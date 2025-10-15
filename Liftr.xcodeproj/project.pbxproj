@@ -1,0 +1,563 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		CFBC43002E9F8FA5002E1FCA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFBC42E72E9F8FA3002E1FCA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CFBC42EE2E9F8FA3002E1FCA;
+			remoteInfo = Liftr;
+		};
+		CFBC430A2E9F8FA5002E1FCA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = CFBC42E72E9F8FA3002E1FCA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = CFBC42EE2E9F8FA3002E1FCA;
+			remoteInfo = Liftr;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		CFBC42EF2E9F8FA3002E1FCA /* Liftr.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Liftr.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		CFBC42FF2E9F8FA5002E1FCA /* LiftrTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiftrTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CFBC43092E9F8FA5002E1FCA /* LiftrUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiftrUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		CFBC42F12E9F8FA3002E1FCA /* Liftr */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Liftr;
+			sourceTree = "<group>";
+		};
+		CFBC43022E9F8FA5002E1FCA /* LiftrTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LiftrTests;
+			sourceTree = "<group>";
+		};
+		CFBC430C2E9F8FA5002E1FCA /* LiftrUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = LiftrUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		CFBC42EC2E9F8FA3002E1FCA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBC42FC2E9F8FA5002E1FCA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBC43062E9F8FA5002E1FCA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		CFBC42E62E9F8FA3002E1FCA = {
+			isa = PBXGroup;
+			children = (
+				CFBC42F12E9F8FA3002E1FCA /* Liftr */,
+				CFBC43022E9F8FA5002E1FCA /* LiftrTests */,
+				CFBC430C2E9F8FA5002E1FCA /* LiftrUITests */,
+				CFBC42F02E9F8FA3002E1FCA /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CFBC42F02E9F8FA3002E1FCA /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CFBC42EF2E9F8FA3002E1FCA /* Liftr.app */,
+				CFBC42FF2E9F8FA5002E1FCA /* LiftrTests.xctest */,
+				CFBC43092E9F8FA5002E1FCA /* LiftrUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		CFBC42EE2E9F8FA3002E1FCA /* Liftr */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFBC43132E9F8FA5002E1FCA /* Build configuration list for PBXNativeTarget "Liftr" */;
+			buildPhases = (
+				CFBC42EB2E9F8FA3002E1FCA /* Sources */,
+				CFBC42EC2E9F8FA3002E1FCA /* Frameworks */,
+				CFBC42ED2E9F8FA3002E1FCA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				CFBC42F12E9F8FA3002E1FCA /* Liftr */,
+			);
+			name = Liftr;
+			packageProductDependencies = (
+			);
+			productName = Liftr;
+			productReference = CFBC42EF2E9F8FA3002E1FCA /* Liftr.app */;
+			productType = "com.apple.product-type.application";
+		};
+		CFBC42FE2E9F8FA5002E1FCA /* LiftrTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFBC43162E9F8FA5002E1FCA /* Build configuration list for PBXNativeTarget "LiftrTests" */;
+			buildPhases = (
+				CFBC42FB2E9F8FA5002E1FCA /* Sources */,
+				CFBC42FC2E9F8FA5002E1FCA /* Frameworks */,
+				CFBC42FD2E9F8FA5002E1FCA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CFBC43012E9F8FA5002E1FCA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CFBC43022E9F8FA5002E1FCA /* LiftrTests */,
+			);
+			name = LiftrTests;
+			packageProductDependencies = (
+			);
+			productName = LiftrTests;
+			productReference = CFBC42FF2E9F8FA5002E1FCA /* LiftrTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		CFBC43082E9F8FA5002E1FCA /* LiftrUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CFBC43192E9F8FA5002E1FCA /* Build configuration list for PBXNativeTarget "LiftrUITests" */;
+			buildPhases = (
+				CFBC43052E9F8FA5002E1FCA /* Sources */,
+				CFBC43062E9F8FA5002E1FCA /* Frameworks */,
+				CFBC43072E9F8FA5002E1FCA /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CFBC430B2E9F8FA5002E1FCA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				CFBC430C2E9F8FA5002E1FCA /* LiftrUITests */,
+			);
+			name = LiftrUITests;
+			packageProductDependencies = (
+			);
+			productName = LiftrUITests;
+			productReference = CFBC43092E9F8FA5002E1FCA /* LiftrUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		CFBC42E72E9F8FA3002E1FCA /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1610;
+				LastUpgradeCheck = 1610;
+				TargetAttributes = {
+					CFBC42EE2E9F8FA3002E1FCA = {
+						CreatedOnToolsVersion = 16.1;
+					};
+					CFBC42FE2E9F8FA5002E1FCA = {
+						CreatedOnToolsVersion = 16.1;
+						TestTargetID = CFBC42EE2E9F8FA3002E1FCA;
+					};
+					CFBC43082E9F8FA5002E1FCA = {
+						CreatedOnToolsVersion = 16.1;
+						TestTargetID = CFBC42EE2E9F8FA3002E1FCA;
+					};
+				};
+			};
+			buildConfigurationList = CFBC42EA2E9F8FA3002E1FCA /* Build configuration list for PBXProject "Liftr" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = CFBC42E62E9F8FA3002E1FCA;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = CFBC42F02E9F8FA3002E1FCA /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				CFBC42EE2E9F8FA3002E1FCA /* Liftr */,
+				CFBC42FE2E9F8FA5002E1FCA /* LiftrTests */,
+				CFBC43082E9F8FA5002E1FCA /* LiftrUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CFBC42ED2E9F8FA3002E1FCA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBC42FD2E9F8FA5002E1FCA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBC43072E9F8FA5002E1FCA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		CFBC42EB2E9F8FA3002E1FCA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBC42FB2E9F8FA5002E1FCA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFBC43052E9F8FA5002E1FCA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CFBC43012E9F8FA5002E1FCA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CFBC42EE2E9F8FA3002E1FCA /* Liftr */;
+			targetProxy = CFBC43002E9F8FA5002E1FCA /* PBXContainerItemProxy */;
+		};
+		CFBC430B2E9F8FA5002E1FCA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = CFBC42EE2E9F8FA3002E1FCA /* Liftr */;
+			targetProxy = CFBC430A2E9F8FA5002E1FCA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		CFBC43112E9F8FA5002E1FCA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		CFBC43122E9F8FA5002E1FCA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		CFBC43142E9F8FA5002E1FCA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Liftr/Preview Content\"";
+				DEVELOPMENT_TEAM = AB4CZRPUHM;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		CFBC43152E9F8FA5002E1FCA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_ASSET_PATHS = "\"Liftr/Preview Content\"";
+				DEVELOPMENT_TEAM = AB4CZRPUHM;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		CFBC43172E9F8FA5002E1FCA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AB4CZRPUHM;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.LiftrTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Liftr.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Liftr";
+			};
+			name = Debug;
+		};
+		CFBC43182E9F8FA5002E1FCA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AB4CZRPUHM;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.LiftrTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Liftr.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Liftr";
+			};
+			name = Release;
+		};
+		CFBC431A2E9F8FA5002E1FCA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AB4CZRPUHM;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.LiftrUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Liftr;
+			};
+			name = Debug;
+		};
+		CFBC431B2E9F8FA5002E1FCA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = AB4CZRPUHM;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.LiftrUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Liftr;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		CFBC42EA2E9F8FA3002E1FCA /* Build configuration list for PBXProject "Liftr" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBC43112E9F8FA5002E1FCA /* Debug */,
+				CFBC43122E9F8FA5002E1FCA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFBC43132E9F8FA5002E1FCA /* Build configuration list for PBXNativeTarget "Liftr" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBC43142E9F8FA5002E1FCA /* Debug */,
+				CFBC43152E9F8FA5002E1FCA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFBC43162E9F8FA5002E1FCA /* Build configuration list for PBXNativeTarget "LiftrTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBC43172E9F8FA5002E1FCA /* Debug */,
+				CFBC43182E9F8FA5002E1FCA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		CFBC43192E9F8FA5002E1FCA /* Build configuration list for PBXNativeTarget "LiftrUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CFBC431A2E9F8FA5002E1FCA /* Debug */,
+				CFBC431B2E9F8FA5002E1FCA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = CFBC42E72E9F8FA3002E1FCA /* Project object */;
+}
