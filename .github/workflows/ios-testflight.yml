@@ -5,7 +5,6 @@ on:
 jobs:
   beta:
     runs-on: macos-14
-    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1

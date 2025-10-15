@@ -1,17 +1,7 @@
 default_platform(:ios)
 
 platform :ios do
-  desc "Compila y ejecuta tests"
-  lane :ci do
-    scan(
-      scheme: ENV["APP_SCHEME"] || "Liftr",
-      clean: true,
-      devices: ["iPhone 16 Pro"]
-      # Si aún no tienes tests, añade: skip_tests: true
-    )
-  end
-
-  desc "Build + Upload a TestFlight"
+  desc "Build + Upload to TestFlight"
   lane :beta do
     app_store_connect_api_key(
       key_id: ENV["ASC_KEY_ID"],
@@ -25,15 +15,12 @@ platform :ios do
 
     build_app(
       scheme: ENV["APP_SCHEME"] || "Liftr",
-      export_method: "app-store",
-      include_bitcode: false,
-      include_symbols: true
+      export_method: "app-store"
     )
 
     upload_to_testflight(
       skip_waiting_for_build_processing: true,
-      distribute_external: false,
-      groups: ["Internal Testers"]
+      distribute_external: false
     )
   end
 end
