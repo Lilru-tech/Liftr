@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum Tab: Hashable {
-  case home, search, add, profile
+  case home, search, add, ranking, profile
 }
 
 struct RootView: View {
@@ -14,26 +14,28 @@ struct RootView: View {
       TabView(selection: $selected) {
         HomeView()
           .tag(Tab.home)
-          .tabItem { Label("Home", systemImage: "house.fill") }
 
         SearchView()
           .tag(Tab.search)
-          .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
         // El tab .add no muestra contenido; lo gestionamos con el botón central
         Color.clear
           .tag(Tab.add)
-          .tabItem { Label("", systemImage: "plus.circle") }
+          
+        RankingView()
+          .tag(Tab.ranking)
 
         ProfileGate()
           .tag(Tab.profile)
-          .tabItem { Label("Profile", systemImage: "person.crop.circle") }
       }
       .onChange(of: selected) { old, new in
         if new == .add {
           selected = old // vuelve a la anterior
           showAddSheet = true
         }
+      }
+      .safeAreaInset(edge: .bottom) {    // deja hueco para la isla
+        Color.clear.frame(height: 90)
       }
 
       // Tab bar “isla”
