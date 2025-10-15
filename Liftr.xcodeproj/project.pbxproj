@@ -13,7 +13,6 @@
 		CFBC43852E9FA7EC002E1FCA /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43842E9FA7EC002E1FCA /* Realtime */; };
 		CFBC43872E9FA7EC002E1FCA /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43862E9FA7EC002E1FCA /* Storage */; };
 		CFBC43AC2E9FA8D9002E1FCA /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43AB2E9FA8D9002E1FCA /* Supabase */; };
-		CFBC43AE2E9FB853002E1FCA /* Gemfile in Resources */ = {isa = PBXBuildFile; fileRef = CFBC43AD2E9FB84F002E1FCA /* Gemfile */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -37,7 +36,6 @@
 		CFBC42EF2E9F8FA3002E1FCA /* Liftr.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Liftr.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CFBC42FF2E9F8FA5002E1FCA /* LiftrTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiftrTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CFBC43092E9F8FA5002E1FCA /* LiftrUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiftrUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		CFBC43AD2E9FB84F002E1FCA /* Gemfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Gemfile; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -54,16 +52,6 @@
 		CFBC430C2E9F8FA5002E1FCA /* LiftrUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = LiftrUITests;
-			sourceTree = "<group>";
-		};
-		CFBC43AF2E9FB865002E1FCA /* fastlane */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = fastlane;
-			sourceTree = "<group>";
-		};
-		CFBC43B32E9FB888002E1FCA /* .github */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = .github;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -102,9 +90,6 @@
 		CFBC42E62E9F8FA3002E1FCA = {
 			isa = PBXGroup;
 			children = (
-				CFBC43B32E9FB888002E1FCA /* .github */,
-				CFBC43AF2E9FB865002E1FCA /* fastlane */,
-				CFBC43AD2E9FB84F002E1FCA /* Gemfile */,
 				CFBC42F12E9F8FA3002E1FCA /* Liftr */,
 				CFBC43022E9F8FA5002E1FCA /* LiftrTests */,
 				CFBC430C2E9F8FA5002E1FCA /* LiftrUITests */,
@@ -147,8 +132,6 @@
 			);
 			fileSystemSynchronizedGroups = (
 				CFBC42F12E9F8FA3002E1FCA /* Liftr */,
-				CFBC43AF2E9FB865002E1FCA /* fastlane */,
-				CFBC43B32E9FB888002E1FCA /* .github */,
 			);
 			name = Liftr;
 			packageProductDependencies = (
@@ -261,7 +244,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				CFBC43AE2E9FB853002E1FCA /* Gemfile in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
