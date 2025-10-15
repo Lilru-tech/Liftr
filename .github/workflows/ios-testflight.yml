@@ -1,0 +1,31 @@
+name: iOS TestFlight
+on:
+  workflow_dispatch:
+
+jobs:
+  beta:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+      - name: Install Fastlane
+        run: |
+          gem install bundler
+          bundle install
+      - name: Cache SPM
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+      - name: Build & Upload to TestFlight
+        env:
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          APP_SCHEME: ${{ secrets.APP_SCHEME }}
+          APP_BUNDLE_ID: ${{ secrets.APP_BUNDLE_ID }}
+        run: bundle exec fastlane ios beta
