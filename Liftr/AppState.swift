@@ -14,20 +14,48 @@ final class AppState: ObservableObject {
     listenAuth()
   }
 
+  deinit {
+    authTask?.cancel()
+  }
+
+  // Fuerza un refresco puntual (por si lo necesitas al abrir la app)
+  @MainActor
+  func refreshSession() async {
+    do {
+      let session = try await SupabaseManager.shared.client.auth.session
+      self.userId = session.user.id
+      self.isAuthenticated = true
+    } catch {
+      self.userId = nil
+      self.isAuthenticated = false
+    }
+  }
+
+  func signOut() {
+    Task {
+      try? await SupabaseManager.shared.client.auth.signOut()
+    }
+  }
+
   private func listenAuth() {
     authTask?.cancel()
     authTask = Task { [weak self] in
       guard let self else { return }
 
-      // Estado inicial
+      // 1) Estado inicial (best-effort)
       if let session = try? await SupabaseManager.shared.client.auth.session {
         await MainActor.run {
           self.isAuthenticated = true
           self.userId = session.user.id
         }
+      } else {
+        await MainActor.run {
+          self.isAuthenticated = false
+          self.userId = nil
+        }
       }
 
-      // Escuchar cambios de autenticación
+      // 2) Escuchar cambios en caliente
       for await state in SupabaseManager.shared.client.auth.authStateChanges {
         await MainActor.run {
           switch state.event {
@@ -37,7 +65,7 @@ final class AppState: ObservableObject {
           case .signedOut, .passwordRecovery:
             self.isAuthenticated = false
             self.userId = nil
-          default:
+          @unknown default:
             break
           }
         }
