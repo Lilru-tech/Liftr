@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.2.0] - 2025-10-16
+### Added
+- **User authentication flow (Sign In / Sign Up)** fully implemented with Supabase Auth.
+- **RegisterView** and **LoginView** redesigned with a clean translucent card style and soft gradients.
+- **Real-time validation** for email, password and username fields.
+- **Sex** and **Date of birth** pickers with modern `LabeledContent` layout (aligned and styled placeholders).
+- **Animated gradient backgrounds** with decorative blur halos for visual polish.
+- **Error handling and feedback banners** for all auth actions (sign-in failures, validation errors, success messages).
+- **Profile auto-creation** on successful signup via Supabase `profiles` upsert.
+
+### Changed
+- **Email confirmation disabled** in Supabase Auth → users are now **auto-confirmed** upon registration.
+- Simplified registration logic (`signUp`) to rely on direct Supabase session instead of waiting for email verification.
+- Unified form aesthetics between login and registration (gray placeholders, rounded translucent panels).
+- Improved password and email validation UX with inline messages.
+
+### Fixed
+- Resolved `Invalid redeclaration of 'rpc'` and decoding issues during precheck RPC call.
+- Corrected SQL trigger syntax to comply with Supabase restrictions (no `$$` delimiters).
+- Fixed session handling (`Cannot find 'session' in scope`) after signup with autoconfirmation.
+- Adjusted form layouts to maintain consistent spacing and alignment across devices.
+
+### Notes
+- Version 0.2.0 marks the **first functional authentication milestone**: users can register, sign in, and manage sessions without external confirmation emails.
+- Next step: integrate user onboarding and persistent workout tracking.
+
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.2.0...HEAD  
+[0.2.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.2.0  
+[0.1.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.1.0
+
 ## [0.1.0] - 2025-10-15
 ### Added
 - **Supabase integration**: initial client (`SupabaseManager`) and connection check.

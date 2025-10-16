@@ -8,15 +8,19 @@ struct AddWorkoutSheet: View {
 
   var body: some View {
     NavigationStack {
-      Form {
-        Picker("Tipo", selection: $kind) {
-          Text("Fuerza").tag("strength")
-          Text("Cardio").tag("cardio")
-          Text("Deporte").tag("sport")
+        GradientBackground {
+            
+            Form {
+                Picker("Tipo", selection: $kind) {
+                    Text("Fuerza").tag("strength")
+                    Text("Cardio").tag("cardio")
+                    Text("Deporte").tag("sport")
+                }
+                TextField("Título", text: $title)
+                TextField("Notas", text: $note)
+            }
+            .scrollContentBackground(.hidden)
         }
-        TextField("Título", text: $title)
-        TextField("Notas", text: $note)
-      }
       .navigationTitle("Nuevo entreno")
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
