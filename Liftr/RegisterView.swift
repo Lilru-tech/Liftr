@@ -89,7 +89,9 @@ struct RegisterView: View {
                 .textInputAutocapitalization(.never)
                 .textContentType(.nickname)
                 .autocorrectionDisabled(true)
-                .onChange(of: username) { _ in usernameDirty = true }
+                .onChange(of: username, initial: false) { _, _ in
+                  usernameDirty = true
+                }
 
               if (usernameDirty || triedSubmit) &&
                   username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -195,9 +197,9 @@ struct RegisterView: View {
       struct Precheck: Decodable { let email_exists: Bool; let username_exists: Bool }
 
       do {
-        let rpcResp = try await client.database
-          .rpc("precheck_signup", params: ["p_email": email, "p_username": cleanUsername])
-          .execute()
+          let rpcResp = try await client
+            .rpc("precheck_signup", params: ["p_email": email, "p_username": cleanUsername])
+            .execute()
 
         // rpcResp.data es Data (no opcional) en tu SDK
         let precheck = try JSONDecoder().decode([Precheck].self, from: rpcResp.data)
@@ -262,10 +264,10 @@ struct RegisterView: View {
       )
 
       do {
-        _ = try await client.database
-          .from("profiles")
-          .upsert(payload, onConflict: "user_id")
-          .execute()
+          _ = try await client
+            .from("profiles")
+            .upsert(payload, onConflict: "user_id")
+            .execute()
       } catch {
         // si falla, no bloqueamos el alta
       }

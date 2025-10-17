@@ -58,16 +58,18 @@ final class AppState: ObservableObject {
       // 2) Escuchar cambios en caliente
       for await state in SupabaseManager.shared.client.auth.authStateChanges {
         await MainActor.run {
-          switch state.event {
-          case .initialSession, .signedIn, .userUpdated, .tokenRefreshed:
-            self.isAuthenticated = (state.session != nil)
-            self.userId = state.session?.user.id
-          case .signedOut, .passwordRecovery:
-            self.isAuthenticated = false
-            self.userId = nil
-          @unknown default:
-            break
-          }
+            switch state.event {
+            case .initialSession, .signedIn, .userUpdated, .tokenRefreshed:
+              self.isAuthenticated = (state.session != nil)
+              self.userId = state.session?.user.id
+
+            case .signedOut, .passwordRecovery, .userDeleted:
+              self.isAuthenticated = false
+              self.userId = nil
+
+            default:                      // <- cubre cualquier caso presente o futuro
+              break
+            }
         }
       }
     }

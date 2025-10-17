@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.3.0] - 2025-10-17
+### Added
+- **Editable workout creation form (`AddWorkoutSheet`)**: now allows logging strength, cardio, and sport workouts with detailed input fields.  
+- **Exercise picker modal (`ExercisePickerSheet`)** with dynamic search in the `exercises` catalog table.  
+- **Dynamic exercise cards** with optional alias, notes, perceived intensity, and direct Supabase RPC integration (`create_strength_workout`, `create_cardio_workout`, `create_sport_workout_v1`).  
+- **Set tracking system** for strength workouts, including reps, weight, RPE, and per-set notes.  
+- **Material-style section cards** with translucent background and rounded corners, matching the app’s overall design.  
+- **Automatic Supabase catalog fetching** when selecting the “Strength” workout type.
+
+### Changed
+- Adjusted the **+ / – Stepper buttons** to appear smaller and more proportionate within the set list.  
+- Simplified the logic for the **“Add set”** button — new sets now always start as **Set 1**, regardless of previous numbering (better suited for custom workout flows).  
+- Improved alignment and spacing of input fields inside each set (Reps, Weight, RPE).  
+- Refined the overall **section card layout** with softer shadows and consistent spacing between sections.  
+
+### Fixed
+- Fixed an issue where the **exercise picker** remained enabled during catalog loading.  
+- Resolved incorrect control alignment inside sets when using the Stepper in compact mode.  
+- Optimized conditional catalog loading to prevent multiple simultaneous Supabase calls.
+
+### Notes
+- This version marks the beginning of the **complete workout logging and tracking flow** within the app.  
+- Next goal: add persistent user progress tracking and historical workout visualization on the profile screen.
+
+[0.3.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.3.0  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.3.0...HEAD
+
 ## [0.2.0] - 2025-10-16
 ### Added
 - **User authentication flow (Sign In / Sign Up)** fully implemented with Supabase Auth.
