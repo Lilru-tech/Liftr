@@ -32,6 +32,7 @@ struct CustomTabBar: View {
         .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
     )
     .padding(.horizontal, 24)
+    .ignoresSafeArea(edges: .bottom)
   }
 }
 
