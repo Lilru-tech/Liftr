@@ -23,7 +23,6 @@ struct RootView: View {
           if app.isAuthenticated { showAddSheet = true } else { showAuthAlert = true }
         }
       }
-      .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 90) }
 
       VStack {
         Spacer()
@@ -35,6 +34,7 @@ struct RootView: View {
         )
         .padding(.horizontal, 16)
         .padding(.bottom, 10)
+        .zIndex(1) 
       }
       .ignoresSafeArea(.keyboard)
     }

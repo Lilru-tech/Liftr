@@ -1,6 +1,6 @@
 # Liftr – Database Schema Documentation
 
-_Last updated: 2025-10-17_
+_Last updated: 2025-10-18_
 
 ## Overview
 PostgreSQL/Supabase schema for **Liftr**, including tables, relations, views, functions, triggers, RLS, checks, enums, indexes, extensions and grants.
@@ -17,7 +17,7 @@ PostgreSQL/Supabase schema for **Liftr**, including tables, relations, views, fu
 
 **public**
 - Tables: `profiles`, `workouts`, `workout_exercises`, `exercise_sets`, `cardio_sessions`, `sport_sessions`, `personal_records`, `score_rules`, `body_metrics`, `exercises`, `workout_scores`, `user_best_scores`, `endurance_records`, `sport_records`
-- Views: `vw_latest_weight`, `vw_workout_volume`, `vw_user_total_scores`
+- Views: `vw_latest_weight`, `vw_workout_volume`, `vw_user_total_scores`, `vw_user_prs`
 
 ---
 
@@ -66,11 +66,10 @@ User profile linked to `auth.users`.
 **FK:** `workouts_user_id_fkey` → `profiles(user_id) ON DELETE CASCADE`  
 **Indexes:** `workouts_user_id_started_at_idx(user_id, started_at DESC)`  
 **RLS:** enabled  
-**Triggers:** `trg_workouts_set_updated_at` (BEFORE UPDATE → `set_updated_at()`)
+**Triggers:** `trg_workouts_set_updated_at` (BEFORE UPDATE → `set_updated_at()`)  
+
 > **Note:**  
-> `duration_min` is a **generated column**. Do not include it in `INSERT` or `UPDATE`.  
-> It is computed from `started_at` and `ended_at`.  
-> Attempting to write it will fail (GENERATED ALWAYS).
+> `duration_min` is a **generated column**. Do not include it in `INSERT` or `UPDATE`. It is computed from `started_at` and `ended_at`. Attempting to write it will fail (GENERATED ALWAYS).
 
 ---
 
@@ -313,9 +312,12 @@ SELECT DISTINCT ON (user_id)
 FROM body_metrics bm
 WHERE weight_kg IS NOT NULL
 ORDER BY user_id, measured_at DESC;
+```
 
-vw_workout_volume
+---
 
+### `vw_workout_volume`
+```sql
 SELECT
   w.id AS workout_id,
   w.user_id,
@@ -325,162 +327,130 @@ LEFT JOIN workout_exercises we ON we.workout_id = w.id
 LEFT JOIN exercise_sets es ON es.workout_exercise_id = we.id
 WHERE w.kind IN ('strength'::workout_kind, 'mixed'::workout_kind)
 GROUP BY w.id, w.user_id;
+```
 
-vw_user_total_scores
+---
+
+### `vw_user_total_scores`
 Aggregates each user’s best scores across all algorithms.
+```sql
 SELECT user_id,
        COALESCE(SUM(best_score), 0)::numeric AS total_score
 FROM public.user_best_scores
 GROUP BY user_id;
+```
 
-⸻
-
-Functions (public)
-    •    set_updated_at() — trigger, PL/pgSQL
-    •    handle_new_user() — trigger, PL/pgSQL (inserts into public.profiles after insert in auth.users)
-    •    score_strength_v1(p_workout_id bigint) → numeric, PL/pgSQL
-    •    score_cardio_run_v1(p_workout_id bigint) → numeric, PL/pgSQL
-    •    compute_workout_score_v1(p_workout_id bigint) → TABLE(algorithm text, score numeric), PL/pgSQL  
-         Calculates score(s) depending on workout kind and applicable algorithms.  
-         Used internally by upsert_workout_score_v1().
-    •    upsert_workout_score_v1(p_workout_id bigint) → void, PL/pgSQL  
-         Inserts or updates `workout_scores` and `user_best_scores` entries automatically.
-    •    create_profile_on_signup — trigger (listed; verify if used or legacy)
-    
-> **Security:** Las funciones RPC están declaradas como `SECURITY DEFINER`, con `REVOKE ALL FROM PUBLIC` y `GRANT EXECUTE TO authenticated`.
-    
-    #### Workout creation functions (RPC)
-- `create_strength_workout(p_user_id uuid, p_items jsonb, p_title text, p_started_at timestamptz, p_ended_at timestamptz, p_notes text, p_perceived_intensity intensity) → bigint`  
-  Creates the strength workout and inserts into `workouts`, `workout_exercises`, and `exercise_sets`.  
-  **Does not** touch `duration_min` (generated column). Automatically updates `workout_scores` and `user_best_scores`.
-
-- `create_cardio_workout(p_user_id uuid, p_modality text, p_title text, p_started_at timestamptz, p_ended_at timestamptz, p_notes text, p_distance_km numeric, p_duration_sec int, p_avg_hr int, p_max_hr int, p_avg_pace_sec_per_km int, p_elevation_gain_m int, p_perceived_intensity intensity) → bigint`  
-  Inserts into `workouts` and `cardio_sessions`. Automatically updates `workout_scores` and `user_best_scores`.  
-
-- `create_sport_workout_v1(p jsonb) → bigint`  
-  Inserts into `workouts` and `sport_sessions`. Converts `p_duration_min` to seconds internally.  
-  Automatically updates `workout_scores` and `user_best_scores`.  
-
-⸻
-
-Triggers
-
-public
-    •    profiles:
-    •    set_profiles_updated_at → BEFORE UPDATE EXECUTE FUNCTION set_updated_at()
-    •    trg_profiles_set_updated_at → BEFORE UPDATE EXECUTE FUNCTION set_updated_at()
-    •    workouts:
-    •    trg_workouts_set_updated_at → BEFORE UPDATE EXECUTE FUNCTION set_updated_at()
-    
-public (new)
-    •    trg_strength_pr_from_set → AFTER INSERT OR UPDATE ON exercise_sets EXECUTE FUNCTION public.trg_strength_pr_from_set()
-    •    trg_cardio_pr_from_session → AFTER INSERT OR UPDATE ON cardio_sessions EXECUTE FUNCTION public.trg_cardio_pr_from_session()
-    •    trg_sport_pr_from_session → AFTER INSERT OR UPDATE ON sport_sessions EXECUTE FUNCTION public.trg_sport_pr_from_session()
-    •    trg_rescore_from_set → AFTER INSERT OR UPDATE OR DELETE ON exercise_sets EXECUTE FUNCTION public.trg_rescore_from_set()
-    •    trg_rescore_from_cardio → AFTER INSERT OR UPDATE OR DELETE ON cardio_sessions EXECUTE FUNCTION public.trg_rescore_from_cardio()
-    •    trg_rescore_from_sport → AFTER INSERT OR UPDATE OR DELETE ON sport_sessions EXECUTE FUNCTION public.trg_rescore_from_sport()
-
-auth
-    •    users:
-    •    (signup trigger not listed currently; verify existence if you expect auto-profile creation)
-
-⸻
-
-RLS & Security
-    •    RLS enabled: true in all public tables listed above.
-    •    Policies present: none returned by query → with RLS on and no policies, client access is blocked (except service_role).
-    •    Nota: el alta de workouts se realiza mediante las funciones RPC `create_*_workout` (write-path controlado).  
-         Asegurar políticas que verifiquen que `p_user_id = auth.uid()` dentro de las funciones, o añadir USING/WITH CHECK por tabla si se habilita escritura directa.
-Re-create per-user policies when ready and document here (USING/WITH CHECK).
-
-⸻
-
-Foreign Keys (public)
-    •    profiles.user_id → auth.users(id) ON DELETE CASCADE
-    •    workouts.user_id → profiles(user_id) ON DELETE CASCADE
-    •    workout_exercises.workout_id → workouts(id) ON DELETE CASCADE
-    •    workout_exercises.exercise_id → exercises(id)
-    •    exercise_sets.workout_exercise_id → workout_exercises(id) ON DELETE CASCADE
-    •    cardio_sessions.workout_id → workouts(id) ON DELETE CASCADE
-    •    sport_sessions.workout_id → workouts(id) ON DELETE CASCADE
-    •    personal_records.user_id → profiles(user_id) ON DELETE CASCADE
-    •    personal_records.exercise_id → exercises(id)
-    •    workout_scores.workout_id → workouts(id) ON DELETE CASCADE
-    •    body_metrics.user_id → profiles(user_id) ON DELETE CASCADE
-    •    user_best_scores.user_id → profiles(user_id) ON DELETE CASCADE  
-    •    user_best_scores.workout_id → workouts(id) ON DELETE CASCADE  
-    •    endurance_records.user_id → profiles(user_id) ON DELETE CASCADE  
-    •    sport_records.user_id → profiles(user_id) ON DELETE CASCADE
-
-⸻
-
-Indexes (highlights)
-    •    workouts_user_id_started_at_idx
-    •    idx_workout_exercises_order
-    •    exercise_sets_workout_exercise_id_idx / idx_sets_by_exercise
-    •    cardio_sessions_workout_id_idx / idx_cardio_by_modality
-    •    sport_sessions_workout_id_idx / idx_sport_by_type
-    •    personal_records_user_id_exercise_id_metric_key (unique composite)
-    •    exercises_lower_idx (unique lower(name))
-    •    workout_scores_workout_id_algorithm_idx (unique composite)
-    •    body_metrics_user_id_measured_at_idx
-    •    user_best_scores_pkey (user_id, algorithm)  
-    •    endurance_records_user_id_modality_metric_key (unique composite)  
-    •    sport_records_user_id_sport_metric_key (unique composite)
-
-⸻
-
-Checks
-    •    Non-negative checks across: profiles, body_metrics, exercise_sets, cardio_sessions, sport_sessions
-    •    `workouts.duration_min` — columna generada; consistencia garantizada por la expresión calculada a partir de `started_at` y `ended_at`.
-
-⸻
-
-Sequences
-    •    Auto-increment sequences: *_id_seq for bigserial PKs.
-
-⸻
-
-Extensions
-    •    pg_graphql, pg_stat_statements, pgcrypto, plpgsql, supabase_vault, uuid-ossp
-
-⸻
-
-### Deprecated / Removed
-- Versiones antiguas de `create_cardio_workout` que:
-  - incluían `p_duration_min` como parámetro, o
-  - insertaban campos de cardio directamente en `workouts`.
-Estas versiones se han eliminado en favor de la firma actual que retorna `bigint` y usa `cardio_sessions`.
-
-### Scoring migration
-- Added automatic recalculation of workout scores and user best scores.
-- Added new views and tables (`user_best_scores`, `endurance_records`, `sport_records`, `vw_user_total_scores`).
-- All RPCs (`create_*_workout`) now invoke `upsert_workout_score_v1()` automatically.
-
-## Grants (public)
-
-Grants show anon, authenticated, service_role, postgres on all tables/views; RLS still governs access.
-
-⸻
-
-Change process
-    1.    Make schema changes in SQL.
-    2.    Update this document in the same PR.
-    3.    Bump CHANGELOG.md under [Unreleased] → release tag when applicable.
-
-⸻
-
-Open TODOs
-    •    Verify signup trigger on auth.users (not listed).
-    •    Re-create RLS policies (per-user access), then document them here.
-    
 ---
 
-## Workout Scoring Flow Summary
-1. The app inserts a workout using one of the RPCs (`create_strength_workout`, `create_cardio_workout`, `create_sport_workout_v1`).
-2. The RPC writes to the corresponding tables and calls `upsert_workout_score_v1(id)`.
-3. The function computes scores per algorithm and updates:
-   - `workout_scores` (per workout)
-   - `user_best_scores` (per user)
-4. When a workout is edited (sets, cardio, or sport), triggers automatically re-evaluate and update scores.
-5. The view `vw_user_total_scores` aggregates total points for rankings.
+### `vw_user_prs`
+Unifies personal records (strength), endurance records (cardio), and sport records into a single shape for profile PRs.
+
+```sql
+create or replace view public.vw_user_prs as
+select
+  'strength'::text as kind,
+  pr.user_id,
+  e.name        as label,
+  pr.metric     as metric,
+  pr.value      as value,
+  pr.achieved_at
+from public.personal_records pr
+join public.exercises e on e.id = pr.exercise_id
+
+union all
+select
+  'cardio'::text as kind,
+  er.user_id,
+  er.modality    as label,
+  er.metric      as metric,
+  er.value       as value,
+  er.achieved_at
+from public.endurance_records er
+
+union all
+select
+  'sport'::text as kind,
+  sr.user_id,
+  sr.sport      as label,
+  sr.metric     as metric,
+  sr.value      as value,
+  sr.achieved_at
+from public.sport_records sr;
+```
+
+> **Note:** The view respects RLS of source tables; only the owner’s rows are visible to the client.
+
+---
+
+## Functions (public)
+
+- `set_updated_at()` — trigger, PL/pgSQL  
+- `handle_new_user()` — trigger, PL/pgSQL (inserts into public.profiles after insert in auth.users)  
+- `score_strength_v1(p_workout_id bigint)` → numeric, PL/pgSQL  
+- `score_cardio_run_v1(p_workout_id bigint)` → numeric, PL/pgSQL  
+- `compute_workout_score_v1(p_workout_id bigint)` → TABLE(algorithm text, score numeric), PL/pgSQL  
+- `upsert_workout_score_v1(p_workout_id bigint)` → void, PL/pgSQL  
+- `create_profile_on_signup` — trigger (verify if legacy)  
+
+---
+
+### RPC: `get_user_prs`
+
+```sql
+create or replace function public.get_user_prs(
+  p_user_id uuid,
+  p_kind    text default null,
+  p_search  text default null
+) returns table(
+  kind text, user_id uuid, label text, metric text, value numeric, achieved_at timestamptz
+)
+language sql stable as $$
+  select *
+  from public.vw_user_prs
+  where user_id = p_user_id
+    and (p_kind  is null or kind = p_kind)
+    and (p_search is null or label ilike '%' || p_search || '%')
+  order by achieved_at desc
+$$;
+
+revoke all on function public.get_user_prs(uuid, text, text) from public;
+grant execute on function public.get_user_prs(uuid, text, text) to authenticated;
+```
+
+---
+
+## RLS & Security
+
+```sql
+-- Personal records (strength)
+create policy if not exists pr_select_own
+on public.personal_records for select
+using (user_id = auth.uid());
+
+-- Endurance records (cardio)
+create policy if not exists er_select_own
+on public.endurance_records for select
+using (user_id = auth.uid());
+
+-- Sport records
+create policy if not exists sr_select_own
+on public.sport_records for select
+using (user_id = auth.uid());
+```
+
+---
+
+## Grants (public)
+- Functions: `EXECUTE` on `public.get_user_prs` granted to `authenticated` (revoked from `public`).  
+- RLS enabled on all PR-related tables.  
+- Grants remain as in previous version (anon, authenticated, service_role, postgres).
+
+---
+
+### Summary (2025-10-18)
+- Added unified view `vw_user_prs`
+- Added RLS policies for all PR tables  
+- Added RPC `get_user_prs(uuid, text, text)`  
+- Granted `EXECUTE` to `authenticated`  
+
+---
