@@ -1,4 +1,4 @@
-name: Auto Merge devel → main
+name: Auto-merge devel → main
 
 on:
   push:
@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: auto-merge-main
+  cancel-in-progress: false
+
 jobs:
   merge:
     runs-on: ubuntu-latest
@@ -16,14 +20,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configure Git
+      - name: Configure git
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Merge devel into main
+      - name: Fast-forward main to devel (fails on conflicts)
         run: |
-          git fetch origin main
+          git fetch origin main devel
           git checkout main
-          git merge origin/devel --no-edit || true
+          git merge --ff-only origin/devel
           git push origin main
