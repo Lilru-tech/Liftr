@@ -7,27 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
-## [0.5.0] - 2025-10-20
+## [0.5.1] - 2025-10-20
 ### Added
-- **Home (v1)**: feed paginado de entrenos (me + seguidos), filtro por tipo (All/Strength/Cardio/Sport) y tarjetas con avatar, título, hora relativa, chip de tipo y **pill de puntuación**.
-- **Search**: buscador de usuarios con navegación al perfil.
-- **Follow / Unfollow**: botones y estado en `ProfileView` con recálculo de contadores.
-- **Gradient background** unificado en todas las pestañas (incluido **Profile de otros usuarios**).
-- **Highlights en Home**: “Recent PRs” y “Top this week” con carga de perfiles asociada.
+- **FollowersListView / FollowingListView**:
+  - New screens accessible from the follower/following counters in `ProfileView`.
+  - Display a searchable list of users with **avatar**, **@username**, and a fully functional **Follow/Unfollow** button.
+  - Integrated **search bar** for filtering users by name.
+  - Unified **gradient background** consistent with the rest of the app.
+  - Direct navigation to each user’s profile by tapping on their row.
 
 ### Changed
-- **Cards rediseñadas** (Home y Profile): fondos con `WorkoutCardBackground`, chips con tintado por tipo y pill de puntuación consistente.
-- **EditProfileSheet**: hoja compacta con `.presentationDetents([.fraction(0.42)])` y editor ajustado al límite de **200** caracteres.
-- **Carga de perfiles**: `ensureProfilesAvailable` para traer perfiles en lote y evitar llamadas repetidas.
+- **FollowButton** logic refactored to update state instantly without reloading the entire list.
+- **Supabase** queries optimized with batched `IN (user_id)` filters to reduce API calls.
 
 ### Fixed
-- **Calendario**: alineación correcta de los días estableciendo el primer día de semana a **lunes** (`WEEK_START = 2`) y reordenando `shortWeekdaySymbols`. Se corrige el desajuste “Monday mostrado en columna de Sunday”.
-- **Fondo en Profile ajeno**: el gradiente ahora se muestra también al entrar desde **Search**.
-- **Puntuación de entrenos**: al leer `workout_scores` se **agregan** posibles filas duplicadas por workout (múltiples algoritmos) sumando sus valores.
-- **Fechas**: rangos y decodificación robusta (ISO8601 con fracciones + zona horaria del dispositivo) para evitar off-by-one al cambiar de día/mes.
+- Removed minor compiler warnings (`try?` misuse, unused `MainActor.run` results).
+- Navigation behavior fixed so **Follow/Unfollow** button no longer triggers profile navigation when tapped.
+
+[0.5.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.5.1
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.5.1...HEAD
+
+---
+
+## [0.5.0] - 2025-10-20
+### Added
+- **Home (v1)**: paginated feed of workouts (self + following), type filters (All / Strength / Cardio / Sport), and redesigned cards with avatar, title, relative time, type chip, and **score pill**.
+- **Search**: user search view with navigation to profile.
+- **Follow / Unfollow**: buttons and state logic added to `ProfileView`, with automatic counter refresh.
+- **Unified gradient background** applied across all tabs, including profiles of other users.
+- **Highlights section in Home**: “Recent PRs” and “Top this week”, with linked profile loading.
+
+### Changed
+- **Cards redesigned** (Home and Profile): consistent `WorkoutCardBackground`, type-tinted chips, and unified score pill design.
+- **EditProfileSheet**: compact presentation using `.presentationDetents([.fraction(0.42)])` and editor limited to **200 characters**.
+- **Profile loading optimization**: introduced `ensureProfilesAvailable` to batch-fetch user profiles and prevent redundant requests.
+
+### Fixed
+- **Calendar alignment**: week layout corrected by setting the first weekday to **Monday** (`WEEK_START = 2`) and reordering `shortWeekdaySymbols`. Fixes issue where Monday appeared under Sunday column.
+- **Profile gradient background** now displays correctly when viewing other users from **Search**.
+- **Workout score aggregation**: multiple `workout_scores` entries per workout are now **summed** to prevent duplicates.
+- **Date decoding**: robust ISO8601 parsing (fractional seconds + device timezone) prevents off-by-one issues at month/day boundaries.
 
 ### Performance
-- Paginación en Home con `range(from:to:)` y carga de puntuaciones por lote usando `IN (ids)`.
+- **Home pagination** implemented with `range(from:to:)` and batch score loading using `IN (ids)` queries.
 
 [0.5.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.5.0
 [Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.5.0...HEAD

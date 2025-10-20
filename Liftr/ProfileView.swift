@@ -188,23 +188,37 @@ struct ProfileView: View {
           Text("@\(username.isEmpty ? "user" : username)")
             .font(.title3).fontWeight(.semibold)
             HStack(spacing: 10) {
-              HStack(spacing: 2) {
-                Image(systemName: "person.2.fill")
-                Text("\(counts?.followers ?? 0) followers")
-                  .lineLimit(1)
-                  .truncationMode(.tail)
-                  .minimumScaleFactor(0.9)
-              }
-              .font(.subheadline)
+                NavigationLink {
+                  if let uid = viewingUserId {
+                    FollowersListView(userId: uid, mode: .followers).gradientBG()
+                  }
+                } label: {
+                  HStack(spacing: 2) {
+                    Image(systemName: "person.2.fill")
+                    Text("\(counts?.followers ?? 0) followers")
+                      .lineLimit(1)
+                      .truncationMode(.tail)
+                      .minimumScaleFactor(0.9)
+                  }
+                }
+                .buttonStyle(.plain)
+                .font(.subheadline)
 
-              HStack(spacing: 4) {
-                Image(systemName: "arrowshape.turn.up.right.fill")
-                Text("\(counts?.following ?? 0) following")
-                  .lineLimit(1)
-                  .truncationMode(.tail)
-                  .minimumScaleFactor(0.9)
-              }
-              .font(.subheadline)
+                NavigationLink {
+                  if let uid = viewingUserId {
+                    FollowersListView(userId: uid, mode: .following).gradientBG()
+                  }
+                } label: {
+                  HStack(spacing: 4) {
+                    Image(systemName: "arrowshape.turn.up.right.fill")
+                    Text("\(counts?.following ?? 0) following")
+                      .lineLimit(1)
+                      .truncationMode(.tail)
+                      .minimumScaleFactor(0.9)
+                  }
+                }
+                .buttonStyle(.plain)
+                .font(.subheadline)
             }
           .foregroundStyle(.secondary)
 
