@@ -2,8 +2,6 @@ import SwiftUI
 
 struct RankingView: View {
   var body: some View {
-    NavigationStack {
-        GradientBackground {
             List {
                 Section("Top 5 Fuerza (volumen total)") {
                     Label("1. Alex", systemImage: "medal.fill")
@@ -21,7 +19,5 @@ struct RankingView: View {
             }
             .scrollContentBackground(.hidden)
             .navigationTitle("Ranking")
-        }
-    }
   }
 }

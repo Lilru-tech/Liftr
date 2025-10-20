@@ -16,10 +16,7 @@ struct LoginView: View {
   private var isButtonEnabled: Bool { !loading && isEmailValid && !password.isEmpty }
 
   var body: some View {
-    NavigationStack {
       ZStack {
-        GradientBackground {
-          // Capa decorativa: halo superior con gradiente y blur
           ZStack {
             Circle()
               .fill(LinearGradient(colors: [.blue.opacity(0.28), .purple.opacity(0.28)],
@@ -99,12 +96,7 @@ struct LoginView: View {
             }
             .padding(.horizontal, 24)
           }
-        }
       }
-      .navigationTitle("Sign in")
-      .navigationBarTitleDisplayMode(.inline)
-    }
-    .banner($banner) // banner global
   }
 
   private func signIn() async {

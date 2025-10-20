@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.5.0] - 2025-10-20
+### Added
+- **Home (v1)**: feed paginado de entrenos (me + seguidos), filtro por tipo (All/Strength/Cardio/Sport) y tarjetas con avatar, título, hora relativa, chip de tipo y **pill de puntuación**.
+- **Search**: buscador de usuarios con navegación al perfil.
+- **Follow / Unfollow**: botones y estado en `ProfileView` con recálculo de contadores.
+- **Gradient background** unificado en todas las pestañas (incluido **Profile de otros usuarios**).
+- **Highlights en Home**: “Recent PRs” y “Top this week” con carga de perfiles asociada.
+
+### Changed
+- **Cards rediseñadas** (Home y Profile): fondos con `WorkoutCardBackground`, chips con tintado por tipo y pill de puntuación consistente.
+- **EditProfileSheet**: hoja compacta con `.presentationDetents([.fraction(0.42)])` y editor ajustado al límite de **200** caracteres.
+- **Carga de perfiles**: `ensureProfilesAvailable` para traer perfiles en lote y evitar llamadas repetidas.
+
+### Fixed
+- **Calendario**: alineación correcta de los días estableciendo el primer día de semana a **lunes** (`WEEK_START = 2`) y reordenando `shortWeekdaySymbols`. Se corrige el desajuste “Monday mostrado en columna de Sunday”.
+- **Fondo en Profile ajeno**: el gradiente ahora se muestra también al entrar desde **Search**.
+- **Puntuación de entrenos**: al leer `workout_scores` se **agregan** posibles filas duplicadas por workout (múltiples algoritmos) sumando sus valores.
+- **Fechas**: rangos y decodificación robusta (ISO8601 con fracciones + zona horaria del dispositivo) para evitar off-by-one al cambiar de día/mes.
+
+### Performance
+- Paginación en Home con `range(from:to:)` y carga de puntuaciones por lote usando `IN (ids)`.
+
+[0.5.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.5.0
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.5.0...HEAD
+
 ## [0.4.0] - 2025-10-18
 ### Added
 - **ProfileView (v1)** with:

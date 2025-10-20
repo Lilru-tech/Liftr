@@ -33,7 +33,7 @@ private struct WorkoutRow: Decodable, Identifiable {
 
 private struct WorkoutScoreRow: Decodable {
   let workout_id: Int
-  let score: Double
+  let score: Decimal
 }
 
 private struct OnlyStartedAt: Decodable {
@@ -46,7 +46,9 @@ private struct GetMonthActivityParams: Encodable {
   let p_month: Int
 }
 
-private extension JSONDecoder {
+private struct FollowRow: Decodable { let follower_id: UUID }
+
+extension JSONDecoder {
   static func supabase() -> JSONDecoder {
     let dec = JSONDecoder()
     dec.dateDecodingStrategy = .custom { decoder in
@@ -83,7 +85,12 @@ private extension JSONDecoder {
 
 struct ProfileView: View {
   @EnvironmentObject var app: AppState
-
+  let userId: UUID?
+  private var viewingUserId: UUID? { userId ?? app.userId }
+  private var isOwnProfile: Bool { viewingUserId != nil && viewingUserId == app.userId }
+  init(userId: UUID? = nil) {
+    self.userId = userId
+  }
   @State private var counts: ProfileCounts?
   @State private var username: String = ""
   @State private var avatarURL: String?
@@ -98,20 +105,22 @@ struct ProfileView: View {
   @State private var bio: String? = nil
   @State private var showEditProfile = false
   @State private var bioExpanded = false
+  @State private var isFollowing: Bool? = nil
+  @State private var mutatingFollow = false
 
     enum Tab: String { case calendar = "Calendar", prs = "PRs", settings = "Settings" }
   @State private var tab: Tab = .calendar
 
   var body: some View {
-    NavigationStack {
-      GradientBackground {
           VStack(spacing: 12) {
             headerCard
 
               Picker("", selection: $tab) {
                 Text("Calendar").tag(Tab.calendar)
                 Text("PRs").tag(Tab.prs)
-                Text("Settings").tag(Tab.settings)
+                if isOwnProfile {
+                  Text("Settings").tag(Tab.settings)
+                }
               }
             .pickerStyle(.segmented)
             .padding(.horizontal)
@@ -128,63 +137,75 @@ struct ProfileView: View {
             let session = try? await SupabaseManager.shared.client.auth.session
             print("[Auth] user.id:", session?.user.id.uuidString ?? "nil")
             await loadProfileHeader()
+            await refreshFollowState()
           }
           .onChange(of: monthDate) { _, newDate in
             monthDays = monthDaysGrid(for: newDate)
             selectedDay = nil
             Task { await loadMonthActivity() }
           }
-      }
-      .navigationTitle("Profile")
-      .navigationBarTitleDisplayMode(.inline)
-      .sheet(isPresented: $showEditProfile) {
-        EditProfileSheet(
-          initialBio: bio ?? "",
-          onSaved: { newBio in
-            self.bio = newBio.isEmpty ? nil : newBio
+          .sheet(isPresented: $showEditProfile) {
+            if isOwnProfile {
+              EditBioSheet(
+                initialBio: bio ?? "",
+                onSaved: { newBio in
+                  self.bio = newBio.isEmpty ? nil : newBio
+                }
+              )
+              .gradientBG()
+              .presentationDetents([.fraction(0.30)])
+              .presentationDragIndicator(.visible)
+            }
           }
-        )
-      }
-    }
   }
     
     private var prsView: some View {
-      PRsListView()
+      PRsListView(userId: viewingUserId)
     }
 
   private var headerCard: some View {
     HStack(alignment: .center, spacing: 14) {
-        PhotosPicker(selection: $pickedItem, matching: .images) {
-          ZStack {
-            AvatarView(urlString: avatarURL)
-              .frame(width: 64, height: 64)
-              .overlay(
-                Group {
-                  if uploadingAvatar {
-                    ProgressView().scaleEffect(0.8)
-                  }
-                },
-                alignment: .bottomTrailing
-              )
+        if isOwnProfile {
+          PhotosPicker(selection: $pickedItem, matching: .images) {
+            ZStack {
+              AvatarView(urlString: avatarURL)
+                .frame(width: 64, height: 64)
+                .overlay(
+                  Group { if uploadingAvatar { ProgressView().scaleEffect(0.8) } },
+                  alignment: .bottomTrailing
+                )
+            }
           }
-        }
-        .onChange(of: pickedItem) { _, newItem in
-          Task { await handlePickedItem(newItem) }
+          .onChange(of: pickedItem) { _, newItem in
+            Task { await handlePickedItem(newItem) }
+          }
+        } else {
+          AvatarView(urlString: avatarURL)
+            .frame(width: 64, height: 64)
         }
 
         VStack(alignment: .leading, spacing: 6) {
           Text("@\(username.isEmpty ? "user" : username)")
             .font(.title3).fontWeight(.semibold)
-          HStack(spacing: 14) {
-            HStack(spacing: 4) {
-              Image(systemName: "person.2.fill")
-              Text("\(counts?.followers ?? 0) followers")
-            }.font(.subheadline)
-            HStack(spacing: 4) {
-              Image(systemName: "arrowshape.turn.up.right.fill")
-              Text("\(counts?.following ?? 0) following")
-            }.font(.subheadline)
-          }
+            HStack(spacing: 10) {
+              HStack(spacing: 2) {
+                Image(systemName: "person.2.fill")
+                Text("\(counts?.followers ?? 0) followers")
+                  .lineLimit(1)
+                  .truncationMode(.tail)
+                  .minimumScaleFactor(0.9)
+              }
+              .font(.subheadline)
+
+              HStack(spacing: 4) {
+                Image(systemName: "arrowshape.turn.up.right.fill")
+                Text("\(counts?.following ?? 0) following")
+                  .lineLimit(1)
+                  .truncationMode(.tail)
+                  .minimumScaleFactor(0.9)
+              }
+              .font(.subheadline)
+            }
           .foregroundStyle(.secondary)
 
           if let bio, !bio.isEmpty {
@@ -197,37 +218,45 @@ struct ProfileView: View {
                 .multilineTextAlignment(.leading)
                 .animation(.easeInOut, value: bioExpanded)
 
-              HStack(spacing: 14) {
-                Button(bioExpanded ? "Show less" : "Read more") {
-                  bioExpanded.toggle()
-                }
-                .font(.caption)
-                .buttonStyle(.plain)
+                HStack(spacing: 14) {
+                  Button(bioExpanded ? "Show less" : "Read more") {
+                    bioExpanded.toggle()
+                  }
+                  .font(.caption)
+                  .buttonStyle(.plain)
 
-                Button {
-                  showEditProfile = true
-                } label: {
-                  Label("Edit", systemImage: "pencil")
-                    .labelStyle(.titleAndIcon)
-                    .font(.caption)
+                  if isOwnProfile {
+                    Button {
+                      showEditProfile = true
+                    } label: {
+                      Label("Edit", systemImage: "pencil")
+                        .labelStyle(.titleAndIcon)
+                        .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Edit bio")
+                  }
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Edit bio")
-              }
               .foregroundStyle(.secondary)
             }
           } else {
-            Button {
-              showEditProfile = true
-            } label: {
-              Label("Add bio", systemImage: "pencil")
-                .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+              if isOwnProfile {
+                Button {
+                  showEditProfile = true
+                } label: {
+                  Label("Add bio", systemImage: "pencil")
+                    .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+              }
           }
         }
-      Spacer()
+        .frame(maxWidth: .infinity, alignment: .leading)
+        Spacer()
+        if !isOwnProfile {
+          followButton
+        }
     }
     .padding(16)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -281,8 +310,8 @@ struct ProfileView: View {
         }
         .padding(.horizontal)
 
-        if let selectedDay {
-          DayWorkoutsList(selectedDay: selectedDay)
+        if let selectedDay, let uid = viewingUserId {
+          DayWorkoutsList(userId: uid, selectedDay: selectedDay)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else {
           Text("Select a day to see your workouts")
@@ -306,6 +335,7 @@ struct ProfileView: View {
 
     private struct PRsListView: View {
       @EnvironmentObject var app: AppState
+      let userId: UUID?
 
       enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
       @State private var filter: KindFilter = .all
@@ -363,8 +393,9 @@ struct ProfileView: View {
         .onChange(of: filter) { _, _ in Task { await load() } }
       }
 
-      private func load() async {
-        guard let uid = app.userId else { return }
+        private func load() async {
+          let effective = userId ?? app.userId
+          guard let uid = effective else { return }
         loading = true; defer { loading = false }
 
         do {
@@ -487,8 +518,8 @@ struct ProfileView: View {
     .scrollContentBackground(.hidden)
   }
 
-  private func loadProfileHeader() async {
-    guard let uid = app.userId else { return }
+    private func loadProfileHeader() async {
+      guard let uid = viewingUserId else { return }
     loading = true; defer { loading = false }
 
     do {
@@ -522,8 +553,8 @@ struct ProfileView: View {
     await loadMonthActivity()
   }
 
-  private func loadMonthActivity() async {
-    guard let uid = app.userId else { return }
+    private func loadMonthActivity() async {
+      guard let uid = viewingUserId else { return }
     let cal = Calendar.current
     let year = cal.component(.year, from: monthDate)
     let month = cal.component(.month, from: monthDate)
@@ -561,7 +592,7 @@ struct ProfileView: View {
   }
 
     private func handlePickedItem(_ item: PhotosPickerItem?) async {
-      guard let item, let uid = app.userId else { return }
+      guard isOwnProfile, let item, let uid = app.userId else { return }
       await MainActor.run { uploadingAvatar = true }
 
       func log(_ m: String) { print("[Avatar]", m) }
@@ -623,17 +654,25 @@ struct ProfileView: View {
   private func monthTitle(for date: Date) -> String {
     let f = DateFormatter(); f.dateFormat = "LLLL yyyy"; return f.string(from: date).capitalized
   }
-
-  private func weekdays() -> [String] {
-    let f = DateFormatter(); f.locale = .current; return f.shortWeekdaySymbols
-  }
+  private let WEEK_START = 2
+    
+    private func weekdays() -> [String] {
+      let fmt = DateFormatter()
+      fmt.locale = .current
+      let symbols = fmt.shortWeekdaySymbols ?? ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]
+      let startIndex = (WEEK_START - 1 + symbols.count) % symbols.count
+      let head = Array(symbols[startIndex...])
+      let tail = Array(symbols[..<startIndex])
+      return head + tail
+    }
 
     private func monthDaysGrid(for date: Date) -> [Date?] {
-      let cal = Calendar.current
+      var cal = Calendar.current
+      cal.firstWeekday = WEEK_START
       let range = cal.range(of: .day, in: .month, for: date)!
       let first = cal.date(from: cal.dateComponents([.year, .month], from: date))!
-      let firstWeekdayIndex = cal.component(.weekday, from: first) - cal.firstWeekday
-      let leading = (firstWeekdayIndex + 7) % 7
+      let weekday = cal.component(.weekday, from: first)
+      let leading = ((weekday - WEEK_START) + 7) % 7
       let monthDates: [Date] = range.compactMap { day -> Date? in
         cal.date(byAdding: .day, value: day - 1, to: first)
       }
@@ -642,9 +681,112 @@ struct ProfileView: View {
       while grid.count % 7 != 0 { grid.append(nil) }
       return grid
     }
+    
+    private var followButton: some View {
+      Group {
+        if isFollowing == nil {
+          ProgressView().controlSize(.small)
+        } else if isFollowing == true {
+            Button {
+              Task { await unfollow() }
+            } label: {
+              Text("Unfollow")
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        } else {
+            Button {
+              Task { await follow() }
+            } label: {
+              Text("Follow")
+                .font(.caption.weight(.semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+      }
+    }
+    
+    private func refreshFollowState() async {
+      guard
+        let me = app.userId,
+        let other = viewingUserId,
+        me != other
+      else {
+        await MainActor.run { isFollowing = nil }
+        return
+      }
+
+      do {
+        let res = try await SupabaseManager.shared.client
+          .from("follows")
+          .select("follower_id")
+          .eq("follower_id", value: me.uuidString)
+          .eq("followee_id", value: other.uuidString)
+          .limit(1)
+          .execute()
+
+        let rows = try JSONDecoder.supabase().decode([FollowRow].self, from: res.data)
+        await MainActor.run { isFollowing = !rows.isEmpty }
+      } catch {
+        await MainActor.run { isFollowing = false }
+      }
+    }
+
+    private func follow() async {
+      guard !mutatingFollow,
+            let me = app.userId,
+            let other = viewingUserId
+      else { return }
+
+      await MainActor.run { mutatingFollow = true }
+      defer { Task { await MainActor.run { mutatingFollow = false } } }
+
+      do {
+        let payload: [String: String] = [
+          "follower_id": me.uuidString,
+          "followee_id": other.uuidString
+        ]
+
+        _ = try await SupabaseManager.shared.client
+          .from("follows")
+          .insert(payload) // el unique + policy nos protege de duplicados
+          .execute()
+
+        await refreshFollowState()
+        await loadProfileHeader()  // refresca contadores
+      } catch {
+        // opcional: manejar error
+      }
+    }
+
+    private func unfollow() async {
+      guard !mutatingFollow,
+            let me = app.userId,
+            let other = viewingUserId
+      else { return }
+
+      await MainActor.run { mutatingFollow = true }
+      defer { Task { await MainActor.run { mutatingFollow = false } } }
+
+      do {
+        _ = try await SupabaseManager.shared.client
+          .from("follows")
+          .delete()
+          .eq("follower_id", value: me.uuidString)
+          .eq("followee_id", value: other.uuidString)
+          .execute()
+
+        await refreshFollowState()
+        await loadProfileHeader()
+      } catch {
+        // opcional: manejar error
+      }
+    }
 }
 
-private struct AvatarView: View {
+struct AvatarView: View {
   let urlString: String?
   var body: some View {
     ZStack {
@@ -667,8 +809,8 @@ private struct AvatarView: View {
 }
 
 private struct DayWorkoutsList: View {
+  let userId: UUID
   let selectedDay: Date
-  @EnvironmentObject var app: AppState
   @State private var workouts: [WorkoutRow] = []
   @State private var scores: [Int: Double] = [:]
   @State private var error: String?
@@ -681,48 +823,57 @@ private struct DayWorkoutsList: View {
         .padding(.horizontal)
 
         if workouts.isEmpty {
-          Text("No workouts this day").foregroundStyle(.secondary).padding(.horizontal)
+          Text("No workouts this day")
+            .foregroundStyle(.secondary)
+            .padding(.horizontal)
         } else {
-            GeometryReader { geo in
-              ScrollView {
-                LazyVStack(spacing: 12) {
-                  ForEach(workouts) { w in
-                    ZStack {
-                      RoundedRectangle(cornerRadius: 14)
-                        .fill(backgroundFor(kind: w.kind))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.15)))
+          GeometryReader { _ in
+            ScrollView {
+              LazyVStack(spacing: 12) {
+                ForEach(workouts) { w in
+                  ZStack {
+                    // Fondo de la card con la tinta del tipo
+                    WorkoutCardBackground(kind: w.kind)
 
-                      HStack(alignment: .top, spacing: 12) {
-                        VStack(alignment: .leading, spacing: 4) {
-                          Text(w.title ?? w.kind.capitalized)
-                            .font(.body.weight(.semibold))
-                            .lineLimit(1)
+                    HStack(alignment: .top, spacing: 12) {
+                      VStack(alignment: .leading, spacing: 4) {
+                        Text(w.title ?? w.kind.capitalized)
+                          .font(.body.weight(.semibold))
+                          .lineLimit(1)
 
-                          Text(timeRange(w))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        Text(timeRange(w))
+                          .font(.caption)
+                          .foregroundStyle(.secondary)
 
-                          kindBadge(w.kind)
-                        }
-                        Spacer()
-                        if let sc = scores[w.id] {
-                          Text(scoreString(sc))
-                            .font(.subheadline.weight(.semibold))
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 10)
-                            .background(Capsule().fill(Color.black.opacity(0.08)))
-                            .overlay(Capsule().stroke(.white.opacity(0.15)))
-                            .accessibilityLabel("Score \(scoreString(sc))")
-                        }
+                        // Chip del tipo con la misma tinta
+                        Text(w.kind.capitalized)
+                          .font(.caption2.weight(.semibold))
+                          .padding(.vertical, 3)
+                          .padding(.horizontal, 6)
+                          .background(
+                            Capsule().fill(workoutTint(for: w.kind).opacity(0.12))
+                          )
+                          .overlay(
+                            Capsule().stroke(Color.white.opacity(0.12))
+                          )
                       }
-                      .padding(14)
+
+                      Spacer()
+
+                      // Pill de puntuación con la misma tinta
+                      if let sc = scores[w.id] {
+                        scorePill(score: sc, kind: w.kind)
+                          .accessibilityLabel("Score \(scoreString(sc))")
+                      }
                     }
-                    .padding(.horizontal)
+                    .padding(14)
                   }
+                  .padding(.horizontal)
                 }
-                Color.clear.frame(height: 8)
               }
+              Color.clear.frame(height: 8)
             }
+          }
         }
     }
     .task(id: selectedDay) { await load() }
@@ -733,7 +884,7 @@ private struct DayWorkoutsList: View {
   }
 
     private func load() async {
-      guard let uid = app.userId else { return }
+      let uid = userId
 
         var cal = Calendar.current
         cal.timeZone = .current
@@ -763,8 +914,15 @@ private struct DayWorkoutsList: View {
               .select("workout_id, score")
               .in("workout_id", values: ids)
               .execute()
+
             let scoreRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: scoreRes.data)
-            scoresDict = Dictionary(uniqueKeysWithValues: scoreRows.map { ($0.workout_id, $0.score) })
+
+            var tmp: [Int: Double] = [:]
+            for row in scoreRows {
+              let value = NSDecimalNumber(decimal: row.score).doubleValue
+              tmp[row.workout_id, default: 0] += value
+            }
+            scoresDict = tmp
           }
 
           await MainActor.run {
