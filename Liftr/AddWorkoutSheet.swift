@@ -129,106 +129,106 @@ struct AddWorkoutSheet: View {
   @State private var perceived: WorkoutIntensity = .moderate
 
 
-  var body: some View {
-    NavigationStack {
-      GradientBackground {
-        Form {
-            Section {
-              SectionCard {
-                FieldRowPlain("Type") {
-                  Picker("", selection: $kind) {
-                    Text("Strength").tag(WorkoutKind.strength)
-                    Text("Cardio").tag(WorkoutKind.cardio)
-                    Text("Sport").tag(WorkoutKind.sport)
-                  }
-                  .pickerStyle(.menu)
-                  .onChange(of: kind) { _, new in
-                    if new == .strength { Task { await loadCatalogIfNeeded() } }
-                  }
+    var body: some View {
+        NavigationStack {
+            GradientBackground {
+            Form {
+                Section {
+                    SectionCard {
+                        FieldRowPlain("Type") {
+                            Picker("", selection: $kind) {
+                                Text("Strength").tag(WorkoutKind.strength)
+                                Text("Cardio").tag(WorkoutKind.cardio)
+                                Text("Sport").tag(WorkoutKind.sport)
+                            }
+                            .pickerStyle(.menu)
+                            .onChange(of: kind) { _, new in
+                                if new == .strength { Task { await loadCatalogIfNeeded() } }
+                            }
+                        }
+                        Divider()
+                        FieldRowPlain("Title") { TextField("Title (optional)", text: $title).textFieldStyle(.plain) }
+                        Divider()
+                        FieldRowPlain("Started at") {
+                            DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
+                        }
+                        Divider()
+                        FieldRowPlain("Finished") { Toggle("", isOn: $endedAtEnabled) }
+                        
+                        if endedAtEnabled {
+                            Divider()
+                            FieldRowPlain("Ended at") {
+                                DatePicker("", selection: $endedAt, in: startedAt..., displayedComponents: [.date, .hourAndMinute])
+                            }
+                            if let dur = durationMinutes {
+                                Divider()
+                                Text("Duration: \(dur) min")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.vertical, 6)
+                            }
+                        }
+                        
+                        Divider()
+                        FieldRowPlain("Notes") { TextField("Notes", text: $note, axis: .vertical).textFieldStyle(.plain) }
+                        Divider()
+                        FieldRowPlain("Intensity") {
+                            Picker("", selection: $perceived) {
+                                ForEach(WorkoutIntensity.allCases) { Text($0.label).tag($0) }
+                            }.pickerStyle(.menu)
+                        }
+                    }
+                } header: {
+                    Text("GENERAL").foregroundStyle(.secondary)
                 }
-                Divider()
-                FieldRowPlain("Title") { TextField("Title (optional)", text: $title).textFieldStyle(.plain) }
-                Divider()
-                FieldRowPlain("Started at") {
-                  DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
+                .listRowBackground(Color.clear)   // <- deja que se vea la tarjeta
+                
+                switch kind {
+                case .strength:
+                    strengthSection
+                        .task { await loadCatalogIfNeeded() }
+                case .cardio:
+                    cardioSection
+                case .sport:
+                    sportSection
                 }
-                Divider()
-                FieldRowPlain("Finished") { Toggle("", isOn: $endedAtEnabled) }
-
-                if endedAtEnabled {
-                  Divider()
-                  FieldRowPlain("Ended at") {
-                    DatePicker("", selection: $endedAt, in: startedAt..., displayedComponents: [.date, .hourAndMinute])
-                  }
-                  if let dur = durationMinutes {
-                    Divider()
-                    Text("Duration: \(dur) min")
-                      .font(.footnote)
-                      .foregroundStyle(.secondary)
-                      .padding(.vertical, 6)
-                  }
+                
+                if let error {
+                    Section { Text(error).foregroundStyle(.red) }
                 }
-
-                Divider()
-                FieldRowPlain("Notes") { TextField("Notes", text: $note, axis: .vertical).textFieldStyle(.plain) }
-                Divider()
-                FieldRowPlain("Intensity") {
-                  Picker("", selection: $perceived) {
-                    ForEach(WorkoutIntensity.allCases) { Text($0.label).tag($0) }
-                  }.pickerStyle(.menu)
-                }
-              }
-            } header: {
-              Text("GENERAL").foregroundStyle(.secondary)
             }
-            .listRowBackground(Color.clear)   // <- deja que se vea la tarjeta
-
-          switch kind {
-          case .strength:
-            strengthSection
-              .task { await loadCatalogIfNeeded() }
-          case .cardio:
-            cardioSection
-          case .sport:
-            sportSection
-          }
-
-            if let error {
-              Section { Text(error).foregroundStyle(.red) }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .listRowBackground(Color.clear)      // ← QUITA el fondo de tarjeta de la sección
+            .listSectionSpacing(-10)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            // exercise picker sheet
+            .sheet(item: $pickerHandle) { handle in
+                if let idx = items.firstIndex(where: { $0.id == handle.id }) {
+                    ExercisePickerSheet(
+                        all: catalog,
+                        selected: Binding(
+                            get: {
+                                guard let exid = items[idx].exerciseId else { return nil }
+                                return catalog.first(where: { $0.id == exid })
+                            },
+                            set: { picked in
+                                items[idx].exerciseId = picked?.id
+                                if items[idx].exerciseName.isEmpty {
+                                    items[idx].exerciseName = picked?.name ?? ""
+                                }
+                            }
+                        )
+                    )
+                } else {
+                    ExercisePickerSheet(all: catalog, selected: .constant(nil))
+                }
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .listRowBackground(Color.clear)      // ← QUITA el fondo de tarjeta de la sección
-        .listSectionSpacing(-10)
-    }
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) {
-          Button("Cancel") { dismiss() }
-        }
-      }
-      // exercise picker sheet
-      .sheet(item: $pickerHandle) { handle in
-        if let idx = items.firstIndex(where: { $0.id == handle.id }) {
-          ExercisePickerSheet(
-            all: catalog,
-            selected: Binding(
-              get: {
-                guard let exid = items[idx].exerciseId else { return nil }
-                return catalog.first(where: { $0.id == exid })
-              },
-              set: { picked in
-                items[idx].exerciseId = picked?.id
-                if items[idx].exerciseName.isEmpty {
-                  items[idx].exerciseName = picked?.name ?? ""
-                }
-              }
-            )
-          )
-        } else {
-          ExercisePickerSheet(all: catalog, selected: .constant(nil))
-        }
-      }
     }
   }
 

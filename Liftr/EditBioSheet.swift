@@ -5,7 +5,7 @@ private struct UpdateProfileBio: Encodable {
   let bio: String?
 }
 
-struct EditProfileSheet: View {
+struct EditBioSheet: View {
   @Environment(\.dismiss) private var dismiss
   @EnvironmentObject var app: AppState
 
@@ -17,12 +17,18 @@ struct EditProfileSheet: View {
   @State private var error: String?
   private let limit = 200
 
+    private var editorHeight: CGFloat {
+      let lineHeight = UIFont.preferredFont(forTextStyle: .body).lineHeight
+      return lineHeight * 6 + 24
+    }
+
   var body: some View {
     NavigationStack {
       VStack(spacing: 12) {
         ZStack {
           TextEditor(text: $text)
-            .frame(minHeight: 160)
+            .font(.body)
+            .frame(height: editorHeight)
             .padding(8)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.2)))

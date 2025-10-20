@@ -33,9 +33,7 @@ struct RegisterView: View {
   }
 
     var body: some View {
-      GradientBackground {
         ZStack {
-          // Halo decorativo (opcional, a juego con Login)
           Circle()
             .fill(LinearGradient(colors: [.blue.opacity(0.20), .purple.opacity(0.20)],
                                  startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -165,7 +163,6 @@ struct RegisterView: View {
             Spacer(minLength: 0)
           }
         }
-      }
       .navigationBarTitleDisplayMode(.inline)
       .banner($banner)
     }
