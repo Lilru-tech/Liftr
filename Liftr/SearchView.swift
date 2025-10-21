@@ -53,7 +53,6 @@ struct SearchView: View {
 
     private func searchUsers() async {
       let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-      // si no hay query, no devolvemos nada
       if q.isEmpty {
         await MainActor.run { self.results = [] }
         return
@@ -62,7 +61,6 @@ struct SearchView: View {
       loading = true; defer { loading = false }
 
       do {
-        // Trae un lote (ahora sí tiene sentido; ya hay query)
         let res = try await SupabaseManager.shared.client
           .from("profiles")
           .select("user_id, username, avatar_url")

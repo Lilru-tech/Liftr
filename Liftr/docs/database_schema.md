@@ -421,6 +421,145 @@ grant execute on function public.get_user_prs(uuid, text, text) to authenticated
 
 ## RLS & Security
 
+🆕 Changes in this version (2025-10-21)
+
+Scope: RLS policies (visibility and access propagation for workouts and related entities)
+
+✅ Changes
+
+Affected Table
+Change Type
+Description
+public.workout_exercises
+Added / Updated Policy
+Added policy we_select_visible allowing users to see exercises belonging to workouts of users they follow.
+public.exercise_sets
+Added / Updated Policy
+Added policy es_select_visible allowing access to sets of followed users’ workouts (through workout_exercises).
+public.follows
+Added Policy
+Added policy follows_select_own so authenticated users can read their own follow relationships.
+public.cardio_sessions
+Verified RLS
+Confirmed cardio_sessions_all_own (visibility of own sessions) active. No structural change.
+public.sport_sessions
+Verified RLS
+Confirmed sport_sessions_all_own active. No structural change.
+
+-- workout_exercises visible to owner or followers
+CREATE POLICY we_select_visible ON public.workout_exercises
+FOR SELECT TO authenticated
+USING (
+  EXISTS (
+    SELECT 1 FROM public.workouts w
+    WHERE w.id = workout_exercises.workout_id
+      AND (
+        w.user_id = auth.uid()
+        OR EXISTS (
+          SELECT 1 FROM public.follows f
+          WHERE f.follower_id = auth.uid()
+            AND f.followee_id = w.user_id
+        )
+      )
+  )
+);
+
+-- exercise_sets visible via workout_exercises
+CREATE POLICY es_select_visible ON public.exercise_sets
+FOR SELECT TO authenticated
+USING (
+  EXISTS (
+    SELECT 1
+    FROM public.workout_exercises we
+    JOIN public.workouts w ON w.id = we.workout_id
+    WHERE we.id = exercise_sets.workout_exercise_id
+      AND (
+        w.user_id = auth.uid()
+        OR EXISTS (
+          SELECT 1 FROM public.follows f
+          WHERE f.follower_id = auth.uid()
+            AND f.followee_id = w.user_id
+        )
+      )
+  )
+);
+
+-- Allow users to read their own follow relations
+CREATE POLICY follows_select_own
+ON public.follows
+FOR SELECT
+TO authenticated
+USING (follower_id = auth.uid());
+
+⚙️ Summary
+    •    ✅ No schema or trigger changes.
+    •    🔒 Updated RLS to propagate visibility of workouts to followers.
+    •    🧩 Ensures users can view cardio/sport/strength details of workouts from followed accounts.
+    •    ⚙️ All new policies are permissive, non-destructive, and backward compatible.
+    
+    
+    -- Personal records (strength)
+create policy if not exists pr_select_own
+on public.personal_records for select
+using (user_id = auth.uid());
+
+-- Endurance records (cardio)
+create policy if not exists er_select_own
+on public.endurance_records for select
+using (user_id = auth.uid());
+
+-- Sport records
+create policy if not exists sr_select_own
+on public.sport_records for select
+using (user_id = auth.uid());
+
+-- Workout exercises: visible if own or following the owner
+create policy if not exists we_select_visible
+on public.workout_exercises for select
+to authenticated
+using (
+  exists (
+    select 1 from public.workouts w
+    where w.id = workout_exercises.workout_id
+      and (
+        w.user_id = auth.uid()
+        or exists (
+          select 1 from public.follows f
+          where f.follower_id = auth.uid()
+            and f.followee_id = w.user_id
+        )
+      )
+  )
+);
+
+-- Exercise sets: visible if own or following the owner
+create policy if not exists es_select_visible
+on public.exercise_sets for select
+to authenticated
+using (
+  exists (
+    select 1
+    from public.workout_exercises we
+    join public.workouts w on w.id = we.workout_id
+    where we.id = exercise_sets.workout_exercise_id
+      and (
+        w.user_id = auth.uid()
+        or exists (
+          select 1 from public.follows f
+          where f.follower_id = auth.uid()
+            and f.followee_id = w.user_id
+        )
+      )
+  )
+);
+
+-- Follows: allow users to read their own rows
+create policy if not exists follows_select_own
+on public.follows for select
+to authenticated
+using (follower_id = auth.uid());
+    
+
 ```sql
 -- Personal records (strength)
 create policy if not exists pr_select_own

@@ -131,6 +131,7 @@ struct ProfileView: View {
               case .settings: settingsView
               }
           }
+          .foregroundStyle(.primary)
           .padding(.vertical, 12)
           .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
           .task {
@@ -273,8 +274,16 @@ struct ProfileView: View {
         }
     }
     .padding(16)
-    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-    .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.22), lineWidth: 0.8))
+    .background(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .fill(.ultraThinMaterial)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: 16, style: .continuous)
+        .strokeBorder(.white.opacity(0.18), lineWidth: 0.8)
+    )
+    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    .compositingGroup()
     .padding(.horizontal)
   }
 
@@ -376,7 +385,6 @@ struct ProfileView: View {
 
             List {
               if loading { ProgressView().frame(maxWidth: .infinity) }
-
               ForEach(sections, id: \.title) { section in
                 Section(section.title) {
                   ForEach(section.items, id: \.id) { pr in
@@ -402,6 +410,9 @@ struct ProfileView: View {
               }
             }
           .listStyle(.insetGrouped)
+          .scrollContentBackground(.hidden)
+          .listRowBackground(Color.clear)
+          .background(Color.clear)
         }
         .task { await load() }
         .onChange(of: filter) { _, _ in Task { await load() } }
@@ -765,13 +776,12 @@ struct ProfileView: View {
 
         _ = try await SupabaseManager.shared.client
           .from("follows")
-          .insert(payload) // el unique + policy nos protege de duplicados
+          .insert(payload)
           .execute()
 
         await refreshFollowState()
-        await loadProfileHeader()  // refresca contadores
+        await loadProfileHeader()
       } catch {
-        // opcional: manejar error
       }
     }
 
@@ -795,7 +805,6 @@ struct ProfileView: View {
         await refreshFollowState()
         await loadProfileHeader()
       } catch {
-        // opcional: manejar error
       }
     }
 }
@@ -843,46 +852,46 @@ private struct DayWorkoutsList: View {
         } else {
           GeometryReader { _ in
             ScrollView {
-              LazyVStack(spacing: 12) {
-                ForEach(workouts) { w in
-                  ZStack {
-                    // Fondo de la card con la tinta del tipo
-                    WorkoutCardBackground(kind: w.kind)
+                LazyVStack(spacing: 12) {
+                    ForEach(workouts) { w in
+                        NavigationLink {
+                          WorkoutDetailView(workoutId: w.id, ownerId: userId)
+                        } label: {
+                        ZStack {
+                            WorkoutCardBackground(kind: w.kind)
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(w.title ?? w.kind.capitalized)
+                                        .font(.body.weight(.semibold))
+                                        .lineLimit(1)
+                                    
+                                    Text(timeRange(w))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
 
-                    HStack(alignment: .top, spacing: 12) {
-                      VStack(alignment: .leading, spacing: 4) {
-                        Text(w.title ?? w.kind.capitalized)
-                          .font(.body.weight(.semibold))
-                          .lineLimit(1)
+                                    Text(w.kind.capitalized)
+                                        .font(.caption2.weight(.semibold))
+                                        .padding(.vertical, 3)
+                                        .padding(.horizontal, 6)
+                                        .background(
+                                            Capsule().fill(workoutTint(for: w.kind).opacity(0.12))
+                                        )
+                                        .overlay(
+                                            Capsule().stroke(Color.white.opacity(0.12))
+                                        )
+                                }
+                                
+                                Spacer()
 
-                        Text(timeRange(w))
-                          .font(.caption)
-                          .foregroundStyle(.secondary)
-
-                        // Chip del tipo con la misma tinta
-                        Text(w.kind.capitalized)
-                          .font(.caption2.weight(.semibold))
-                          .padding(.vertical, 3)
-                          .padding(.horizontal, 6)
-                          .background(
-                            Capsule().fill(workoutTint(for: w.kind).opacity(0.12))
-                          )
-                          .overlay(
-                            Capsule().stroke(Color.white.opacity(0.12))
-                          )
-                      }
-
-                      Spacer()
-
-                      // Pill de puntuación con la misma tinta
-                      if let sc = scores[w.id] {
-                        scorePill(score: sc, kind: w.kind)
-                          .accessibilityLabel("Score \(scoreString(sc))")
-                      }
+                                if let sc = scores[w.id] {
+                                    scorePill(score: sc, kind: w.kind)
+                                        .accessibilityLabel("Score \(scoreString(sc))")
+                                }
+                            }
+                            .padding(14)
+                        }
+                        .padding(.horizontal)
                     }
-                    .padding(14)
-                  }
-                  .padding(.horizontal)
                 }
               }
               Color.clear.frame(height: 8)

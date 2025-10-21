@@ -8,7 +8,6 @@ struct LoginView: View {
   @State private var error: String?
   @State private var banner: Banner?
 
-  // Validación simple de email
   private var isEmailValid: Bool {
     NSPredicate(format: "SELF MATCHES[c] %@", "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$")
       .evaluate(with: email.uppercased())
@@ -26,18 +25,15 @@ struct LoginView: View {
               .offset(y: -170)
               .allowsHitTesting(false)
 
-            // Contenido centrado verticalmente
             VStack(spacing: 18) {
               Spacer(minLength: 0)
 
-              // Subtítulo centrado
               Text("Sign in to continue tracking your workouts.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
 
-              // Tarjeta translúcida
               VStack(spacing: 14) {
                 if let error {
                   Text(error)
