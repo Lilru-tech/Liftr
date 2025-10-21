@@ -1,8 +1,7 @@
 import SwiftUI
 import Supabase
 
-// MARK: - Exercise catalog model
-private struct Exercise: Identifiable, Decodable {
+struct Exercise: Identifiable, Decodable {
   let id: Int64
   let name: String
   let category: String?
@@ -11,7 +10,7 @@ private struct Exercise: Identifiable, Decodable {
   let equipment: String?
 }
 
-private enum WorkoutIntensity: String, CaseIterable, Identifiable {
+enum WorkoutIntensity: String, CaseIterable, Identifiable {
   case easy, moderate, hard, max
   var id: String { rawValue }
   var label: String {
@@ -24,8 +23,7 @@ private enum WorkoutIntensity: String, CaseIterable, Identifiable {
   }
 }
 
-// MARK: - Sheet to pick an exercise
-private struct ExercisePickerSheet: View {
+struct ExercisePickerSheet: View {
   let all: [Exercise]
   @Binding var selected: Exercise?
   @Environment(\.dismiss) private var dismiss
@@ -66,7 +64,6 @@ private struct ExercisePickerSheet: View {
   }
 }
 
-// Wrapper para .sheet(item:)
 private struct PickerHandle: Identifiable {
   let id: UUID
 }
@@ -111,23 +108,15 @@ struct AddWorkoutSheet: View {
   @State private var startedAt: Date = .now
   @State private var endedAtEnabled: Bool = false
   @State private var endedAt: Date = .now
-
-  // Strength
   @State private var items: [EditableExercise] = [EditableExercise()]
-
-  // Cardio / Sport
   @State private var cardio = CardioForm()
   @State private var sport = SportForm()
-
-  // Catalog
   @State private var catalog: [Exercise] = []
   @State private var loadingCatalog = false
-  @State private var pickerHandle: PickerHandle? = nil   // 👈 antes era UUID?
-
+  @State private var pickerHandle: PickerHandle? = nil
   @State private var loading = false
   @State private var error: String?
   @State private var perceived: WorkoutIntensity = .moderate
-
 
     var body: some View {
         NavigationStack {
@@ -181,7 +170,7 @@ struct AddWorkoutSheet: View {
                 } header: {
                     Text("GENERAL").foregroundStyle(.secondary)
                 }
-                .listRowBackground(Color.clear)   // <- deja que se vea la tarjeta
+                .listRowBackground(Color.clear)
                 
                 switch kind {
                 case .strength:
@@ -199,14 +188,13 @@ struct AddWorkoutSheet: View {
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
-            .listRowBackground(Color.clear)      // ← QUITA el fondo de tarjeta de la sección
+            .listRowBackground(Color.clear)
             .listSectionSpacing(-10)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
             }
-            // exercise picker sheet
             .sheet(item: $pickerHandle) { handle in
                 if let idx = items.firstIndex(where: { $0.id == handle.id }) {
                     ExercisePickerSheet(
@@ -232,9 +220,6 @@ struct AddWorkoutSheet: View {
     }
   }
 
-  // MARK: Sections
-
-    // Botón con el mismo look & feel que Register
     private var saveButton: some View {
       Button {
         Task { await save() }
@@ -252,16 +237,12 @@ struct AddWorkoutSheet: View {
       }
       .disabled(loading || !canSave)
     }
-    
-    // MARK: - EXERCISES
+
     private var strengthSection: some View {
       Section {
         SectionCard {
-          // Lista de ejercicios
           ForEach(items.indices, id: \.self) { i in
             if i != items.startIndex { Divider().padding(.vertical, 6) }
-
-            // Exercise picker
             FieldRowPlain("Exercise") {
               Button {
                 pickerHandle = .init(id: items[i].id)
@@ -282,7 +263,6 @@ struct AddWorkoutSheet: View {
 
             Divider()
 
-            // Alias
             FieldRowPlain("Alias") {
               TextField("Exercise name (optional)", text: $items[i].exerciseName)
                 .textFieldStyle(.plain)
@@ -290,58 +270,53 @@ struct AddWorkoutSheet: View {
 
             Divider()
 
-            // Notas del ejercicio
             FieldRowPlain("Notes") {
               TextField("Notes (exercise)", text: $items[i].notes)
                 .textFieldStyle(.plain)
             }
 
-            // Sets
-            ForEach(items[i].sets.indices, id: \.self) { s in
-              Divider()
-              LabeledContent {
-                HStack(spacing: 2) {
-                    Stepper("", value: $items[i].sets[s].setNumber, in: 1...99)
-                      .labelsHidden()
-                      .controlSize(.mini)
-                      .scaleEffect(0.70, anchor: .leading)
-                      .frame(width: 70)
-                      .offset(x: -15)
+              ForEach(items[i].sets.indices, id: \.self) { s in
+                Divider()
+                HStack(spacing: 6) {
+                  Text("Set \(items[i].sets[s].setNumber)")
+                    .font(.subheadline)
+                    .frame(width: 46, alignment: .leading)
+
+                  Stepper("", value: $items[i].sets[s].setNumber, in: 1...99)
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .scaleEffect(0.74, anchor: .leading)
+                    .frame(width: 64)
 
                   TextField("Reps", value: $items[i].sets[s].reps, format: .number)
                     .keyboardType(.numberPad)
-                    .frame(width: 50)
+                    .frame(width: 44)
 
                   TextField("Weight kg", text: $items[i].sets[s].weightKg)
                     .keyboardType(.decimalPad)
-                    .frame(width: 78)
+                    .frame(width: 70)
 
                   TextField("RPE", text: $items[i].sets[s].rpe)
                     .keyboardType(.decimalPad)
-                    .frame(width: 44)
+                    .frame(width: 38)
+
+                  TextField("Rest s", value: $items[i].sets[s].restSec, format: .number)
+                    .keyboardType(.numberPad)
+                    .frame(width: 54)
 
                   if items[i].sets.count > 1 {
                     Button(role: .destructive) {
                       items[i].sets.remove(at: s)
-                    } label: {
-                      Image(systemName: "minus.circle.fill")
-                    }
+                    } label: { Image(systemName: "minus.circle.fill") }
                     .buttonStyle(.borderless)
                   }
                 }
-              } label: {
-                Text("Set \(items[i].sets[s].setNumber)")
-                  .lineLimit(1)
-                  .layoutPriority(1)
               }
-              .font(.subheadline)
-            }
 
-            // Acciones del ejercicio
             Divider().padding(.vertical, 4)
             HStack {
                 Button {
-                  items[i].sets.append(EditableSet(setNumber: 1)) // ← siempre Set 1
+                  items[i].sets.append(EditableSet(setNumber: 1))
                 } label: { Label("Add set", systemImage: "plus.circle") }
                 .buttonStyle(.borderless)
 
@@ -361,7 +336,6 @@ struct AddWorkoutSheet: View {
             }
           }
 
-          // Botón "Add exercise"
           Divider().padding(.vertical, 6)
           Button {
             let nextOrder = (items.last?.orderIndex ?? 0) + 1
@@ -373,20 +347,17 @@ struct AddWorkoutSheet: View {
           .padding(.top, 2)
         }
 
-        // Botón Save pegado al final de la sección
         saveButton
           .padding(.top, 8)
       } header: {
         Text("EXERCISES").foregroundStyle(.secondary)
       }
-      .listRowBackground(Color.clear) // deja ver la tarjeta
+      .listRowBackground(Color.clear)
     }
-    
-    // MARK: - CARDIO
+
     private var cardioSection: some View {
       Section {
         SectionCard {
-          // Modality
           FieldRowPlain {
             TextField("Modality (e.g. Run, Bike…)", text: $cardio.modality)
               .textFieldStyle(.plain)
@@ -394,15 +365,43 @@ struct AddWorkoutSheet: View {
 
           Divider()
 
-          // Distance / Duration
-          HStack {
-            TextField("Distance (km)", text: $cardio.distanceKm).keyboardType(.decimalPad)
-            TextField("Duration (sec)", text: $cardio.durationSec).keyboardType(.numberPad)
-          }
+            HStack(spacing: 12) {
+              TextField("Distance (km)", text: $cardio.distanceKm)
+                .keyboardType(.decimalPad)
+                .onChange(of: cardio.distanceKm) { _, _ in
+                  updateAutoPaceIfNeeded()
+                }
+
+              // Duración H : M : S
+              VStack(alignment: .leading, spacing: 6) {
+                Text("Duration").font(.caption).foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                  TextField("h", text: $cardio.durH)
+                    .keyboardType(.numberPad)
+                    .frame(width: 36)
+                    .onChange(of: cardio.durH) { _, _ in updateAutoPaceIfNeeded() }
+
+                  Text(":")
+
+                  TextField("m", text: $cardio.durM)
+                    .keyboardType(.numberPad)
+                    .frame(width: 36)
+                    .onChange(of: cardio.durM) { _, _ in updateAutoPaceIfNeeded() }
+
+                  Text(":")
+
+                  TextField("s", text: $cardio.durS)
+                    .keyboardType(.numberPad)
+                    .frame(width: 36)
+                    .onChange(of: cardio.durS) { _, _ in updateAutoPaceIfNeeded() }
+                }
+                .font(.subheadline)
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
           Divider()
 
-          // HR
           HStack {
             TextField("Avg HR", text: $cardio.avgHR).keyboardType(.numberPad)
             TextField("Max HR", text: $cardio.maxHR).keyboardType(.numberPad)
@@ -410,11 +409,23 @@ struct AddWorkoutSheet: View {
 
           Divider()
 
-          // Pace / Elevation
-          HStack {
-            TextField("Avg pace (s/km)", text: $cardio.avgPaceSecPerKm).keyboardType(.numberPad)
-            TextField("Elevation gain (m)", text: $cardio.elevationGainM).keyboardType(.numberPad)
-          }
+            HStack(spacing: 12) {
+              VStack(alignment: .leading, spacing: 6) {
+                Text("Avg pace (/km)").font(.caption).foregroundStyle(.secondary)
+                if let p = autoPaceSec(distanceKmText: cardio.distanceKm,
+                                       durH: cardio.durH, durM: cardio.durM, durS: cardio.durS) {
+                  Text(String(format: "%d:%02d /km", p/60, p%60))
+                    .font(.subheadline.weight(.semibold))
+                } else {
+                  Text("—").font(.subheadline).foregroundStyle(.secondary)
+                }
+              }
+              .frame(maxWidth: .infinity, alignment: .leading)
+
+              TextField("Elevation gain (m)", text: $cardio.elevationGainM)
+                .keyboardType(.numberPad)
+            }
+            Divider()
         }
 
         saveButton
@@ -424,8 +435,7 @@ struct AddWorkoutSheet: View {
       }
       .listRowBackground(Color.clear)
     }
-    
-    // MARK: - SPORT
+
     private var sportSection: some View {
       Section {
         SectionCard {
@@ -465,8 +475,6 @@ struct AddWorkoutSheet: View {
       .listRowBackground(Color.clear)
     }
 
-  // MARK: Save rules
-
   private var canSave: Bool {
     switch kind {
     case .strength:
@@ -488,8 +496,6 @@ struct AddWorkoutSheet: View {
     let secs = Int(endedAt.timeIntervalSince(startedAt))
     return secs > 0 ? secs / 60 : 0
   }
-
-  // MARK: Save
 
   private func save() async {
     error = nil
@@ -514,26 +520,34 @@ struct AddWorkoutSheet: View {
             p_started_at: iso.string(from: startedAt),
             p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
             p_notes: note.isEmpty ? nil : note,
-            p_perceived_intensity: perceived.rawValue   // si lo dejaste no-opcional; si opcional, usa ?.rawValue
+            p_perceived_intensity: perceived.rawValue
           )
         _ = try await client.rpc("create_strength_workout", params: params).execute()
 
       case .cardio:
-          let params = RPCCardioParams(
-            p_user_id: userId,
-            p_modality: cardio.modality,
-            p_title: title.isEmpty ? nil : title,
-            p_started_at: iso.string(from: startedAt),
-            p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
-            p_notes: note.isEmpty ? nil : note,
-            p_distance_km: parseDouble(cardio.distanceKm),
-            p_duration_sec: parseInt(cardio.durationSec),
-            p_avg_hr: parseInt(cardio.avgHR),
-            p_max_hr: parseInt(cardio.maxHR),
-            p_avg_pace_sec_per_km: parseInt(cardio.avgPaceSecPerKm),
-            p_elevation_gain_m: parseInt(cardio.elevationGainM),
-            p_perceived_intensity: perceived.rawValue   // 👈 NUEVO (o ?.rawValue si opcional)
-          )
+        let durSecHMS = hmsToSeconds(cardio.durH, cardio.durM, cardio.durS)
+        let paceAuto  = autoPaceSec(distanceKmText: cardio.distanceKm,
+                                    durH: cardio.durH, durM: cardio.durM, durS: cardio.durS)
+
+        let params = RPCCardioParams(
+          p_user_id: userId,
+          p_modality: cardio.modality,
+          p_title: title.isEmpty ? nil : title,
+          p_started_at: iso.string(from: startedAt),
+          p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
+          p_notes: note.isEmpty ? nil : note,
+          p_distance_km: parseDouble(cardio.distanceKm),
+          p_duration_sec: durSecHMS ?? parseInt(cardio.durationSec),
+          p_avg_hr: parseInt(cardio.avgHR),
+          p_max_hr: parseInt(cardio.maxHR),
+
+          // pace auto-calculado (fallback a legacy si no hay datos suficientes)
+          p_avg_pace_sec_per_km: paceAuto ?? parseInt(cardio.avgPaceSecPerKm),
+
+          p_elevation_gain_m: parseInt(cardio.elevationGainM),
+          p_perceived_intensity: perceived.rawValue
+        )
+
         _ = try await client.rpc("create_cardio_workout", params: params).execute()
 
       case .sport:
@@ -549,7 +563,7 @@ struct AddWorkoutSheet: View {
           p_duration_min: minutes,
           p_match_result: sport.matchResult.isEmpty ? nil : sport.matchResult,
           p_session_notes: sport.sessionNotes.isEmpty ? nil : sport.sessionNotes,
-          p_perceived_intensity: perceived.rawValue   // si lo quieres opcional usa: perceivedOptional?.rawValue
+          p_perceived_intensity: perceived.rawValue
         )
 
         _ = try await client
@@ -562,8 +576,6 @@ struct AddWorkoutSheet: View {
       self.error = error.localizedDescription
     }
   }
-
-  // MARK: Helpers
 
   private func parseInt(_ s: String) -> Int? {
     let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -595,19 +607,43 @@ struct AddWorkoutSheet: View {
       let res = try await SupabaseManager.shared.client
         .from("exercises")
         .select("*")
-        .eq("is_public", value: true)           // 👈 firma correcta
-        .eq("modality", value: "strength")      // 👈 firma correcta
+        .eq("is_public", value: true)
+        .eq("modality", value: "strength")
         .order("name", ascending: true)
         .execute()
 
       catalog = try JSONDecoder().decode([Exercise].self, from: res.data)
     } catch {
-      // silencio para no bloquear UI
     }
   }
-}
+    
+    private func autoPaceSec(distanceKmText: String, durH: String, durM: String, durS: String) -> Int? {
+      guard let dist = parseDouble(distanceKmText), dist > 0,
+            let dur = hmsToSeconds(durH, durM, durS) else { return nil }
+      // segundos por km
+      return Int((Double(dur) / dist).rounded())
+    }
 
-// MARK: - UI Models
+    private func secondsToHMS(_ sec: Int) -> (h: Int, m: Int, s: Int) {
+      let h = sec / 3600
+      let m = (sec % 3600) / 60
+      let s = sec % 60
+      return (h, m, s)
+    }
+
+    // Intenta autocompletar pace si el usuario no lo ha tocado
+    private func updateAutoPaceIfNeeded() {
+      guard let p = autoPaceSec(distanceKmText: cardio.distanceKm,
+                                durH: cardio.durH, durM: cardio.durM, durS: cardio.durS)
+      else { return }
+
+      let (h,m,s) = secondsToHMS(p)
+      // Normalmente pace es m:s; dejamos h en blanco si es 0
+      cardio.paceH = h == 0 ? "" : String(h)
+      cardio.paceM = String(m)
+      cardio.paceS = String(s)
+    }
+}
 
 private enum WorkoutKind: String, CaseIterable, Identifiable {
   case strength, cardio, sport
@@ -616,8 +652,8 @@ private enum WorkoutKind: String, CaseIterable, Identifiable {
 
 private struct EditableExercise: Identifiable {
   let id = UUID()
-  var exerciseId: Int64? = nil         // seleccionado desde catálogo
-  var exerciseName: String = ""        // alias opcional
+  var exerciseId: Int64? = nil
+  var exerciseName: String = ""
   var orderIndex: Int = 1
   var notes: String = ""
   var sets: [EditableSet] = [EditableSet(setNumber: 1)]
@@ -668,11 +704,25 @@ private struct EditableSet: Identifiable {
 private struct CardioForm {
   var modality: String = "Run"
   var distanceKm: String = ""
-  var durationSec: String = ""
+
+  // NUEVO: duración en h:m:s
+  var durH: String = ""
+  var durM: String = ""
+  var durS: String = ""
+
   var avgHR: String = ""
   var maxHR: String = ""
-  var avgPaceSecPerKm: String = ""
+
+  // NUEVO: pace en h:m:s por km (normalmente m:s; h opcional)
+  var paceH: String = ""   // suele ir vacío
+  var paceM: String = ""
+  var paceS: String = ""
+
   var elevationGainM: String = ""
+
+  // Compat (si hubiese datos “legacy” en texto de segundos)
+  var durationSec: String = ""
+  var avgPaceSecPerKm: String = ""
 }
 
 private struct SportForm {
@@ -681,8 +731,6 @@ private struct SportForm {
   var matchResult: String = ""
   var sessionNotes: String = ""
 }
-
-// MARK: - RPC payloads
 
 private struct RPCStrengthParams: Encodable {
   let p_user_id: UUID
@@ -724,7 +772,7 @@ private struct RPCCardioParams: Encodable {
   let p_max_hr: Int?
   let p_avg_pace_sec_per_km: Int?
   let p_elevation_gain_m: Int?
-  let p_perceived_intensity: String?   // 👈 NUEVO
+  let p_perceived_intensity: String?
 }
 
 private struct RPCSportParams: Encodable {
@@ -737,9 +785,28 @@ private struct RPCSportParams: Encodable {
   let p_duration_min: Int?
   let p_match_result: String?
   let p_session_notes: String?
-  let p_perceived_intensity: String?   // "easy|moderate|hard|max"
+  let p_perceived_intensity: String?
 }
 
 private struct RPCSportWrapper: Encodable {
   let p: RPCSportParams
+}
+
+private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
+  let H = Int(h.trimmingCharacters(in: .whitespaces)) ?? 0
+  let M = Int(m.trimmingCharacters(in: .whitespaces)) ?? 0
+  let S = Int(s.trimmingCharacters(in: .whitespaces)) ?? 0
+  guard (0...59).contains(M), (0...59).contains(S), H >= 0 else { return nil }
+  let total = H*3600 + M*60 + S
+  return total > 0 ? total : nil
+}
+
+private func msToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
+  // pace: normalmente 0:mm:ss, pero soporta horas opcional
+  let H = Int(h.trimmingCharacters(in: .whitespaces)) ?? 0
+  let M = Int(m.trimmingCharacters(in: .whitespaces)) ?? 0
+  let S = Int(s.trimmingCharacters(in: .whitespaces)) ?? 0
+  guard (0...59).contains(M), (0...59).contains(S), H >= 0 else { return nil }
+  let total = H*3600 + M*60 + S
+  return total > 0 ? total : nil
 }

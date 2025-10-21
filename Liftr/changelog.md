@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.0] - 2025-10-21
+### Added
+- **Database (RLS Policies):**:
+    •    Added new visibility policies to allow users to see workouts, exercises, and sets from people they follow.
+    •    New policies created:
+    •    we_select_visible → grants read access to workout_exercises from followed users.
+    •    es_select_visible → grants read access to exercise_sets belonging to followed workouts.
+    •    follows_select_own → allows users to read their own follow relationships.
+    •    Verified existing cardio_sessions and sport_sessions RLS for owner-only visibility.
+    •    All new policies are permissive, non-destructive, and backward compatible.
+    
+### Changed
+    •    EditWorkoutMetaSheet (UI):
+    •    Redesigned the “GENERAL” section with a new SectionCard layout for a cleaner and more consistent visual style.
+    •    Fixed Notes field truncation issue — now expands properly with vertical text input.
+    •    Improved padding, spacing, and dividers for better hierarchy.
+    •    Adopted consistent FieldRowPlain layout across fields (Title, Notes, Started, Finished, Intensity).
+
+### Fixed
+    •    Notes text field now displays full multiline input without clipping.
+    •    Removed layout warnings related to nested Section blocks inside Form.
+    •    Ensured smooth save behavior and consistent navigation dismissal after updating workout metadata.
+
+### Database
+    •    RLS: Added new policies to propagate follower-based visibility for workouts and their related data (exercise_sets, workout_exercises).
+    •    Verified: No structural changes in schema, triggers, or functions.
+[0.6.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.0
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.0...HEAD
+
 ## [0.5.1] - 2025-10-20
 ### Added
 - **FollowersListView / FollowingListView**:

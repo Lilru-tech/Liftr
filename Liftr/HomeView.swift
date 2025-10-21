@@ -1,14 +1,16 @@
 import SwiftUI
 import Supabase
 
+extension Notification.Name {
+  static let workoutDidChange = Notification.Name("workoutDidChange")
+}
+
 struct HomeView: View {
   @EnvironmentObject var app: AppState
 
-  // MARK: - Filtro
   enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
   @State private var filter: KindFilter = .all
 
-  // MARK: - Filas base
   struct WorkoutRow: Decodable, Identifiable {
     let id: Int
     let user_id: UUID
@@ -21,7 +23,6 @@ struct HomeView: View {
   struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
   private struct WorkoutScoreRow: Decodable { let workout_id: Int; let score: Decimal }
 
-  // PRs (vw_user_prs)
   struct PRRow: Decodable, Identifiable {
     let kind: String
     let user_id: UUID
@@ -32,75 +33,77 @@ struct HomeView: View {
     var id: String { "\(user_id.uuidString)|\(label)|\(metric)|\(achieved_at.timeIntervalSince1970)" }
   }
 
-  // Item del feed
-    struct FeedItem: Identifiable, Equatable {
+    struct FeedItem: Identifiable, Hashable, Equatable {
       let id: Int
       let workout: WorkoutRow
       let username: String
       let avatarURL: String?
       let score: Double?
 
+      func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(workout.kind)
+        hasher.combine(workout.title ?? "")
+        hasher.combine(workout.started_at?.timeIntervalSince1970 ?? 0)
+        hasher.combine(workout.ended_at?.timeIntervalSince1970 ?? 0)
+        hasher.combine(username)
+        hasher.combine(avatarURL ?? "")
+        hasher.combine(score ?? -1)
+      }
+
       static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id &&
+        lhs.workout.kind == rhs.workout.kind &&
+        (lhs.workout.title ?? "") == (rhs.workout.title ?? "") &&
+        (lhs.workout.started_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.started_at?.timeIntervalSince1970 ?? 0) &&
+        (lhs.workout.ended_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.ended_at?.timeIntervalSince1970 ?? 0) &&
+        lhs.username == rhs.username &&
+        (lhs.avatarURL ?? "") == (rhs.avatarURL ?? "") &&
+        (lhs.score ?? -1) == (rhs.score ?? -1)
       }
     }
-
-  // MARK: - Estado
+    
   @State private var feed: [FeedItem] = []
   @State private var profiles: [UUID: ProfileRow] = [:]
   @State private var followees: [UUID] = []
-
-  // Paginación
   @State private var page = 0
   private let pageSize = 30
   @State private var canLoadMore = true
   @State private var isLoadingPage = false
-
-  // Loading & error
+  @State private var selectedItem: FeedItem?
   @State private var initialLoading = false
   @State private var error: String?
-
-  // Resumen de hoy
   @State private var todayCount = 0
   @State private var todayMinutes = 0
   @State private var todayPoints = 0
-
-  // Streak + semana
   @State private var streakDays = 0
   @State private var weekWorkouts = 0
   @State private var weekPoints = 0
-
-  // Highlights
   @State private var recentPRs: [PRRow] = []
   @State private var weeklyTop: [(user: ProfileRow, points: Int)] = []
 
-  // Control de render de highlights intercalado
   private let highlightsInsertIndex = 5
 
   var body: some View {
     VStack(spacing: 8) {
-      // Filtro
       Picker("", selection: $filter) {
         ForEach(KindFilter.allCases, id: \.self) { k in Text(k.rawValue).tag(k) }
       }
       .pickerStyle(.segmented)
       .padding(.horizontal)
 
-      // Resúmenes
       VStack(spacing: 8) {
         TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
         StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
       }
       .padding(.horizontal)
 
-      // Feed
       List {
         if initialLoading && feed.isEmpty {
           ProgressView().frame(maxWidth: .infinity)
         }
 
           ForEach(Array(feed.enumerated()), id: \.element.id) { i, item in
-            // Header de fecha cuando cambia el día
             if i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at) {
               Text(dateLabel(item.workout.started_at))
                 .font(.footnote.weight(.semibold))
@@ -109,16 +112,19 @@ struct HomeView: View {
                 .listRowBackground(Color.clear)
             }
 
-            HomeFeedCard(item: item)
+              HomeFeedCard(item: item)
+                .id(item)
+                .contentShape(Rectangle())
+                .onTapGesture { selectedItem = item }
               .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
               .listRowBackground(Color.clear)
               .onAppear {
                 if i == feed.count - 1 {
+                    print("[Home.cell.onAppear] last cell reached → loadPage(reset:false)")
                   Task { await loadPage(reset: false) }
                 }
               }
 
-            // Highlights tras X items (solo una vez)
             if i == highlightsInsertIndex, !recentPRs.isEmpty || !weeklyTop.isEmpty {
                 HighlightsCard(
                   prs: recentPRs,
@@ -145,13 +151,102 @@ struct HomeView: View {
     }
     .background(.clear)
     .task { await reloadAll() }
+    .navigationDestination(item: $selectedItem) { it in
+      WorkoutDetailView(workoutId: it.id, ownerId: it.workout.user_id)
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: .workoutUpdated).receive(on: RunLoop.main)
+    ) { note in
+      let idAny = note.object
+      print("[Home.onReceive workoutUpdated] recv note object=\(String(describing: idAny)) threadMain=\(Thread.isMainThread)")
+
+      guard let id = idAny as? Int else {
+        print("[Home.onReceive workoutUpdated] object nil o no Int → reloadAll()")
+        Task { await reloadAll() }
+        return
+      }
+
+      // Logs de userInfo
+      if let ui = note.userInfo {
+        let keys = Array(ui.keys).map { "\($0)" }.joined(separator: ", ")
+        print("[Home.onReceive workoutUpdated] id=\(id) userInfo.keys=[\(keys)]")
+        print("[Home.onReceive workoutUpdated] ui.title=\(String(describing: ui["title"])) ui.kind=\(String(describing: ui["kind"])) ui.started_at=\(String(describing: ui["started_at"])) ui.ended_at=\(String(describing: ui["ended_at"])) ui.score=\(String(describing: ui["score"]))")
+      } else {
+        print("[Home.onReceive workoutUpdated] id=\(id) userInfo=nil")
+      }
+
+      // Intento 1: parchear con userInfo
+      if let ui = note.userInfo,
+         let kind = ui["kind"] as? String {
+
+        let title     = ui["title"] as? String
+        let startedAt = ui["started_at"] as? Date
+        let endedAt   = ui["ended_at"] as? Date
+
+        var newScore: Double? = nil
+        if let raw = ui["score"], !(raw is NSNull) {
+          newScore = raw as? Double
+        }
+
+        if let idx = feed.firstIndex(where: { $0.id == id }) {
+          print("[Home.onReceive workoutUpdated] parcheando feed idx=\(idx) id=\(id)")
+          let old = feed[idx]
+          let patched = WorkoutRow(
+            id: old.workout.id,
+            user_id: old.workout.user_id,
+            kind: kind,
+            title: title,
+            started_at: startedAt ?? old.workout.started_at,
+            ended_at: endedAt ?? old.workout.ended_at
+          )
+
+          // ⚠️ Mutación SIEMPRE en MainActor
+          Task { await MainActor.run {
+            feed[idx] = FeedItem(
+              id: old.id,
+              workout: patched,
+              username: old.username,
+              avatarURL: old.avatarURL,
+              score: newScore ?? old.score
+            )
+              feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
+              print("[Home.onReceive workoutUpdated] patched OK (title=\(title ?? "nil"), score=\(String(describing: newScore)))")
+            }}
+            Task { await recalcHomeSummaries() }
+            return
+        } else {
+          print("[Home.onReceive workoutUpdated] id=\(id) no estaba en feed visible → refreshOne()")
+        }
+      } else {
+        print("[Home.onReceive workoutUpdated] no hay ‘kind’ en userInfo → refreshOne()")
+      }
+
+      // Intento 2: refrescar solo ese id
+      Task {
+        print("[Home.onReceive workoutUpdated] calling refreshOne(\(id))…")
+        await refreshOne(id: id)
+      }
+    }
+    .onReceive(
+      NotificationCenter.default.publisher(for: .workoutDidChange).receive(on: RunLoop.main)
+    ) { note in
+      let idAny = note.object
+      print("[Home.onReceive workoutDidChange] recv object=\(String(describing: idAny)) threadMain=\(Thread.isMainThread)")
+      if let id = idAny as? Int {
+        Task {
+          print("[Home.onReceive workoutDidChange] refreshOne(\(id))…")
+          await refreshOne(id: id)
+        }
+      } else {
+        print("[Home.onReceive workoutDidChange] reloadAll()…")
+        Task { await reloadAll() }
+      }
+    }
     .onChange(of: filter) { _, _ in Task { await reloadAll() } }
   }
 
-  // MARK: - Carga principal
-
     private func reloadAll() async {
-      // Sanity-check: asegura que usamos el userId real de la sesión actual
+        print("[Home.reloadAll] start filter=\(filter.rawValue)")
       if let session = try? await SupabaseManager.shared.client.auth.session {
         if app.userId != session.user.id {
           await MainActor.run { app.userId = session.user.id }
@@ -170,7 +265,6 @@ struct HomeView: View {
       }
 
       do {
-        // 1) Followees del usuario actual
         let fRes = try await SupabaseManager.shared.client
           .from("follows")
           .select("followee_id")
@@ -180,18 +274,12 @@ struct HomeView: View {
         let fRows = try JSONDecoder.supabase().decode([FollowRow].self, from: fRes.data)
         let ids = fRows.map { $0.followee_id }
         await MainActor.run { self.followees = ids }
-
-        // 2) Primer page del feed (me + followees)
         await loadPage(reset: true)
-
-        // 3) Perfiles (para highlights/leaderboard)
         try await ensureProfilesAvailable(for: ([me] + ids))
-
-        // 4) Cargar tarjetas/resúmenes en paralelo
-        async let t: Void = loadTodaySummary()                // ← SOLO me (ya corregido dentro)
-        async let w: Void = loadWeekSummaryAndLeaderboard()   // ← mis totales + top (ya corregido dentro)
-        async let s: Void = loadStreak()                      // ← solo me
-        async let r: Void = loadRecentPRs()                   // ← me + followees
+        async let t: Void = loadTodaySummary()
+        async let w: Void = loadWeekSummaryAndLeaderboard()
+        async let s: Void = loadStreak()
+        async let r: Void = loadRecentPRs()
         _ = await (t, w, s, r)
 
       } catch {
@@ -206,6 +294,7 @@ struct HomeView: View {
 
     private func loadPage(reset: Bool) async {
       guard let me = app.userId else { return }
+
       if reset {
         await MainActor.run {
           page = 0
@@ -213,12 +302,25 @@ struct HomeView: View {
           feed.removeAll()
         }
       }
+
       guard canLoadMore, !isLoadingPage else { return }
-      await MainActor.run { isLoadingPage = true }
-      defer { Task { await MainActor.run { isLoadingPage = false } } }
+
+      await MainActor.run {
+        isLoadingPage = true
+        print("[Home.loadPage] isLoadingPage=true reset=\(reset) page=\(page) canLoadMore=\(canLoadMore)")
+      }
+
+      defer {
+        Task { await MainActor.run {
+          isLoadingPage = false
+          print("[Home.loadPage] isLoadingPage=false")
+        }}
+      }
 
       do {
         let allIds = [me] + followees
+        print("[Home.loadPage] fetching page=\(page) pageSize=\(pageSize) userIds=\(allIds.count)")
+
         var q: PostgrestFilterBuilder = SupabaseManager.shared.client
           .from("workouts")
           .select("id, user_id, kind, title, started_at, ended_at")
@@ -226,6 +328,7 @@ struct HomeView: View {
 
         if filter != .all {
           q = q.eq("kind", value: filter.rawValue.lowercased())
+          print("[Home.loadPage] filter=\(filter.rawValue.lowercased())")
         }
 
         let from = page * pageSize
@@ -237,31 +340,29 @@ struct HomeView: View {
           .execute()
 
         let workouts = try JSONDecoder.supabase().decode([WorkoutRow].self, from: wRes.data)
-        let ids = workouts.map { $0.id }
+        print("[Home.loadPage] fetched workouts=\(workouts.count) from=\(from) to=\(to)")
 
-        // perfiles de estos workouts
+        let ids = workouts.map { $0.id }
         let uniqueUserIds = Array(Set(workouts.map { $0.user_id }))
         try await ensureProfilesAvailable(for: uniqueUserIds)
 
-        // scores de estos workouts
-          var scoresDict: [Int: Double] = [:]
-          if !ids.isEmpty {
-            let sRes = try await SupabaseManager.shared.client
-              .from("workout_scores")
-              .select("workout_id, score")
-              .in("workout_id", values: ids)
-              .execute()
+        var scoresDict: [Int: Double] = [:]
+        if !ids.isEmpty {
+          let sRes = try await SupabaseManager.shared.client
+            .from("workout_scores")
+            .select("workout_id, score")
+            .in("workout_id", values: ids)
+            .execute()
 
-            let sRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: sRes.data)
-
-            // 🔧 Combinar duplicados (sumando si hay más de un algoritmo por workout)
-            var tmp: [Int: Double] = [:]
-            for row in sRows {
-              let value = NSDecimalNumber(decimal: row.score).doubleValue
-              tmp[row.workout_id, default: 0] += value
-            }
-            scoresDict = tmp
+          let sRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: sRes.data)
+          print("[Home.loadPage] fetched scores rows=\(sRows.count)")
+          var tmp: [Int: Double] = [:]
+          for row in sRows {
+            let value = NSDecimalNumber(decimal: row.score).doubleValue
+            tmp[row.workout_id, default: 0] += value
           }
+          scoresDict = tmp
+        }
 
         let items: [FeedItem] = workouts.map { w in
           let prof = profiles[w.user_id]
@@ -279,28 +380,104 @@ struct HomeView: View {
           self.feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
           self.canLoadMore = workouts.count == pageSize
           if canLoadMore { page += 1 }
+          print("[Home.loadPage] appended items=\(items.count) newFeedCount=\(feed.count) canLoadMore=\(canLoadMore) nextPage=\(page)")
         }
       } catch {
-        // Si falla la página, desactiva canLoadMore para evitar loops
-        await MainActor.run { self.canLoadMore = false }
+        await MainActor.run {
+          self.canLoadMore = false
+          print("[Home.loadPage] error=\(error) → canLoadMore=false")
+        }
+      }
+    }
+    
+    private func refreshOne(id: Int) async {
+      guard let me = app.userId else { return }
+
+      print("[Home.refreshOne] id=\(id) start")
+
+      do {
+        // 1) Leer el workout actualizado
+        let wRes = try await SupabaseManager.shared.client
+          .from("workouts")
+          .select("id, user_id, kind, title, started_at, ended_at")
+          .eq("id", value: id)
+          .single()
+          .execute()
+        let w = try JSONDecoder.supabase().decode(WorkoutRow.self, from: wRes.data)
+        print("[Home.refreshOne] got workout kind=\(w.kind) title=\(String(describing: w.title)) started_at=\(String(describing: w.started_at)) ended_at=\(String(describing: w.ended_at))")
+
+        // 2) Asegurar perfil del dueño
+        try await ensureProfilesAvailable(for: [w.user_id])
+        let prof = profiles[w.user_id]
+        print("[Home.refreshOne] profile username=\(String(describing: prof?.username)) avatar=\(String(describing: prof?.avatar_url))")
+
+        // 3) Leer su puntuación total (si existe)
+        let sRes = try await SupabaseManager.shared.client
+          .from("workout_scores")
+          .select("workout_id, score")
+          .eq("workout_id", value: id)
+          .execute()
+        let sRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: sRes.data)
+        let scTotal = sRows.reduce(0.0) { $0 + NSDecimalNumber(decimal: $1.score).doubleValue }
+        let score: Double? = sRows.isEmpty ? nil : scTotal
+        print("[Home.refreshOne] scores rows=\(sRows.count) total=\(String(describing: score))")
+
+        // 4) Construir item actualizado y sustituirlo en el feed
+        let updated = FeedItem(
+          id: w.id,
+          workout: w,
+          username: prof?.username ?? (w.user_id == me ? "You" : "—"),
+          avatarURL: prof?.avatar_url,
+          score: score
+        )
+        print("[Home.refreshOne] will update feed on main…")
+
+        await MainActor.run {
+          if let idx = feed.firstIndex(where: { $0.id == id }) {
+            print("[Home.refreshOne] replacing item at idx=\(idx)")
+            feed[idx] = updated
+            // Mantener orden por fecha
+            feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
+          } else {
+            print("[Home.refreshOne] item id=\(id) no estaba en feed (no inserto)")
+          }
+        }
+          await recalcHomeSummaries()
+        print("[Home.refreshOne] done id=\(id)")
+      } catch {
+        print("[Home.refreshOne] error=\(error) → fallback reloadAll()")
+        await reloadAll()
       }
     }
 
-  private func ensureProfilesAvailable(for userIds: [UUID]) async throws {
-    let missing = userIds.filter { profiles[$0] == nil }
-    guard !missing.isEmpty else { return }
-    let pRes = try await SupabaseManager.shared.client
-      .from("profiles")
-      .select("user_id, username, avatar_url")
-      .in("user_id", values: missing.map { $0.uuidString })
-      .execute()
-    let pRows = try JSONDecoder.supabase().decode([ProfileRow].self, from: pRes.data)
-    await MainActor.run {
-      for p in pRows { profiles[p.user_id] = p }
-    }
-  }
+    private func ensureProfilesAvailable(for userIds: [UUID]) async throws {
+      // 1) Calcula cuáles faltan
+      let missing = userIds.filter { profiles[$0] == nil }
+      if !missing.isEmpty {
+        print("[Home.ensureProfiles] missing=\(missing.count) (will fetch)")
+      } else {
+        print("[Home.ensureProfiles] all profiles cached (\(userIds.count))")
+      }
 
-  // MARK: - Resúmenes
+      // 2) Si no falta ninguno, sal temprano
+      guard !missing.isEmpty else { return }
+
+      // 3) Pide a Supabase sólo los que faltan
+      let pRes = try await SupabaseManager.shared.client
+        .from("profiles")
+        .select("user_id, username, avatar_url")
+        .in("user_id", values: missing.map { $0.uuidString })
+        .execute()
+
+      let pRows = try JSONDecoder.supabase().decode([ProfileRow].self, from: pRes.data)
+      print("[Home.ensureProfiles] fetched=\(pRows.count)")
+
+      // 4) Actualiza el diccionario en MainActor
+      await MainActor.run {
+        for p in pRows { profiles[p.user_id] = p }
+      }
+    }
+
 
     private func loadTodaySummary() async {
       guard let me = app.userId else { return }
@@ -313,7 +490,6 @@ struct HomeView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         iso.timeZone = .current
 
-        // 🔧 Solo mis workouts de hoy
         let wRes = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id, user_id, kind, title, started_at, ended_at")
@@ -358,7 +534,15 @@ struct HomeView: View {
           self.todayMinutes = minutes
           self.todayPoints = points
         }
-      } catch { /* ignore */ }
+      } catch { }
+    }
+    
+    private func recalcHomeSummaries() async {
+      async let t: Void = loadTodaySummary()
+      async let w: Void = loadWeekSummaryAndLeaderboard()
+      async let s: Void = loadStreak()
+      async let r: Void = loadRecentPRs()
+      _ = await (t, w, s, r)
     }
 
     private func loadWeekSummaryAndLeaderboard() async {
@@ -369,7 +553,6 @@ struct HomeView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         iso.timeZone = .current
 
-        // 1) Para leaderboard: me + followees
         let allIds = [me] + followees
         let allRes = try await SupabaseManager.shared.client
           .from("workouts")
@@ -381,7 +564,6 @@ struct HomeView: View {
           .execute()
         let rowsAll = try JSONDecoder.supabase().decode([WorkoutRow].self, from: allRes.data)
 
-        // 2) Para mis totales: SOLO yo
         let meRes = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id, user_id, started_at, ended_at, kind, title")
@@ -392,7 +574,6 @@ struct HomeView: View {
           .execute()
         let rowsMe = try JSONDecoder.supabase().decode([WorkoutRow].self, from: meRes.data)
 
-          // Scores para todos los workouts implicados (union para no duplicar)
           let allIdsForScores = Array(Set(rowsAll.map { $0.id } + rowsMe.map { $0.id }))
           var scoresDict: [Int: Double] = [:]
           if !allIdsForScores.isEmpty {
@@ -412,11 +593,9 @@ struct HomeView: View {
             scoresDict = tmp
           }
 
-        // Mis totales de la semana (card)
         var myWeekPts = 0
         for w in rowsMe { myWeekPts += Int((scoresDict[w.id] ?? 0).rounded()) }
 
-        // Leaderboard (me + followees)
         var ptsByUser: [UUID: Int] = [:]
         for w in rowsAll { ptsByUser[w.user_id, default: 0] += Int((scoresDict[w.id] ?? 0).rounded()) }
 
@@ -438,7 +617,6 @@ struct HomeView: View {
   private func loadStreak() async {
     guard let me = app.userId else { return }
     do {
-      // últimos 60 días para calcular racha fiable
       let now = Date()
       let start = Calendar.current.date(byAdding: .day, value: -60, to: now)!
       let iso = ISO8601DateFormatter()
@@ -459,7 +637,6 @@ struct HomeView: View {
       let streak = computeStreak(from: dates)
       await MainActor.run { self.streakDays = streak }
     } catch {
-      // opcional
     }
   }
 
@@ -471,8 +648,6 @@ struct HomeView: View {
       let iso = ISO8601DateFormatter()
       iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
       iso.timeZone = .current
-
-      // PRs recientes de me + followees
       let prRes = try await SupabaseManager.shared.client
         .from("vw_user_prs")
         .select("*")
@@ -482,18 +657,13 @@ struct HomeView: View {
         .limit(10)
         .execute()
       let prs = try JSONDecoder.supabase().decode([PRRow].self, from: prRes.data)
-
-      // Perfiles para todos los owners de esos PRs
       let owners = Array(Set(prs.map { $0.user_id }))
       try await ensureProfilesAvailable(for: owners)
 
       await MainActor.run { self.recentPRs = prs }
     } catch {
-      // opcional
     }
   }
-
-  // MARK: - Helpers (UI/Fecha)
 
   private func sameDay(_ a: Date?, _ b: Date?) -> Bool {
     guard let a, let b else { return false }
@@ -523,15 +693,14 @@ struct HomeView: View {
 
   private func weekRange() -> (Date, Date) {
     var cal = Calendar.current
-    cal.firstWeekday = 2 // lunes
+    cal.firstWeekday = 2
     let now = Date()
     let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
-    let start = cal.date(from: comps)! // start of week
+    let start = cal.date(from: comps)!
     return (start, now)
   }
 }
 
-// MARK: - Cards auxiliares
 
 private struct TodaySummaryCard: View {
   let count: Int; let minutes: Int; let points: Int
@@ -570,12 +739,11 @@ private struct StreakWeekCard: View {
 private struct HighlightsCard: View {
   let prs: [HomeView.PRRow]
   let weeklyTop: [(user: HomeView.ProfileRow, points: Int)]
-  let profileFor: (UUID) -> HomeView.ProfileRow?   // 👈 NUEVO
+  let profileFor: (UUID) -> HomeView.ProfileRow?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
 
-      // --- Recent PRs (con dueño) ---
       if !prs.isEmpty {
         Text("Recent PRs").font(.subheadline.weight(.semibold))
 
@@ -610,7 +778,6 @@ private struct HighlightsCard: View {
         }
       }
 
-      // --- Weekly top (igual que antes) ---
       if !weeklyTop.isEmpty {
         if !prs.isEmpty { Divider() }
         Text("Top this week").font(.subheadline.weight(.semibold))
@@ -631,7 +798,6 @@ private struct HighlightsCard: View {
     .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
   }
 
-  // helpers locales (igual que ya tenías)
   private func prettyMetric(_ m: String) -> String {
     switch m.lowercased() {
     case "max_hr": return "Max HR"
@@ -676,7 +842,6 @@ private struct HighlightsCard: View {
   }
 }
 
-// MARK: - Card del feed (misma estética que Profile)
 
 private struct HomeFeedCard: View {
   let item: HomeView.FeedItem
@@ -699,7 +864,6 @@ private struct HomeFeedCard: View {
             Text(relative(d)).font(.caption2).foregroundStyle(.secondary)
           }
 
-          // Chip del tipo
           Text(item.workout.kind.capitalized)
             .font(.caption2.weight(.semibold))
             .padding(.vertical, 3)
@@ -718,7 +882,6 @@ private struct HomeFeedCard: View {
     }
   }
 
-  // Helpers visuales (usa los que definiste para Profile)
   private func relative(_ d: Date) -> String {
     let f = RelativeDateTimeFormatter(); f.unitsStyle = .short
     return f.localizedString(for: d, relativeTo: Date())

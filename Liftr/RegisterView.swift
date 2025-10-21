@@ -9,8 +9,8 @@ struct RegisterView: View {
   @State private var username = ""
   @State private var sex: Sex = .prefer_not_to_say
   @State private var dateOfBirth: Date = Calendar.current.date(byAdding: .year, value: -20, to: .now) ?? .now
-  @State private var height: String = ""   // cm (permite coma)
-  @State private var weight: String = ""   // kg (permite coma)
+  @State private var height: String = ""
+  @State private var weight: String = ""
 
   @State private var loading = false
   @State private var error: String?
@@ -18,9 +18,7 @@ struct RegisterView: View {
   @State private var usernameDirty = false
   @State private var triedSubmit = false
 
-  // MARK: - Validaciones locales
   private var isEmailValid: Bool {
-    // Formato básico
     NSPredicate(format: "SELF MATCHES[c] %@", "^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}$")
       .evaluate(with: email.uppercased())
   }
@@ -44,15 +42,11 @@ struct RegisterView: View {
 
           VStack(spacing: 18) {
             Spacer(minLength: 0)
-
-            // Subtítulo centrado (ligero)
             Text("Create your account to start tracking your workouts.")
               .font(.subheadline)
               .foregroundStyle(.secondary)
               .multilineTextAlignment(.center)
               .padding(.horizontal, 24)
-
-            // Tarjeta translúcida con campos "grises" (como Login)
             VStack(spacing: 14) {
               if let error {
                 Text(error)
@@ -60,7 +54,6 @@ struct RegisterView: View {
                   .frame(maxWidth: .infinity, alignment: .leading)
               }
 
-              // ACCOUNT
               TextField("Email", text: $email)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
@@ -80,9 +73,6 @@ struct RegisterView: View {
                   .foregroundStyle(.red)
               }
 
-
-
-              // PROFILE
               TextField("Username (required)", text: $username)
                 .textInputAutocapitalization(.never)
                 .textContentType(.nickname)
@@ -111,7 +101,7 @@ struct RegisterView: View {
                   .pickerStyle(.menu)
                 } label: {
                   Text("Sex")
-                    .foregroundStyle(.secondary) // estilo gris tenue como los placeholders
+                    .foregroundStyle(.secondary)
                 }
                 .labelStyle(.titleOnly)
 
@@ -120,15 +110,14 @@ struct RegisterView: View {
                     .datePickerStyle(.compact)
                 } label: {
                   Text("Date of birth")
-                    .foregroundStyle(.secondary) // color gris tenue, igual que los placeholders
+                    .foregroundStyle(.secondary)
                 }
                 .labelStyle(.titleOnly)
-                .padding(.vertical, 2) // opcional, para igualar altura con los TextField
+                .padding(.vertical, 2)
 
               TextField("Height (cm)", text: $height).keyboardType(.decimalPad)
               TextField("Weight (kg)", text: $weight).keyboardType(.decimalPad)
 
-              // Footer y botón pegado
               VStack(spacing: 12) {
                 Text("You can update these details later in your profile.")
                   .font(.footnote)
@@ -173,12 +162,8 @@ struct RegisterView: View {
       defer { loading = false }
 
       let client = SupabaseManager.shared.client
-      try? await client.auth.signOut() // evitar estados raros
-
-        // Normaliza inputs
+      try? await client.auth.signOut()
         let cleanUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // 🚫 no continúes si el username no es válido
         guard cleanUsername.count >= 3 else {
           self.error = "Username is required (min. 3 characters)."
           return
@@ -190,15 +175,13 @@ struct RegisterView: View {
       if let h = Double(height.replacingOccurrences(of: ",", with: ".")), let v = try? AnyJSON(h) { meta["height_cm"] = v }
       if let w = Double(weight.replacingOccurrences(of: ",", with: ".")), let v = try? AnyJSON(w) { meta["weight_kg"] = v }
 
-      // 🚦 PRECHECK server-side (email + username)
       struct Precheck: Decodable { let email_exists: Bool; let username_exists: Bool }
 
       do {
           let rpcResp = try await client
             .rpc("precheck_signup", params: ["p_email": email, "p_username": cleanUsername])
             .execute()
-
-        // rpcResp.data es Data (no opcional) en tu SDK
+          
         let precheck = try JSONDecoder().decode([Precheck].self, from: rpcResp.data)
 
         guard let result = precheck.first else {
@@ -218,7 +201,6 @@ struct RegisterView: View {
         return
       }
 
-      // ✅ Si llegamos aquí, email y username están libres → registrar
       do {
         _ = try await client.auth.signUp(email: email, password: password, data: meta)
       } catch {
@@ -233,14 +215,11 @@ struct RegisterView: View {
         return
       }
 
-        // Con autoconfirm debería existir sesión inmediatamente
         guard let session = try? await client.auth.session else {
-          // fallback muy raro: sin sesión, no podemos upsertear perfil con user_id
           await showSuccessAndPop("Account created! Welcome 🎉")
           return
         }
 
-        // 3) Completar perfil (opcional) cuando hay sesión
         let userId = session.user.id
       func parseDouble(_ s: String) -> Double? { Double(s.replacingOccurrences(of: ",", with: ".")) }
       struct ProfileUpsert: Encodable {
@@ -266,7 +245,6 @@ struct RegisterView: View {
             .upsert(payload, onConflict: "user_id")
             .execute()
       } catch {
-        // si falla, no bloqueamos el alta
       }
 
         await showSuccessAndPop("Account created! Welcome 🎉")
@@ -280,7 +258,6 @@ struct RegisterView: View {
     }
 }
 
-// MARK: - Helpers (mantenemos los tuyos)
 enum Sex: String, CaseIterable {
   case male, female, other, prefer_not_to_say
   var label: String {
