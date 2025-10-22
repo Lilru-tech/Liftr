@@ -23,45 +23,272 @@ enum WorkoutIntensity: String, CaseIterable, Identifiable {
   }
 }
 
+enum SortMode: String, CaseIterable, Identifiable {
+  case alphabetic = "Alphabetic"
+  case mostUsed   = "Most used"
+  case favorites  = "Favorites"
+  case recent     = "Recently used"     // 👈 NUEVO
+  var id: String { rawValue }
+  var label: String {
+    switch self {
+      case .alphabetic: "A–Z"
+      case .mostUsed:   "Más usados"
+      case .favorites:  "Favoritos"
+      case .recent:     "Últimos usados" // 👈 NUEVO
+    }
+  }
+}
+
 struct ExercisePickerSheet: View {
   let all: [Exercise]
   @Binding var selected: Exercise?
   @Environment(\.dismiss) private var dismiss
 
   @State private var query = ""
-
+  @State private var sortMode: SortMode = .alphabetic
+  @State private var loading = false
+  @State private var exercises: [Exercise] = []
+  @State private var favorites = Set<Int64>()
+    
   var filtered: [Exercise] {
     let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    guard !q.isEmpty else { return all }
-    return all.filter { $0.name.lowercased().contains(q) }
+    guard !q.isEmpty else { return exercises }
+    return exercises.filter { $0.name.lowercased().contains(q) }
   }
 
   var body: some View {
     NavigationStack {
       List {
-        ForEach(filtered) { ex in
-          Button {
-            selected = ex
-            dismiss()
-          } label: {
-            VStack(alignment: .leading, spacing: 2) {
-              Text(ex.name)
-              Text([ex.category, ex.muscle_primary, ex.equipment].compactMap { $0 }.joined(separator: " · "))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+          ForEach(filtered) { ex in
+            HStack {
+              VStack(alignment: .leading, spacing: 2) {
+                Text(ex.name)
+                Text([ex.category, ex.muscle_primary, ex.equipment].compactMap { $0 }.joined(separator: " · "))
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+              }
+
+              Spacer()
+
+              // Botón de estrella (marca / desmarca favorito)
+              Button {
+                Task { await toggleFavorite(ex.id) }
+              } label: {
+                Image(systemName: favorites.contains(ex.id) ? "star.fill" : "star")
+                  .font(.subheadline)
+                  .foregroundStyle(favorites.contains(ex.id) ? .yellow : .secondary)
+                  .opacity(0.9)
+                  .frame(width: 32, height: 32)          // buen target táctil
+                  .contentShape(Rectangle())             // asegura hit-area
+                  .accessibilityLabel(favorites.contains(ex.id) ? "Unfavorite" : "Favorite")
+                  .accessibilityAddTraits(.isButton)
+              }
+              .buttonStyle(.plain)  // evita estilos de lista por defecto
+            }
+            .contentShape(Rectangle())                   // el resto de la fila es “tappable”
+            .onTapGesture {                              // seleccionar el ejercicio
+              selected = ex
+              dismiss()
             }
           }
-        }
       }
       .searchable(text: $query)
-      .navigationTitle("Choose exercise")
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
           Button("Cancel") { dismiss() }
         }
+        ToolbarItem(placement: .navigationBarTrailing) {
+          Menu {
+            ForEach(SortMode.allCases) { mode in
+              Button(mode.label) {
+                sortMode = mode
+                Task { await loadExercises() }
+              }
+            }
+          } label: {
+            Image(systemName: "line.3.horizontal.decrease.circle")
+          }
+          .accessibilityLabel("Filter")
+        }
       }
+      .overlay {
+        if loading {
+          ProgressView("Loading…")
+            .padding()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+      }
+      .task { await loadExercises() }
     }
   }
+
+  // MARK: - Load logic
+
+    private func loadExercises() async {
+      loading = true
+      defer { loading = false }
+      do {
+        await loadFavorites()
+
+        switch sortMode {
+        case .alphabetic:
+          let res = try await SupabaseManager.shared.client
+            .from("exercises")
+            .select("*")
+            .eq("is_public", value: true)
+            .eq("modality", value: "strength")
+            .order("name", ascending: true)
+            .execute()
+          exercises = try JSONDecoder().decode([Exercise].self, from: res.data)
+
+        case .mostUsed:
+          let params: [String: AnyJSON] = [
+            "p_modality": try .init("strength"),
+            "p_search":   try .init(AnyJSON.null),
+            "p_limit":    try .init(200)
+          ]
+          let res = try await SupabaseManager.shared.client
+            .rpc("get_exercises_usage", params: params)
+            .execute()
+          let used = try JSONDecoder.supabaseCustom().decode([ExerciseUsage].self, from: res.data)
+          exercises = used.map { Exercise(id: $0.id, name: $0.name, category: nil, modality: "strength", muscle_primary: nil, equipment: nil) }
+
+        case .favorites:
+          if favorites.isEmpty {
+            exercises = []
+          } else {
+            let ids = favorites.map(Int.init)   // 👈 conversión
+            let res = try await SupabaseManager.shared.client
+              .from("exercises")
+              .select("*")
+              .eq("is_public", value: true)
+              .eq("modality", value: "strength")
+              .in("id", values: ids)            // 👈 usa [Int]
+              .order("name", ascending: true)
+              .execute()
+            exercises = try JSONDecoder().decode([Exercise].self, from: res.data)
+          }
+        case .recent:
+          // Reutilizamos el RPC: trae id, name, times_used, last_used_at
+          let params: [String: AnyJSON] = [
+            "p_modality": try .init("strength"),
+            "p_search":   try .init(AnyJSON.null),
+            "p_limit":    try .init(200)
+          ]
+          let res = try await SupabaseManager.shared.client
+            .rpc("get_exercises_usage", params: params)
+            .execute()
+
+          let used = try JSONDecoder.supabaseCustom().decode([ExerciseUsage].self, from: res.data)
+
+          // Solo los que se usaron al menos una vez y ordenar por “last_used_at” desc
+          let sorted = used
+            .filter { $0.last_used_at != nil && $0.times_used > 0 }
+            .sorted { (a, b) in
+              // nils al final por seguridad (aunque filtramos)
+              (a.last_used_at ?? .distantPast) > (b.last_used_at ?? .distantPast)
+            }
+
+          // Mapear a tu modelo de lista
+          exercises = sorted.map {
+            Exercise(
+              id: $0.id,
+              name: $0.name,
+              category: nil,
+              modality: "strength",
+              muscle_primary: nil,
+              equipment: nil
+            )
+          }
+        }
+      } catch {
+        print("Error loading exercises:", error)
+      }
+    }
+    
+    private func loadFavorites() async {
+      do {
+        let res = try await SupabaseManager.shared.client
+          .from("user_favorite_exercises")
+          .select("exercise_id")
+          .execute()
+
+        struct Row: Decodable { let exercise_id: Int64 }
+        let rows = try JSONDecoder().decode([Row].self, from: res.data)
+
+        await MainActor.run {
+          favorites = Set(rows.map { $0.exercise_id })
+        }
+      } catch {
+        print("Error loading favorites:", error)
+      }
+    }
+
+    private struct FavoriteRow: Encodable {
+      let user_id: UUID
+      let exercise_id: Int64
+    }
+
+    private func toggleFavorite(_ exerciseId: Int64) async {
+      let client = SupabaseManager.shared.client
+
+      // UI optimista
+      if favorites.contains(exerciseId) {
+        // --- UNFAVORITE (optimista) ---
+        await MainActor.run {
+          _ = favorites.remove(exerciseId)
+          if sortMode == .favorites {
+            exercises.removeAll { $0.id == exerciseId }
+          }
+        }
+
+        do {
+          let session = try await client.auth.session
+          _ = try await client
+            .from("user_favorite_exercises")
+            .delete()
+            .eq("user_id", value: session.user.id)        // ayuda a RLS
+            .eq("exercise_id", value: Int(exerciseId))    // Int, no Int64
+            .execute()
+        } catch {
+          // Revertir si falló
+          await MainActor.run { _ = favorites.insert(exerciseId) }
+          print("Error unfavorite:", error)
+        }
+      } else {
+        // --- FAVORITE (optimista) ---
+        await MainActor.run { _ = favorites.insert(exerciseId) }  // 👈 AQUÍ estaba tu error
+
+        do {
+          let session = try await client.auth.session
+          struct FavInsert: Encodable { let user_id: UUID; let exercise_id: Int }
+          let row = FavInsert(user_id: session.user.id, exercise_id: Int(exerciseId))
+
+          // UPSERT para evitar 23505 si llega duplicado
+          _ = try await client
+            .from("user_favorite_exercises")
+            .upsert([row], onConflict: "user_id,exercise_id", returning: .minimal)
+            .execute()
+        } catch let err as PostgrestError {
+          // Si llega 23505 igualmente, lo tratamos como éxito (ya era favorito)
+          if err.code != "23505" {
+            // Revertir si otro error
+            await MainActor.run { _ = favorites.remove(exerciseId) }
+            print("Error favorite:", err)
+          }
+        } catch {
+          await MainActor.run { _ = favorites.remove(exerciseId) }
+          print("Error favorite:", error)
+        }
+      }
+    }
+}
+
+struct ExerciseUsage: Decodable {
+  let id: Int64
+  let name: String
+  let times_used: Int
+  let last_used_at: Date?
 }
 
 private struct PickerHandle: Identifiable {
@@ -99,8 +326,21 @@ private struct FieldRowPlain<Content: View>: View {
   }
 }
 
+struct AddWorkoutDraft {
+  var kind: WorkoutKind
+  var title: String = ""
+  var note: String = ""
+  var startedAt: Date = .now
+  var endedAt: Date? = nil
+  var perceived: WorkoutIntensity = .moderate
+  var strengthItems: [EditableExercise] = []
+  var cardio: CardioForm? = nil
+  var sport: SportForm? = nil
+}
+
 struct AddWorkoutSheet: View {
   @Environment(\.dismiss) private var dismiss
+  @EnvironmentObject var app: AppState
 
   @State private var kind: WorkoutKind = .strength
   @State private var title: String = ""
@@ -117,6 +357,28 @@ struct AddWorkoutSheet: View {
   @State private var loading = false
   @State private var error: String?
   @State private var perceived: WorkoutIntensity = .moderate
+  @State private var banner: Banner?
+    
+    init(draft: AddWorkoutDraft? = nil) {
+      if let d = draft {
+        _kind      = State(initialValue: d.kind)
+        _title     = State(initialValue: d.title)
+        _note      = State(initialValue: d.note)
+        _startedAt = State(initialValue: d.startedAt)
+        _endedAtEnabled = State(initialValue: d.endedAt != nil)
+        _endedAt   = State(initialValue: d.endedAt ?? d.startedAt)
+        _perceived = State(initialValue: d.perceived)
+
+        switch d.kind {
+        case .strength:
+          _items  = State(initialValue: d.strengthItems.isEmpty ? [EditableExercise()] : d.strengthItems)
+        case .cardio:
+          _cardio = State(initialValue: d.cardio ?? CardioForm())
+        case .sport:
+          _sport  = State(initialValue: d.sport ?? SportForm())
+        }
+      }
+    }
 
     var body: some View {
         NavigationStack {
@@ -190,11 +452,6 @@ struct AddWorkoutSheet: View {
             .scrollContentBackground(.hidden)
             .listRowBackground(Color.clear)
             .listSectionSpacing(-10)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
             .sheet(item: $pickerHandle) { handle in
                 if let idx = items.firstIndex(where: { $0.id == handle.id }) {
                     ExercisePickerSheet(
@@ -218,6 +475,7 @@ struct AddWorkoutSheet: View {
             }
         }
     }
+        .banner($banner)
   }
 
     private var saveButton: some View {
@@ -570,12 +828,35 @@ struct AddWorkoutSheet: View {
           .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
           .execute()
       }
-
-      dismiss()
+        await showSuccessAndGoHome("Workout saved! 💪")
     } catch {
       self.error = error.localizedDescription
     }
   }
+    
+    @MainActor
+    private func resetForm() {
+      kind = .strength
+      title = ""
+      note = ""
+      startedAt = .now
+      endedAtEnabled = false
+      endedAt = .now
+      items = [EditableExercise()]
+      cardio = CardioForm()
+      sport = SportForm()
+      perceived = .moderate
+    }
+
+    @MainActor
+    private func showSuccessAndGoHome(_ message: String) async {
+      banner = Banner(message: message, type: .success)
+      // muestra el banner un momento
+      try? await Task.sleep(nanoseconds: 1_600_000_000)
+      // resetea el formulario y navega a Home
+      resetForm()
+      app.selectedTab = .home
+    }
 
   private func parseInt(_ s: String) -> Int? {
     let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -645,12 +926,12 @@ struct AddWorkoutSheet: View {
     }
 }
 
-private enum WorkoutKind: String, CaseIterable, Identifiable {
+enum WorkoutKind: String, CaseIterable, Identifiable {
   case strength, cardio, sport
   var id: String { rawValue }
 }
 
-private struct EditableExercise: Identifiable {
+struct EditableExercise: Identifiable {
   let id = UUID()
   var exerciseId: Int64? = nil
   var exerciseName: String = ""
@@ -675,7 +956,7 @@ private struct EditableExercise: Identifiable {
   }
 }
 
-private struct EditableSet: Identifiable {
+struct EditableSet: Identifiable {
   let id = UUID()
   var setNumber: Int
   var reps: Int? = nil
@@ -701,7 +982,7 @@ private struct EditableSet: Identifiable {
   }
 }
 
-private struct CardioForm {
+struct CardioForm {
   var modality: String = "Run"
   var distanceKm: String = ""
 
@@ -725,14 +1006,14 @@ private struct CardioForm {
   var avgPaceSecPerKm: String = ""
 }
 
-private struct SportForm {
+struct SportForm {
   var sport: String = "Football"
   var durationMin: String = ""
   var matchResult: String = ""
   var sessionNotes: String = ""
 }
 
-private struct RPCStrengthParams: Encodable {
+struct RPCStrengthParams: Encodable {
   let p_user_id: UUID
   let p_items: [StrengthItem]
   let p_title: String?
@@ -775,7 +1056,7 @@ private struct RPCCardioParams: Encodable {
   let p_perceived_intensity: String?
 }
 
-private struct RPCSportParams: Encodable {
+struct RPCSportParams: Encodable {
   let p_user_id: UUID
   let p_sport: String
   let p_title: String?
@@ -788,7 +1069,7 @@ private struct RPCSportParams: Encodable {
   let p_perceived_intensity: String?
 }
 
-private struct RPCSportWrapper: Encodable {
+struct RPCSportWrapper: Encodable {
   let p: RPCSportParams
 }
 

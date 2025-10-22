@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.1] - 2025-10-22
+### Added
+- **Workout duplication**: from `WorkoutDetailView` → “…” menu → **Duplicate** now opens the **Add** tab with a pre-filled form depending on the workout type:
+  - *Strength*: copies all exercises (order, notes) and every **set** (reps, weight, RPE, rest).
+  - *Cardio*: copies modality, distance, duration, HR, pace, and elevation gain.
+  - *Sport*: copies sport, duration, result, and session notes.
+  - Always resets the date to **now** and clears any previous `ended_at` value.
+- **Save feedback**: after pressing `Save` in `AddWorkoutSheet`, a **success banner** (“Workout saved! 💪”) now appears, the form is **reset**, and the app **redirects automatically to Home**.
+- **Exercise picker – new sorting modes**:
+  - **Favorites** (with instant optimistic UI updates).
+  - **Most used** (via `get_exercises_usage` RPC).
+  - **Recently used** (sorted by last_used_at DESC, safe fallback if null).
+  - Improved search and clearer row labels showing alias/category.
+
+### Changed
+- **Duplication flow integrated with global navigation**:
+  - Uses `AppState.openAdd(with:)` to inject the **AddWorkoutDraft** (`app.addDraft`) and trigger sheet recreation via `app.addDraftKey`.
+  - The Add tab now rebuilds dynamically with `.id(app.addDraftKey)` when a new draft is passed.
+- **Exercise picker UX improvements**:
+  - Enlarged touch area for the favorite ★ button.
+  - Cleaner visual hierarchy and separation from the main tap gesture.
+
+### Fixed
+- **Duplicate button not working**: now correctly generates the draft, switches to the **Add** tab, and opens the form in “edit mode” with duplicated data.
+- **AddWorkoutSheet retained old data after saving**: now displays a success banner, resets the form state, and redirects to **Home** to avoid stale state confusion.
+- Fixed navigation inconsistencies when closing sheets or returning from duplicated workouts.
+
+### Database
+- No schema changes.
+- Reused existing RPC `get_exercises_usage` for both “Most used” and “Recently used” exercise filters.
+
+[0.6.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.1
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.1...HEAD
+
 ## [0.6.0] - 2025-10-21
 ### Added
 - **Database (RLS Policies):**:
@@ -33,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Database
     •    RLS: Added new policies to propagate follower-based visibility for workouts and their related data (exercise_sets, workout_exercises).
     •    Verified: No structural changes in schema, triggers, or functions.
+    
 [0.6.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.0
 [Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.0...HEAD
 

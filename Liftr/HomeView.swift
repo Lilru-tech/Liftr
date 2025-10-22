@@ -71,6 +71,7 @@ struct HomeView: View {
   @State private var canLoadMore = true
   @State private var isLoadingPage = false
   @State private var selectedItem: FeedItem?
+  @State private var _selToken = UUID()
   @State private var initialLoading = false
   @State private var error: String?
   @State private var todayCount = 0
@@ -113,7 +114,6 @@ struct HomeView: View {
             }
 
               HomeFeedCard(item: item)
-                .id(item)
                 .contentShape(Rectangle())
                 .onTapGesture { selectedItem = item }
               .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
@@ -149,10 +149,20 @@ struct HomeView: View {
       .scrollContentBackground(.hidden)
       .refreshable { await reloadAll() }
     }
+    .onChange(of: selectedItem) { old, new in
+      print("[Home.selectedItem] \(old?.id.description ?? "nil") → \(new?.id.description ?? "nil") main=\(Thread.isMainThread)")
+    }
     .background(.clear)
     .task { await reloadAll() }
     .navigationDestination(item: $selectedItem) { it in
       WorkoutDetailView(workoutId: it.id, ownerId: it.workout.user_id)
+        .onAppear {
+          print("[Home.navDest.onAppear] showing WorkoutDetailView id=\(it.id) main=\(Thread.isMainThread)")
+        }
+        .onDisappear {
+          print("[Home.navDest.onDisappear] leaving WorkoutDetailView id=\(it.id) main=\(Thread.isMainThread)")
+          selectedItem = nil
+        }
     }
     .onReceive(
       NotificationCenter.default.publisher(for: .workoutUpdated).receive(on: RunLoop.main)

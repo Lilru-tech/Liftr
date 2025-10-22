@@ -3,6 +3,21 @@ import Combine
 import Supabase
 
 final class AppState: ObservableObject {
+    // Navegación global entre tabs
+  @Published var selectedTab: Tab = .home
+
+    // Borrador que consume el AddWorkoutSheet del tab .add
+  @Published var addDraft: AddWorkoutDraft?
+
+    // Forzamos recrear AddWorkoutSheet cuando llega un nuevo draft
+  @Published var addDraftKey = UUID()
+
+  @MainActor
+  func openAdd(with draft: AddWorkoutDraft?) {
+    self.addDraft = draft
+    self.addDraftKey = UUID()  // fuerza .id(...) en RootView
+    self.selectedTab = .add
+  }
   static let shared = AppState()
 
   @Published var isAuthenticated: Bool = false
