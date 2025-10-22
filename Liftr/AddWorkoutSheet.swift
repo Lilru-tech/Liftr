@@ -39,6 +39,40 @@ enum SortMode: String, CaseIterable, Identifiable {
   }
 }
 
+enum SportType: String, CaseIterable, Identifiable {
+  case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby
+  var id: String { rawValue }
+  var label: String {
+    switch self {
+      case .padel: "Padel"
+      case .tennis: "Tennis"
+      case .football: "Football"
+      case .basketball: "Basketball"
+      case .badminton: "Badminton"
+      case .squash: "Squash"
+      case .table_tennis: "Table Tennis"
+      case .volleyball: "Volleyball"
+      case .handball: "Handball"
+      case .hockey: "Hockey"
+      case .rugby: "Rugby"
+    }
+  }
+}
+
+enum MatchResult: String, CaseIterable, Identifiable {
+  case win, loss, draw, unfinished, forfeit
+  var id: String { rawValue }
+  var label: String {
+    switch self {
+      case .win: "Win"
+      case .loss: "Loss"
+      case .draw: "Draw"
+      case .unfinished: "Unfinished"
+      case .forfeit: "Forfeit"
+    }
+  }
+}
+
 struct ExercisePickerSheet: View {
   let all: [Exercise]
   @Binding var selected: Exercise?
@@ -681,10 +715,14 @@ struct AddWorkoutSheet: View {
     private var sportSection: some View {
       Section {
         SectionCard {
-          FieldRowPlain {
-            TextField("Sport (e.g. Football, Tennis…)", text: $sport.sport)
-              .textFieldStyle(.plain)
-          }
+            FieldRowPlain {
+              Picker("", selection: $sport.sport) {
+                ForEach(SportType.allCases) { s in
+                  Text(s.label).tag(s)
+                }
+              }
+              .pickerStyle(.menu)
+            }
 
           Divider()
 
@@ -694,12 +732,39 @@ struct AddWorkoutSheet: View {
               .textFieldStyle(.plain)
           }
 
-          Divider()
+            if sportUsesNumericScore(sport.sport) {
+              Divider()
+              FieldRowPlain {
+                HStack {
+                  TextField("Score for", text: $sport.scoreFor).keyboardType(.numberPad)
+                  TextField("Score against", text: $sport.scoreAgainst).keyboardType(.numberPad)
+                }
+              }
+            }
 
-          FieldRowPlain {
-            TextField("Match result (optional)", text: $sport.matchResult)
-              .textFieldStyle(.plain)
-          }
+            if sportUsesSetText(sport.sport) {
+              Divider()
+              FieldRowPlain {
+                TextField("Match score text (e.g. 6/3 6/4 6/4)", text: $sport.matchScoreText)
+                  .textFieldStyle(.plain)
+              }
+            }
+
+            Divider()
+            FieldRowPlain {
+              TextField("Location (optional)", text: $sport.location)
+                .textFieldStyle(.plain)
+            }
+            Divider()
+
+            FieldRowPlain {
+              Picker("", selection: $sport.matchResult) {
+                ForEach(MatchResult.allCases) { r in
+                  Text(r.label).tag(r)
+                }
+              }
+              .pickerStyle(.menu)
+            }
 
           Divider()
 
@@ -729,7 +794,7 @@ struct AddWorkoutSheet: View {
     case .cardio:
       return !cardio.modality.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     case .sport:
-      return !sport.sport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      return true
     }
   }
 
@@ -792,24 +857,30 @@ struct AddWorkoutSheet: View {
         _ = try await client.rpc("create_cardio_workout", params: params).execute()
 
       case .sport:
-        let minutes = parseInt(sport.durationMin) ?? durationMinutes
+          let minutes = parseInt(sport.durationMin) ?? durationMinutes
+          let durationMin = minutes                     // la función espera minutos
 
-        let payload = RPCSportParams(
-          p_user_id: userId,
-          p_sport: sport.sport,
-          p_title: title.isEmpty ? nil : title,
-          p_started_at: iso.string(from: startedAt),
-          p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
-          p_notes: note.isEmpty ? nil : note,
-          p_duration_min: minutes,
-          p_match_result: sport.matchResult.isEmpty ? nil : sport.matchResult,
-          p_session_notes: sport.sessionNotes.isEmpty ? nil : sport.sessionNotes,
-          p_perceived_intensity: perceived.rawValue
-        )
+          let payload = RPCSportParams(
+            p_user_id: userId,
+            p_sport: sport.sport.rawValue,
+            p_title: title.isEmpty ? nil : title,
+            p_started_at: iso.string(from: startedAt),
+            p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
+            p_notes: note.isEmpty ? nil : note,
+            p_duration_min: durationMin,                // <- minutos
+            p_duration_sec: nil,                        // o ponlo si usas el fallback
+            p_score_for: parseInt(sport.scoreFor),
+            p_score_against: parseInt(sport.scoreAgainst),
+            p_match_result: sport.matchResult.rawValue,
+            p_match_score_text: sport.matchScoreText.trimmedOrNil,
+            p_location: sport.location.trimmedOrNil,
+            p_session_notes: sport.sessionNotes.trimmedOrNil,
+            p_perceived_intensity: perceived.rawValue
+          )
 
-        _ = try await client
-          .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
-          .execute()
+          _ = try await client
+            .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
+            .execute()
       }
         await showSuccessAndGoHome("Workout saved! 💪")
     } catch {
@@ -902,6 +973,20 @@ struct AddWorkoutSheet: View {
       cardio.paceM = String(m)
       cardio.paceS = String(s)
     }
+    
+    // helpers to decide which sport fields to show
+    private func sportUsesNumericScore(_ s: SportType) -> Bool {
+      switch s {
+        case .football, .basketball, .handball, .hockey, .rugby: return true
+        default: return false
+      }
+    }
+    private func sportUsesSetText(_ s: SportType) -> Bool {
+      switch s {
+        case .padel, .tennis, .badminton, .squash, .table_tennis, .volleyball: return true
+        default: return false
+      }
+    }
 }
 
 enum WorkoutKind: String, CaseIterable, Identifiable {
@@ -977,9 +1062,13 @@ struct CardioForm {
 }
 
 struct SportForm {
-  var sport: String = "Football"
+  var sport: SportType = .football
   var durationMin: String = ""
-  var matchResult: String = ""
+  var scoreFor: String = ""
+  var scoreAgainst: String = ""
+  var matchResult: MatchResult = .unfinished
+  var matchScoreText: String = ""
+  var location: String = ""
   var sessionNotes: String = ""
 }
 
@@ -1033,8 +1122,13 @@ struct RPCSportParams: Encodable {
   let p_started_at: String
   let p_ended_at: String?
   let p_notes: String?
-  let p_duration_min: Int?
+  let p_duration_min: Int?              // <- envía minutos (o añade p_duration_sec si mantienes el fallback)
+  let p_duration_sec: Int?
+  let p_score_for: Int?
+  let p_score_against: Int?
   let p_match_result: String?
+  let p_match_score_text: String?
+  let p_location: String?
   let p_session_notes: String?
   let p_perceived_intensity: String?
 }

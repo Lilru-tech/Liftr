@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.3] - 2025-10-22  
+### Added  
+- Sport workouts (extended metadata):  
+  - Added full support for sport-specific fields such as `score_for`, `score_against`, `match_score_text`, `location`, and `duration_sec`.  
+  - Enables complete recording of sports like padel, football, or tennis with full match details and custom notes.  
+  - Integrated seamlessly with AddWorkoutSheet and EditWorkoutMetaSheet for editing and displaying these values.  
+
+### Changed  
+- Database function:  
+  - The RPC `create_sport_workout_v1` was rewritten to accept all new sport-related fields and ensure consistent data insertion into `public.sport_sessions`.  
+  - Improved backward compatibility: still works with previous payloads that only provided `p_duration_min`.  
+  - Simplified duration handling — automatically converts minutes to seconds when needed.  
+
+### Fixed  
+- WorkoutDetailView / EditWorkoutMetaSheet:  
+  - Fixed missing sport data (duration, result, match score, or location) after saving.  
+  - Root cause: some fields were not persisted by the old RPC — now properly stored and displayed.  
+
+### Database  
+- Updated: `create_sport_workout_v1(p jsonb)` now includes all sport session columns and improved parameter handling.  
+- No schema or trigger changes — only logic updates within the existing function.  
+
+[0.6.3]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.3  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.3...HEAD  
+
 ## [0.6.2] - 2025-10-22
 ### Added
 - **RankingView (v1)**:

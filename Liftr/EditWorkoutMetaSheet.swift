@@ -34,9 +34,13 @@ struct EditWorkoutMetaSheet: View {
   @State private var c_avgPace = ""
   @State private var c_elevGain = ""
   @State private var c_notes = ""
-  @State private var s_sport = ""
+  @State private var s_sport: SportType = .football
   @State private var s_durationMin = ""
-  @State private var s_matchResult = ""
+  @State private var s_scoreFor = ""
+  @State private var s_scoreAgainst = ""
+  @State private var s_matchResult: MatchResult = .unfinished
+  @State private var s_matchScoreText = ""
+  @State private var s_location = ""
   @State private var s_sessionNotes = ""
 
   struct SEditableSet: Identifiable, Hashable {
@@ -246,14 +250,31 @@ struct EditWorkoutMetaSheet: View {
     } header: { Text("CARDIO") }
   }
 
-  private var sportSection: some View {
-    Section {
-      TextField("Sport", text: $s_sport)
-      TextField("Duration (min)", text: $s_durationMin).keyboardType(.numberPad)
-      TextField("Match result", text: $s_matchResult)
-      TextField("Session notes", text: $s_sessionNotes, axis: .vertical)
-    } header: { Text("SPORT") }
-  }
+    private var sportSection: some View {
+      Section {
+        Picker("Sport", selection: $s_sport) {
+          ForEach(SportType.allCases) { Text($0.label).tag($0) }
+        }
+        TextField("Duration (min)", text: $s_durationMin).keyboardType(.numberPad)
+
+        if sportUsesNumericScore(s_sport) {
+          HStack {
+            TextField("Score for", text: $s_scoreFor).keyboardType(.numberPad)
+            TextField("Score against", text: $s_scoreAgainst).keyboardType(.numberPad)
+          }
+        }
+
+        if sportUsesSetText(s_sport) {
+          TextField("Sets / score text (optional)", text: $s_matchScoreText)
+        }
+
+        Picker("Match result", selection: $s_matchResult) {
+          ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
+        }
+        TextField("Location (optional)", text: $s_location)
+        TextField("Session notes", text: $s_sessionNotes, axis: .vertical)
+      } header: { Text("SPORT") }
+    }
 
     private var strengthSection: some View {
       Section {
@@ -418,17 +439,25 @@ struct EditWorkoutMetaSheet: View {
             .eq("workout_id", value: workoutId)
             .single()
             .execute()
-          struct Row: Decodable {
-            let sport: String
-            let duration_sec: Int?
-            let match_result: String?
-            let notes: String?
-          }
+            struct Row: Decodable {
+              let sport: String
+              let duration_sec: Int?
+              let match_result: String?
+              let score_for: Int?
+              let score_against: Int?
+              let match_score_text: String?
+              let location: String?
+              let notes: String?
+            }
           let r = try decoder.decode(Row.self, from: res.data)
-          s_sport = r.sport
-          s_durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
-          s_matchResult = r.match_result ?? ""
-          s_sessionNotes = r.notes ?? ""
+            s_sport = SportType(rawValue: r.sport) ?? .football
+            s_durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
+            s_scoreFor = r.score_for.map(String.init) ?? ""
+            s_scoreAgainst = r.score_against.map(String.init) ?? ""
+            s_matchResult = MatchResult(rawValue: r.match_result ?? "") ?? .unfinished
+            s_matchScoreText = r.match_score_text ?? ""
+            s_location = r.location ?? ""
+            s_sessionNotes = r.notes ?? ""
 
         case "strength":
           let exQ = try await SupabaseManager.shared.client
@@ -559,13 +588,21 @@ struct EditWorkoutMetaSheet: View {
           struct SportPayload: Encodable {
             let sport: String
             let duration_sec: Int?
+            let score_for: Int?
+            let score_against: Int?
             let match_result: String?
+            let match_score_text: String?
+            let location: String?
             let notes: String?
           }
           let payload = SportPayload(
-            sport: s_sport,
+            sport: s_sport.rawValue,
             duration_sec: parseInt(s_durationMin).map { $0 * 60 },
-            match_result: s_matchResult.trimmedOrNil,
+            score_for: parseInt(s_scoreFor),
+            score_against: parseInt(s_scoreAgainst),
+            match_result: s_matchResult.rawValue,
+            match_score_text: s_matchScoreText.trimmedOrNil,
+            location: s_location.trimmedOrNil,
             notes: s_sessionNotes.trimmedOrNil
           )
           _ = try await SupabaseManager.shared.client
@@ -772,6 +809,20 @@ struct EditWorkoutMetaSheet: View {
       return String(format: "%d:%02d /km", mm, ss)
     }
     
+    // helpers to decide which sport fields to show
+    private func sportUsesNumericScore(_ s: SportType) -> Bool {
+      switch s {
+        case .football, .basketball, .handball, .hockey, .rugby: return true
+        default: return false
+      }
+    }
+    private func sportUsesSetText(_ s: SportType) -> Bool {
+      switch s {
+        case .padel, .tennis, .badminton, .squash, .table_tennis, .volleyball: return true
+        default: return false
+      }
+    }
+    
   private func parseInt(_ s: String) -> Int? {
     let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
     return t.isEmpty ? nil : Int(t)
@@ -782,7 +833,7 @@ struct EditWorkoutMetaSheet: View {
   }
 }
 
-private extension String {
+extension String {
   var trimmedOrNil: String? {
     let t = trimmingCharacters(in: .whitespacesAndNewlines)
     return t.isEmpty ? nil : t

@@ -341,20 +341,28 @@ struct WorkoutDetailView: View {
             .single()
             .execute()
 
-          struct Row: Decodable {
-            let sport: String
-            let duration_sec: Int?
-            let match_result: String?
-            let notes: String?
-          }
+            struct Row: Decodable {
+              let sport: String
+              let duration_sec: Int?
+              let match_result: String?
+              let score_for: Int?
+              let score_against: Int?
+              let match_score_text: String?
+              let location: String?
+              let notes: String?
+            }
           let r = try decoder.decode(Row.self, from: res.data)
 
-          var sf = SportForm()
-          sf.sport = r.sport
-          sf.durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
-          sf.matchResult = r.match_result ?? ""
-          sf.sessionNotes = r.notes ?? ""
-          draft.sport = sf
+            var sf = SportForm()
+            sf.sport = SportType(rawValue: r.sport) ?? .football
+            sf.durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
+            sf.scoreFor = r.score_for.map(String.init) ?? ""
+            sf.scoreAgainst = r.score_against.map(String.init) ?? ""
+            sf.matchResult = MatchResult(rawValue: r.match_result ?? "") ?? .unfinished
+            sf.matchScoreText = r.match_score_text ?? ""
+            sf.location = r.location ?? ""
+            sf.sessionNotes = r.notes ?? ""
+            draft.sport = sf
         } catch { return nil }
 
       default: break
@@ -603,12 +611,16 @@ private struct SportDetailBlock: View {
   let workoutId: Int
   let reloadKey: UUID
     
-  private struct SportRow: Decodable {
-    let sport: String
-    let duration_sec: Int?
-    let match_result: String?
-    let notes: String?
-  }
+    private struct SportRow: Decodable {
+      let sport: String
+      let duration_sec: Int?
+      let match_result: String?
+      let score_for: Int?
+      let score_against: Int?
+      let match_score_text: String?
+      let location: String?
+      let notes: String?
+    }
 
   @State private var row: SportRow?
   @State private var error: String?
@@ -617,14 +629,17 @@ private struct SportDetailBlock: View {
     VStack(alignment: .leading, spacing: 10) {
       Text("Sport").font(.headline)
 
-      if let r = row {
-        info("Sport", r.sport)
-        if let s = r.duration_sec { info("Duration", durationString(Double(s))) }
-        if let res = r.match_result, !res.isEmpty { info("Result", res) }
-        if let n = r.notes, !n.isEmpty { info("Notes", n) }
-      } else {
-        Text("No sport session linked").foregroundStyle(.secondary).font(.caption)
-      }
+        if let r = row {
+          info("Sport", r.sport.capitalized)
+          if let s = r.duration_sec { info("Duration", durationString(Double(s))) }
+          if let res = r.match_result, !res.isEmpty { info("Result", res.capitalized) }
+          if let sf = r.score_for, let sa = r.score_against { info("Score", "\(sf) – \(sa)") }
+          if let mst = r.match_score_text, !mst.isEmpty { info("Sets", mst) }
+          if let loc = r.location, !loc.isEmpty { info("Location", loc) }
+          if let n = r.notes, !n.isEmpty { info("Notes", n) }
+        } else {
+          Text("No sport session linked").foregroundStyle(.secondary).font(.caption)
+        }
     }
     .padding(14)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
