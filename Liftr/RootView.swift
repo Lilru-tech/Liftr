@@ -4,58 +4,48 @@ enum Tab: Hashable { case home, search, add, ranking, profile }
 
 struct RootView: View {
   @EnvironmentObject var app: AppState
-  @State private var selected: Tab = .home
-  @State private var showAddSheet = false
   @State private var showAuthAlert = false
 
   var body: some View {
-    TabView(selection: $selected) {
+    TabView(selection: $app.selectedTab) {        // ⬅️ bindea a AppState
       // Home
-      NavigationStack {
-        HomeView()
-          .gradientBG()
-      }
-      .tag(Tab.home)
-      .tabItem { Label("Home", systemImage: "house.fill") }
+      NavigationStack { HomeView().gradientBG() }
+        .tag(Tab.home)
+        .tabItem { Label("Home", systemImage: "house.fill") }
 
       // Search
-      NavigationStack {
-        SearchView()
-          .gradientBG()
-      }
-      .tag(Tab.search)
-      .tabItem { Label("Search", systemImage: "magnifyingglass") }
+      NavigationStack { SearchView().gradientBG() }
+        .tag(Tab.search)
+        .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
-      // Add (no navigation stack)
-      Color.clear
-        .tag(Tab.add)
-        .tabItem { Label("Add", systemImage: "plus.circle.fill") }
+      // Add Workout (se recrea con .id cuando llega un draft nuevo)
+      NavigationStack {
+        AddWorkoutSheet(draft: app.addDraft)
+          .gradientBG()
+          .id(app.addDraftKey)
+      }
+      .tag(Tab.add)
+      .tabItem { Label("Add", systemImage: "plus.circle.fill") }
 
       // Ranking
-      NavigationStack {
-        RankingView()
-          .gradientBG()
-      }
-      .tag(Tab.ranking)
-      .tabItem { Label("Ranking", systemImage: "trophy.fill") }
+      NavigationStack { RankingView().gradientBG() }
+        .tag(Tab.ranking)
+        .tabItem { Label("Ranking", systemImage: "trophy.fill") }
 
       // Profile
-      NavigationStack {
-        ProfileGate()
-          .gradientBG()
-      }
-      .tag(Tab.profile)
-      .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+      NavigationStack { ProfileGate().gradientBG() }
+        .tag(Tab.profile)
+        .tabItem { Label("Profile", systemImage: "person.crop.circle") }
     }
-    .onChange(of: selected) { old, new in
-      if new == .add {
-        selected = old
-        app.isAuthenticated ? (showAddSheet = true) : (showAuthAlert = true)
+    // Si el usuario toca el tab Add desde la barra y no está logueado, lo rebotamos
+    .onChange(of: app.selectedTab) { old, new in
+      if new == .add && !app.isAuthenticated {
+        app.selectedTab = old
+        showAuthAlert = true
       }
     }
-    .sheet(isPresented: $showAddSheet) { AddWorkoutSheet() }
     .alert("Necesitas iniciar sesión", isPresented: $showAuthAlert) {
-      Button("Ir a Perfil") { selected = .profile }
+      Button("Ir a Perfil") { app.selectedTab = .profile }
       Button("Cancelar", role: .cancel) {}
     } message: {
       Text("Crea una cuenta o inicia sesión para registrar entrenos.")
