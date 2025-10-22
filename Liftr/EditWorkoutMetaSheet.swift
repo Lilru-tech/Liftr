@@ -34,7 +34,6 @@ struct EditWorkoutMetaSheet: View {
   @State private var c_avgPace = ""
   @State private var c_elevGain = ""
   @State private var c_notes = ""
-
   @State private var s_sport = ""
   @State private var s_durationMin = ""
   @State private var s_matchResult = ""
@@ -385,37 +384,39 @@ struct EditWorkoutMetaSheet: View {
       .listRowBackground(Color.clear)
     }
 
-  private func loadSpecificIfNeeded() async {
-    loading = true; defer { loading = false }
-    do {
-      switch kind.lowercased() {
-      case "cardio":
-        let res = try await SupabaseManager.shared.client
-          .from("cardio_sessions")
-          .select("*")
-          .eq("workout_id", value: workoutId)
-          .single()
-          .execute()
-        struct Row: Decodable {
-          let modality: String
-          let distance_km: Decimal?
-          let duration_sec: Int?
-          let avg_hr: Int?
-          let max_hr: Int?
-          let avg_pace_sec_per_km: Int?
-          let elevation_gain_m: Int?
-          let notes: String?
-        }
-        let r = try JSONDecoder.supabase().decode(Row.self, from: res.data)
-        c_modality   = r.modality
-        c_distanceKm = r.distance_km.map { "\($0)" } ?? ""
-        c_durationSec = r.duration_sec.map { "\($0)" } ?? ""
-        c_avgHR      = r.avg_hr.map { "\($0)" } ?? ""
-        c_maxHR      = r.max_hr.map { "\($0)" } ?? ""
-        c_avgPace    = r.avg_pace_sec_per_km.map { "\($0)" } ?? ""
-        c_elevGain   = r.elevation_gain_m.map { "\($0)" } ?? ""
-        c_notes      = r.notes ?? ""
-          // Descomponer duración a H:M:S para edición cómoda
+    // Reemplaza TODO el método por este
+    private func loadSpecificIfNeeded() async {
+      loading = true; defer { loading = false }
+      do {
+        let decoder = JSONDecoder.supabaseCustom()
+
+        switch kind.lowercased() {
+        case "cardio":
+          let res = try await SupabaseManager.shared.client
+            .from("cardio_sessions")
+            .select("*")
+            .eq("workout_id", value: workoutId)
+            .single()
+            .execute()
+          struct Row: Decodable {
+            let modality: String
+            let distance_km: Decimal?
+            let duration_sec: Int?
+            let avg_hr: Int?
+            let max_hr: Int?
+            let avg_pace_sec_per_km: Int?
+            let elevation_gain_m: Int?
+            let notes: String?
+          }
+          let r = try decoder.decode(Row.self, from: res.data)
+          c_modality   = r.modality
+          c_distanceKm = r.distance_km.map { "\($0)" } ?? ""
+          c_durationSec = r.duration_sec.map { "\($0)" } ?? ""
+          c_avgHR      = r.avg_hr.map { "\($0)" } ?? ""
+          c_maxHR      = r.max_hr.map { "\($0)" } ?? ""
+          c_avgPace    = r.avg_pace_sec_per_km.map { "\($0)" } ?? ""
+          c_elevGain   = r.elevation_gain_m.map { "\($0)" } ?? ""
+          c_notes      = r.notes ?? ""
           if let sec = r.duration_sec, sec > 0 {
             let h = sec / 3600
             let m = (sec % 3600) / 60
@@ -427,32 +428,32 @@ struct EditWorkoutMetaSheet: View {
             c_durH = ""; c_durM = ""; c_durS = ""
           }
 
-      case "sport":
-        let res = try await SupabaseManager.shared.client
-          .from("sport_sessions")
-          .select("*")
-          .eq("workout_id", value: workoutId)
-          .single()
-          .execute()
-        struct Row: Decodable {
-          let sport: String
-          let duration_sec: Int?
-          let match_result: String?
-          let notes: String?
-        }
-        let r = try JSONDecoder.supabase().decode(Row.self, from: res.data)
-        s_sport = r.sport
-        s_durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
-        s_matchResult = r.match_result ?? ""
-        s_sessionNotes = r.notes ?? ""
+        case "sport":
+          let res = try await SupabaseManager.shared.client
+            .from("sport_sessions")
+            .select("*")
+            .eq("workout_id", value: workoutId)
+            .single()
+            .execute()
+          struct Row: Decodable {
+            let sport: String
+            let duration_sec: Int?
+            let match_result: String?
+            let notes: String?
+          }
+          let r = try decoder.decode(Row.self, from: res.data)
+          s_sport = r.sport
+          s_durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
+          s_matchResult = r.match_result ?? ""
+          s_sessionNotes = r.notes ?? ""
 
-      case "strength":
-        let exQ = try await SupabaseManager.shared.client
-          .from("workout_exercises")
-          .select("id, exercise_id, order_index, notes, exercises(name)")
-          .eq("workout_id", value: workoutId)
-          .order("order_index", ascending: true)
-          .execute()
+        case "strength":
+          let exQ = try await SupabaseManager.shared.client
+            .from("workout_exercises")
+            .select("id, exercise_id, order_index, notes, exercises(name)")
+            .eq("workout_id", value: workoutId)
+            .order("order_index", ascending: true)
+            .execute()
 
           struct ExWire: Decodable {
             let id: Int
@@ -462,133 +463,135 @@ struct EditWorkoutMetaSheet: View {
             let exercises: ExName?
             struct ExName: Decodable { let name: String? }
           }
-        let exWire = try JSONDecoder.supabase().decode([ExWire].self, from: exQ.data)
-        let exIds = exWire.map { $0.id }
-        var setsByEx: [Int: [SEditableSet]] = [:]
-        if !exIds.isEmpty {
-          let sRes = try await SupabaseManager.shared.client
-            .from("exercise_sets")
-            .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
-            .in("workout_exercise_id", values: exIds)
-            .order("set_number", ascending: true)
+          let exWire = try decoder.decode([ExWire].self, from: exQ.data)
+
+          let exIds = exWire.map { $0.id }
+          var setsByEx: [Int: [SEditableSet]] = [:]
+          if !exIds.isEmpty {
+            let sRes = try await SupabaseManager.shared.client
+              .from("exercise_sets")
+              .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
+              .in("workout_exercise_id", values: exIds)
+              .order("set_number", ascending: true)
+              .execute()
+
+            struct SetWire: Decodable {
+              let id: Int
+              let workout_exercise_id: Int
+              let set_number: Int
+              let reps: Int?
+              let weight_kg: Decimal?
+              let rpe: Decimal?
+              let rest_sec: Int?
+            }
+            let sWire = try decoder.decode([SetWire].self, from: sRes.data)
+            for s in sWire {
+              let editable = SEditableSet(
+                setId: s.id,
+                setNumber: s.set_number,
+                reps: s.reps,
+                weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
+                rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
+                restSec: s.rest_sec
+              )
+              setsByEx[s.workout_exercise_id, default: []].append(editable)
+            }
+          }
+
+          let mapped: [SEditableExercise] = exWire.map { ex in
+            SEditableExercise(
+              workoutExerciseId: ex.id,
+              exerciseId: ex.exercise_id,
+              name: ex.exercises?.name ?? "Exercise",
+              notes: ex.notes ?? "",
+              sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]]
+            )
+          }
+          await MainActor.run { s_items = mapped }
+
+        default:
+          break
+        }
+      } catch {
+        self.error = error.localizedDescription
+      }
+    }
+
+    private func saveAll() async {
+      error = nil; saving = true; defer { saving = false }
+      do {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let decoder = JSONDecoder.supabaseCustom()   // 👈 NUEVO
+
+        struct CommonPayload: Encodable {
+          let title: String?
+          let notes: String?
+          let started_at: String?
+          let ended_at: String?
+          let perceived_intensity: String?
+        }
+        let common = CommonPayload(
+          title: title.trimmedOrNil,
+          notes: notes.trimmedOrNil,
+          started_at: iso.string(from: startedAt),
+          ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
+          perceived_intensity: perceived.rawValue
+        )
+        _ = try await SupabaseManager.shared.client
+          .from("workouts")
+          .update(common)
+          .eq("id", value: workoutId)
+          .execute()
+
+        switch kind.lowercased() {
+        case "cardio":
+          struct CardioPayload: Encodable {
+            let modality: String
+            let distance_km: Double?
+            let duration_sec: Int?
+            let avg_hr: Int?
+            let max_hr: Int?
+            let avg_pace_sec_per_km: Int?
+            let elevation_gain_m: Int?
+            let notes: String?
+          }
+          let payload = CardioPayload(
+            modality: c_modality,
+            distance_km: parseDouble(c_distanceKm),
+            duration_sec: hmsToSeconds(c_durH, c_durM, c_durS) ?? parseInt(c_durationSec),
+            avg_hr: parseInt(c_avgHR),
+            max_hr: parseInt(c_maxHR),
+            avg_pace_sec_per_km: autoPaceSec(distanceKmText: c_distanceKm, durH: c_durH, durM: c_durM, durS: c_durS) ?? parseInt(c_avgPace),
+            elevation_gain_m: parseInt(c_elevGain),
+            notes: c_notes.trimmedOrNil
+          )
+          _ = try await SupabaseManager.shared.client
+            .from("cardio_sessions")
+            .update(payload)
+            .eq("workout_id", value: workoutId)
             .execute()
 
-          struct SetWire: Decodable {
-            let id: Int
-            let workout_exercise_id: Int
-            let set_number: Int
-            let reps: Int?
-            let weight_kg: Decimal?
-            let rpe: Decimal?
-            let rest_sec: Int?
+        case "sport":
+          struct SportPayload: Encodable {
+            let sport: String
+            let duration_sec: Int?
+            let match_result: String?
+            let notes: String?
           }
-          let sWire = try JSONDecoder.supabase().decode([SetWire].self, from: sRes.data)
-          for s in sWire {
-            let editable = SEditableSet(
-              setId: s.id,
-              setNumber: s.set_number,
-              reps: s.reps,
-              weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
-              rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
-              restSec: s.rest_sec
-            )
-            setsByEx[s.workout_exercise_id, default: []].append(editable)
-          }
-        }
-
-        let mapped: [SEditableExercise] = exWire.map { ex in
-          SEditableExercise(
-            workoutExerciseId: ex.id,
-            exerciseId: ex.exercise_id,
-            name: ex.exercises?.name ?? "Exercise",
-            notes: ex.notes ?? "",
-            sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]]
+          let payload = SportPayload(
+            sport: s_sport,
+            duration_sec: parseInt(s_durationMin).map { $0 * 60 },
+            match_result: s_matchResult.trimmedOrNil,
+            notes: s_sessionNotes.trimmedOrNil
           )
-        }
-        await MainActor.run { s_items = mapped }
+          _ = try await SupabaseManager.shared.client
+            .from("sport_sessions")
+            .update(payload)
+            .eq("workout_id", value: workoutId)
+            .execute()
 
-      default:
-        break
-      }
-    } catch {
-      self.error = error.localizedDescription
-    }
-  }
-
-  private func saveAll() async {
-    error = nil; saving = true; defer { saving = false }
-    do {
-      let iso = ISO8601DateFormatter()
-      iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-
-      struct CommonPayload: Encodable {
-        let title: String?
-        let notes: String?
-        let started_at: String?
-        let ended_at: String?
-        let perceived_intensity: String?
-      }
-      let common = CommonPayload(
-        title: title.trimmedOrNil,
-        notes: notes.trimmedOrNil,
-        started_at: iso.string(from: startedAt),
-        ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
-        perceived_intensity: perceived.rawValue
-      )
-      _ = try await SupabaseManager.shared.client
-        .from("workouts")
-        .update(common)
-        .eq("id", value: workoutId)
-        .execute()
-
-      switch kind.lowercased() {
-      case "cardio":
-        struct CardioPayload: Encodable {
-          let modality: String
-          let distance_km: Double?
-          let duration_sec: Int?
-          let avg_hr: Int?
-          let max_hr: Int?
-          let avg_pace_sec_per_km: Int?
-          let elevation_gain_m: Int?
-          let notes: String?
-        }
-        let payload = CardioPayload(
-          modality: c_modality,
-          distance_km: parseDouble(c_distanceKm),
-          duration_sec: hmsToSeconds(c_durH, c_durM, c_durS) ?? parseInt(c_durationSec),
-          avg_hr: parseInt(c_avgHR),
-          max_hr: parseInt(c_maxHR),
-          avg_pace_sec_per_km: autoPaceSec(distanceKmText: c_distanceKm, durH: c_durH, durM: c_durM, durS: c_durS) ?? parseInt(c_avgPace),
-          elevation_gain_m: parseInt(c_elevGain),
-          notes: c_notes.trimmedOrNil
-        )
-        _ = try await SupabaseManager.shared.client
-          .from("cardio_sessions")
-          .update(payload)
-          .eq("workout_id", value: workoutId)
-          .execute()
-
-      case "sport":
-        struct SportPayload: Encodable {
-          let sport: String
-          let duration_sec: Int?
-          let match_result: String?
-          let notes: String?
-        }
-        let payload = SportPayload(
-          sport: s_sport,
-          duration_sec: parseInt(s_durationMin).map { $0 * 60 },
-          match_result: s_matchResult.trimmedOrNil,
-          notes: s_sessionNotes.trimmedOrNil
-        )
-        _ = try await SupabaseManager.shared.client
-          .from("sport_sessions")
-          .update(payload)
-          .eq("workout_id", value: workoutId)
-          .execute()
-
-      case "strength":
+        case "strength":
           for ex in s_items {
             struct ExPayload: Encodable { let exercise_id: Int; let notes: String? }
             _ = try await SupabaseManager.shared.client
@@ -598,23 +601,23 @@ struct EditWorkoutMetaSheet: View {
               .execute()
           }
 
-        let exIds = s_items.map { $0.workoutExerciseId }
-        if !exIds.isEmpty {
-          _ = try await SupabaseManager.shared.client
-            .from("exercise_sets")
-            .delete()
-            .in("workout_exercise_id", values: exIds)
-            .execute()
-        }
+          let exIds = s_items.map { $0.workoutExerciseId }
+          if !exIds.isEmpty {
+            _ = try await SupabaseManager.shared.client
+              .from("exercise_sets")
+              .delete()
+              .in("workout_exercise_id", values: exIds)
+              .execute()
+          }
 
-        struct InsertSet: Encodable {
-          let workout_exercise_id: Int
-          let set_number: Int
-          let reps: Int?
-          let weight_kg: Double?
-          let rpe: Double?
-          let rest_sec: Int?
-        }
+          struct InsertSet: Encodable {
+            let workout_exercise_id: Int
+            let set_number: Int
+            let reps: Int?
+            let weight_kg: Double?
+            let rpe: Double?
+            let rest_sec: Int?
+          }
           let payload: [InsertSet] = s_items.flatMap { ex in
             ex.sets
               .filter { s in
@@ -634,20 +637,19 @@ struct EditWorkoutMetaSheet: View {
                 )
               }
           }
-        if !payload.isEmpty {
-          _ = try await SupabaseManager.shared.client
-            .from("exercise_sets")
-            .insert(payload)
-            .execute()
+          if !payload.isEmpty {
+            _ = try await SupabaseManager.shared.client
+              .from("exercise_sets")
+              .insert(payload)
+              .execute()
+          }
+
+        default: break
         }
 
-      default: break
-      }
-
-        // 1) Aviso para Detail (si alguien lo escucha)
         NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
 
-        // 2) Leer el workout fresco (solo los campos que Home necesita)
+        // Leer workout fresco
         let freshRes = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id, user_id, kind, title, started_at, ended_at")
@@ -655,7 +657,6 @@ struct EditWorkoutMetaSheet: View {
           .single()
           .execute()
 
-        // Ojo: usamos un decodificador "ligero" local para no depender de tipos de HomeView
         struct Fresh: Decodable {
           let id: Int
           let user_id: UUID
@@ -664,19 +665,17 @@ struct EditWorkoutMetaSheet: View {
           let started_at: Date?
           let ended_at: Date?
         }
-        let fresh = try JSONDecoder.supabase().decode(Fresh.self, from: freshRes.data)
+        let fresh = try decoder.decode(Fresh.self, from: freshRes.data)   // 👈 CAMBIO
 
-        // 3) Notificación con userInfo para que Home parchee sin reconsultar
-        // Calcular score total actualizado
+        // Score total
         struct ScoreWire: Decodable { let workout_id: Int; let score: Decimal }
         let scoreRes = try await SupabaseManager.shared.client
           .from("workout_scores")
           .select("workout_id, score")
           .eq("workout_id", value: workoutId)
           .execute()
-        let sRows = try JSONDecoder.supabase().decode([ScoreWire].self, from: scoreRes.data)
+        let sRows = try decoder.decode([ScoreWire].self, from: scoreRes.data)   // 👈 CAMBIO
         let totalScore = sRows.reduce(0.0) { $0 + NSDecimalNumber(decimal: $1.score).doubleValue }
-        // 3) Notificación con userInfo para que Home parchee sin reconsultar
         let scorePayload: Any = sRows.isEmpty ? NSNull() : totalScore
 
         NotificationCenter.default.post(
@@ -687,23 +686,18 @@ struct EditWorkoutMetaSheet: View {
             "user_id": fresh.user_id,
             "kind": fresh.kind,
             "title": fresh.title as Any,
-            // 🔴 CLAVE: fuerza tipo estable: Date | NSNull (no Optional<Date>)
             "started_at": fresh.started_at ?? NSNull(),
             "ended_at":   fresh.ended_at   ?? NSNull(),
             "score":      scorePayload
           ]
         )
 
-        print("[Edit] posted workoutUpdated with fresh title=\(fresh.title ?? "nil")")
-
-        // 4) Lógica de cierre
         await onSaved()
-        print("[Edit] posted notifications for id=\(workoutId)")
         dismiss()
-    } catch {
-      self.error = error.localizedDescription
+      } catch {
+        self.error = error.localizedDescription
+      }
     }
-  }
     
     // MARK: - Add/Remove exercise helpers (Strength)
 

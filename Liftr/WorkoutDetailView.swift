@@ -6,8 +6,10 @@ struct WorkoutDetailView: View {
   let workoutId: Int
   let ownerId: UUID
   @State private var showEdit = false
+  @State private var showDuplicate = false
+  @State private var duplicateDraft: AddWorkoutDraft?
   private var canEdit: Bool { app.userId == ownerId }
-    
+
   struct WorkoutDetailRow: Decodable {
     let id: Int
     let user_id: UUID
@@ -118,7 +120,22 @@ struct WorkoutDetailView: View {
     .toolbar {
       if canEdit {
         ToolbarItem(placement: .topBarTrailing) {
-          Button("Edit") { showEdit = true }
+          Menu {
+            Button("Edit") { showEdit = true }
+              Button("Duplicate") {
+                Task {
+                  let d = await buildDuplicateDraft()
+                  await MainActor.run {
+                    guard let d else { return }
+                    app.addDraft = d
+                    app.addDraftKey = UUID()     // 🔁 fuerza recreación del AddWorkoutSheet
+                    app.selectedTab = .add       // 🔀 cambia de pestaña
+                  }
+                }
+              }
+          } label: {
+            Image(systemName: "ellipsis.circle")
+          }
         }
       }
     }
@@ -200,6 +217,153 @@ struct WorkoutDetailView: View {
     if let e = w.ended_at { return "\(f.string(from: s)) – \(f.string(from: e))" }
     return f.string(from: s)
   }
+    
+    private func buildDuplicateDraft() async -> AddWorkoutDraft? {
+      guard let base = workout else { return nil }
+
+      var draft = AddWorkoutDraft(
+        kind: WorkoutKind(rawValue: base.kind) ?? .strength,
+        title: base.title ?? "",
+        note: base.notes ?? "",
+        startedAt: Date(),
+        endedAt: nil,
+        perceived: WorkoutIntensity(rawValue: base.perceived_intensity ?? "moderate") ?? .moderate
+      )
+
+      let decoder = JSONDecoder.supabase()
+
+      switch base.kind.lowercased() {
+      case "strength":
+        do {
+          // ejercicios
+          let exRes = try await SupabaseManager.shared.client
+            .from("workout_exercises")
+            .select("id, exercise_id, order_index, notes, exercises(name)")
+            .eq("workout_id", value: workoutId)
+            .order("order_index", ascending: true)
+            .execute()
+
+          struct ExWire: Decodable {
+            let id: Int
+            let exercise_id: Int64
+            let order_index: Int
+            let notes: String?
+            let exercises: ExName?
+            struct ExName: Decodable { let name: String? }
+          }
+          let exs = try decoder.decode([ExWire].self, from: exRes.data)
+
+          // sets
+          let exIds = exs.map { $0.id }
+          var setsByEx: [Int: [EditableSet]] = [:]
+          if !exIds.isEmpty {
+            let setRes = try await SupabaseManager.shared.client
+              .from("exercise_sets")
+              .select("workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
+              .in("workout_exercise_id", values: exIds)
+              .order("set_number", ascending: true)
+              .execute()
+
+            struct SetWire: Decodable {
+              let workout_exercise_id: Int
+              let set_number: Int
+              let reps: Int?
+              let weight_kg: Decimal?
+              let rpe: Decimal?
+              let rest_sec: Int?
+            }
+            let sets = try decoder.decode([SetWire].self, from: setRes.data)
+            for s in sets {
+              setsByEx[s.workout_exercise_id, default: []].append(
+                EditableSet(
+                  setNumber: s.set_number,
+                  reps: s.reps,
+                  weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
+                  rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
+                  restSec: s.rest_sec,
+                  notes: ""
+                )
+              )
+            }
+          }
+
+          draft.strengthItems = exs.map { ex in
+            EditableExercise(
+              exerciseId: ex.exercise_id,
+              exerciseName: ex.exercises?.name ?? "",
+              orderIndex: ex.order_index,
+              notes: ex.notes ?? "",
+              sets: setsByEx[ex.id] ?? [EditableSet(setNumber: 1)]
+            )
+          }
+        } catch { return nil }
+
+      case "cardio":
+        do {
+          let res = try await SupabaseManager.shared.client
+            .from("cardio_sessions")
+            .select("*")
+            .eq("workout_id", value: workoutId)
+            .single()
+            .execute()
+
+          struct Row: Decodable {
+            let modality: String
+            let distance_km: Decimal?
+            let duration_sec: Int?
+            let avg_hr: Int?
+            let max_hr: Int?
+            let avg_pace_sec_per_km: Int?
+            let elevation_gain_m: Int?
+            let notes: String?
+          }
+          let r = try decoder.decode(Row.self, from: res.data)
+
+          var cf = CardioForm()
+          cf.modality = r.modality
+          cf.distanceKm = r.distance_km.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? ""
+          if let s = r.duration_sec, s > 0 {
+            cf.durH = String(s/3600); cf.durM = String((s%3600)/60); cf.durS = String(s%60)
+          }
+          cf.avgHR = r.avg_hr.map { "\($0)" } ?? ""
+          cf.maxHR = r.max_hr.map { "\($0)" } ?? ""
+          if let p = r.avg_pace_sec_per_km, p > 0 {
+            cf.paceH = ""; cf.paceM = String(p/60); cf.paceS = String(p%60)
+          }
+          cf.elevationGainM = r.elevation_gain_m.map { "\($0)" } ?? ""
+          draft.cardio = cf
+        } catch { return nil }
+
+      case "sport":
+        do {
+          let res = try await SupabaseManager.shared.client
+            .from("sport_sessions")
+            .select("*")
+            .eq("workout_id", value: workoutId)
+            .single()
+            .execute()
+
+          struct Row: Decodable {
+            let sport: String
+            let duration_sec: Int?
+            let match_result: String?
+            let notes: String?
+          }
+          let r = try decoder.decode(Row.self, from: res.data)
+
+          var sf = SportForm()
+          sf.sport = r.sport
+          sf.durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
+          sf.matchResult = r.match_result ?? ""
+          sf.sessionNotes = r.notes ?? ""
+          draft.sport = sf
+        } catch { return nil }
+
+      default: break
+      }
+
+      return draft
+    }
 }
 
 private struct StrengthDetailBlock: View {
