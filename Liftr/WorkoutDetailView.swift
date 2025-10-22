@@ -128,8 +128,8 @@ struct WorkoutDetailView: View {
                   await MainActor.run {
                     guard let d else { return }
                     app.addDraft = d
-                    app.addDraftKey = UUID()     // 🔁 fuerza recreación del AddWorkoutSheet
-                    app.selectedTab = .add       // 🔀 cambia de pestaña
+                    app.addDraftKey = UUID()
+                    app.selectedTab = .add
                   }
                 }
               }
@@ -235,7 +235,6 @@ struct WorkoutDetailView: View {
       switch base.kind.lowercased() {
       case "strength":
         do {
-          // ejercicios
           let exRes = try await SupabaseManager.shared.client
             .from("workout_exercises")
             .select("id, exercise_id, order_index, notes, exercises(name)")
@@ -253,7 +252,6 @@ struct WorkoutDetailView: View {
           }
           let exs = try decoder.decode([ExWire].self, from: exRes.data)
 
-          // sets
           let exIds = exs.map { $0.id }
           var setsByEx: [Int: [EditableSet]] = [:]
           if !exIds.isEmpty {

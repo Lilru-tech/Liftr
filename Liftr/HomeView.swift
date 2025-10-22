@@ -176,7 +176,6 @@ struct HomeView: View {
         return
       }
 
-      // Logs de userInfo
       if let ui = note.userInfo {
         let keys = Array(ui.keys).map { "\($0)" }.joined(separator: ", ")
         print("[Home.onReceive workoutUpdated] id=\(id) userInfo.keys=[\(keys)]")
@@ -185,7 +184,6 @@ struct HomeView: View {
         print("[Home.onReceive workoutUpdated] id=\(id) userInfo=nil")
       }
 
-      // Intento 1: parchear con userInfo
       if let ui = note.userInfo,
          let kind = ui["kind"] as? String {
 
@@ -210,7 +208,6 @@ struct HomeView: View {
             ended_at: endedAt ?? old.workout.ended_at
           )
 
-          // ⚠️ Mutación SIEMPRE en MainActor
           Task { await MainActor.run {
             feed[idx] = FeedItem(
               id: old.id,
@@ -231,7 +228,6 @@ struct HomeView: View {
         print("[Home.onReceive workoutUpdated] no hay ‘kind’ en userInfo → refreshOne()")
       }
 
-      // Intento 2: refrescar solo ese id
       Task {
         print("[Home.onReceive workoutUpdated] calling refreshOne(\(id))…")
         await refreshOne(id: id)
@@ -406,7 +402,6 @@ struct HomeView: View {
       print("[Home.refreshOne] id=\(id) start")
 
       do {
-        // 1) Leer el workout actualizado
         let wRes = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id, user_id, kind, title, started_at, ended_at")
@@ -416,12 +411,10 @@ struct HomeView: View {
         let w = try JSONDecoder.supabase().decode(WorkoutRow.self, from: wRes.data)
         print("[Home.refreshOne] got workout kind=\(w.kind) title=\(String(describing: w.title)) started_at=\(String(describing: w.started_at)) ended_at=\(String(describing: w.ended_at))")
 
-        // 2) Asegurar perfil del dueño
         try await ensureProfilesAvailable(for: [w.user_id])
         let prof = profiles[w.user_id]
         print("[Home.refreshOne] profile username=\(String(describing: prof?.username)) avatar=\(String(describing: prof?.avatar_url))")
 
-        // 3) Leer su puntuación total (si existe)
         let sRes = try await SupabaseManager.shared.client
           .from("workout_scores")
           .select("workout_id, score")
@@ -432,7 +425,6 @@ struct HomeView: View {
         let score: Double? = sRows.isEmpty ? nil : scTotal
         print("[Home.refreshOne] scores rows=\(sRows.count) total=\(String(describing: score))")
 
-        // 4) Construir item actualizado y sustituirlo en el feed
         let updated = FeedItem(
           id: w.id,
           workout: w,
@@ -446,7 +438,6 @@ struct HomeView: View {
           if let idx = feed.firstIndex(where: { $0.id == id }) {
             print("[Home.refreshOne] replacing item at idx=\(idx)")
             feed[idx] = updated
-            // Mantener orden por fecha
             feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
           } else {
             print("[Home.refreshOne] item id=\(id) no estaba en feed (no inserto)")
@@ -461,7 +452,6 @@ struct HomeView: View {
     }
 
     private func ensureProfilesAvailable(for userIds: [UUID]) async throws {
-      // 1) Calcula cuáles faltan
       let missing = userIds.filter { profiles[$0] == nil }
       if !missing.isEmpty {
         print("[Home.ensureProfiles] missing=\(missing.count) (will fetch)")
@@ -469,10 +459,7 @@ struct HomeView: View {
         print("[Home.ensureProfiles] all profiles cached (\(userIds.count))")
       }
 
-      // 2) Si no falta ninguno, sal temprano
       guard !missing.isEmpty else { return }
-
-      // 3) Pide a Supabase sólo los que faltan
       let pRes = try await SupabaseManager.shared.client
         .from("profiles")
         .select("user_id, username, avatar_url")
@@ -482,7 +469,6 @@ struct HomeView: View {
       let pRows = try JSONDecoder.supabase().decode([ProfileRow].self, from: pRes.data)
       print("[Home.ensureProfiles] fetched=\(pRows.count)")
 
-      // 4) Actualiza el diccionario en MainActor
       await MainActor.run {
         for p in pRows { profiles[p.user_id] = p }
       }

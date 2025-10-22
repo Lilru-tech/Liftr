@@ -111,10 +111,8 @@ struct EditWorkoutMetaSheet: View {
   var body: some View {
     NavigationStack {
         Form {
-          // — GENERAL —
           Section {
             SectionCard {
-              // Title
               FieldRowPlain("Title") {
                 TextField("Title", text: $title)
                   .textFieldStyle(.plain)
@@ -123,24 +121,21 @@ struct EditWorkoutMetaSheet: View {
 
               Divider().padding(.vertical, 6)
 
-              // Notes
               FieldRowPlain("Notes") {
                 TextField("Notes", text: $notes, axis: .vertical)
                   .textFieldStyle(.plain)
-                  .lineLimit(3, reservesSpace: true)   // evita que se “corte”
-                  .layoutPriority(1)                   // da prioridad de ancho al texto
+                  .lineLimit(3, reservesSpace: true)
+                  .layoutPriority(1)
               }
 
               Divider().padding(.vertical, 6)
 
-              // Started
               FieldRowPlain("Started") {
                 DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
               }
 
               Divider().padding(.vertical, 6)
 
-              // Finished + Ended
               FieldRowPlain("Finished") {
                 Toggle("", isOn: $endedAtEnabled)
               }
@@ -154,7 +149,6 @@ struct EditWorkoutMetaSheet: View {
 
               Divider().padding(.vertical, 6)
 
-              // Intensity
               FieldRowPlain("Intensity") {
                 Picker("", selection: $perceived) {
                   ForEach(WorkoutIntensity.allCases) { Text($0.label).tag($0) }
@@ -162,9 +156,8 @@ struct EditWorkoutMetaSheet: View {
               }
             }
           } header: { Text("GENERAL") }
-          .listRowBackground(Color.clear)   // mismo fondo que Strength
+          .listRowBackground(Color.clear)
 
-          // — resto de secciones —
           switch kind.lowercased() {
           case "cardio":  cardioSection
           case "sport":   sportSection
@@ -201,11 +194,9 @@ struct EditWorkoutMetaSheet: View {
               }
               guard let ex = picked else { return }
               if let idx = exerciseIndexToRename {
-                // Reemplazar ejercicio existente
                 s_items[idx].exerciseId = Int(ex.id)
                 s_items[idx].name = ex.name
               } else {
-                // Añadir ejercicio nuevo
                 Task { await insertExercise(ex) }
               }
             }
@@ -240,7 +231,6 @@ struct EditWorkoutMetaSheet: View {
         TextField("Max HR", text: $c_maxHR).keyboardType(.numberPad)
       }
         HStack(spacing: 12) {
-          // Avg pace autocalculado y solo lectura
           VStack(alignment: .leading, spacing: 4) {
             Text("Avg pace (/km)").font(.caption).foregroundStyle(.secondary)
             Text(autoPaceLabel())
@@ -273,8 +263,6 @@ struct EditWorkoutMetaSheet: View {
           } else {
               ForEach(s_items.indices, id: \.self) { i in
                 if i != s_items.startIndex { Divider().padding(.vertical, 6) }
-
-                  // Cabecera ejercicio (tap para cambiarlo)
                   FieldRowPlain(nil) {
                     Button {
                       Task { await loadCatalogIfNeeded() }
@@ -295,13 +283,11 @@ struct EditWorkoutMetaSheet: View {
 
                 Divider()
 
-                // Notas del ejercicio
                 FieldRowPlain("Notes") {
                   TextField("Notes (exercise)", text: $s_items[i].notes)
                     .textFieldStyle(.plain)
                 }
 
-                // Sets (compacto)
                 ForEach(s_items[i].sets.indices, id: \.self) { s in
                   Divider()
                     HStack(spacing: 6) {
@@ -336,11 +322,9 @@ struct EditWorkoutMetaSheet: View {
                     }
                 }
 
-                  // Acciones del ejercicio
                   Divider().padding(.vertical, 4)
                   HStack {
                       Button {
-                        // Siempre empezar nuevos sets en 1
                         s_items[i].sets.append(
                           SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)
                         )
@@ -384,7 +368,6 @@ struct EditWorkoutMetaSheet: View {
       .listRowBackground(Color.clear)
     }
 
-    // Reemplaza TODO el método por este
     private func loadSpecificIfNeeded() async {
       loading = true; defer { loading = false }
       do {
@@ -522,7 +505,7 @@ struct EditWorkoutMetaSheet: View {
       do {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let decoder = JSONDecoder.supabaseCustom()   // 👈 NUEVO
+        let decoder = JSONDecoder.supabaseCustom()
 
         struct CommonPayload: Encodable {
           let title: String?
@@ -649,7 +632,6 @@ struct EditWorkoutMetaSheet: View {
 
         NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
 
-        // Leer workout fresco
         let freshRes = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id, user_id, kind, title, started_at, ended_at")
@@ -665,16 +647,15 @@ struct EditWorkoutMetaSheet: View {
           let started_at: Date?
           let ended_at: Date?
         }
-        let fresh = try decoder.decode(Fresh.self, from: freshRes.data)   // 👈 CAMBIO
+        let fresh = try decoder.decode(Fresh.self, from: freshRes.data)
 
-        // Score total
         struct ScoreWire: Decodable { let workout_id: Int; let score: Decimal }
         let scoreRes = try await SupabaseManager.shared.client
           .from("workout_scores")
           .select("workout_id, score")
           .eq("workout_id", value: workoutId)
           .execute()
-        let sRows = try decoder.decode([ScoreWire].self, from: scoreRes.data)   // 👈 CAMBIO
+        let sRows = try decoder.decode([ScoreWire].self, from: scoreRes.data)
         let totalScore = sRows.reduce(0.0) { $0 + NSDecimalNumber(decimal: $1.score).doubleValue }
         let scorePayload: Any = sRows.isEmpty ? NSNull() : totalScore
 
@@ -698,8 +679,6 @@ struct EditWorkoutMetaSheet: View {
         self.error = error.localizedDescription
       }
     }
-    
-    // MARK: - Add/Remove exercise helpers (Strength)
 
     private func loadCatalogIfNeeded() async {
       guard catalog.isEmpty && !loadingCatalog else { return }
@@ -714,36 +693,33 @@ struct EditWorkoutMetaSheet: View {
           .execute()
         catalog = try JSONDecoder().decode([Exercise].self, from: res.data)
       } catch {
-        // silencioso
       }
     }
 
     private func insertExercise(_ ex: Exercise) async {
       do {
-        // Orden siguiente (fallback si no tienes order_index en estado)
         let nextOrder = (s_items.count) + 1
 
         let res = try await SupabaseManager.shared.client
           .from("workout_exercises")
           .insert([
             "workout_id": workoutId,
-            "exercise_id": Int(ex.id),   // 👈 casteo a Int para INT4
+            "exercise_id": Int(ex.id),
             "order_index": nextOrder,
             "notes": nil
           ])
-          .select("id")                 // 👈 devolver id insertado
+          .select("id")
           .single()
           .execute()
 
         struct InsertedId: Decodable { let id: Int }
         let inserted = try JSONDecoder().decode(InsertedId.self, from: res.data)
 
-        // 👇 actualiza UI de forma optimista
         await MainActor.run {
             s_items.append(
               SEditableExercise(
                 workoutExerciseId: inserted.id,
-                exerciseId: Int(ex.id),  // 👈 añadir este argumento
+                exerciseId: Int(ex.id),
                 name: ex.name,
                 notes: "",
                 sets: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]
@@ -757,14 +733,12 @@ struct EditWorkoutMetaSheet: View {
 
     private func deleteExercise(_ workoutExerciseId: Int) async {
       do {
-        // 1) Borrar sets del ejercicio (si no hay cascade)
         _ = try await SupabaseManager.shared.client
           .from("exercise_sets")
           .delete()
           .eq("workout_exercise_id", value: workoutExerciseId)
           .execute()
 
-        // 2) Borrar el workout_exercise
         _ = try await SupabaseManager.shared.client
           .from("workout_exercises")
           .delete()
@@ -774,8 +748,6 @@ struct EditWorkoutMetaSheet: View {
         await MainActor.run { self.error = error.localizedDescription }
       }
     }
-
-    // MARK: - Cardio helpers
 
     private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
       let H = Int(h.trimmingCharacters(in: .whitespaces)) ?? 0
