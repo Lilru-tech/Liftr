@@ -1,7 +1,6 @@
 import Foundation
 
 extension JSONDecoder {
-  /// Decodificador personalizado compatible con Supabase (ISO8601 + epoch).
   static func supabaseCustom() -> JSONDecoder {
     let decoder = JSONDecoder()
 
