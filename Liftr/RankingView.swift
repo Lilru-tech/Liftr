@@ -31,8 +31,6 @@ enum LBAgeBand: String, CaseIterable, Identifiable {
   var id: String { rawValue }
 }
 
-// MARK: - Local UI building blocks
-
 private struct SectionCard<Content: View>: View {
   @ViewBuilder var content: Content
   init(@ViewBuilder content: () -> Content) { self.content = content() }

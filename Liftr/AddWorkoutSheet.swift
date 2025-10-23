@@ -858,8 +858,7 @@ struct AddWorkoutSheet: View {
 
       case .sport:
           let minutes = parseInt(sport.durationMin) ?? durationMinutes
-          let durationMin = minutes                     // la función espera minutos
-
+          let durationMin = minutes
           let payload = RPCSportParams(
             p_user_id: userId,
             p_sport: sport.sport.rawValue,
@@ -867,8 +866,8 @@ struct AddWorkoutSheet: View {
             p_started_at: iso.string(from: startedAt),
             p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
             p_notes: note.isEmpty ? nil : note,
-            p_duration_min: durationMin,                // <- minutos
-            p_duration_sec: nil,                        // o ponlo si usas el fallback
+            p_duration_min: durationMin,
+            p_duration_sec: nil,
             p_score_for: parseInt(sport.scoreFor),
             p_score_against: parseInt(sport.scoreAgainst),
             p_match_result: sport.matchResult.rawValue,
@@ -973,8 +972,7 @@ struct AddWorkoutSheet: View {
       cardio.paceM = String(m)
       cardio.paceS = String(s)
     }
-    
-    // helpers to decide which sport fields to show
+
     private func sportUsesNumericScore(_ s: SportType) -> Bool {
       switch s {
         case .football, .basketball, .handball, .hockey, .rugby: return true
@@ -1122,7 +1120,7 @@ struct RPCSportParams: Encodable {
   let p_started_at: String
   let p_ended_at: String?
   let p_notes: String?
-  let p_duration_min: Int?              // <- envía minutos (o añade p_duration_sec si mantienes el fallback)
+  let p_duration_min: Int?
   let p_duration_sec: Int?
   let p_score_for: Int?
   let p_score_against: Int?
