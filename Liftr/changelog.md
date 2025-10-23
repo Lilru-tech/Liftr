@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.3] - 2025-10-22  
+### Added  
+- Sport workouts (extended metadata):  
+  - Added full support for sport-specific fields such as `score_for`, `score_against`, `match_score_text`, `location`, and `duration_sec`.  
+  - Enables complete recording of sports like padel, football, or tennis with full match details and custom notes.  
+  - Integrated seamlessly with AddWorkoutSheet and EditWorkoutMetaSheet for editing and displaying these values.  
+
+### Changed  
+- Database function:  
+  - The RPC `create_sport_workout_v1` was rewritten to accept all new sport-related fields and ensure consistent data insertion into `public.sport_sessions`.  
+  - Improved backward compatibility: still works with previous payloads that only provided `p_duration_min`.  
+  - Simplified duration handling — automatically converts minutes to seconds when needed.  
+
+### Fixed  
+- WorkoutDetailView / EditWorkoutMetaSheet:  
+  - Fixed missing sport data (duration, result, match score, or location) after saving.  
+  - Root cause: some fields were not persisted by the old RPC — now properly stored and displayed.  
+
+### Database  
+- Updated: `create_sport_workout_v1(p jsonb)` now includes all sport session columns and improved parameter handling.  
+- No schema or trigger changes — only logic updates within the existing function.  
+
+[0.6.3]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.3  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.3...HEAD  
+
+## [0.6.2] - 2025-10-22
+### Added
+- **RankingView (v1)**:
+  - New **leaderboard screen** showing global and friends rankings by **total score**.
+  - Filtering by **scope** (Global / Friends), **period** (Today / Week / Month / All-time), **type** (All / Strength / Cardio / Sport), **sex**, and **age band**.
+  - Each row displays **rank**, **avatar**, **username**, **total score**, and **workouts count**.
+  - Introduced a new visual design with **SectionCard** components for cleaner card-style layout.
+  - Integrated gradient background consistent with app design.
+
+### Changed
+- **Leaderboard SQL (get_leaderboard_v1)**:
+  - Added `workout_id` to the `src` CTE to fix incorrect workout counting.
+  - Replaced  
+    `count(distinct case when score is not null then started_at::date end)`  
+    with  
+    `count(distinct workout_id)`  
+    to correctly count all workouts rather than workout days.
+  - Clarified filters for **period**, **scope**, **sex**, and **age** for more accurate aggregation.
+  - Maintains total score aggregation across all algorithms by default.
+
+### Fixed
+- **Workouts count mismatch**: previously only counted distinct training days (e.g., 8) instead of real workouts (e.g., 34).  
+  Now the count matches `count(distinct workouts.id)` from the database.
+- **Friends/Global visibility issues**: added missing RLS policies to ensure visible workouts, profiles, and scores from followed users.
+- **UI layout**: fixed long type-checking compile time by breaking `RankingView` into subviews and adding a local `SectionCard` definition.
+- **AnyJSON encoding errors**: replaced generic initializers with lightweight helpers (`ajString`, `ajInt`) to ensure stable RPC param serialization.
+
+### Database
+- **Function:** `get_leaderboard_v1(...)` updated for correct workout counting and improved filters.
+- **RLS:** added visibility policies for:
+  - `workouts_select_visible`
+  - `workout_scores_select_visible`
+  - `profiles_select_visible_min`
+- **No schema or trigger changes.**
+
+[0.6.2]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.2  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.2...HEAD
+
 ## [0.6.1] - 2025-10-22
 ### Added
 - **Workout duplication**: from `WorkoutDetailView` → “…” menu → **Duplicate** now opens the **Add** tab with a pre-filled form depending on the workout type:

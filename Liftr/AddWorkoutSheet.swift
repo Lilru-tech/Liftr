@@ -27,14 +27,48 @@ enum SortMode: String, CaseIterable, Identifiable {
   case alphabetic = "Alphabetic"
   case mostUsed   = "Most used"
   case favorites  = "Favorites"
-  case recent     = "Recently used"     // 👈 NUEVO
+  case recent     = "Recently used"
   var id: String { rawValue }
   var label: String {
     switch self {
       case .alphabetic: "A–Z"
       case .mostUsed:   "Más usados"
       case .favorites:  "Favoritos"
-      case .recent:     "Últimos usados" // 👈 NUEVO
+      case .recent:     "Últimos usados"
+    }
+  }
+}
+
+enum SportType: String, CaseIterable, Identifiable {
+  case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby
+  var id: String { rawValue }
+  var label: String {
+    switch self {
+      case .padel: "Padel"
+      case .tennis: "Tennis"
+      case .football: "Football"
+      case .basketball: "Basketball"
+      case .badminton: "Badminton"
+      case .squash: "Squash"
+      case .table_tennis: "Table Tennis"
+      case .volleyball: "Volleyball"
+      case .handball: "Handball"
+      case .hockey: "Hockey"
+      case .rugby: "Rugby"
+    }
+  }
+}
+
+enum MatchResult: String, CaseIterable, Identifiable {
+  case win, loss, draw, unfinished, forfeit
+  var id: String { rawValue }
+  var label: String {
+    switch self {
+      case .win: "Win"
+      case .loss: "Loss"
+      case .draw: "Draw"
+      case .unfinished: "Unfinished"
+      case .forfeit: "Forfeit"
     }
   }
 }
@@ -70,7 +104,6 @@ struct ExercisePickerSheet: View {
 
               Spacer()
 
-              // Botón de estrella (marca / desmarca favorito)
               Button {
                 Task { await toggleFavorite(ex.id) }
               } label: {
@@ -78,15 +111,15 @@ struct ExercisePickerSheet: View {
                   .font(.subheadline)
                   .foregroundStyle(favorites.contains(ex.id) ? .yellow : .secondary)
                   .opacity(0.9)
-                  .frame(width: 32, height: 32)          // buen target táctil
-                  .contentShape(Rectangle())             // asegura hit-area
+                  .frame(width: 32, height: 32)
+                  .contentShape(Rectangle())
                   .accessibilityLabel(favorites.contains(ex.id) ? "Unfavorite" : "Favorite")
                   .accessibilityAddTraits(.isButton)
               }
-              .buttonStyle(.plain)  // evita estilos de lista por defecto
+              .buttonStyle(.plain)
             }
-            .contentShape(Rectangle())                   // el resto de la fila es “tappable”
-            .onTapGesture {                              // seleccionar el ejercicio
+            .contentShape(Rectangle())
+            .onTapGesture {
               selected = ex
               dismiss()
             }
@@ -122,8 +155,6 @@ struct ExercisePickerSheet: View {
     }
   }
 
-  // MARK: - Load logic
-
     private func loadExercises() async {
       loading = true
       defer { loading = false }
@@ -157,19 +188,18 @@ struct ExercisePickerSheet: View {
           if favorites.isEmpty {
             exercises = []
           } else {
-            let ids = favorites.map(Int.init)   // 👈 conversión
+            let ids = favorites.map(Int.init)
             let res = try await SupabaseManager.shared.client
               .from("exercises")
               .select("*")
               .eq("is_public", value: true)
               .eq("modality", value: "strength")
-              .in("id", values: ids)            // 👈 usa [Int]
+              .in("id", values: ids)
               .order("name", ascending: true)
               .execute()
             exercises = try JSONDecoder().decode([Exercise].self, from: res.data)
           }
         case .recent:
-          // Reutilizamos el RPC: trae id, name, times_used, last_used_at
           let params: [String: AnyJSON] = [
             "p_modality": try .init("strength"),
             "p_search":   try .init(AnyJSON.null),
@@ -181,15 +211,12 @@ struct ExercisePickerSheet: View {
 
           let used = try JSONDecoder.supabaseCustom().decode([ExerciseUsage].self, from: res.data)
 
-          // Solo los que se usaron al menos una vez y ordenar por “last_used_at” desc
           let sorted = used
             .filter { $0.last_used_at != nil && $0.times_used > 0 }
             .sorted { (a, b) in
-              // nils al final por seguridad (aunque filtramos)
               (a.last_used_at ?? .distantPast) > (b.last_used_at ?? .distantPast)
             }
 
-          // Mapear a tu modelo de lista
           exercises = sorted.map {
             Exercise(
               id: $0.id,
@@ -232,9 +259,7 @@ struct ExercisePickerSheet: View {
     private func toggleFavorite(_ exerciseId: Int64) async {
       let client = SupabaseManager.shared.client
 
-      // UI optimista
       if favorites.contains(exerciseId) {
-        // --- UNFAVORITE (optimista) ---
         await MainActor.run {
           _ = favorites.remove(exerciseId)
           if sortMode == .favorites {
@@ -247,32 +272,27 @@ struct ExercisePickerSheet: View {
           _ = try await client
             .from("user_favorite_exercises")
             .delete()
-            .eq("user_id", value: session.user.id)        // ayuda a RLS
-            .eq("exercise_id", value: Int(exerciseId))    // Int, no Int64
+            .eq("user_id", value: session.user.id)
+            .eq("exercise_id", value: Int(exerciseId))
             .execute()
         } catch {
-          // Revertir si falló
           await MainActor.run { _ = favorites.insert(exerciseId) }
           print("Error unfavorite:", error)
         }
       } else {
-        // --- FAVORITE (optimista) ---
-        await MainActor.run { _ = favorites.insert(exerciseId) }  // 👈 AQUÍ estaba tu error
+        await MainActor.run { _ = favorites.insert(exerciseId) }
 
         do {
           let session = try await client.auth.session
           struct FavInsert: Encodable { let user_id: UUID; let exercise_id: Int }
           let row = FavInsert(user_id: session.user.id, exercise_id: Int(exerciseId))
 
-          // UPSERT para evitar 23505 si llega duplicado
           _ = try await client
             .from("user_favorite_exercises")
             .upsert([row], onConflict: "user_id,exercise_id", returning: .minimal)
             .execute()
         } catch let err as PostgrestError {
-          // Si llega 23505 igualmente, lo tratamos como éxito (ya era favorito)
           if err.code != "23505" {
-            // Revertir si otro error
             await MainActor.run { _ = favorites.remove(exerciseId) }
             print("Error favorite:", err)
           }
@@ -629,8 +649,6 @@ struct AddWorkoutSheet: View {
                 .onChange(of: cardio.distanceKm) { _, _ in
                   updateAutoPaceIfNeeded()
                 }
-
-              // Duración H : M : S
               VStack(alignment: .leading, spacing: 6) {
                 Text("Duration").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 6) {
@@ -697,10 +715,14 @@ struct AddWorkoutSheet: View {
     private var sportSection: some View {
       Section {
         SectionCard {
-          FieldRowPlain {
-            TextField("Sport (e.g. Football, Tennis…)", text: $sport.sport)
-              .textFieldStyle(.plain)
-          }
+            FieldRowPlain {
+              Picker("", selection: $sport.sport) {
+                ForEach(SportType.allCases) { s in
+                  Text(s.label).tag(s)
+                }
+              }
+              .pickerStyle(.menu)
+            }
 
           Divider()
 
@@ -710,12 +732,39 @@ struct AddWorkoutSheet: View {
               .textFieldStyle(.plain)
           }
 
-          Divider()
+            if sportUsesNumericScore(sport.sport) {
+              Divider()
+              FieldRowPlain {
+                HStack {
+                  TextField("Score for", text: $sport.scoreFor).keyboardType(.numberPad)
+                  TextField("Score against", text: $sport.scoreAgainst).keyboardType(.numberPad)
+                }
+              }
+            }
 
-          FieldRowPlain {
-            TextField("Match result (optional)", text: $sport.matchResult)
-              .textFieldStyle(.plain)
-          }
+            if sportUsesSetText(sport.sport) {
+              Divider()
+              FieldRowPlain {
+                TextField("Match score text (e.g. 6/3 6/4 6/4)", text: $sport.matchScoreText)
+                  .textFieldStyle(.plain)
+              }
+            }
+
+            Divider()
+            FieldRowPlain {
+              TextField("Location (optional)", text: $sport.location)
+                .textFieldStyle(.plain)
+            }
+            Divider()
+
+            FieldRowPlain {
+              Picker("", selection: $sport.matchResult) {
+                ForEach(MatchResult.allCases) { r in
+                  Text(r.label).tag(r)
+                }
+              }
+              .pickerStyle(.menu)
+            }
 
           Divider()
 
@@ -745,7 +794,7 @@ struct AddWorkoutSheet: View {
     case .cardio:
       return !cardio.modality.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     case .sport:
-      return !sport.sport.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      return true
     }
   }
 
@@ -799,7 +848,6 @@ struct AddWorkoutSheet: View {
           p_avg_hr: parseInt(cardio.avgHR),
           p_max_hr: parseInt(cardio.maxHR),
 
-          // pace auto-calculado (fallback a legacy si no hay datos suficientes)
           p_avg_pace_sec_per_km: paceAuto ?? parseInt(cardio.avgPaceSecPerKm),
 
           p_elevation_gain_m: parseInt(cardio.elevationGainM),
@@ -809,24 +857,29 @@ struct AddWorkoutSheet: View {
         _ = try await client.rpc("create_cardio_workout", params: params).execute()
 
       case .sport:
-        let minutes = parseInt(sport.durationMin) ?? durationMinutes
+          let minutes = parseInt(sport.durationMin) ?? durationMinutes
+          let durationMin = minutes
+          let payload = RPCSportParams(
+            p_user_id: userId,
+            p_sport: sport.sport.rawValue,
+            p_title: title.isEmpty ? nil : title,
+            p_started_at: iso.string(from: startedAt),
+            p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
+            p_notes: note.isEmpty ? nil : note,
+            p_duration_min: durationMin,
+            p_duration_sec: nil,
+            p_score_for: parseInt(sport.scoreFor),
+            p_score_against: parseInt(sport.scoreAgainst),
+            p_match_result: sport.matchResult.rawValue,
+            p_match_score_text: sport.matchScoreText.trimmedOrNil,
+            p_location: sport.location.trimmedOrNil,
+            p_session_notes: sport.sessionNotes.trimmedOrNil,
+            p_perceived_intensity: perceived.rawValue
+          )
 
-        let payload = RPCSportParams(
-          p_user_id: userId,
-          p_sport: sport.sport,
-          p_title: title.isEmpty ? nil : title,
-          p_started_at: iso.string(from: startedAt),
-          p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
-          p_notes: note.isEmpty ? nil : note,
-          p_duration_min: minutes,
-          p_match_result: sport.matchResult.isEmpty ? nil : sport.matchResult,
-          p_session_notes: sport.sessionNotes.isEmpty ? nil : sport.sessionNotes,
-          p_perceived_intensity: perceived.rawValue
-        )
-
-        _ = try await client
-          .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
-          .execute()
+          _ = try await client
+            .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
+            .execute()
       }
         await showSuccessAndGoHome("Workout saved! 💪")
     } catch {
@@ -851,9 +904,7 @@ struct AddWorkoutSheet: View {
     @MainActor
     private func showSuccessAndGoHome(_ message: String) async {
       banner = Banner(message: message, type: .success)
-      // muestra el banner un momento
       try? await Task.sleep(nanoseconds: 1_600_000_000)
-      // resetea el formulario y navega a Home
       resetForm()
       app.selectedTab = .home
     }
@@ -901,7 +952,6 @@ struct AddWorkoutSheet: View {
     private func autoPaceSec(distanceKmText: String, durH: String, durM: String, durS: String) -> Int? {
       guard let dist = parseDouble(distanceKmText), dist > 0,
             let dur = hmsToSeconds(durH, durM, durS) else { return nil }
-      // segundos por km
       return Int((Double(dur) / dist).rounded())
     }
 
@@ -912,17 +962,28 @@ struct AddWorkoutSheet: View {
       return (h, m, s)
     }
 
-    // Intenta autocompletar pace si el usuario no lo ha tocado
     private func updateAutoPaceIfNeeded() {
       guard let p = autoPaceSec(distanceKmText: cardio.distanceKm,
                                 durH: cardio.durH, durM: cardio.durM, durS: cardio.durS)
       else { return }
 
       let (h,m,s) = secondsToHMS(p)
-      // Normalmente pace es m:s; dejamos h en blanco si es 0
       cardio.paceH = h == 0 ? "" : String(h)
       cardio.paceM = String(m)
       cardio.paceS = String(s)
+    }
+
+    private func sportUsesNumericScore(_ s: SportType) -> Bool {
+      switch s {
+        case .football, .basketball, .handball, .hockey, .rugby: return true
+        default: return false
+      }
+    }
+    private func sportUsesSetText(_ s: SportType) -> Bool {
+      switch s {
+        case .padel, .tennis, .badminton, .squash, .table_tennis, .volleyball: return true
+        default: return false
+      }
     }
 }
 
@@ -985,31 +1046,27 @@ struct EditableSet: Identifiable {
 struct CardioForm {
   var modality: String = "Run"
   var distanceKm: String = ""
-
-  // NUEVO: duración en h:m:s
   var durH: String = ""
   var durM: String = ""
   var durS: String = ""
-
   var avgHR: String = ""
   var maxHR: String = ""
-
-  // NUEVO: pace en h:m:s por km (normalmente m:s; h opcional)
-  var paceH: String = ""   // suele ir vacío
+  var paceH: String = ""
   var paceM: String = ""
   var paceS: String = ""
-
   var elevationGainM: String = ""
-
-  // Compat (si hubiese datos “legacy” en texto de segundos)
   var durationSec: String = ""
   var avgPaceSecPerKm: String = ""
 }
 
 struct SportForm {
-  var sport: String = "Football"
+  var sport: SportType = .football
   var durationMin: String = ""
-  var matchResult: String = ""
+  var scoreFor: String = ""
+  var scoreAgainst: String = ""
+  var matchResult: MatchResult = .unfinished
+  var matchScoreText: String = ""
+  var location: String = ""
   var sessionNotes: String = ""
 }
 
@@ -1064,7 +1121,12 @@ struct RPCSportParams: Encodable {
   let p_ended_at: String?
   let p_notes: String?
   let p_duration_min: Int?
+  let p_duration_sec: Int?
+  let p_score_for: Int?
+  let p_score_against: Int?
   let p_match_result: String?
+  let p_match_score_text: String?
+  let p_location: String?
   let p_session_notes: String?
   let p_perceived_intensity: String?
 }
@@ -1083,7 +1145,6 @@ private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
 }
 
 private func msToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
-  // pace: normalmente 0:mm:ss, pero soporta horas opcional
   let H = Int(h.trimmingCharacters(in: .whitespaces)) ?? 0
   let M = Int(m.trimmingCharacters(in: .whitespaces)) ?? 0
   let S = Int(s.trimmingCharacters(in: .whitespaces)) ?? 0
