@@ -808,8 +808,7 @@ struct EditWorkoutMetaSheet: View {
       let ss = p % 60
       return String(format: "%d:%02d /km", mm, ss)
     }
-    
-    // helpers to decide which sport fields to show
+
     private func sportUsesNumericScore(_ s: SportType) -> Bool {
       switch s {
         case .football, .basketball, .handball, .hockey, .rugby: return true
