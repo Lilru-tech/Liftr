@@ -113,6 +113,10 @@ struct ProfileView: View {
   @State private var progressPoints: [ProgressPoint] = []
   @State private var progressLoading = false
   @State private var progressError: String?
+  private enum ProgressSubtab: CaseIterable { case activity, intensity, consistency }
+  @State private var progressSubtab: ProgressSubtab = .activity
+  @State private var kindDistribution: [KindSlice] = []
+  @State private var totalDurationMin: Int = 0
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
   @State private var tab: Tab = .calendar
@@ -156,6 +160,7 @@ struct ProfileView: View {
           }
           .onChange(of: progressRange) { _, _ in Task { await loadProgress() } }
           .onChange(of: progressMetric) { _, _ in Task { await loadProgress() } }
+          .onChange(of: progressSubtab) { _, _ in Task { await loadProgress() } }
           .sheet(isPresented: $showEditProfile) {
             if isOwnProfile {
               EditBioSheet(
@@ -177,67 +182,141 @@ struct ProfileView: View {
 
     private var progressView: some View {
       VStack(spacing: 12) {
-        HStack(spacing: 12) {
-          Picker("Range", selection: $progressRange) {
-            Text("Week").tag(ProgressRange.week)
-            Text("Month").tag(ProgressRange.month)
-            Text("Year").tag(ProgressRange.year)
-          }
-          .pickerStyle(.segmented)
+          HStack(spacing: 12) {
+            Picker("Range", selection: $progressRange) {
+              Text("Week").tag(ProgressRange.week)
+              Text("Month").tag(ProgressRange.month)
+              Text("Year").tag(ProgressRange.year)
+            }
+            .pickerStyle(.segmented)
 
-          Picker("Metric", selection: $progressMetric) {
-            Text("Workouts").tag(ProgressMetric.workouts)
-            Text("Score").tag(ProgressMetric.score)
+            Picker("View", selection: $progressSubtab) {
+              Text("Activity").tag(ProgressSubtab.activity)
+              Text("Intensity").tag(ProgressSubtab.intensity)
+              Text("Consistency").tag(ProgressSubtab.consistency)
+            }
+            .pickerStyle(.segmented)
           }
-          .pickerStyle(.segmented)
-        }
-        .padding(.horizontal)
-
-        if progressLoading {
-          ProgressView().padding()
-        } else if let err = progressError {
-          Text(err).foregroundStyle(.red).padding(.horizontal)
-        } else if progressPoints.isEmpty {
-          Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
-        } else {
-          let maxY = progressPoints.map { $0.value }.max() ?? 0
-          let yUpper = max(1, maxY * 1.15)
-          let yLower = -yUpper * 0.05
-
-          Chart(progressPoints) { p in
-            LineMark(
-              x: .value("Period", p.label),
-              y: .value("Value", p.value)
-            )
-            .interpolationMethod(.catmullRom)
-
-            PointMark(
-              x: .value("Period", p.label),
-              y: .value("Value", p.value)
-            )
-          }
-          .chartPlotStyle { plotArea in
-            plotArea
-              .background(Color.gray.opacity(0.18))
-              .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-          }
-          .chartYAxisLabel(progressMetric == .workouts ? "Workouts" : "Score")
-          .chartYScale(domain: yLower...yUpper)
-          .frame(height: 240)
           .padding(.horizontal)
-        }
+
+          // 👇 Solo muestra el selector de métrica cuando la subpestaña es "Activity"
+          if progressSubtab == .activity {
+            HStack {
+              Picker("Metric", selection: $progressMetric) {
+                Text("Workouts").tag(ProgressMetric.workouts)
+                Text("Score").tag(ProgressMetric.score)
+              }
+              .pickerStyle(.segmented)
+            }
+            .padding(.horizontal)
+          }
+
+          if progressLoading {
+            ProgressView().padding()
+          } else if let err = progressError {
+            Text(err).foregroundStyle(.red).padding(.horizontal)
+          } else if progressSubtab == .consistency {
+            // CONSISTENCY: donut/barras + total de minutos
+            if kindDistribution.isEmpty && totalDurationMin == 0 {
+              Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
+            } else {
+              VStack(spacing: 12) {
+                // Donut si hay iOS 17, si no, barras
+                if #available(iOS 17.0, *) {
+                  Chart(kindDistribution) { s in
+                    SectorMark(
+                      angle: .value("Count", s.count),
+                      innerRadius: .ratio(0.55),
+                      angularInset: 1.5
+                    )
+                    .foregroundStyle(by: .value("Kind", s.kind.capitalized))
+                  }
+                  .frame(height: 220)
+                  .padding(.horizontal)
+                  .chartLegend(.visible)
+                  .chartPlotStyle { plotArea in
+                    plotArea
+                      .background(Color.gray.opacity(0.18))
+                      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                  }
+                } else {
+                  Chart(kindDistribution) { s in
+                    BarMark(
+                      x: .value("Kind", s.kind.capitalized),
+                      y: .value("Workouts", s.count)
+                    )
+                  }
+                  .frame(height: 220)
+                  .padding(.horizontal)
+                  .chartPlotStyle { plotArea in
+                    plotArea
+                      .background(Color.gray.opacity(0.18))
+                      .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                  }
+                }
+
+                Text("Total duration: \(formatMinutes(totalDurationMin))")
+                  .font(.footnote.weight(.semibold))
+                  .foregroundStyle(.secondary)
+                  .padding(.top, 4)
+              }
+            }
+
+          } else if progressPoints.isEmpty {
+            Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
+
+          } else {
+            // ACTIVITY o INTENSITY: línea + puntos
+            let maxY = progressPoints.map { $0.value }.max() ?? 0
+            let yUpper = max(1, maxY * 1.15)
+            let yLower = -yUpper * 0.05
+
+            Chart(progressPoints) { p in
+              LineMark(
+                x: .value("Period", p.label),
+                y: .value("Value", p.value)
+              )
+              .interpolationMethod(.catmullRom)
+
+              PointMark(
+                x: .value("Period", p.label),
+                y: .value("Value", p.value)
+              )
+            }
+            .chartPlotStyle { plotArea in
+              plotArea
+                .background(Color.gray.opacity(0.18))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+            .chartYAxisLabel(
+              progressSubtab == .activity
+              ? (progressMetric == .workouts ? "Workouts" : "Score")
+              : "Avg score"
+            )
+            .chartYScale(domain: yLower...yUpper)
+            .frame(height: 240)
+            .padding(.horizontal)
+          }
       }
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     
     private enum ProgressRange: CaseIterable { case week, month, year }
+    
     private enum ProgressMetric: CaseIterable { case workouts, score }
+    
     private struct ProgressPoint: Identifiable {
       let id = UUID()
       let date: Date
       let label: String
       let value: Double
+    }
+
+    private struct KindSlice: Identifiable {
+      let id = UUID()
+      let kind: String
+      let count: Int
     }
     
   private var headerCard: some View {
@@ -697,7 +776,7 @@ struct ProfileView: View {
       await MainActor.run { progressLoading = true; progressError = nil }
       defer { Task { await MainActor.run { progressLoading = false } } }
 
-      // Determinar rango temporal
+      // Rango temporal
       var cal = Calendar.current
       cal.timeZone = .current
       let now = Date()
@@ -721,8 +800,9 @@ struct ProfileView: View {
         bucketCount = 12
       }
 
-      // Construir buckets
-      var buckets: [Date: Double] = [:]
+      // Buckets
+      var bucketsCount: [Date: Int] = [:]      // workouts por bucket
+      var bucketsScore: [Date: Double] = [:]   // score total por bucket
       var labels: [Date: String] = [:]
       var cursor = start
       for _ in 0..<bucketCount {
@@ -739,12 +819,13 @@ struct ProfileView: View {
           key = cal.startOfDay(for: cursor)
           label = DateFormatter.shortDay(cursor)
         }
-        buckets[key] = 0
+        bucketsCount[key] = 0
+        bucketsScore[key] = 0
         labels[key] = label
         cursor = cal.date(byAdding: step, value: 1, to: cursor) ?? cursor
       }
 
-      // Ventana temporal exacta
+      // Ventana exacta
       let end: Date
       switch step {
       case .day:
@@ -760,37 +841,76 @@ struct ProfileView: View {
       iso.timeZone = .current
 
       do {
-        // 1) Workouts en el rango
+        // 1) Workouts en el rango (incluye kind + duration_min)
         let res = try await SupabaseManager.shared.client
           .from("workouts")
-          .select("id,started_at")
+          .select("id,started_at,kind,duration_min")
           .eq("user_id", value: uid.uuidString)
           .gte("started_at", value: iso.string(from: start))
           .lt("started_at", value: iso.string(from: end))
           .execute()
 
-        struct W: Decodable { let id: Int; let started_at: Date? }
+        struct W: Decodable { let id: Int; let started_at: Date?; let kind: String; let duration_min: Int? }
         let workouts = try JSONDecoder.supabase().decode([W].self, from: res.data)
+        let ids = workouts.map { $0.id }
 
+        // 2) Scores por workout (sumar si hay varios algoritmos)
         var scoresByWorkout: [Int: Double] = [:]
-        if progressMetric == .score {
-          let ids = workouts.map { $0.id }
-          if !ids.isEmpty {
-            let sres = try await SupabaseManager.shared.client
-              .from("workout_scores")
-              .select("workout_id,score")
-              .in("workout_id", values: ids)
-              .execute()
+        if !ids.isEmpty {
+          let sres = try await SupabaseManager.shared.client
+            .from("workout_scores")
+            .select("workout_id,score")
+            .in("workout_id", values: ids)
+            .execute()
 
-            struct S: Decodable { let workout_id: Int; let score: Decimal }
-            let srows = try JSONDecoder.supabase().decode([S].self, from: sres.data)
-            for r in srows {
-              scoresByWorkout[r.workout_id, default: 0] += NSDecimalNumber(decimal: r.score).doubleValue
+          struct S: Decodable { let workout_id: Int; let score: Decimal }
+          let srows = try JSONDecoder.supabase().decode([S].self, from: sres.data)
+          for r in srows {
+            scoresByWorkout[r.workout_id, default: 0] += NSDecimalNumber(decimal: r.score).doubleValue
+          }
+        }
+
+        // 3) Duraciones por workout (coalesce: workouts.duration_min, cardio.duration_sec/60, sport.duration_sec/60)
+        var durationMinByWorkout: [Int: Int] = [:]
+        // a) de workouts.duration_min
+        for w in workouts {
+          if let dm = w.duration_min {
+            durationMinByWorkout[w.id] = max(dm, 0)
+          }
+        }
+        // b) cardio
+        if !ids.isEmpty {
+          let cres = try await SupabaseManager.shared.client
+            .from("cardio_sessions")
+            .select("workout_id,duration_sec")
+            .in("workout_id", values: ids)
+            .execute()
+          struct CRow: Decodable { let workout_id: Int; let duration_sec: Int? }
+          let crows = try JSONDecoder.supabase().decode([CRow].self, from: cres.data)
+          for r in crows {
+            if let s = r.duration_sec, durationMinByWorkout[r.workout_id] == nil {
+              durationMinByWorkout[r.workout_id] = max(Int(round(Double(s)/60.0)), 0)
+            }
+          }
+          // c) sport
+          let sres2 = try await SupabaseManager.shared.client
+            .from("sport_sessions")
+            .select("workout_id,duration_sec")
+            .in("workout_id", values: ids)
+            .execute()
+          struct SRow2: Decodable { let workout_id: Int; let duration_sec: Int? }
+          let srows2 = try JSONDecoder.supabase().decode([SRow2].self, from: sres2.data)
+          for r in srows2 {
+            if let s = r.duration_sec, durationMinByWorkout[r.workout_id] == nil {
+              durationMinByWorkout[r.workout_id] = max(Int(round(Double(s)/60.0)), 0)
             }
           }
         }
 
-        // 2) Agregación a buckets
+        // 4) Distribución por tipo y agregación a buckets
+        var kindCount: [String: Int] = [:]
+        var totalMinutes = 0
+
         for w in workouts {
           guard let d = w.started_at else { continue }
           let key: Date
@@ -802,22 +922,51 @@ struct ProfileView: View {
           default:
             key = cal.startOfDay(for: d)
           }
-          if buckets[key] != nil {
-            if progressMetric == .workouts {
-              buckets[key]! += 1
-            } else {
-              buckets[key]! += scoresByWorkout[w.id] ?? 0
-            }
+          guard bucketsCount[key] != nil else { continue }
+
+          // Activity
+          bucketsCount[key]! += 1
+          bucketsScore[key]! += scoresByWorkout[w.id] ?? 0
+
+          // Consistency: distribución y duración
+          kindCount[w.kind, default: 0] += 1
+          totalMinutes += (durationMinByWorkout[w.id] ?? 0)
+        }
+
+        // 5) Salidas para cada subpestaña:
+        // Activity (workouts o score)
+        if progressSubtab == .activity {
+          let ordered = bucketsCount.keys.sorted()
+          let points: [ProgressPoint] = ordered.map { k in
+            let val = (progressMetric == .workouts) ? Double(bucketsCount[k] ?? 0) : (bucketsScore[k] ?? 0)
+            return ProgressPoint(date: k, label: labels[k] ?? "", value: val)
+          }
+          await MainActor.run { self.progressPoints = points }
+        }
+
+        // Intensity (promedio de score por workout en cada bucket)
+        if progressSubtab == .intensity {
+          let ordered = bucketsCount.keys.sorted()
+          let points: [ProgressPoint] = ordered.map { k in
+            let count = max(1, bucketsCount[k] ?? 0)
+            let avg = (bucketsScore[k] ?? 0) / Double(count)
+            return ProgressPoint(date: k, label: labels[k] ?? "", value: avg)
+          }
+          await MainActor.run { self.progressPoints = points }
+        }
+
+        // Consistency (distribución + duración total)
+        if progressSubtab == .consistency {
+          let slices = ["strength","cardio","sport"]
+            .map { KindSlice(kind: $0, count: kindCount[$0] ?? 0) }
+            .filter { $0.count > 0 }
+          await MainActor.run {
+            self.kindDistribution = slices
+            self.totalDurationMin = totalMinutes
+            self.progressPoints = [] // no usamos línea aquí
           }
         }
 
-        // 3) Orden y salida
-        let ordered = buckets.keys.sorted()
-        let points: [ProgressPoint] = ordered.map { k in
-          ProgressPoint(date: k, label: labels[k] ?? "", value: buckets[k] ?? 0)
-        }
-
-        await MainActor.run { self.progressPoints = points }
       } catch {
         await MainActor.run { self.progressError = error.localizedDescription }
       }
@@ -1232,4 +1381,12 @@ private func resizedJPEG(from image: UIImage, maxSide: CGFloat = 1024, quality: 
 
 private func kbString(_ data: Data) -> String {
   String(format: "%.1f KB", Double(data.count)/1024.0)
+}
+
+private func formatMinutes(_ minutes: Int) -> String {
+  let m = max(0, minutes)
+  let h = m / 60
+  let r = m % 60
+  if h > 0 { return "\(h)h \(r)m" }
+  return "\(r)m"
 }

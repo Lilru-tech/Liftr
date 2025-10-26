@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.5] - 2025-10-26
+### Added
+- **Profile → Progress: Advanced stats & subtabs**
+  - New **subtabs**: **Activity**, **Intensity**, **Consistency**.
+  - **Activity**: shows either **Workouts** or **Score** per bucket (Week/Month/Year).
+  - **Intensity**: shows **average score per bucket** (total score ÷ workouts).
+  - **Consistency**: shows **workout distribution by type** (strength/cardio/sport) as a **donut chart** (iOS 17+ `SectorMark`) with **bar chart fallback** on older iOS. Displays **total trained duration** (hh:mm).
+  - Context-aware UI: the **Metric** picker (Workouts/Score) only appears in **Activity**.
+
+### Changed
+- **Progress data pipeline**
+  - Refactored `loadProgress()` to compute **counts**, **scores**, **per-workout averages**, **type distribution**, and **total duration** in one pass.
+  - Duration now coalesces from multiple sources: `workouts.duration_min`, or `cardio_sessions.duration_sec` / `sport_sessions.duration_sec` (converted to minutes).
+  - Reused the existing **time bucketing** (day/month) and labels; preserved the **smooth line** (`.interpolationMethod(.catmullRom)`).
+- **Charts styling**
+  - Unified plot area styling (soft gray background with rounded corners) across line, donut, and bar charts.
+  - Dynamic Y-axis margins kept to prevent line clipping at zero across **Activity** and **Intensity**.
+
+### Fixed
+- Prevented **line clipping at 0** in **Intensity** when buckets have low or zero values.
+- Avoided duplicate `.chartPlotStyle` in the same chart to remove potential layout warnings.
+
+### Database
+- **No schema changes.**
+- Read paths broadened to include `cardio_sessions.duration_sec` and `sport_sessions.duration_sec` when `workouts.duration_min` is missing. RLS unchanged.
+
+[0.6.5]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.5
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.5...HEAD
+
 ## [0.6.4] - 2025-10-26  
 ### Added  
 - **Remember Me (Login)**  
