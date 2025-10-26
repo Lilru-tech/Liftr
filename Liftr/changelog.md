@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.4] - 2025-10-26  
+### Added  
+- **Remember Me (Login)**  
+  - Introduced a new **“Remember Me”** toggle in the login screen.  
+  - When enabled, the user’s session is now **persisted locally** across app restarts, allowing instant auto-login without requiring credentials again.  
+  - Implemented secure session restoration through Supabase Auth (`supabase.auth.session`) with automatic refresh of access tokens when the app launches.  
+  - Added local flag storage using `@AppStorage("rememberMe")` to maintain state between sessions.  
+
+### Changed  
+- **ProfileView (Progress tab / Chart)**  
+  - Updated the **chart background** to use a **soft translucent gray** (`Color.gray.opacity(0.18)`) that subtly blends with the profile gradient, giving the chart better separation without breaking visual consistency.  
+  - Added **rounded corners** (`cornerRadius: 12`) to the chart’s plot area for a cleaner and more modern look.  
+  - Smoothed the chart line using `.interpolationMethod(.catmullRom)` for more natural curves between data points.  
+  - Introduced a **dynamic Y-axis range** with small top and bottom margins (`chartYScale(domain: yLower...yUpper)`), ensuring the line never gets cut off even when values reach `0`.  
+  - Minor spacing refinements for consistent horizontal padding and height alignment across “Week”, “Month”, and “Year” modes.  
+
+### Fixed  
+- **Chart rendering edge cases**  
+  - Fixed visual clipping when all progress values were `0` — the chart line is now always visible with a safe margin below the X-axis.  
+  - Prevented duplicate `.chartPlotStyle` modifiers that could cause layout warnings in some SwiftUI versions.  
+- **Session persistence**  
+  - Fixed login sessions being lost after app restart when using Supabase Auth.  
+  - Improved token refresh handling to prevent “Auth session missing” errors during startup.  
+
+[0.6.4]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.4  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.4...HEAD  
+
 ## [0.6.3] - 2025-10-22  
 ### Added  
 - Sport workouts (extended metadata):  
