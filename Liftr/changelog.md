@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.6] - 2025-10-26
+### Added
+- **Home → Monthly Summary (v1, collapsible)**
+  - Added a new **“{Month} {Year} summary”** card displaying key monthly metrics.
+  - Includes a **Show more / Show less** toggle to expand or collapse the chart area.
+  - Added a **Share your progress** button (using `ImageRenderer`) that exports the summary as an image.
+  - Displays contextual **medal/star badge** when workout or improvement thresholds are reached.
+
+### Changed
+- **Month-to-Date logic & copy**
+  - Monthly summary now reflects **Month-To-Date (MTD)** data — from the 1st of the current month up to the current day.
+  - Improvement percentage is calculated against the **previous full month**.
+  - Texts localized to English: **“Workouts / Total score / Improvement”**.
+- **Home layout**
+  - The monthly summary card is now rendered **inside the feed list**, not above it — freeing vertical space.
+  - Default state is **collapsed**, allowing the feed to remain the main focus.
+  - Unified chart style (soft gray background, rounded corners, Catmull-Rom line interpolation).
+
+### Fixed
+- **Month label mismatch**: previously displayed the *previous* month (e.g., “September” in October); now correctly shows the **current month (MTD)**.
+- **Vertical spacing**: fixed layout compression caused by the summary card; collapsible design restores proper scroll area for the workout feed.
+
+[0.6.6]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.6  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.6...HEAD
+
 ## [0.6.5] - 2025-10-26
 ### Added
 - **Profile → Progress: Advanced stats & subtabs**

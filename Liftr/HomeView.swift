@@ -1,5 +1,7 @@
 import SwiftUI
 import Supabase
+import Charts
+import UIKit
 
 extension Notification.Name {
   static let workoutDidChange = Notification.Name("workoutDidChange")
@@ -32,6 +34,22 @@ struct HomeView: View {
     let achieved_at: Date
     var id: String { "\(user_id.uuidString)|\(label)|\(metric)|\(achieved_at.timeIntervalSince1970)" }
   }
+    
+    struct MonthPoint: Identifiable {
+      let id = UUID()
+      let date: Date
+      let label: String
+      let value: Double
+    }
+
+    struct MonthSummary {
+      let year: Int
+      let month: Int
+      let workouts: Int
+      let totalScore: Int
+      let deltaPercent: Double
+      let series: [MonthPoint]
+    }
 
     struct FeedItem: Identifiable, Hashable, Equatable {
       let id: Int
@@ -82,6 +100,9 @@ struct HomeView: View {
   @State private var weekPoints = 0
   @State private var recentPRs: [PRRow] = []
   @State private var weeklyTop: [(user: ProfileRow, points: Int)] = []
+  @State private var monthSummary: MonthSummary?
+  @State private var shareImage: UIImage?
+  @State private var showShareSheet = false
 
   private let highlightsInsertIndex = 5
 
@@ -93,16 +114,29 @@ struct HomeView: View {
       .pickerStyle(.segmented)
       .padding(.horizontal)
 
-      VStack(spacing: 8) {
-        TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
-        StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
-      }
-      .padding(.horizontal)
-
+        VStack(spacing: 6) {
+          TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
+          StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 2)
+        
       List {
         if initialLoading && feed.isEmpty {
           ProgressView().frame(maxWidth: .infinity)
         }
+          
+          if let summary = monthSummary {
+            MonthlySummaryCard(
+              summary: summary,
+              onShare: { image in
+                self.shareImage = image
+                self.showShareSheet = true
+              }
+            )
+            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+            .listRowBackground(Color.clear)
+          }
 
           ForEach(Array(feed.enumerated()), id: \.element.id) { i, item in
             if i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at) {
@@ -249,6 +283,11 @@ struct HomeView: View {
       }
     }
     .onChange(of: filter) { _, _ in Task { await reloadAll() } }
+    .sheet(isPresented: $showShareSheet) {
+      if let img = shareImage {
+        ShareSheet(items: [img])
+      }
+    }
   }
 
     private func reloadAll() async {
@@ -286,7 +325,8 @@ struct HomeView: View {
         async let w: Void = loadWeekSummaryAndLeaderboard()
         async let s: Void = loadStreak()
         async let r: Void = loadRecentPRs()
-        _ = await (t, w, s, r)
+        async let m: Void = loadMonthlySummary()
+        _ = await (t, w, s, r, m)
 
       } catch {
         await MainActor.run {
@@ -538,7 +578,8 @@ struct HomeView: View {
       async let w: Void = loadWeekSummaryAndLeaderboard()
       async let s: Void = loadStreak()
       async let r: Void = loadRecentPRs()
-      _ = await (t, w, s, r)
+      async let m: Void = loadMonthlySummary()
+      _ = await (t, w, s, r, m)
     }
 
     private func loadWeekSummaryAndLeaderboard() async {
@@ -660,6 +701,122 @@ struct HomeView: View {
     } catch {
     }
   }
+    
+    private func loadMonthlySummary() async {
+      guard let me = app.userId else { return }
+
+      var cal = Calendar.current
+      cal.timeZone = .current
+
+        // Mes actual (MTD): desde el primer día del mes hasta ahora
+        let now = Date()
+        guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) else { return }
+        let monthEnd = now // MTD
+
+        // Mes anterior completo (para delta)
+        guard let prevStart = cal.date(byAdding: .month, value: -1, to: monthStart) else { return }
+        let prevEnd = monthStart
+
+      let iso = ISO8601DateFormatter()
+      iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      iso.timeZone = .current
+
+      struct W: Decodable { let id: Int; let started_at: Date? }
+
+      do {
+        // --- Mes cerrado (M-1)
+        let wRes = try await SupabaseManager.shared.client
+          .from("workouts")
+          .select("id,started_at")
+          .eq("user_id", value: me.uuidString)
+          .gte("started_at", value: iso.string(from: monthStart))
+          .lt("started_at", value: iso.string(from: monthEnd))
+          .execute()
+        let rows = try JSONDecoder.supabase().decode([W].self, from: wRes.data)
+        let ids = rows.map { $0.id }
+
+        var scoreByWorkout: [Int: Double] = [:]
+        if !ids.isEmpty {
+          let sRes = try await SupabaseManager.shared.client
+            .from("workout_scores")
+            .select("workout_id,score")
+            .in("workout_id", values: ids)
+            .execute()
+          struct S: Decodable { let workout_id: Int; let score: Decimal }
+          let sRows = try JSONDecoder.supabase().decode([S].self, from: sRes.data)
+          for s in sRows {
+            scoreByWorkout[s.workout_id, default: 0] += NSDecimalNumber(decimal: s.score).doubleValue
+          }
+        }
+
+        // Serie diaria (score por día)
+        var seriesMap: [Date: Double] = [:]
+        var cursor = monthStart
+        while cursor < monthEnd {
+          let key = cal.startOfDay(for: cursor)
+          seriesMap[key] = 0
+          cursor = cal.date(byAdding: .day, value: 1, to: cursor)!
+        }
+
+        for w in rows {
+          guard let d = w.started_at else { continue }
+          let key = cal.startOfDay(for: d)
+          seriesMap[key, default: 0] += (scoreByWorkout[w.id] ?? 0)
+        }
+
+        let orderedDays = seriesMap.keys.sorted()
+        let points: [MonthPoint] = orderedDays.map { d in
+          let dayNum = cal.component(.day, from: d)
+          return MonthPoint(date: d, label: "\(dayNum)", value: seriesMap[d] ?? 0)
+        }
+
+        let totalScore = Int(points.reduce(0) { $0 + $1.value }.rounded())
+        let workoutsCount = rows.count
+
+        // --- Mes previo a M-1 (para comparar)
+        let pwRes = try await SupabaseManager.shared.client
+          .from("workouts")
+          .select("id")
+          .eq("user_id", value: me.uuidString)
+          .gte("started_at", value: iso.string(from: prevStart))
+          .lt("started_at", value: iso.string(from: prevEnd))
+          .execute()
+        let prowIds = try JSONDecoder.supabase().decode([W].self, from: pwRes.data).map { $0.id }
+
+        var prevTotalScore = 0.0
+        if !prowIds.isEmpty {
+          let psRes = try await SupabaseManager.shared.client
+            .from("workout_scores")
+            .select("workout_id,score")
+            .in("workout_id", values: prowIds)
+            .execute()
+          struct PS: Decodable { let workout_id: Int; let score: Decimal }
+          let psRows = try JSONDecoder.supabase().decode([PS].self, from: psRes.data)
+          for s in psRows { prevTotalScore += NSDecimalNumber(decimal: s.score).doubleValue }
+        }
+
+        let delta: Double
+        if prevTotalScore <= 0 {
+          delta = totalScore > 0 ? 100.0 : 0.0
+        } else {
+          delta = ((Double(totalScore) - prevTotalScore) / prevTotalScore) * 100.0
+        }
+
+        let comp = cal.dateComponents([.year, .month], from: monthStart)
+        let summary = MonthSummary(
+          year: comp.year ?? 0,
+          month: comp.month ?? 0,
+          workouts: workoutsCount,
+          totalScore: totalScore,
+          deltaPercent: delta,
+          series: points
+        )
+
+        await MainActor.run { self.monthSummary = summary }
+      } catch {
+        // silenciar por ahora
+      }
+    }
 
   private func sameDay(_ a: Date?, _ b: Date?) -> Bool {
     guard let a, let b else { return false }
@@ -729,6 +886,124 @@ private struct StreakWeekCard: View {
     .padding(12)
     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
     .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+  }
+}
+
+private struct MonthlySummaryCard: View {
+  let summary: HomeView.MonthSummary
+  let onShare: (UIImage) -> Void
+  @State private var expanded = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Text(titleText)
+          .font(.headline)
+        Spacer()
+        medalView
+      }
+
+        Text(lineText)
+          .font(.subheadline)
+          .foregroundStyle(.secondary)
+        
+        Button(expanded ? "Show less" : "Show more") {
+          withAnimation(.easeInOut) { expanded.toggle() }
+        }
+        .font(.caption.weight(.semibold))
+        .buttonStyle(.plain)
+
+        if expanded {
+          // Sparkline
+          Chart(summary.series) { p in
+            LineMark(
+              x: .value("Day", p.label),
+              y: .value("Score", p.value)
+            )
+            .interpolationMethod(.catmullRom)
+
+            AreaMark(
+              x: .value("Day", p.label),
+              y: .value("Score", p.value)
+            )
+            .opacity(0.15)
+          }
+          .chartPlotStyle { plotArea in
+            plotArea
+              .background(Color.gray.opacity(0.18))
+              .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+          }
+          .frame(height: 140)
+
+          HStack {
+            Spacer()
+            Button {
+              if let img = renderCard() { onShare(img) }
+            } label: {
+              Label("Share your progress", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(.borderedProminent)
+          }
+        }
+    }
+    .padding(14)
+    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+  }
+
+  private var titleText: String {
+    let m = summary.month
+    let y = summary.year
+    let monthName = DateFormatter().monthSymbols[(max(1,m)-1) % 12]
+    return "\(monthName) \(y) summary"
+  }
+
+  private var lineText: String {
+    let delta = String(format: "%@%.0f%%", summary.deltaPercent >= 0 ? "+" : "", summary.deltaPercent)
+      return "Workouts: \(summary.workouts)  •  Total score: \(summary.totalScore)  •  Improvement: \(delta)"
+  }
+
+  @ViewBuilder
+  private var medalView: some View {
+    if summary.workouts >= 20 || summary.deltaPercent >= 10 {
+      Image(systemName: "medal.fill")
+        .symbolRenderingMode(.palette)
+        .foregroundStyle(.yellow, .orange)
+    } else {
+      Image(systemName: "star.circle.fill")
+        .foregroundStyle(.secondary)
+    }
+  }
+
+  // Render del propio card a UIImage (iOS 16+)
+  private func renderCard() -> UIImage? {
+    let renderer = ImageRenderer(content:
+      VStack(alignment: .leading, spacing: 10) {
+        HStack {
+          Text(titleText).font(.headline)
+          Spacer()
+          medalView
+        }
+        Text(lineText).font(.subheadline).foregroundStyle(.secondary)
+        Chart(summary.series) { p in
+          LineMark(x: .value("Day", p.label), y: .value("Score", p.value))
+            .interpolationMethod(.catmullRom)
+          AreaMark(x: .value("Day", p.label), y: .value("Score", p.value)).opacity(0.15)
+        }
+        .chartPlotStyle { plotArea in
+          plotArea
+            .background(Color.gray.opacity(0.18))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .frame(height: 140)
+      }
+      .padding(14)
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+      .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+      .frame(width: 360) // tamaño cómodo para compartir
+    )
+    renderer.scale = UIScreen.main.scale
+    return renderer.uiImage
   }
 }
 
@@ -882,4 +1157,12 @@ private struct HomeFeedCard: View {
     let f = RelativeDateTimeFormatter(); f.unitsStyle = .short
     return f.localizedString(for: d, relativeTo: Date())
   }
+}
+
+private struct ShareSheet: UIViewControllerRepresentable {
+  let items: [Any]
+  func makeUIViewController(context: Context) -> UIActivityViewController {
+    UIActivityViewController(activityItems: items, applicationActivities: nil)
+  }
+  func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
 }
