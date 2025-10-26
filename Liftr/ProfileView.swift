@@ -2,6 +2,7 @@ import SwiftUI
 import Supabase
 import PhotosUI
 import UIKit
+import Charts
 
 private struct ProfileCounts: Decodable, Identifiable {
   let user_id: UUID
@@ -107,8 +108,13 @@ struct ProfileView: View {
   @State private var bioExpanded = false
   @State private var isFollowing: Bool? = nil
   @State private var mutatingFollow = false
-
-    enum Tab: String { case calendar = "Calendar", prs = "PRs", settings = "Settings" }
+  @State private var progressRange: ProgressRange = .week
+  @State private var progressMetric: ProgressMetric = .workouts
+  @State private var progressPoints: [ProgressPoint] = []
+  @State private var progressLoading = false
+  @State private var progressError: String?
+    
+    enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
   @State private var tab: Tab = .calendar
 
   var body: some View {
@@ -118,6 +124,7 @@ struct ProfileView: View {
               Picker("", selection: $tab) {
                 Text("Calendar").tag(Tab.calendar)
                 Text("PRs").tag(Tab.prs)
+                Text("Progress").tag(Tab.progress)
                 if isOwnProfile {
                   Text("Settings").tag(Tab.settings)
                 }
@@ -128,6 +135,7 @@ struct ProfileView: View {
               switch tab {
               case .calendar: calendarView
               case .prs: prsView
+              case .progress: progressView
               case .settings: settingsView
               }
           }
@@ -139,12 +147,15 @@ struct ProfileView: View {
             print("[Auth] user.id:", session?.user.id.uuidString ?? "nil")
             await loadProfileHeader()
             await refreshFollowState()
+            await loadProgress()
           }
           .onChange(of: monthDate) { _, newDate in
             monthDays = monthDaysGrid(for: newDate)
             selectedDay = nil
             Task { await loadMonthActivity() }
           }
+          .onChange(of: progressRange) { _, _ in Task { await loadProgress() } }
+          .onChange(of: progressMetric) { _, _ in Task { await loadProgress() } }
           .sheet(isPresented: $showEditProfile) {
             if isOwnProfile {
               EditBioSheet(
@@ -164,6 +175,71 @@ struct ProfileView: View {
       PRsListView(userId: viewingUserId)
     }
 
+    private var progressView: some View {
+      VStack(spacing: 12) {
+        HStack(spacing: 12) {
+          Picker("Range", selection: $progressRange) {
+            Text("Week").tag(ProgressRange.week)
+            Text("Month").tag(ProgressRange.month)
+            Text("Year").tag(ProgressRange.year)
+          }
+          .pickerStyle(.segmented)
+
+          Picker("Metric", selection: $progressMetric) {
+            Text("Workouts").tag(ProgressMetric.workouts)
+            Text("Score").tag(ProgressMetric.score)
+          }
+          .pickerStyle(.segmented)
+        }
+        .padding(.horizontal)
+
+        if progressLoading {
+          ProgressView().padding()
+        } else if let err = progressError {
+          Text(err).foregroundStyle(.red).padding(.horizontal)
+        } else if progressPoints.isEmpty {
+          Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
+        } else {
+          let maxY = progressPoints.map { $0.value }.max() ?? 0
+          let yUpper = max(1, maxY * 1.15)
+          let yLower = -yUpper * 0.05
+
+          Chart(progressPoints) { p in
+            LineMark(
+              x: .value("Period", p.label),
+              y: .value("Value", p.value)
+            )
+            .interpolationMethod(.catmullRom)
+
+            PointMark(
+              x: .value("Period", p.label),
+              y: .value("Value", p.value)
+            )
+          }
+          .chartPlotStyle { plotArea in
+            plotArea
+              .background(Color.gray.opacity(0.18))
+              .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+          }
+          .chartYAxisLabel(progressMetric == .workouts ? "Workouts" : "Score")
+          .chartYScale(domain: yLower...yUpper)
+          .frame(height: 240)
+          .padding(.horizontal)
+        }
+      }
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    
+    private enum ProgressRange: CaseIterable { case week, month, year }
+    private enum ProgressMetric: CaseIterable { case workouts, score }
+    private struct ProgressPoint: Identifiable {
+      let id = UUID()
+      let date: Date
+      let label: String
+      let value: Double
+    }
+    
   private var headerCard: some View {
     HStack(alignment: .center, spacing: 14) {
         if isOwnProfile {
@@ -615,6 +691,137 @@ struct ProfileView: View {
         await MainActor.run { self.error = error.localizedDescription }
       }
   }
+    
+    private func loadProgress() async {
+      guard let uid = viewingUserId else { return }
+      await MainActor.run { progressLoading = true; progressError = nil }
+      defer { Task { await MainActor.run { progressLoading = false } } }
+
+      // Determinar rango temporal
+      var cal = Calendar.current
+      cal.timeZone = .current
+      let now = Date()
+      let start: Date
+      let step: Calendar.Component
+      let bucketCount: Int
+
+      switch progressRange {
+      case .week:
+        start = cal.date(byAdding: .day, value: -6, to: now.startOfDay) ?? now.startOfDay
+        step = .day
+        bucketCount = 7
+      case .month:
+        start = cal.date(byAdding: .day, value: -29, to: now.startOfDay) ?? now.startOfDay
+        step = .day
+        bucketCount = 30
+      case .year:
+        let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
+        start = cal.date(byAdding: .month, value: -11, to: monthStart) ?? monthStart
+        step = .month
+        bucketCount = 12
+      }
+
+      // Construir buckets
+      var buckets: [Date: Double] = [:]
+      var labels: [Date: String] = [:]
+      var cursor = start
+      for _ in 0..<bucketCount {
+        let key: Date
+        let label: String
+        switch step {
+        case .day:
+          key = cal.startOfDay(for: cursor)
+          label = DateFormatter.shortDay(cursor)
+        case .month:
+          key = cal.date(from: cal.dateComponents([.year,.month], from: cursor)) ?? cursor
+          label = DateFormatter.shortMonth(cursor)
+        default:
+          key = cal.startOfDay(for: cursor)
+          label = DateFormatter.shortDay(cursor)
+        }
+        buckets[key] = 0
+        labels[key] = label
+        cursor = cal.date(byAdding: step, value: 1, to: cursor) ?? cursor
+      }
+
+      // Ventana temporal exacta
+      let end: Date
+      switch step {
+      case .day:
+        end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now)) ?? now
+      case .month:
+        end = cal.date(byAdding: .month, value: 1, to: cal.date(from: cal.dateComponents([.year,.month], from: now)) ?? now) ?? now
+      default:
+        end = now
+      }
+
+      let iso = ISO8601DateFormatter()
+      iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      iso.timeZone = .current
+
+      do {
+        // 1) Workouts en el rango
+        let res = try await SupabaseManager.shared.client
+          .from("workouts")
+          .select("id,started_at")
+          .eq("user_id", value: uid.uuidString)
+          .gte("started_at", value: iso.string(from: start))
+          .lt("started_at", value: iso.string(from: end))
+          .execute()
+
+        struct W: Decodable { let id: Int; let started_at: Date? }
+        let workouts = try JSONDecoder.supabase().decode([W].self, from: res.data)
+
+        var scoresByWorkout: [Int: Double] = [:]
+        if progressMetric == .score {
+          let ids = workouts.map { $0.id }
+          if !ids.isEmpty {
+            let sres = try await SupabaseManager.shared.client
+              .from("workout_scores")
+              .select("workout_id,score")
+              .in("workout_id", values: ids)
+              .execute()
+
+            struct S: Decodable { let workout_id: Int; let score: Decimal }
+            let srows = try JSONDecoder.supabase().decode([S].self, from: sres.data)
+            for r in srows {
+              scoresByWorkout[r.workout_id, default: 0] += NSDecimalNumber(decimal: r.score).doubleValue
+            }
+          }
+        }
+
+        // 2) Agregación a buckets
+        for w in workouts {
+          guard let d = w.started_at else { continue }
+          let key: Date
+          switch step {
+          case .day:
+            key = cal.startOfDay(for: d)
+          case .month:
+            key = cal.date(from: cal.dateComponents([.year,.month], from: d)) ?? d
+          default:
+            key = cal.startOfDay(for: d)
+          }
+          if buckets[key] != nil {
+            if progressMetric == .workouts {
+              buckets[key]! += 1
+            } else {
+              buckets[key]! += scoresByWorkout[w.id] ?? 0
+            }
+          }
+        }
+
+        // 3) Orden y salida
+        let ordered = buckets.keys.sorted()
+        let points: [ProgressPoint] = ordered.map { k in
+          ProgressPoint(date: k, label: labels[k] ?? "", value: buckets[k] ?? 0)
+        }
+
+        await MainActor.run { self.progressPoints = points }
+      } catch {
+        await MainActor.run { self.progressError = error.localizedDescription }
+      }
+    }
 
     private func handlePickedItem(_ item: PhotosPickerItem?) async {
       guard isOwnProfile, let item, let uid = app.userId else { return }
@@ -995,6 +1202,19 @@ private struct DayWorkoutsList: View {
 
 private extension Date {
   var startOfDay: Date { Calendar.current.startOfDay(for: self) }
+}
+
+private extension DateFormatter {
+  static func shortDay(_ d: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "dd/MM"
+    return f.string(from: d)
+  }
+  static func shortMonth(_ d: Date) -> String {
+    let f = DateFormatter()
+    f.dateFormat = "MMM yy"
+    return f.string(from: d).capitalized
+  }
 }
 
 private func resizedJPEG(from image: UIImage, maxSide: CGFloat = 1024, quality: CGFloat = 0.85) -> Data? {
