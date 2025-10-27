@@ -198,8 +198,6 @@ struct ProfileView: View {
             .pickerStyle(.segmented)
           }
           .padding(.horizontal)
-
-          // 👇 Solo muestra el selector de métrica cuando la subpestaña es "Activity"
           if progressSubtab == .activity {
             HStack {
               Picker("Metric", selection: $progressMetric) {
@@ -216,12 +214,10 @@ struct ProfileView: View {
           } else if let err = progressError {
             Text(err).foregroundStyle(.red).padding(.horizontal)
           } else if progressSubtab == .consistency {
-            // CONSISTENCY: donut/barras + total de minutos
             if kindDistribution.isEmpty && totalDurationMin == 0 {
               Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
             } else {
               VStack(spacing: 12) {
-                // Donut si hay iOS 17, si no, barras
                 if #available(iOS 17.0, *) {
                   Chart(kindDistribution) { s in
                     SectorMark(
@@ -266,7 +262,6 @@ struct ProfileView: View {
             Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
 
           } else {
-            // ACTIVITY o INTENSITY: línea + puntos
             let maxY = progressPoints.map { $0.value }.max() ?? 0
             let yUpper = max(1, maxY * 1.15)
             let yLower = -yUpper * 0.05
@@ -775,8 +770,6 @@ struct ProfileView: View {
       guard let uid = viewingUserId else { return }
       await MainActor.run { progressLoading = true; progressError = nil }
       defer { Task { await MainActor.run { progressLoading = false } } }
-
-      // Rango temporal
       var cal = Calendar.current
       cal.timeZone = .current
       let now = Date()
@@ -799,10 +792,8 @@ struct ProfileView: View {
         step = .month
         bucketCount = 12
       }
-
-      // Buckets
-      var bucketsCount: [Date: Int] = [:]      // workouts por bucket
-      var bucketsScore: [Date: Double] = [:]   // score total por bucket
+      var bucketsCount: [Date: Int] = [:]
+      var bucketsScore: [Date: Double] = [:]
       var labels: [Date: String] = [:]
       var cursor = start
       for _ in 0..<bucketCount {
@@ -824,8 +815,6 @@ struct ProfileView: View {
         labels[key] = label
         cursor = cal.date(byAdding: step, value: 1, to: cursor) ?? cursor
       }
-
-      // Ventana exacta
       let end: Date
       switch step {
       case .day:
@@ -841,7 +830,6 @@ struct ProfileView: View {
       iso.timeZone = .current
 
       do {
-        // 1) Workouts en el rango (incluye kind + duration_min)
         let res = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id,started_at,kind,duration_min")
@@ -853,8 +841,6 @@ struct ProfileView: View {
         struct W: Decodable { let id: Int; let started_at: Date?; let kind: String; let duration_min: Int? }
         let workouts = try JSONDecoder.supabase().decode([W].self, from: res.data)
         let ids = workouts.map { $0.id }
-
-        // 2) Scores por workout (sumar si hay varios algoritmos)
         var scoresByWorkout: [Int: Double] = [:]
         if !ids.isEmpty {
           let sres = try await SupabaseManager.shared.client
@@ -869,16 +855,12 @@ struct ProfileView: View {
             scoresByWorkout[r.workout_id, default: 0] += NSDecimalNumber(decimal: r.score).doubleValue
           }
         }
-
-        // 3) Duraciones por workout (coalesce: workouts.duration_min, cardio.duration_sec/60, sport.duration_sec/60)
         var durationMinByWorkout: [Int: Int] = [:]
-        // a) de workouts.duration_min
         for w in workouts {
           if let dm = w.duration_min {
             durationMinByWorkout[w.id] = max(dm, 0)
           }
         }
-        // b) cardio
         if !ids.isEmpty {
           let cres = try await SupabaseManager.shared.client
             .from("cardio_sessions")
@@ -892,7 +874,6 @@ struct ProfileView: View {
               durationMinByWorkout[r.workout_id] = max(Int(round(Double(s)/60.0)), 0)
             }
           }
-          // c) sport
           let sres2 = try await SupabaseManager.shared.client
             .from("sport_sessions")
             .select("workout_id,duration_sec")
@@ -906,8 +887,6 @@ struct ProfileView: View {
             }
           }
         }
-
-        // 4) Distribución por tipo y agregación a buckets
         var kindCount: [String: Int] = [:]
         var totalMinutes = 0
 
@@ -923,18 +902,11 @@ struct ProfileView: View {
             key = cal.startOfDay(for: d)
           }
           guard bucketsCount[key] != nil else { continue }
-
-          // Activity
           bucketsCount[key]! += 1
           bucketsScore[key]! += scoresByWorkout[w.id] ?? 0
-
-          // Consistency: distribución y duración
           kindCount[w.kind, default: 0] += 1
           totalMinutes += (durationMinByWorkout[w.id] ?? 0)
         }
-
-        // 5) Salidas para cada subpestaña:
-        // Activity (workouts o score)
         if progressSubtab == .activity {
           let ordered = bucketsCount.keys.sorted()
           let points: [ProgressPoint] = ordered.map { k in
@@ -943,8 +915,6 @@ struct ProfileView: View {
           }
           await MainActor.run { self.progressPoints = points }
         }
-
-        // Intensity (promedio de score por workout en cada bucket)
         if progressSubtab == .intensity {
           let ordered = bucketsCount.keys.sorted()
           let points: [ProgressPoint] = ordered.map { k in
@@ -954,8 +924,6 @@ struct ProfileView: View {
           }
           await MainActor.run { self.progressPoints = points }
         }
-
-        // Consistency (distribución + duración total)
         if progressSubtab == .consistency {
           let slices = ["strength","cardio","sport"]
             .map { KindSlice(kind: $0, count: kindCount[$0] ?? 0) }
@@ -963,7 +931,7 @@ struct ProfileView: View {
           await MainActor.run {
             self.kindDistribution = slices
             self.totalDurationMin = totalMinutes
-            self.progressPoints = [] // no usamos línea aquí
+            self.progressPoints = []
           }
         }
 

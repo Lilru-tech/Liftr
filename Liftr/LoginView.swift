@@ -141,10 +141,7 @@ struct LoginView: View {
 
       static func save(key: String, value: String) {
         let data = Data(value.utf8)
-
-        // Elimina entrada previa si existe
         delete(key: key)
-
         let query: [String: Any] = [
           kSecClass as String: kSecClassGenericPassword,
           kSecAttrService as String: service,
