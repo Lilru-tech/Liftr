@@ -7,6 +7,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.7] - 2025-10-27
+### Added
+- **Home → Likes on workout cards**
+  - Added a **like pill** on each feed card with a **heart icon** (filled if liked by the user) and **counter**.
+  - Reuses `workout_likes` to fetch both total likes and whether the current user has liked (`isLiked`).
+  - Batched loading: during pagination, `workout_likes` are queried with `IN (workout_id)` and merged into in-memory results.
+- **Home → Insights (v1)**
+  - Introduced new **insight pills** displayed in the feed:
+    - `💪 Strongest week this month: {points} points`
+    - `⚽ Best sport match: {score} ({sport})`
+  - Data sources reused:
+    - **Streak**: consecutive training days (last 60 days).
+    - **Strongest week (MTD)**: total `workout_scores` grouped by week of the current month.
+    - **Best sport match**: highest `score` from `sport` workouts (via `sport_sessions` for sport name).
+
+### Changed
+- **Feed item model**  
+  - `FeedItem` now includes `likeCount: Int` and `isLiked: Bool`.
+  - `HomeFeedCard` updated to render the **like pill** next to the **score pill**.
+- **Home feed loading (pagination & refresh)**  
+  - `loadPage(...)` and `refreshOne(...)` now also retrieve and attach `likeCount` / `isLiked` along with `score`.
+
+### Fixed
+- **Compile error (“type-check in reasonable time”)**  
+  - Fixed by **building `FeedItem` with all required fields** (`likeCount` and `isLiked`) in the `.workoutUpdated` notification handler.  
+  - Prevents heavy type inference in the closure and stabilizes compilation time.
+
+### Database
+- **No schema changes.**  
+  - Reads from `workout_likes`, `workout_scores`, `sport_sessions`, and `workouts`. Existing RLS policies remain valid.
+
+[0.6.7]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.7  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.7...HEAD
+
+## [0.6.6] - 2025-10-26
+### Added
+- **Home → Monthly Summary (v1, collapsible)**
+  - Added a new **“{Month} {Year} summary”** card displaying key monthly metrics.
+  - Includes a **Show more / Show less** toggle to expand or collapse the chart area.
+  - Added a **Share your progress** button (using `ImageRenderer`) that exports the summary as an image.
+  - Displays contextual **medal/star badge** when workout or improvement thresholds are reached.
+
+### Changed
+- **Month-to-Date logic & copy**
+  - Monthly summary now reflects **Month-To-Date (MTD)** data — from the 1st of the current month up to the current day.
+  - Improvement percentage is calculated against the **previous full month**.
+  - Texts localized to English: **“Workouts / Total score / Improvement”**.
+- **Home layout**
+  - The monthly summary card is now rendered **inside the feed list**, not above it — freeing vertical space.
+  - Default state is **collapsed**, allowing the feed to remain the main focus.
+  - Unified chart style (soft gray background, rounded corners, Catmull-Rom line interpolation).
+
+### Fixed
+- **Month label mismatch**: previously displayed the *previous* month (e.g., “September” in October); now correctly shows the **current month (MTD)**.
+- **Vertical spacing**: fixed layout compression caused by the summary card; collapsible design restores proper scroll area for the workout feed.
+
+[0.6.6]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.6  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.6...HEAD
+
+## [0.6.5] - 2025-10-26
+### Added
+- **Profile → Progress: Advanced stats & subtabs**
+  - New **subtabs**: **Activity**, **Intensity**, **Consistency**.
+  - **Activity**: shows either **Workouts** or **Score** per bucket (Week/Month/Year).
+  - **Intensity**: shows **average score per bucket** (total score ÷ workouts).
+  - **Consistency**: shows **workout distribution by type** (strength/cardio/sport) as a **donut chart** (iOS 17+ `SectorMark`) with **bar chart fallback** on older iOS. Displays **total trained duration** (hh:mm).
+  - Context-aware UI: the **Metric** picker (Workouts/Score) only appears in **Activity**.
+
+### Changed
+- **Progress data pipeline**
+  - Refactored `loadProgress()` to compute **counts**, **scores**, **per-workout averages**, **type distribution**, and **total duration** in one pass.
+  - Duration now coalesces from multiple sources: `workouts.duration_min`, or `cardio_sessions.duration_sec` / `sport_sessions.duration_sec` (converted to minutes).
+  - Reused the existing **time bucketing** (day/month) and labels; preserved the **smooth line** (`.interpolationMethod(.catmullRom)`).
+- **Charts styling**
+  - Unified plot area styling (soft gray background with rounded corners) across line, donut, and bar charts.
+  - Dynamic Y-axis margins kept to prevent line clipping at zero across **Activity** and **Intensity**.
+
+### Fixed
+- Prevented **line clipping at 0** in **Intensity** when buckets have low or zero values.
+- Avoided duplicate `.chartPlotStyle` in the same chart to remove potential layout warnings.
+
+### Database
+- **No schema changes.**
+- Read paths broadened to include `cardio_sessions.duration_sec` and `sport_sessions.duration_sec` when `workouts.duration_min` is missing. RLS unchanged.
+
+[0.6.5]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.5
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.5...HEAD
+
+## [0.6.4] - 2025-10-26  
+### Added  
+- **Remember Me (Login)**  
+  - Introduced a new **“Remember Me”** toggle in the login screen.  
+  - When enabled, the user’s session is now **persisted locally** across app restarts, allowing instant auto-login without requiring credentials again.  
+  - Implemented secure session restoration through Supabase Auth (`supabase.auth.session`) with automatic refresh of access tokens when the app launches.  
+  - Added local flag storage using `@AppStorage("rememberMe")` to maintain state between sessions.  
+
+### Changed  
+- **ProfileView (Progress tab / Chart)**  
+  - Updated the **chart background** to use a **soft translucent gray** (`Color.gray.opacity(0.18)`) that subtly blends with the profile gradient, giving the chart better separation without breaking visual consistency.  
+  - Added **rounded corners** (`cornerRadius: 12`) to the chart’s plot area for a cleaner and more modern look.  
+  - Smoothed the chart line using `.interpolationMethod(.catmullRom)` for more natural curves between data points.  
+  - Introduced a **dynamic Y-axis range** with small top and bottom margins (`chartYScale(domain: yLower...yUpper)`), ensuring the line never gets cut off even when values reach `0`.  
+  - Minor spacing refinements for consistent horizontal padding and height alignment across “Week”, “Month”, and “Year” modes.  
+
+### Fixed  
+- **Chart rendering edge cases**  
+  - Fixed visual clipping when all progress values were `0` — the chart line is now always visible with a safe margin below the X-axis.  
+  - Prevented duplicate `.chartPlotStyle` modifiers that could cause layout warnings in some SwiftUI versions.  
+- **Session persistence**  
+  - Fixed login sessions being lost after app restart when using Supabase Auth.  
+  - Improved token refresh handling to prevent “Auth session missing” errors during startup.  
+
+[0.6.4]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.4  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.4...HEAD  
+
 ## [0.6.3] - 2025-10-22  
 ### Added  
 - Sport workouts (extended metadata):  
