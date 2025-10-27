@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.6.7] - 2025-10-27
+### Added
+- **Home → Likes on workout cards**
+  - Added a **like pill** on each feed card with a **heart icon** (filled if liked by the user) and **counter**.
+  - Reuses `workout_likes` to fetch both total likes and whether the current user has liked (`isLiked`).
+  - Batched loading: during pagination, `workout_likes` are queried with `IN (workout_id)` and merged into in-memory results.
+- **Home → Insights (v1)**
+  - Introduced new **insight pills** displayed in the feed:
+    - `💪 Strongest week this month: {points} points`
+    - `⚽ Best sport match: {score} ({sport})`
+  - Data sources reused:
+    - **Streak**: consecutive training days (last 60 days).
+    - **Strongest week (MTD)**: total `workout_scores` grouped by week of the current month.
+    - **Best sport match**: highest `score` from `sport` workouts (via `sport_sessions` for sport name).
+
+### Changed
+- **Feed item model**  
+  - `FeedItem` now includes `likeCount: Int` and `isLiked: Bool`.
+  - `HomeFeedCard` updated to render the **like pill** next to the **score pill**.
+- **Home feed loading (pagination & refresh)**  
+  - `loadPage(...)` and `refreshOne(...)` now also retrieve and attach `likeCount` / `isLiked` along with `score`.
+
+### Fixed
+- **Compile error (“type-check in reasonable time”)**  
+  - Fixed by **building `FeedItem` with all required fields** (`likeCount` and `isLiked`) in the `.workoutUpdated` notification handler.  
+  - Prevents heavy type inference in the closure and stabilizes compilation time.
+
+### Database
+- **No schema changes.**  
+  - Reads from `workout_likes`, `workout_scores`, `sport_sessions`, and `workouts`. Existing RLS policies remain valid.
+
+[0.6.7]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.6.7  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.6.7...HEAD
+
 ## [0.6.6] - 2025-10-26
 ### Added
 - **Home → Monthly Summary (v1, collapsible)**

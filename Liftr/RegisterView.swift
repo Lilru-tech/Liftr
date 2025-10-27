@@ -31,129 +31,131 @@ struct RegisterView: View {
   }
 
     var body: some View {
+        GradientBackground {
         ZStack {
-          Circle()
-            .fill(LinearGradient(colors: [.blue.opacity(0.20), .purple.opacity(0.20)],
-                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-            .frame(width: 320, height: 320)
-            .blur(radius: 90)
-            .offset(y: -170)
-            .allowsHitTesting(false)
-
-          VStack(spacing: 18) {
-            Spacer(minLength: 0)
-            Text("Create your account to start tracking your workouts.")
-              .font(.subheadline)
-              .foregroundStyle(.secondary)
-              .multilineTextAlignment(.center)
-              .padding(.horizontal, 24)
-            VStack(spacing: 14) {
-              if let error {
-                Text(error)
-                  .foregroundStyle(.red)
-                  .frame(maxWidth: .infinity, alignment: .leading)
-              }
-
-              TextField("Email", text: $email)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.emailAddress)
-                .textContentType(.emailAddress)
-                .autocorrectionDisabled(true)
-              SecureField("Password (min. 8)", text: $password)
-                .textContentType(.newPassword)
-
-              if !isEmailValid && !email.isEmpty {
-                Text("Invalid email format.")
-                  .font(.caption)
-                  .foregroundStyle(.red)
-              }
-              if !isPasswordValid && !password.isEmpty {
-                Text("Password must be at least 8 characters.")
-                  .font(.caption)
-                  .foregroundStyle(.red)
-              }
-
-              TextField("Username (required)", text: $username)
-                .textInputAutocapitalization(.never)
-                .textContentType(.nickname)
-                .autocorrectionDisabled(true)
-                .onChange(of: username, initial: false) { _, _ in
-                  usernameDirty = true
+            Circle()
+                .fill(LinearGradient(colors: [.blue.opacity(0.20), .purple.opacity(0.20)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+                .frame(width: 320, height: 320)
+                .blur(radius: 90)
+                .offset(y: -170)
+                .allowsHitTesting(false)
+            
+            VStack(spacing: 18) {
+                Spacer(minLength: 0)
+                Text("Create your account to start tracking your workouts.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                VStack(spacing: 14) {
+                    if let error {
+                        Text(error)
+                            .foregroundStyle(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    
+                    TextField("Email", text: $email)
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.emailAddress)
+                        .textContentType(.emailAddress)
+                        .autocorrectionDisabled(true)
+                    SecureField("Password (min. 8)", text: $password)
+                        .textContentType(.newPassword)
+                    
+                    if !isEmailValid && !email.isEmpty {
+                        Text("Invalid email format.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    if !isPasswordValid && !password.isEmpty {
+                        Text("Password must be at least 8 characters.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    
+                    TextField("Username (required)", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .textContentType(.nickname)
+                        .autocorrectionDisabled(true)
+                        .onChange(of: username, initial: false) { _, _ in
+                            usernameDirty = true
+                        }
+                    
+                    if (usernameDirty || triedSubmit) &&
+                        username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Username is required.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    } else if (usernameDirty || triedSubmit) && !isUsernameValid {
+                        Text("Username must be at least 3 characters.")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
+                    
+                    Divider().padding(.vertical, 4)
+                    
+                    LabeledContent {
+                        Picker("", selection: $sex) {
+                            ForEach(Sex.allCases, id: \.self) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                    } label: {
+                        Text("Sex")
+                            .foregroundStyle(.secondary)
+                    }
+                    .labelStyle(.titleOnly)
+                    
+                    LabeledContent {
+                        DatePicker("", selection: $dateOfBirth, displayedComponents: .date)
+                            .datePickerStyle(.compact)
+                    } label: {
+                        Text("Date of birth")
+                            .foregroundStyle(.secondary)
+                    }
+                    .labelStyle(.titleOnly)
+                    .padding(.vertical, 2)
+                    
+                    TextField("Height (cm)", text: $height).keyboardType(.decimalPad)
+                    TextField("Weight (kg)", text: $weight).keyboardType(.decimalPad)
+                    
+                    VStack(spacing: 12) {
+                        Text("You can update these details later in your profile.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        
+                        Button {
+                            triedSubmit = true
+                            guard isFormValid else { return }
+                            Task { await signUp() }
+                        } label: {
+                            HStack {
+                                if loading { ProgressView().tint(.white) }
+                                Text(loading ? "Creating…" : "Create account")
+                                    .fontWeight(.semibold)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background((!loading && isFormValid) ? Color.blue : Color.gray.opacity(0.5),
+                                        in: RoundedRectangle(cornerRadius: 14))
+                            .foregroundStyle(.white)
+                        }
+                        .disabled(loading || !isFormValid)
+                    }
+                    .padding(.top, 6)
                 }
-
-              if (usernameDirty || triedSubmit) &&
-                  username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("Username is required.")
-                  .font(.caption)
-                  .foregroundStyle(.red)
-              } else if (usernameDirty || triedSubmit) && !isUsernameValid {
-                Text("Username must be at least 3 characters.")
-                  .font(.caption)
-                  .foregroundStyle(.red)
-              }
+                .padding(20)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.22), lineWidth: 0.8))
+                .shadow(color: .black.opacity(0.12), radius: 10, y: 6)
+                .padding(.horizontal, 24)
                 
-                Divider().padding(.vertical, 4)
-
-                LabeledContent {
-                  Picker("", selection: $sex) {
-                    ForEach(Sex.allCases, id: \.self) { Text($0.label).tag($0) }
-                  }
-                  .pickerStyle(.menu)
-                } label: {
-                  Text("Sex")
-                    .foregroundStyle(.secondary)
-                }
-                .labelStyle(.titleOnly)
-
-                LabeledContent {
-                  DatePicker("", selection: $dateOfBirth, displayedComponents: .date)
-                    .datePickerStyle(.compact)
-                } label: {
-                  Text("Date of birth")
-                    .foregroundStyle(.secondary)
-                }
-                .labelStyle(.titleOnly)
-                .padding(.vertical, 2)
-
-              TextField("Height (cm)", text: $height).keyboardType(.decimalPad)
-              TextField("Weight (kg)", text: $weight).keyboardType(.decimalPad)
-
-              VStack(spacing: 12) {
-                Text("You can update these details later in your profile.")
-                  .font(.footnote)
-                  .foregroundStyle(.secondary)
-
-                Button {
-                  triedSubmit = true
-                  guard isFormValid else { return }
-                  Task { await signUp() }
-                } label: {
-                  HStack {
-                    if loading { ProgressView().tint(.white) }
-                    Text(loading ? "Creating…" : "Create account")
-                      .fontWeight(.semibold)
-                  }
-                  .frame(maxWidth: .infinity)
-                  .padding(.vertical, 12)
-                  .background((!loading && isFormValid) ? Color.blue : Color.gray.opacity(0.5),
-                              in: RoundedRectangle(cornerRadius: 14))
-                  .foregroundStyle(.white)
-                }
-                .disabled(loading || !isFormValid)
-              }
-              .padding(.top, 6)
+                Spacer(minLength: 0)
             }
-            .padding(20)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.22), lineWidth: 0.8))
-            .shadow(color: .black.opacity(0.12), radius: 10, y: 6)
-            .padding(.horizontal, 24)
-
-            Spacer(minLength: 0)
-          }
         }
-      .navigationBarTitleDisplayMode(.inline)
-      .banner($banner)
+        .navigationBarTitleDisplayMode(.inline)
+        .banner($banner)
+    }
     }
 
     private func signUp() async {
