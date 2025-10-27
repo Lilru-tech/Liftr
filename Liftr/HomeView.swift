@@ -24,7 +24,8 @@ struct HomeView: View {
   private struct FollowRow: Decodable { let followee_id: UUID }
   struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
   private struct WorkoutScoreRow: Decodable { let workout_id: Int; let score: Decimal }
-
+  private struct LikeRow: Decodable { let workout_id: Int; let user_id: UUID }
+    
   struct PRRow: Decodable, Identifiable {
     let kind: String
     let user_id: UUID
@@ -57,6 +58,8 @@ struct HomeView: View {
       let username: String
       let avatarURL: String?
       let score: Double?
+      let likeCount: Int
+      let isLiked: Bool
 
       func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -67,18 +70,22 @@ struct HomeView: View {
         hasher.combine(username)
         hasher.combine(avatarURL ?? "")
         hasher.combine(score ?? -1)
+        hasher.combine(likeCount)
+        hasher.combine(isLiked)
       }
 
-      static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
-        lhs.id == rhs.id &&
-        lhs.workout.kind == rhs.workout.kind &&
-        (lhs.workout.title ?? "") == (rhs.workout.title ?? "") &&
-        (lhs.workout.started_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.started_at?.timeIntervalSince1970 ?? 0) &&
-        (lhs.workout.ended_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.ended_at?.timeIntervalSince1970 ?? 0) &&
-        lhs.username == rhs.username &&
-        (lhs.avatarURL ?? "") == (rhs.avatarURL ?? "") &&
-        (lhs.score ?? -1) == (rhs.score ?? -1)
-      }
+        static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
+          lhs.id == rhs.id &&
+          lhs.workout.kind == rhs.workout.kind &&
+          (lhs.workout.title ?? "") == (rhs.workout.title ?? "") &&
+          (lhs.workout.started_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.started_at?.timeIntervalSince1970 ?? 0) &&
+          (lhs.workout.ended_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.ended_at?.timeIntervalSince1970 ?? 0) &&
+          lhs.username == rhs.username &&
+          (lhs.avatarURL ?? "") == (rhs.avatarURL ?? "") &&
+          (lhs.score ?? -1) == (rhs.score ?? -1) &&
+          lhs.likeCount == rhs.likeCount &&
+          lhs.isLiked == rhs.isLiked
+        }
     }
     
   @State private var feed: [FeedItem] = []
@@ -101,6 +108,9 @@ struct HomeView: View {
   @State private var recentPRs: [PRRow] = []
   @State private var weeklyTop: [(user: ProfileRow, points: Int)] = []
   @State private var monthSummary: MonthSummary?
+  @State private var strongestWeekPtsMTD = 0
+  @State private var bestSportScore = 0
+  @State private var bestSportLabel = ""
   @State private var shareImage: UIImage?
   @State private var showShareSheet = false
 
@@ -117,6 +127,9 @@ struct HomeView: View {
         VStack(spacing: 6) {
           TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
           StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
+            InsightsRow(strongestWeekPts: strongestWeekPtsMTD,
+                        bestSportScore: bestSportScore,
+                        bestSportLabel: bestSportLabel)
         }
         .padding(.horizontal)
         .padding(.bottom, 2)
@@ -248,7 +261,9 @@ struct HomeView: View {
               workout: patched,
               username: old.username,
               avatarURL: old.avatarURL,
-              score: newScore ?? old.score
+              score: newScore ?? old.score,
+              likeCount: old.likeCount,
+              isLiked: old.isLiked
             )
               feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
               print("[Home.onReceive workoutUpdated] patched OK (title=\(title ?? "nil"), score=\(String(describing: newScore)))")
@@ -326,7 +341,8 @@ struct HomeView: View {
         async let s: Void = loadStreak()
         async let r: Void = loadRecentPRs()
         async let m: Void = loadMonthlySummary()
-        _ = await (t, w, s, r, m)
+        async let i: Void = loadInsights()
+        _ = await (t, w, s, r, m, i)
 
       } catch {
         await MainActor.run {
@@ -409,7 +425,22 @@ struct HomeView: View {
           }
           scoresDict = tmp
         }
-
+          
+          var likeCountByWorkout: [Int: Int] = [:]
+          var likedByMe: Set<Int> = []
+          if !ids.isEmpty {
+            let lRes = try await SupabaseManager.shared.client
+              .from("workout_likes")
+              .select("workout_id,user_id")
+              .in("workout_id", values: ids)
+              .execute()
+            let lRows = try JSONDecoder.supabase().decode([LikeRow].self, from: lRes.data)
+            for row in lRows {
+              likeCountByWorkout[row.workout_id, default: 0] += 1
+              if row.user_id == me { likedByMe.insert(row.workout_id) }
+            }
+          }
+          
         let items: [FeedItem] = workouts.map { w in
           let prof = profiles[w.user_id]
           return FeedItem(
@@ -417,7 +448,9 @@ struct HomeView: View {
             workout: w,
             username: prof?.username ?? (w.user_id == me ? "You" : "—"),
             avatarURL: prof?.avatar_url,
-            score: scoresDict[w.id]
+            score: scoresDict[w.id],
+            likeCount: likeCountByWorkout[w.id] ?? 0,
+            isLiked: likedByMe.contains(w.id)
           )
         }
 
@@ -465,12 +498,28 @@ struct HomeView: View {
         let score: Double? = sRows.isEmpty ? nil : scTotal
         print("[Home.refreshOne] scores rows=\(sRows.count) total=\(String(describing: score))")
 
+          var likeCount = 0
+          var isLiked = false
+          do {
+            let lRes = try await SupabaseManager.shared.client
+              .from("workout_likes")
+              .select("workout_id,user_id")
+              .eq("workout_id", value: id)
+              .limit(2000)
+              .execute()
+            let lRows = try JSONDecoder.supabase().decode([LikeRow].self, from: lRes.data)
+            likeCount = lRows.count
+            if let me = app.userId { isLiked = lRows.contains(where: { $0.user_id == me }) }
+          } catch { /* ignore */ }
+          
         let updated = FeedItem(
           id: w.id,
           workout: w,
           username: prof?.username ?? (w.user_id == me ? "You" : "—"),
           avatarURL: prof?.avatar_url,
-          score: score
+          score: score,
+          likeCount: likeCount,
+          isLiked: isLiked
         )
         print("[Home.refreshOne] will update feed on main…")
 
@@ -574,12 +623,13 @@ struct HomeView: View {
     }
     
     private func recalcHomeSummaries() async {
-      async let t: Void = loadTodaySummary()
-      async let w: Void = loadWeekSummaryAndLeaderboard()
-      async let s: Void = loadStreak()
-      async let r: Void = loadRecentPRs()
-      async let m: Void = loadMonthlySummary()
-      _ = await (t, w, s, r, m)
+        async let t: Void = loadTodaySummary()
+        async let w: Void = loadWeekSummaryAndLeaderboard()
+        async let s: Void = loadStreak()
+        async let r: Void = loadRecentPRs()
+        async let m: Void = loadMonthlySummary()
+        async let i: Void = loadInsights()
+        _ = await (t, w, s, r, m, i)
     }
 
     private func loadWeekSummaryAndLeaderboard() async {
@@ -815,6 +865,134 @@ struct HomeView: View {
         await MainActor.run { self.monthSummary = summary }
       } catch {
         // silenciar por ahora
+      }
+    }
+    
+    // MARK: - Insights
+
+    private func loadInsights() async {
+      async let a: Void = loadStrongestWeekMTD()
+      async let b: Void = loadBestSportMatch()
+      _ = await (a, b)
+    }
+
+    /// Semana más fuerte del mes actual (MTD) por puntos totales.
+    private func loadStrongestWeekMTD() async {
+      guard let me = app.userId else { return }
+      var cal = Calendar.current; cal.timeZone = .current
+
+      // Rango MTD
+      let now = Date()
+      guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) else { return }
+      let monthEnd = now
+
+      let iso = ISO8601DateFormatter()
+      iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+      iso.timeZone = .current
+
+      struct W: Decodable { let id: Int; let started_at: Date? }
+
+      do {
+        let wRes = try await SupabaseManager.shared.client
+          .from("workouts")
+          .select("id,started_at")
+          .eq("user_id", value: me.uuidString)
+          .gte("started_at", value: iso.string(from: monthStart))
+          .lt("started_at", value: iso.string(from: monthEnd))
+          .order("started_at", ascending: false)
+          .execute()
+        let rows = try JSONDecoder.supabase().decode([W].self, from: wRes.data)
+        let ids = rows.map { $0.id }
+
+        var scoreByWorkout: [Int: Double] = [:]
+        if !ids.isEmpty {
+          let sRes = try await SupabaseManager.shared.client
+            .from("workout_scores")
+            .select("workout_id,score")
+            .in("workout_id", values: ids)
+            .execute()
+          struct S: Decodable { let workout_id: Int; let score: Decimal }
+          let sRows = try JSONDecoder.supabase().decode([S].self, from: sRes.data)
+          for s in sRows {
+            scoreByWorkout[s.workout_id, default: 0] += NSDecimalNumber(decimal: s.score).doubleValue
+          }
+        }
+
+        // Agrupar por semana ISO dentro del mes
+        var byWeek: [String: Double] = [:]
+        for w in rows {
+          guard let d = w.started_at else { continue }
+          let comp = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: d)
+          let key = "\(comp.yearForWeekOfYear ?? 0)-W\(comp.weekOfYear ?? 0)"
+          byWeek[key, default: 0] += (scoreByWorkout[w.id] ?? 0)
+        }
+
+        let best = Int(byWeek.values.max()?.rounded() ?? 0)
+        await MainActor.run { self.strongestWeekPtsMTD = best }
+      } catch { /* ignore */ }
+    }
+
+    /// Mejor partido de deporte por score total (all-time, muestra el nombre del deporte).
+    private func loadBestSportMatch() async {
+      guard let me = app.userId else { return }
+
+      // 1) Obtener mis workouts de tipo sport
+      let wRes = try? await SupabaseManager.shared.client
+        .from("workouts")
+        .select("id")
+        .eq("user_id", value: me.uuidString)
+        .eq("kind", value: "sport")
+        .order("started_at", ascending: false)
+        .limit(800) // margen razonable
+        .execute()
+      struct WID: Decodable { let id: Int }
+      let wIds = (try? JSONDecoder.supabase().decode([WID].self, from: wRes?.data ?? Data()))?.map { $0.id } ?? []
+
+      guard !wIds.isEmpty else {
+        await MainActor.run {
+          self.bestSportScore = 0
+          self.bestSportLabel = ""
+        }
+        return
+      }
+
+      // 2) Cargar etiquetas de deporte para esos workouts
+      let sRes = try? await SupabaseManager.shared.client
+        .from("sport_sessions")
+        .select("workout_id,sport")
+        .in("workout_id", values: wIds)
+        .execute()
+      struct SS: Decodable { let workout_id: Int; let sport: String }
+      let sessions = (try? JSONDecoder.supabase().decode([SS].self, from: sRes?.data ?? Data())) ?? []
+
+      // 3) Puntos de cada workout
+      let scRes = try? await SupabaseManager.shared.client
+        .from("workout_scores")
+        .select("workout_id,score")
+        .in("workout_id", values: wIds)
+        .execute()
+      struct SRow: Decodable { let workout_id: Int; let score: Decimal }
+      let scores = (try? JSONDecoder.supabase().decode([SRow].self, from: scRes?.data ?? Data())) ?? []
+
+      var totalByWorkout: [Int: Double] = [:]
+      for s in scores {
+        totalByWorkout[s.workout_id, default: 0] += NSDecimalNumber(decimal: s.score).doubleValue
+      }
+
+      // 4) Máximo
+      var bestScore = 0
+      var bestLabel = ""
+      for ss in sessions {
+        let sc = Int((totalByWorkout[ss.workout_id] ?? 0).rounded())
+        if sc > bestScore {
+          bestScore = sc
+          bestLabel = ss.sport.capitalized
+        }
+      }
+
+      await MainActor.run {
+        self.bestSportScore = bestScore
+        self.bestSportLabel = bestLabel
       }
     }
 
@@ -1113,6 +1291,34 @@ private struct HighlightsCard: View {
   }
 }
 
+private struct InsightsRow: View {
+  let strongestWeekPts: Int
+  let bestSportScore: Int
+  let bestSportLabel: String
+
+    var body: some View {
+      HStack(spacing: 8) {
+        InsightPill(text: "💪 Strongest week: \(strongestWeekPts) pts")
+        if bestSportScore > 0 {
+          Spacer(minLength: 8)  // << empuja la segunda pill al borde derecho
+          InsightPill(text: "⚽ Best sport: \(bestSportScore) (\(bestSportLabel))")
+        }
+      }
+      .frame(maxWidth: .infinity) // el Spacer hace el trabajo de estirar
+    }
+
+  private struct InsightPill: View {
+    let text: String
+    var body: some View {
+      Text(text)
+        .font(.caption.weight(.semibold))
+        .padding(.vertical, 6).padding(.horizontal, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.18)))
+    }
+  }
+}
+
 
 private struct HomeFeedCard: View {
   let item: HomeView.FeedItem
@@ -1143,11 +1349,24 @@ private struct HomeFeedCard: View {
             .overlay(Capsule().stroke(Color.white.opacity(0.12)))
         }
 
-        Spacer()
+          Spacer()
 
-        if let sc = item.score {
-          scorePill(score: sc, kind: item.workout.kind)
-        }
+          // Puntuación (si existe)
+          if let sc = item.score {
+            scorePill(score: sc, kind: item.workout.kind)
+          }
+
+          // Likes
+          HStack(spacing: 6) {
+            Image(systemName: item.isLiked ? "heart.fill" : "heart")
+              .symbolRenderingMode(.palette)
+              .foregroundStyle(item.isLiked ? .red : .secondary)
+            Text("\(item.likeCount)")
+              .font(.subheadline.weight(.semibold))
+          }
+          .padding(.vertical, 6)
+          .padding(.horizontal, 10)
+          .background(.ultraThinMaterial, in: Capsule())
       }
       .padding(14)
     }
