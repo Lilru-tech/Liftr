@@ -758,12 +758,10 @@ struct HomeView: View {
       var cal = Calendar.current
       cal.timeZone = .current
 
-        // Mes actual (MTD): desde el primer día del mes hasta ahora
         let now = Date()
         guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) else { return }
-        let monthEnd = now // MTD
+        let monthEnd = now
 
-        // Mes anterior completo (para delta)
         guard let prevStart = cal.date(byAdding: .month, value: -1, to: monthStart) else { return }
         let prevEnd = monthStart
 
@@ -774,7 +772,6 @@ struct HomeView: View {
       struct W: Decodable { let id: Int; let started_at: Date? }
 
       do {
-        // --- Mes cerrado (M-1)
         let wRes = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id,started_at")
@@ -798,8 +795,6 @@ struct HomeView: View {
             scoreByWorkout[s.workout_id, default: 0] += NSDecimalNumber(decimal: s.score).doubleValue
           }
         }
-
-        // Serie diaria (score por día)
         var seriesMap: [Date: Double] = [:]
         var cursor = monthStart
         while cursor < monthEnd {
@@ -822,8 +817,6 @@ struct HomeView: View {
 
         let totalScore = Int(points.reduce(0) { $0 + $1.value }.rounded())
         let workoutsCount = rows.count
-
-        // --- Mes previo a M-1 (para comparar)
         let pwRes = try await SupabaseManager.shared.client
           .from("workouts")
           .select("id")
@@ -864,11 +857,8 @@ struct HomeView: View {
 
         await MainActor.run { self.monthSummary = summary }
       } catch {
-        // silenciar por ahora
       }
     }
-    
-    // MARK: - Insights
 
     private func loadInsights() async {
       async let a: Void = loadStrongestWeekMTD()
@@ -876,16 +866,12 @@ struct HomeView: View {
       _ = await (a, b)
     }
 
-    /// Semana más fuerte del mes actual (MTD) por puntos totales.
     private func loadStrongestWeekMTD() async {
       guard let me = app.userId else { return }
       var cal = Calendar.current; cal.timeZone = .current
-
-      // Rango MTD
       let now = Date()
       guard let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) else { return }
       let monthEnd = now
-
       let iso = ISO8601DateFormatter()
       iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
       iso.timeZone = .current
@@ -918,7 +904,6 @@ struct HomeView: View {
           }
         }
 
-        // Agrupar por semana ISO dentro del mes
         var byWeek: [String: Double] = [:]
         for w in rows {
           guard let d = w.started_at else { continue }
@@ -929,21 +914,18 @@ struct HomeView: View {
 
         let best = Int(byWeek.values.max()?.rounded() ?? 0)
         await MainActor.run { self.strongestWeekPtsMTD = best }
-      } catch { /* ignore */ }
+      } catch { }
     }
 
-    /// Mejor partido de deporte por score total (all-time, muestra el nombre del deporte).
     private func loadBestSportMatch() async {
       guard let me = app.userId else { return }
-
-      // 1) Obtener mis workouts de tipo sport
       let wRes = try? await SupabaseManager.shared.client
         .from("workouts")
         .select("id")
         .eq("user_id", value: me.uuidString)
         .eq("kind", value: "sport")
         .order("started_at", ascending: false)
-        .limit(800) // margen razonable
+        .limit(800)
         .execute()
       struct WID: Decodable { let id: Int }
       let wIds = (try? JSONDecoder.supabase().decode([WID].self, from: wRes?.data ?? Data()))?.map { $0.id } ?? []
@@ -956,7 +938,6 @@ struct HomeView: View {
         return
       }
 
-      // 2) Cargar etiquetas de deporte para esos workouts
       let sRes = try? await SupabaseManager.shared.client
         .from("sport_sessions")
         .select("workout_id,sport")
@@ -964,8 +945,6 @@ struct HomeView: View {
         .execute()
       struct SS: Decodable { let workout_id: Int; let sport: String }
       let sessions = (try? JSONDecoder.supabase().decode([SS].self, from: sRes?.data ?? Data())) ?? []
-
-      // 3) Puntos de cada workout
       let scRes = try? await SupabaseManager.shared.client
         .from("workout_scores")
         .select("workout_id,score")
@@ -978,8 +957,6 @@ struct HomeView: View {
       for s in scores {
         totalByWorkout[s.workout_id, default: 0] += NSDecimalNumber(decimal: s.score).doubleValue
       }
-
-      // 4) Máximo
       var bestScore = 0
       var bestLabel = ""
       for ss in sessions {
@@ -1092,7 +1069,6 @@ private struct MonthlySummaryCard: View {
         .buttonStyle(.plain)
 
         if expanded {
-          // Sparkline
           Chart(summary.series) { p in
             LineMark(
               x: .value("Day", p.label),
@@ -1152,8 +1128,6 @@ private struct MonthlySummaryCard: View {
         .foregroundStyle(.secondary)
     }
   }
-
-  // Render del propio card a UIImage (iOS 16+)
   private func renderCard() -> UIImage? {
     let renderer = ImageRenderer(content:
       VStack(alignment: .leading, spacing: 10) {
@@ -1178,7 +1152,7 @@ private struct MonthlySummaryCard: View {
       .padding(14)
       .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
       .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-      .frame(width: 360) // tamaño cómodo para compartir
+      .frame(width: 360)
     )
     renderer.scale = UIScreen.main.scale
     return renderer.uiImage
@@ -1300,11 +1274,11 @@ private struct InsightsRow: View {
       HStack(spacing: 8) {
         InsightPill(text: "💪 Strongest week: \(strongestWeekPts) pts")
         if bestSportScore > 0 {
-          Spacer(minLength: 8)  // << empuja la segunda pill al borde derecho
+          Spacer(minLength: 8)
           InsightPill(text: "⚽ Best sport: \(bestSportScore) (\(bestSportLabel))")
         }
       }
-      .frame(maxWidth: .infinity) // el Spacer hace el trabajo de estirar
+      .frame(maxWidth: .infinity)
     }
 
   private struct InsightPill: View {
@@ -1351,12 +1325,10 @@ private struct HomeFeedCard: View {
 
           Spacer()
 
-          // Puntuación (si existe)
           if let sc = item.score {
             scorePill(score: sc, kind: item.workout.kind)
           }
 
-          // Likes
           HStack(spacing: 6) {
             Image(systemName: item.isLiked ? "heart.fill" : "heart")
               .symbolRenderingMode(.palette)

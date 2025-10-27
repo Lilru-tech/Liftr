@@ -35,6 +35,8 @@ struct WorkoutDetailView: View {
   @State private var likeBusy = false
   @State private var showLikesSheet = false
   @State private var likers: [ProfileRow] = []
+  @State private var loadLikesRequestId = 0
+  @State private var showCommentsSheet = false
 
   var body: some View {
     ScrollView {
@@ -55,32 +57,8 @@ struct WorkoutDetailView: View {
                     .lineLimit(2)
                 }
                 Spacer()
-                if let sc = totalScore {
-                  scorePill(score: sc, kind: w.kind)
-                }
-                  
-                  Button {
-                    Task { await toggleLike() }
-                  } label: {
-                    HStack(spacing: 6) {
-                      Image(systemName: isLiked ? "heart.fill" : "heart")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(isLiked ? .red : .secondary)
-                        Text("\(likeCount)")
-                          .font(.subheadline.weight(.semibold))
-                          .onTapGesture { Task { await showLikers() } }
-                    }
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 10)
-                    .background(.ultraThinMaterial, in: Capsule())
-                  }
-                  .disabled(likeBusy)
-                  .contextMenu {
-                    Button {
-                      Task { await showLikers() }
-                    } label: {
-                      Label("View likes", systemImage: "person.2.fill")
-                    }
+                  if let sc = totalScore {
+                    scorePill(score: sc, kind: w.kind)
                   }
               }
 
@@ -130,15 +108,69 @@ struct WorkoutDetailView: View {
           default:
             EmptyView()
           }
+              VStack(alignment: .leading, spacing: 10) {
+                Text("Feedback").font(.headline)
+
+                HStack(spacing: 10) {
+                  Button {
+                    Task { await toggleLike() }
+                  } label: {
+                    HStack(spacing: 6) {
+                      Image(systemName: isLiked ? "heart.fill" : "heart")
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(isLiked ? .red : .secondary)
+                      Text("\(likeCount)")
+                        .font(.subheadline.weight(.semibold))
+                        .onTapGesture { Task { await showLikers() } }
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(.ultraThinMaterial, in: Capsule())
+                  }
+                  .disabled(likeBusy)
+                  .contextMenu {
+                    Button {
+                      Task { await showLikers() }
+                    } label: {
+                      Label("View likes", systemImage: "person.2.fill")
+                    }
+                  }
+                  Button {
+                    showCommentsSheet = true
+                  } label: {
+                    HStack(spacing: 6) {
+                      Image(systemName: "bubble.right")
+                        .foregroundStyle(.secondary)
+                      Text("Comments")
+                        .font(.subheadline.weight(.semibold))
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(.ultraThinMaterial, in: Capsule())
+                  }
+
+                  Spacer()
+                }
+              }
+              .padding(14)
+              .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+              .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
         }
       }
       .padding(16)
     }
-    .task { await load(); await loadLikes() }
+    .task {
+      await load()
+      await loadLikes()
+      if likeCount > 0 { await loadLikers() }
+    }
     .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
       if let id = note.object as? Int, id == workoutId {
-        Task { await load(); await loadLikes() }
+          Task { await load() }
       }
+    }
+    .onChange(of: app.userId) { _, _ in
+      Task { await loadLikes() }
     }
     .gradientBG()
     .safeAreaPadding(.top, 2)
@@ -170,8 +202,21 @@ struct WorkoutDetailView: View {
     }
     .sheet(isPresented: $showLikesSheet) {
       LikersSheet(likers: likers)
+        .onAppear { Task { await loadLikers() } }
         .presentationDetents(Set([.medium, .large]))
         .presentationBackground(.ultraThinMaterial)
+    }
+    .sheet(isPresented: $showCommentsSheet) {
+      CommentsSheet(
+        workoutId: workoutId,
+        ownerId: ownerId,
+        onDidChange: {
+          await load()
+        }
+      )
+      .environmentObject(app)
+      .presentationDetents(Set([.large]))
+      .presentationBackground(.ultraThinMaterial)
     }
     .sheet(isPresented: $showEdit) {
       if let w = workout {
@@ -246,36 +291,37 @@ struct WorkoutDetailView: View {
     return String(format: "%d:%02d /km", m, sec)
   }
 
-    // MARK: - Likes
-
     private func loadLikes() async {
-      guard let me = app.userId else { return }
-      do {
-        // 1) ¿Yo he dado like?
-        let myRes = try await SupabaseManager.shared.client
-          .from("workout_likes")
-          .select("user_id")
-          .eq("workout_id", value: workoutId)
-          .eq("user_id", value: me.uuidString)
-          .limit(1)
-          .execute()
-        let mine = try JSONDecoder.supabase().decode([LikeRow].self, from: myRes.data)
+      let reqId = loadLikesRequestId + 1
+      await MainActor.run { loadLikesRequestId = reqId }
 
-        // 2) Contador total
-        let allRes = try await SupabaseManager.shared.client
+      do {
+        let countRes = try await SupabaseManager.shared.client
           .from("workout_likes")
-          .select("user_id")
+          .select("user_id", head: true, count: .exact)
           .eq("workout_id", value: workoutId)
-          .limit(2000)
           .execute()
-        let all = try JSONDecoder.supabase().decode([LikeRow].self, from: allRes.data)
+        let total = countRes.count ?? 0
+        var mine = false
+        if let me = app.userId {
+          let myRes = try await SupabaseManager.shared.client
+            .from("workout_likes")
+            .select("user_id")
+            .eq("workout_id", value: workoutId)
+            .eq("user_id", value: me.uuidString)
+            .limit(1)
+            .execute()
+          let rows = try JSONDecoder.supabase().decode([LikeRow].self, from: myRes.data)
+          mine = !rows.isEmpty
+        }
+        guard reqId == loadLikesRequestId else { return }
 
         await MainActor.run {
-          self.isLiked = !mine.isEmpty
-          self.likeCount = all.count
+          self.likeCount = total
+          self.isLiked = mine
         }
       } catch {
-        // Silenciar; no bloquear la UI por errores de conteo
+        print("loadLikes error:", error)
       }
     }
 
@@ -287,7 +333,6 @@ struct WorkoutDetailView: View {
 
       do {
         if isLiked {
-          // Quitar like
           _ = try await SupabaseManager.shared.client
             .from("workout_likes")
             .delete()
@@ -298,9 +343,8 @@ struct WorkoutDetailView: View {
             self.isLiked = false
             self.likeCount = max(0, self.likeCount - 1)
           }
-            Task { await loadLikers() }
+            Task { await loadLikers(); await loadLikes() }
         } else {
-          // Dar like
           struct LikeInsert: Encodable { let workout_id: Int; let user_id: UUID }
           _ = try await SupabaseManager.shared.client
             .from("workout_likes")
@@ -310,24 +354,24 @@ struct WorkoutDetailView: View {
             self.isLiked = true
             self.likeCount += 1
           }
-            Task { await loadLikers() }
+            Task { await loadLikers(); await loadLikes() }
         }
       } catch {
-        // Si falla, recargar estado real desde servidor
         await loadLikes()
       }
     }
-    
-    // MARK: - Likers list
 
     private func showLikers() async {
-      await loadLikers()
       await MainActor.run { showLikesSheet = true }
+      await loadLikers()
+      if self.likers.isEmpty, self.likeCount > 0 {
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        await loadLikers()
+      }
     }
 
     private func loadLikers() async {
       do {
-        // Traemos likes + perfil embebido (PostgREST)
          let res = try await SupabaseManager.shared.client
           .from("workout_likes")
           .select("user_id, created_at, profiles(user_id, username, avatar_url)")
@@ -345,7 +389,6 @@ struct WorkoutDetailView: View {
           var people: [ProfileRow] = rows.compactMap { $0.profiles }
 
           if people.isEmpty, !rows.isEmpty {
-            // Fallback: pedir perfiles por user_id para los que falten
             let ids = rows.map { $0.user_id.uuidString }
             let pRes = try await SupabaseManager.shared.client
               .from("profiles")
@@ -358,7 +401,6 @@ struct WorkoutDetailView: View {
 
           await MainActor.run { self.likers = people }
       } catch {
-        // No bloqueamos la UI; si falla, simplemente no mostramos resultados
         await MainActor.run { self.likers = [] }
       }
     }
@@ -838,40 +880,59 @@ private struct SportDetailBlock: View {
 private struct LikersSheet: View {
   let likers: [WorkoutDetailView.ProfileRow]
 
-  var body: some View {
-    VStack(alignment: .leading, spacing: 12) {
-      HStack {
-        Text("Likes").font(.title3.weight(.semibold))
-        Spacer()
-        Text("\(likers.count)")
-          .font(.subheadline.weight(.semibold))
-          .foregroundStyle(.secondary)
-      }
-      .padding(.bottom, 6)
-
-      if likers.isEmpty {
-        Text("No likes yet")
-          .font(.subheadline)
-          .foregroundStyle(.secondary)
-          .frame(maxWidth: .infinity, alignment: .center)
-          .padding(.vertical, 24)
-      } else {
-        List(likers, id: \.user_id) { p in
-          HStack(spacing: 12) {
-            AvatarView(urlString: p.avatar_url)
-              .frame(width: 36, height: 36)
-              .clipShape(RoundedRectangle(cornerRadius: 8))
-            Text("@\(p.username)")
-              .font(.body)
-            Spacer()
+    var body: some View {
+      VStack(alignment: .leading, spacing: 12) {
+        HStack {
+          Text("Likes").font(.title3.weight(.semibold))
+          Spacer()
+          HStack(spacing: 6) {
+            Image(systemName: "heart.fill")
+              .symbolRenderingMode(.hierarchical)
+            Text("\(likers.count)")
+              .font(.caption.weight(.semibold))
           }
-          .listRowBackground(Color.clear)
+          .padding(.vertical, 4)
+          .padding(.horizontal, 10)
+          .background(.ultraThinMaterial, in: Capsule())
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(Color.clear)
+
+        Divider().opacity(0.2)
+
+        if likers.isEmpty {
+          VStack(spacing: 8) {
+            Image(systemName: "heart")
+              .font(.system(size: 36, weight: .semibold))
+              .symbolRenderingMode(.hierarchical)
+              .foregroundStyle(.secondary)
+
+            Text("No likes yet")
+              .font(.headline)
+
+            Text("Be the first to like this workout.")
+              .font(.subheadline)
+              .foregroundStyle(.secondary)
+          }
+          .frame(maxWidth: .infinity, alignment: .center)
+          .padding(.vertical, 36)
+          .padding(.horizontal, 12)
+          .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        } else {
+          List(likers, id: \.user_id) { p in
+            HStack(spacing: 12) {
+              AvatarView(urlString: p.avatar_url)
+                .frame(width: 36, height: 36)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+              Text("@\(p.username)")
+                .font(.body)
+              Spacer()
+            }
+            .listRowBackground(Color.clear)
+          }
+          .listStyle(.plain)
+          .scrollContentBackground(.hidden)
+          .background(Color.clear)
+        }
       }
+      .padding(16)
     }
-    .padding(16)
-  }
 }

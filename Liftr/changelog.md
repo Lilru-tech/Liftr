@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.7.0] - 2025-10-27
+### Added
+- **WorkoutDetailView → Comments (v1.1)**
+  - **Reply UX**: inline “Reply” composer under each comment/reply.
+  - **Thread toggling**: “View X replies” now switches to **“Hide replies”** when expanded.
+  - **Comment likes**: heart toggle with live counter on both **top-level** comments and **replies** (optimistic UI).
+
+### Changed
+- **Replies loader**  
+  - `loadReplies(for:forceReload:)` added; used after posting a reply to **refresh the thread without a full screen reload**.
+  - When replying to a collapsed thread, the parent now **auto-expands** before reload.
+- **Like updates**  
+  - Optimistic updates for `likesCount` and `likedByMe` on target comment/reply, with backend **fallback sync** via `reloadSingle` on error.
+
+### Fixed
+- **Replies not appearing until manual refresh**: after posting a reply, the parent thread is **force-reloaded** and shown immediately.
+- **“View X replies” label** didn’t change to **“Hide replies”** when expanded — now toggles correctly.
+- **Soft-delete feedback**: deleted comments now **update instantly** in place and show a neutral **“Comment deleted”** placeholder.
+
+### Database
+- **No schema changes.**
+- Reads/Writes:
+  - `workout_comments` (insert replies, soft-delete with `deleted_at`, `deleted_by`)
+  - `workout_comment_likes` (insert/delete)
+  - `profiles` (display info)
+- **RLS unchanged.**
+
+[0.7.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.7.0  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.7.0...HEAD
+
 ## [0.6.7] - 2025-10-27
 ### Added
 - **Home → Likes on workout cards**
