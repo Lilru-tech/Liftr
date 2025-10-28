@@ -10,17 +10,19 @@ struct WorkoutDetailView: View {
   @State private var duplicateDraft: AddWorkoutDraft?
   private var canEdit: Bool { app.userId == ownerId }
 
-  struct WorkoutDetailRow: Decodable {
-    let id: Int
-    let user_id: UUID
-    let kind: String
-    let title: String?
-    let notes: String?
-    let started_at: Date?
-    let ended_at: Date?
-    let duration_min: Int?
-    let perceived_intensity: String?
-  }
+    struct WorkoutDetailRow: Decodable {
+      let id: Int
+      let user_id: UUID
+      let kind: String
+      let title: String?
+      let notes: String?
+      let started_at: Date?
+      let ended_at: Date?
+      let duration_min: Int?
+      let perceived_intensity: String?
+      let state: String
+    }
+    
   struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
   struct ScoreRow: Decodable { let workout_id: Int; let score: Decimal }
   @State private var workout: WorkoutDetailRow?
@@ -37,210 +39,284 @@ struct WorkoutDetailView: View {
   @State private var likers: [ProfileRow] = []
   @State private var loadLikesRequestId = 0
   @State private var showCommentsSheet = false
+  @State private var showErrorAlert = false
+  @State private var alertMessage = ""
 
-  var body: some View {
-    ScrollView {
-      VStack(spacing: 14) {
-        if let w = workout {
-          ZStack {
-            WorkoutCardBackground(kind: w.kind)
-            VStack(alignment: .leading, spacing: 10) {
-              HStack(alignment: .top, spacing: 10) {
-                AvatarView(urlString: profile?.avatar_url)
-                  .frame(width: 44, height: 44)
-                VStack(alignment: .leading, spacing: 4) {
-                  Text(profile.map { "@\($0.username)" } ?? "@user")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                  Text(w.title ?? w.kind.capitalized)
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(2)
-                }
-                Spacer()
-                  if let sc = totalScore {
-                    scorePill(score: sc, kind: w.kind)
-                  }
-              }
-
-              HStack(spacing: 10) {
-                Text(dateRange(w)).font(.footnote).foregroundStyle(.secondary)
-                if let dur = w.duration_min {
-                  Text("• \(dur) min")
-                    .font(.footnote).foregroundStyle(.secondary)
-                }
-                if let pi = w.perceived_intensity, !pi.isEmpty {
-                  Text("• \(pi.capitalized)")
-                    .font(.footnote).foregroundStyle(.secondary)
-                }
-                Spacer()
-                Text(w.kind.capitalized)
-                  .font(.caption2.weight(.semibold))
-                  .padding(.vertical, 4).padding(.horizontal, 8)
-                  .background(Capsule().fill(workoutTint(for: w.kind).opacity(0.15)))
-                  .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-              }
-            }
-            .padding(16)
-          }
-          .clipShape(RoundedRectangle(cornerRadius: 16))
-          .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.18)))
-        }
-        if let notes = workout?.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-          VStack(alignment: .leading, spacing: 8) {
-            Text("Notes").font(.headline)
-            Text(notes)
-              .frame(maxWidth: .infinity, alignment: .leading)
-              .foregroundStyle(.secondary)
-          }
-          .padding(14)
-          .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-          .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-        }
-
-          if let kind = workout?.kind {
-            switch kind.lowercased() {
-            case "strength":
-              StrengthDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
-            case "cardio":
-              CardioDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
-            case "sport":
-              SportDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
-          default:
-            EmptyView()
-          }
-              VStack(alignment: .leading, spacing: 10) {
-                Text("Feedback").font(.headline)
-
-                HStack(spacing: 10) {
-                  Button {
-                    Task { await toggleLike() }
-                  } label: {
-                    HStack(spacing: 6) {
-                      Image(systemName: isLiked ? "heart.fill" : "heart")
-                        .symbolRenderingMode(.palette)
-                        .foregroundStyle(isLiked ? .red : .secondary)
-                      Text("\(likeCount)")
-                        .font(.subheadline.weight(.semibold))
-                        .onTapGesture { Task { await showLikers() } }
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(.ultraThinMaterial, in: Capsule())
-                  }
-                  .disabled(likeBusy)
-                  .contextMenu {
-                    Button {
-                      Task { await showLikers() }
-                    } label: {
-                      Label("View likes", systemImage: "person.2.fill")
-                    }
-                  }
-                  Button {
-                    showCommentsSheet = true
-                  } label: {
-                    HStack(spacing: 6) {
-                      Image(systemName: "bubble.right")
-                        .foregroundStyle(.secondary)
-                      Text("Comments")
-                        .font(.subheadline.weight(.semibold))
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(.ultraThinMaterial, in: Capsule())
-                  }
-
-                  Spacer()
-                }
-              }
-              .padding(14)
-              .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-              .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-        }
+    var body: some View {
+      ScrollView {
+        content
       }
-      .padding(16)
-    }
-    .task {
-      await load()
-      await loadLikes()
-      if likeCount > 0 { await loadLikers() }
-    }
-    .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
-      if let id = note.object as? Int, id == workoutId {
+      .task {
+        await load()
+        await loadLikes()
+        if likeCount > 0 { await loadLikers() }
+      }
+      .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
+        if let id = note.object as? Int, id == workoutId {
           Task { await load() }
+        }
+      }
+      .onChange(of: app.userId) { _, _ in
+        Task { await loadLikes() }
+      }
+      .gradientBG()
+      .safeAreaPadding(.top, 2)
+      .navigationTitle(workout?.title ?? workout?.kind.capitalized ?? "Workout")
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar(.visible, for: .navigationBar)
+      .toolbarBackground(.visible, for: .navigationBar)
+      .toolbar { toolbarContent }
+      .sheet(isPresented: $showLikesSheet) { LikersSheet(likers: likers)
+          .onAppear { Task { await loadLikers() } }
+          .presentationDetents(Set([.medium, .large]))
+          .presentationBackground(.ultraThinMaterial)
+      }
+      .sheet(isPresented: $showCommentsSheet) {
+        CommentsSheet(
+          workoutId: workoutId,
+          ownerId: ownerId,
+          onDidChange: { await load() }
+        )
+        .environmentObject(app)
+        .presentationDetents(Set([.large]))
+        .presentationBackground(.ultraThinMaterial)
+      }
+      .sheet(isPresented: $showEdit) {
+        if let w = workout {
+          EditWorkoutMetaSheet(
+            kind: w.kind,
+            workoutId: workoutId,
+            initial: .init(
+              title: w.title ?? "",
+              notes: w.notes ?? "",
+              startedAt: w.started_at ?? .now,
+              endedAt: w.ended_at,
+              perceived: w.perceived_intensity ?? "moderate"
+            ),
+            onSaved: {
+              await load()
+              await loadLikes()
+              reloadKey = UUID()
+            }
+          )
+          .gradientBG()
+          .presentationDetents(Set([.medium, .large]))
+        }
       }
     }
-    .onChange(of: app.userId) { _, _ in
-      Task { await loadLikes() }
+    
+@ViewBuilder
+private var content: some View {
+  VStack(spacing: 14) {
+    if let w = workout {
+      workoutHeader(w)
     }
-    .gradientBG()
-    .safeAreaPadding(.top, 2)
-    .navigationTitle(workout?.title ?? workout?.kind.capitalized ?? "Workout")
-    .navigationBarTitleDisplayMode(.inline)
-    .toolbar(.visible, for: .navigationBar)
-    .toolbarBackground(.visible, for: .navigationBar)
-    .toolbar {
+
+    if let notes = workout?.notes,
+       !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      notesBlock(notes)
+    }
+
+    if let kind = workout?.kind {
+      workoutDetail(kind)
+      feedbackBlock
+    }
+  }
+  .padding(16)
+}
+    
+    @ViewBuilder
+    private func workoutHeader(_ w: WorkoutDetailRow) -> some View {
+      ZStack {
+        WorkoutCardBackground(kind: w.kind)
+        VStack(alignment: .leading, spacing: 10) {
+          HStack(alignment: .top, spacing: 10) {
+            AvatarView(urlString: profile?.avatar_url)
+              .frame(width: 44, height: 44)
+            VStack(alignment: .leading, spacing: 4) {
+              NavigationLink {
+                ProfileView(userId: ownerId).id(ownerId).gradientBG()
+              } label: {
+                Text("@\(profile?.username ?? "user")")
+                  .font(.subheadline.weight(.semibold))
+                  .foregroundStyle(.secondary)
+              }
+              .buttonStyle(.plain)
+
+              Text(w.title ?? w.kind.capitalized)
+                .font(.title3.weight(.semibold))
+                .lineLimit(2)
+            }
+            Spacer()
+            if let sc = totalScore {
+              scorePill(score: sc, kind: w.kind)
+            }
+          }
+
+          HStack(spacing: 10) {
+            Text(dateRange(w)).font(.footnote).foregroundStyle(.secondary)
+            if let dur = w.duration_min {
+              Text("• \(dur) min")
+                .font(.footnote).foregroundStyle(.secondary)
+            }
+            if let pi = w.perceived_intensity, !pi.isEmpty {
+              Text("• \(pi.capitalized)")
+                .font(.footnote).foregroundStyle(.secondary)
+            }
+            Spacer()
+              if w.state == "planned" {
+                draftBadge
+              }
+          }
+        }
+        .padding(16)
+      }
+      .clipShape(RoundedRectangle(cornerRadius: 16))
+      .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.18)))
+    }
+
+    private var draftBadge: some View {
+      HStack(spacing: 6) {
+        Image(systemName: "pencil")
+        Text("Draft")
+      }
+      .font(.caption2.weight(.semibold))
+      .padding(.vertical, 4)
+      .padding(.horizontal, 8)
+      .background(Capsule().fill(Color.yellow.opacity(0.22)))
+      .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+    }
+    
+    @ViewBuilder
+    private func notesBlock(_ notes: String) -> some View {
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Notes").font(.headline)
+        Text(notes)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .foregroundStyle(.secondary)
+      }
+      .padding(14)
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+      .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+    }
+
+    @ViewBuilder
+    private func workoutDetail(_ kind: String) -> some View {
+      switch kind.lowercased() {
+      case "strength":
+        StrengthDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
+      case "cardio":
+        CardioDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
+      case "sport":
+        SportDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
+      default:
+        EmptyView()
+      }
+    }
+
+    private var feedbackBlock: some View {
+      VStack(alignment: .leading, spacing: 10) {
+        Text("Feedback").font(.headline)
+        HStack(spacing: 10) {
+          likeButtonGroup
+          commentButton
+          Spacer()
+        }
+      }
+      .padding(14)
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+      .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+    }
+
+    private var likeButtonGroup: some View {
+      HStack(spacing: 0) {
+        Button {
+          Task { await toggleLike() }
+        } label: {
+          HStack(spacing: 6) {
+            Image(systemName: isLiked ? "heart.fill" : "heart")
+              .symbolRenderingMode(.palette)
+              .foregroundStyle(isLiked ? .red : .secondary)
+          }
+          .frame(height: 28)
+          .padding(.vertical, 8)
+          .padding(.leading, 12)
+          .padding(.trailing, 10)
+        }
+        .buttonStyle(.plain)
+        .disabled(likeBusy)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+          LongPressGesture(minimumDuration: 0.4).onEnded { _ in
+            Task { await showLikers() }
+          }
+        )
+
+        Divider()
+          .frame(height: 20)
+          .padding(.vertical, 6)
+          .opacity(0.25)
+
+        Button {
+          Task { await showLikers() }
+        } label: {
+          HStack(spacing: 6) {
+            Image(systemName: "person.2.fill")
+            Text("\(likeCount)").font(.subheadline.weight(.semibold))
+          }
+          .frame(height: 28)
+          .padding(.vertical, 8)
+          .padding(.horizontal, 12)
+        }
+        .buttonStyle(.plain)
+      }
+      .background(.ultraThinMaterial, in: Capsule())
+      .overlay(Capsule().stroke(.white.opacity(0.12)))
+    }
+
+    private var commentButton: some View {
+      Button { showCommentsSheet = true } label: {
+        HStack(spacing: 6) {
+          Image(systemName: "bubble.right").foregroundStyle(.secondary)
+          Text("Comments").font(.subheadline.weight(.semibold))
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+      }
+    }
+    
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
       if canEdit {
+        ToolbarItem(placement: .topBarTrailing) {
+          if let w = workout, w.state == "planned" {
+            Button("Publish") {
+              Task { await publishWorkout() }
+            }
+            .buttonStyle(.borderedProminent)
+          }
+        }
         ToolbarItem(placement: .topBarTrailing) {
           Menu {
             Button("Edit") { showEdit = true }
-              Button("Duplicate") {
-                Task {
-                  let d = await buildDuplicateDraft()
-                  await MainActor.run {
-                    guard let d else { return }
-                    app.addDraft = d
-                    app.addDraftKey = UUID()
-                    app.selectedTab = .add
-                  }
+            Button("Duplicate") {
+              Task {
+                let d = await buildDuplicateDraft()
+                await MainActor.run {
+                  guard let d else { return }
+                  app.addDraft = d
+                  app.addDraftKey = UUID()
+                  app.selectedTab = .add
                 }
               }
+            }
           } label: {
             Image(systemName: "ellipsis.circle")
           }
         }
       }
     }
-    .sheet(isPresented: $showLikesSheet) {
-      LikersSheet(likers: likers)
-        .onAppear { Task { await loadLikers() } }
-        .presentationDetents(Set([.medium, .large]))
-        .presentationBackground(.ultraThinMaterial)
-    }
-    .sheet(isPresented: $showCommentsSheet) {
-      CommentsSheet(
-        workoutId: workoutId,
-        ownerId: ownerId,
-        onDidChange: {
-          await load()
-        }
-      )
-      .environmentObject(app)
-      .presentationDetents(Set([.large]))
-      .presentationBackground(.ultraThinMaterial)
-    }
-    .sheet(isPresented: $showEdit) {
-      if let w = workout {
-        EditWorkoutMetaSheet(
-          kind: w.kind,
-          workoutId: workoutId,
-          initial: .init(
-            title: w.title ?? "",
-            notes: w.notes ?? "",
-            startedAt: w.started_at ?? .now,
-            endedAt: w.ended_at,
-            perceived: w.perceived_intensity ?? "moderate"
-          ),
-          onSaved: {
-              await load()
-              await loadLikes()
-              reloadKey = UUID()
-          }
-        )
-        .gradientBG()
-        .presentationDetents(Set([.medium, .large]))
-      }
-    }
-  }
 
   private func load() async {
     loading = true; defer { loading = false }
@@ -402,6 +478,73 @@ struct WorkoutDetailView: View {
           await MainActor.run { self.likers = people }
       } catch {
         await MainActor.run { self.likers = [] }
+      }
+    }
+    
+    private func publishWorkout() async {
+      guard let me = app.userId else { return }
+        if let w = workout, w.state != "planned" {
+          print("[Publish] skipped: state is already '\(w.state)'")
+          return
+        }
+
+      do {
+        let newStarted = workout?.started_at ?? Date()
+
+        struct WorkoutUpdate: Encodable {
+          let state: String
+          let started_at: Date
+        }
+          let payload = WorkoutUpdate(state: "published", started_at: newStarted)
+
+        let res = try await SupabaseManager.shared.client
+          .from("workouts")
+          .update(payload)
+          .eq("id", value: workoutId)
+          .eq("user_id", value: me.uuidString)
+          .select("*")
+          .single()
+          .execute()
+          print("[Publish] status =", res.response.statusCode)
+          let bodyStr = String(data: res.data, encoding: .utf8) ?? ""
+          print("[Publish] body   =", bodyStr)
+          let trimmed = bodyStr.trimmingCharacters(in: .whitespacesAndNewlines)
+          if trimmed == "[]" || trimmed.isEmpty {
+            throw NSError(domain: "Publish", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey:
+                                     "No se actualizó ninguna fila (RLS o user_id no coincide)."])
+          }
+
+        let updated = try JSONDecoder.supabase().decode(WorkoutDetailRow.self, from: res.data)
+
+        await MainActor.run {
+          self.workout = updated
+          self.error = nil
+        }
+          if updated.state == "planned" {
+            print("[Publish][WARN] UI still shows planned, forcing reload()")
+            await load()
+          }
+
+          var ui: [String: Any] = ["kind": updated.kind, "state": updated.state]
+          if let t = updated.title { ui["title"] = t }
+          if let s = updated.started_at { ui["started_at"] = s }
+          if let e = updated.ended_at { ui["ended_at"] = e }
+
+          NotificationCenter.default.post(
+            name: .workoutUpdated,
+            object: workoutId,
+            userInfo: ui
+          )
+
+        print("[Publish] done. state=\(updated.state)")
+      } catch {
+        print("[Publish][ERROR]", error.localizedDescription)
+        await MainActor.run {
+          self.alertMessage = error.localizedDescription
+          self.showErrorAlert = true
+          self.error = error.localizedDescription
+        }
       }
     }
     

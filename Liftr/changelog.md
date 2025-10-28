@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.7.1] - 2025-10-28  
+### Added  
+- **Workout Planner (v1)**  
+  - Introduced the **Plan mode** in the Add Workout screen, allowing users to schedule workouts ahead of time.  
+  - Planned workouts appear in Home as **“Draft”** until published.  
+  - Added **state transitions** (`planned → published`) with proper UI refresh and Realtime sync.  
+
+- **New Exercises are highlighted**  
+  - When adding a new exercise, it is hightlighet to give more visibility
+
+- **Delete Exercises confirmation modal**  
+  - When deleting an exercise, a modal to confirm appears. This is due to avoid missclicks in the delete exercise option
+
+### Changed  
+- **Logo update**  
+  - Replaced the previous app logo and icon with a refreshed, modernized version.  
+
+- **Profile navigation flow**  
+  - Improved user profile routing from Home, Ranking, and Search tabs.  
+  - Added deep-link consistency to ensure profile reloads only when necessary.  
+
+- **Like button UX**  
+  - Adjusted tap area and gesture priority so that tapping the heart no longer opens the likes list.  
+  - Improved responsiveness and feedback animation when liking a workout.  
+
+### Fixed  
+- **Shared card visibility**  
+  - Fixed an issue where shared workout cards were sometimes invisible to followers due to missing RLS propagation.  
+  - Updated visibility checks to include shared workouts in the public feed.  
+
+### Database  
+- **Functions:**  
+  - Rebuilt `create_cardio_workout(...)` and `create_strength_workout(...)` to support planned/published states.  
+- **Tables:**  
+  - `workouts.state` now limited to `('planned', 'published', 'archived')`.  
+  - No structural changes to other tables.  
+- **RLS:**  
+  - Verified visibility propagation for shared workouts and planner-created entries.  
+
+[0.7.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.7.1  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.7.1...HEAD  
+
 ## [0.7.0] - 2025-10-27
 ### Added
 - **WorkoutDetailView → Comments (v1.1)**
