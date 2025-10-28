@@ -73,6 +73,13 @@ enum MatchResult: String, CaseIterable, Identifiable {
   }
 }
 
+enum PublishMode: String, CaseIterable, Identifiable {
+  case add, plan
+  var id: String { rawValue }
+  var label: String { self == .add ? "Add" : "Plan" }
+  var stateParam: String { self == .add ? "published" : "planned" }
+}
+
 struct ExercisePickerSheet: View {
   let all: [Exercise]
   @Binding var selected: Exercise?
@@ -378,6 +385,9 @@ struct AddWorkoutSheet: View {
   @State private var error: String?
   @State private var perceived: WorkoutIntensity = .moderate
   @State private var banner: Banner?
+  @State private var recentlyAddedExerciseId: UUID? = nil
+  @State private var confirmRemoveIndex: Int? = nil
+  @State private var publishMode: PublishMode = .add
     
     init(draft: AddWorkoutDraft? = nil) {
       if let d = draft {
@@ -416,6 +426,12 @@ struct AddWorkoutSheet: View {
                             .onChange(of: kind) { _, new in
                                 if new == .strength { Task { await loadCatalogIfNeeded() } }
                             }
+                        }
+                        Divider()
+                        FieldRowPlain("Mode") {
+                          Picker("", selection: $publishMode) {
+                            ForEach(PublishMode.allCases) { Text($0.label).tag($0) }
+                          }.pickerStyle(.segmented)
                         }
                         Divider()
                         FieldRowPlain("Title") { TextField("Title (optional)", text: $title).textFieldStyle(.plain) }
@@ -496,6 +512,23 @@ struct AddWorkoutSheet: View {
         }
     }
         .banner($banner)
+        .alert(
+          "Are you sure you want to remove the exercise?",
+          isPresented: Binding(
+            get: { confirmRemoveIndex != nil },
+            set: { if !$0 { confirmRemoveIndex = nil } }
+          )
+        ) {
+          Button("Remove", role: .destructive) {
+            if let idx = confirmRemoveIndex {
+              items.remove(at: idx)
+            }
+            confirmRemoveIndex = nil
+          }
+          Button("Cancel", role: .cancel) {
+            confirmRemoveIndex = nil
+          }
+        }
   }
 
     private var saveButton: some View {
@@ -519,108 +552,127 @@ struct AddWorkoutSheet: View {
     private var strengthSection: some View {
       Section {
         SectionCard {
-          ForEach(items.indices, id: \.self) { i in
-            if i != items.startIndex { Divider().padding(.vertical, 6) }
-            FieldRowPlain("Exercise") {
-              Button {
-                pickerHandle = .init(id: items[i].id)
-              } label: {
-                HStack {
-                  Image(systemName: "list.bullet.rectangle.portrait")
-                  Text(exerciseLabel(for: items[i]))
-                    .foregroundStyle(exerciseSelected(items[i]) ? .primary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                  Spacer()
-                  if loadingCatalog { ProgressView() }
+            ForEach(items.indices, id: \.self) { i in
+              if i != items.startIndex { Divider().padding(.vertical, 6) }
+
+              VStack(spacing: 0) {
+
+                FieldRowPlain("Exercise") {
+                  Button {
+                    pickerHandle = .init(id: items[i].id)
+                  } label: {
+                    HStack {
+                      Image(systemName: "list.bullet.rectangle.portrait")
+                      Text(exerciseLabel(for: items[i]))
+                        .foregroundStyle(exerciseSelected(items[i]) ? .primary : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                      Spacer()
+                      if loadingCatalog { ProgressView() }
+                    }
+                  }
+                  .buttonStyle(.plain)
+                  .disabled(loadingCatalog || catalog.isEmpty)
                 }
-              }
-              .buttonStyle(.plain)
-              .disabled(loadingCatalog || catalog.isEmpty)
-            }
 
-            Divider()
-
-            FieldRowPlain("Alias") {
-              TextField("Exercise name (optional)", text: $items[i].exerciseName)
-                .textFieldStyle(.plain)
-            }
-
-            Divider()
-
-            FieldRowPlain("Notes") {
-              TextField("Notes (exercise)", text: $items[i].notes)
-                .textFieldStyle(.plain)
-            }
-
-              ForEach(items[i].sets.indices, id: \.self) { s in
                 Divider()
-                HStack(spacing: 6) {
-                  Text("Set \(items[i].sets[s].setNumber)")
-                    .font(.subheadline)
-                    .frame(width: 46, alignment: .leading)
 
-                  Stepper("", value: $items[i].sets[s].setNumber, in: 1...99)
-                    .labelsHidden()
-                    .controlSize(.mini)
-                    .scaleEffect(0.74, anchor: .leading)
-                    .frame(width: 64)
+                FieldRowPlain("Alias") {
+                  TextField("Exercise name (optional)", text: $items[i].exerciseName)
+                    .textFieldStyle(.plain)
+                }
 
-                  TextField("Reps", value: $items[i].sets[s].reps, format: .number)
-                    .keyboardType(.numberPad)
-                    .frame(width: 44)
+                Divider()
 
-                  TextField("Weight kg", text: $items[i].sets[s].weightKg)
-                    .keyboardType(.decimalPad)
-                    .frame(width: 70)
+                FieldRowPlain("Notes") {
+                  TextField("Notes (exercise)", text: $items[i].notes)
+                    .textFieldStyle(.plain)
+                }
 
-                  TextField("RPE", text: $items[i].sets[s].rpe)
-                    .keyboardType(.decimalPad)
-                    .frame(width: 38)
+                ForEach(items[i].sets.indices, id: \.self) { s in
+                  Divider()
+                  HStack(spacing: 6) {
+                    Text("Set \(items[i].sets[s].setNumber)")
+                      .font(.subheadline)
+                      .frame(width: 46, alignment: .leading)
 
-                  TextField("Rest s", value: $items[i].sets[s].restSec, format: .number)
-                    .keyboardType(.numberPad)
-                    .frame(width: 54)
+                    Stepper("", value: $items[i].sets[s].setNumber, in: 1...99)
+                      .labelsHidden()
+                      .controlSize(.mini)
+                      .scaleEffect(0.74, anchor: .leading)
+                      .frame(width: 64)
 
-                  if items[i].sets.count > 1 {
+                    TextField("Reps", value: $items[i].sets[s].reps, format: .number)
+                      .keyboardType(.numberPad)
+                      .frame(width: 44)
+
+                    TextField("Weight kg", text: $items[i].sets[s].weightKg)
+                      .keyboardType(.decimalPad)
+                      .frame(width: 70)
+
+                    TextField("RPE", text: $items[i].sets[s].rpe)
+                      .keyboardType(.decimalPad)
+                      .frame(width: 38)
+
+                    TextField("Rest s", value: $items[i].sets[s].restSec, format: .number)
+                      .keyboardType(.numberPad)
+                      .frame(width: 54)
+
+                    if items[i].sets.count > 1 {
+                      Button(role: .destructive) {
+                        items[i].sets.remove(at: s)
+                      } label: { Image(systemName: "minus.circle.fill") }
+                      .buttonStyle(.borderless)
+                    }
+                  }
+                }
+
+                Divider().padding(.vertical, 4)
+                HStack {
+                  Button {
+                    items[i].sets.append(EditableSet(setNumber: 1))
+                  } label: { Label("Add set", systemImage: "plus.circle") }
+                  .buttonStyle(.borderless)
+
+                  Spacer()
+
+                  if items.count > 1 {
                     Button(role: .destructive) {
-                      items[i].sets.remove(at: s)
-                    } label: { Image(systemName: "minus.circle.fill") }
+                      confirmRemoveIndex = i
+                    } label: {
+                      HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                        Text("Remove exercise")
+                      }
+                    }
                     .buttonStyle(.borderless)
                   }
                 }
+
               }
-
-            Divider().padding(.vertical, 4)
-            HStack {
-                Button {
-                  items[i].sets.append(EditableSet(setNumber: 1))
-                } label: { Label("Add set", systemImage: "plus.circle") }
-                .buttonStyle(.borderless)
-
-              Spacer()
-
-              if items.count > 1 {
-                Button(role: .destructive) {
-                  items.remove(at: i)
-                } label: {
-                  HStack(spacing: 6) {
-                    Image(systemName: "trash")
-                    Text("Remove exercise")
-                  }
-                }
-                .buttonStyle(.borderless)
-              }
+              .padding(6)
+              .background(
+                RoundedRectangle(cornerRadius: 12)
+                  .fill(Color.yellow.opacity(items[i].id == recentlyAddedExerciseId ? 0.18 : 0))
+              )
+              .animation(.easeInOut(duration: 0.6), value: recentlyAddedExerciseId)
             }
-          }
 
           Divider().padding(.vertical, 6)
-          Button {
-            let nextOrder = (items.last?.orderIndex ?? 0) + 1
-            items.append(EditableExercise(orderIndex: nextOrder))
-          } label: {
-            Label("Add exercise", systemImage: "plus")
-          }
+            Button {
+              let nextOrder = (items.last?.orderIndex ?? 0) + 1
+              let new = EditableExercise(orderIndex: nextOrder)
+              items.append(new)
+              recentlyAddedExerciseId = new.id
+              Task {
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                await MainActor.run {
+                  if recentlyAddedExerciseId == new.id { recentlyAddedExerciseId = nil }
+                }
+              }
+            } label: {
+              Label("Add exercise", systemImage: "plus")
+            }
           .buttonStyle(.borderless)
           .padding(.top, 2)
         }
@@ -827,7 +879,8 @@ struct AddWorkoutSheet: View {
             p_started_at: iso.string(from: startedAt),
             p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
             p_notes: note.isEmpty ? nil : note,
-            p_perceived_intensity: perceived.rawValue
+            p_perceived_intensity: perceived.rawValue,
+            p_state: publishMode.stateParam
           )
         _ = try await client.rpc("create_strength_workout", params: params).execute()
 
@@ -836,25 +889,26 @@ struct AddWorkoutSheet: View {
         let paceAuto  = autoPaceSec(distanceKmText: cardio.distanceKm,
                                     durH: cardio.durH, durM: cardio.durM, durS: cardio.durS)
 
-        let params = RPCCardioParams(
-          p_user_id: userId,
-          p_modality: cardio.modality,
-          p_title: title.isEmpty ? nil : title,
-          p_started_at: iso.string(from: startedAt),
-          p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
-          p_notes: note.isEmpty ? nil : note,
-          p_distance_km: parseDouble(cardio.distanceKm),
-          p_duration_sec: durSecHMS ?? parseInt(cardio.durationSec),
-          p_avg_hr: parseInt(cardio.avgHR),
-          p_max_hr: parseInt(cardio.maxHR),
+          let params = RPCCardioParams(
+            p_user_id: userId,
+            p_modality: cardio.modality,
+            p_title: title.isEmpty ? nil : title,
+            p_started_at: iso.string(from: startedAt),
+            p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
+            p_notes: note.isEmpty ? nil : note,
+            p_distance_km: parseDouble(cardio.distanceKm),
+            p_duration_sec: durSecHMS ?? parseInt(cardio.durationSec),
+            p_avg_hr: parseInt(cardio.avgHR),
+            p_max_hr: parseInt(cardio.maxHR),
+            p_avg_pace_sec_per_km: paceAuto ?? parseInt(cardio.avgPaceSecPerKm),
+            p_elevation_gain_m: parseInt(cardio.elevationGainM),
+            p_perceived_intensity: perceived.rawValue,
+            p_state: publishMode.stateParam
+          )
 
-          p_avg_pace_sec_per_km: paceAuto ?? parseInt(cardio.avgPaceSecPerKm),
-
-          p_elevation_gain_m: parseInt(cardio.elevationGainM),
-          p_perceived_intensity: perceived.rawValue
-        )
-
-        _ = try await client.rpc("create_cardio_workout", params: params).execute()
+          _ = try await client
+            .rpc("create_cardio_workout_v1", params: RPCCardioWrapper(p: params))
+            .execute()
 
       case .sport:
           let minutes = parseInt(sport.durationMin) ?? durationMinutes
@@ -874,14 +928,15 @@ struct AddWorkoutSheet: View {
             p_match_score_text: sport.matchScoreText.trimmedOrNil,
             p_location: sport.location.trimmedOrNil,
             p_session_notes: sport.sessionNotes.trimmedOrNil,
-            p_perceived_intensity: perceived.rawValue
+            p_perceived_intensity: perceived.rawValue,
+            p_state: publishMode.stateParam
           )
 
           _ = try await client
             .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
             .execute()
       }
-        await showSuccessAndGoHome("Workout saved! 💪")
+        await showSuccessAndGoHome(publishMode == .add ? "Workout published! 💪" : "Workout planned! 🗓️")
     } catch {
       self.error = error.localizedDescription
     }
@@ -1078,6 +1133,7 @@ struct RPCStrengthParams: Encodable {
   let p_ended_at: String?
   let p_notes: String?
   let p_perceived_intensity: String?
+  let p_state: String
 
 
   struct StrengthItem: Encodable {
@@ -1097,7 +1153,7 @@ struct RPCStrengthParams: Encodable {
   }
 }
 
-private struct RPCCardioParams: Encodable {
+struct RPCCardioParams: Encodable {
   let p_user_id: UUID
   let p_modality: String
   let p_title: String?
@@ -1111,6 +1167,11 @@ private struct RPCCardioParams: Encodable {
   let p_avg_pace_sec_per_km: Int?
   let p_elevation_gain_m: Int?
   let p_perceived_intensity: String?
+  let p_state: String
+}
+
+struct RPCCardioWrapper: Encodable {
+  let p: RPCCardioParams
 }
 
 struct RPCSportParams: Encodable {
@@ -1129,6 +1190,7 @@ struct RPCSportParams: Encodable {
   let p_location: String?
   let p_session_notes: String?
   let p_perceived_intensity: String?
+  let p_state: String
 }
 
 struct RPCSportWrapper: Encodable {

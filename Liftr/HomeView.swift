@@ -7,20 +7,27 @@ extension Notification.Name {
   static let workoutDidChange = Notification.Name("workoutDidChange")
 }
 
+private struct ShareItem: Identifiable {
+  let id = UUID()
+  let image: UIImage
+}
+
 struct HomeView: View {
   @EnvironmentObject var app: AppState
 
   enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
   @State private var filter: KindFilter = .all
 
-  struct WorkoutRow: Decodable, Identifiable {
-    let id: Int
-    let user_id: UUID
-    let kind: String
-    let title: String?
-    let started_at: Date?
-    let ended_at: Date?
-  }
+    struct WorkoutRow: Decodable, Identifiable {
+      let id: Int
+      let user_id: UUID
+      let kind: String
+      let title: String?
+      let state: String
+      let started_at: Date?
+      let ended_at: Date?
+    }
+    
   private struct FollowRow: Decodable { let followee_id: UUID }
   struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
   private struct WorkoutScoreRow: Decodable { let workout_id: Int; let score: Decimal }
@@ -61,18 +68,19 @@ struct HomeView: View {
       let likeCount: Int
       let isLiked: Bool
 
-      func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(workout.kind)
-        hasher.combine(workout.title ?? "")
-        hasher.combine(workout.started_at?.timeIntervalSince1970 ?? 0)
-        hasher.combine(workout.ended_at?.timeIntervalSince1970 ?? 0)
-        hasher.combine(username)
-        hasher.combine(avatarURL ?? "")
-        hasher.combine(score ?? -1)
-        hasher.combine(likeCount)
-        hasher.combine(isLiked)
-      }
+        func hash(into hasher: inout Hasher) {
+          hasher.combine(id)
+          hasher.combine(workout.kind)
+          hasher.combine(workout.title ?? "")
+          hasher.combine(workout.started_at?.timeIntervalSince1970 ?? 0)
+          hasher.combine(workout.ended_at?.timeIntervalSince1970 ?? 0)
+          hasher.combine(workout.state)
+          hasher.combine(username)
+          hasher.combine(avatarURL ?? "")
+          hasher.combine(score ?? -1)
+          hasher.combine(likeCount)
+          hasher.combine(isLiked)
+        }
 
         static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
           lhs.id == rhs.id &&
@@ -80,6 +88,7 @@ struct HomeView: View {
           (lhs.workout.title ?? "") == (rhs.workout.title ?? "") &&
           (lhs.workout.started_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.started_at?.timeIntervalSince1970 ?? 0) &&
           (lhs.workout.ended_at?.timeIntervalSince1970 ?? 0) == (rhs.workout.ended_at?.timeIntervalSince1970 ?? 0) &&
+          lhs.workout.state == rhs.workout.state &&
           lhs.username == rhs.username &&
           (lhs.avatarURL ?? "") == (rhs.avatarURL ?? "") &&
           (lhs.score ?? -1) == (rhs.score ?? -1) &&
@@ -111,8 +120,7 @@ struct HomeView: View {
   @State private var strongestWeekPtsMTD = 0
   @State private var bestSportScore = 0
   @State private var bestSportLabel = ""
-  @State private var shareImage: UIImage?
-  @State private var showShareSheet = false
+  @State private var shareItem: ShareItem?
 
   private let highlightsInsertIndex = 5
 
@@ -140,13 +148,12 @@ struct HomeView: View {
         }
           
           if let summary = monthSummary {
-            MonthlySummaryCard(
-              summary: summary,
-              onShare: { image in
-                self.shareImage = image
-                self.showShareSheet = true
-              }
-            )
+              MonthlySummaryCard(
+                summary: summary,
+                onShare: { image in
+                  self.shareItem = ShareItem(image: image)
+                }
+              )
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .listRowBackground(Color.clear)
           }
@@ -206,10 +213,6 @@ struct HomeView: View {
         .onAppear {
           print("[Home.navDest.onAppear] showing WorkoutDetailView id=\(it.id) main=\(Thread.isMainThread)")
         }
-        .onDisappear {
-          print("[Home.navDest.onDisappear] leaving WorkoutDetailView id=\(it.id) main=\(Thread.isMainThread)")
-          selectedItem = nil
-        }
     }
     .onReceive(
       NotificationCenter.default.publisher(for: .workoutUpdated).receive(on: RunLoop.main)
@@ -226,7 +229,7 @@ struct HomeView: View {
       if let ui = note.userInfo {
         let keys = Array(ui.keys).map { "\($0)" }.joined(separator: ", ")
         print("[Home.onReceive workoutUpdated] id=\(id) userInfo.keys=[\(keys)]")
-        print("[Home.onReceive workoutUpdated] ui.title=\(String(describing: ui["title"])) ui.kind=\(String(describing: ui["kind"])) ui.started_at=\(String(describing: ui["started_at"])) ui.ended_at=\(String(describing: ui["ended_at"])) ui.score=\(String(describing: ui["score"]))")
+          print("[Home.onReceive workoutUpdated] ui.title=\(String(describing: ui["title"])) ui.kind=\(String(describing: ui["kind"])) ui.state=\(String(describing: ui["state"])) ui.started_at=\(String(describing: ui["started_at"])) ui.ended_at=\(String(describing: ui["ended_at"])) ui.score=\(String(describing: ui["score"]))")
       } else {
         print("[Home.onReceive workoutUpdated] id=\(id) userInfo=nil")
       }
@@ -246,14 +249,15 @@ struct HomeView: View {
         if let idx = feed.firstIndex(where: { $0.id == id }) {
           print("[Home.onReceive workoutUpdated] parcheando feed idx=\(idx) id=\(id)")
           let old = feed[idx]
-          let patched = WorkoutRow(
-            id: old.workout.id,
-            user_id: old.workout.user_id,
-            kind: kind,
-            title: title,
-            started_at: startedAt ?? old.workout.started_at,
-            ended_at: endedAt ?? old.workout.ended_at
-          )
+            let patched = WorkoutRow(
+              id: old.workout.id,
+              user_id: old.workout.user_id,
+              kind: kind,
+              title: title,
+              state: (ui["state"] as? String) ?? old.workout.state,
+              started_at: startedAt ?? old.workout.started_at,
+              ended_at: endedAt ?? old.workout.ended_at
+            )
 
           Task { await MainActor.run {
             feed[idx] = FeedItem(
@@ -268,8 +272,9 @@ struct HomeView: View {
               feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
               print("[Home.onReceive workoutUpdated] patched OK (title=\(title ?? "nil"), score=\(String(describing: newScore)))")
             }}
+            if ui["state"] == nil { Task { await refreshOne(id: id) } }
             Task { await recalcHomeSummaries() }
-            return
+            if (ui["state"] as? String) != nil { return } 
         } else {
           print("[Home.onReceive workoutUpdated] id=\(id) no estaba en feed visible → refreshOne()")
         }
@@ -298,10 +303,8 @@ struct HomeView: View {
       }
     }
     .onChange(of: filter) { _, _ in Task { await reloadAll() } }
-    .sheet(isPresented: $showShareSheet) {
-      if let img = shareImage {
-        ShareSheet(items: [img])
-      }
+    .sheet(item: $shareItem) { item in
+      ShareSheet(items: [item.image])
     }
   }
 
@@ -383,10 +386,11 @@ struct HomeView: View {
         let allIds = [me] + followees
         print("[Home.loadPage] fetching page=\(page) pageSize=\(pageSize) userIds=\(allIds.count)")
 
-        var q: PostgrestFilterBuilder = SupabaseManager.shared.client
-          .from("workouts")
-          .select("id, user_id, kind, title, started_at, ended_at")
-          .in("user_id", values: allIds.map { $0.uuidString })
+          var q: PostgrestFilterBuilder = SupabaseManager.shared.client
+            .from("workouts")
+            .select("id, user_id, kind, title, started_at, ended_at, state")
+            .in("user_id", values: allIds.map { $0.uuidString })
+            .or("user_id.eq.\(me.uuidString),state.neq.planned")
 
         if filter != .all {
           q = q.eq("kind", value: filter.rawValue.lowercased())
@@ -477,7 +481,7 @@ struct HomeView: View {
       do {
         let wRes = try await SupabaseManager.shared.client
           .from("workouts")
-          .select("id, user_id, kind, title, started_at, ended_at")
+          .select("id, user_id, kind, title, started_at, ended_at, state")
           .eq("id", value: id)
           .single()
           .execute()
@@ -577,7 +581,7 @@ struct HomeView: View {
 
         let wRes = try await SupabaseManager.shared.client
           .from("workouts")
-          .select("id, user_id, kind, title, started_at, ended_at")
+          .select("id, user_id, kind, title, started_at, ended_at, state")
           .eq("user_id", value: me.uuidString)
           .gte("started_at", value: iso.string(from: start))
           .lt("started_at", value: iso.string(from: end))
@@ -643,7 +647,7 @@ struct HomeView: View {
         let allIds = [me] + followees
         let allRes = try await SupabaseManager.shared.client
           .from("workouts")
-          .select("id, user_id, started_at, ended_at, kind, title")
+          .select("id, user_id, started_at, ended_at, kind, title, state")
           .in("user_id", values: allIds.map { $0.uuidString })
           .gte("started_at", value: iso.string(from: weekStart))
           .lt("started_at", value: iso.string(from: now))
@@ -653,7 +657,7 @@ struct HomeView: View {
 
         let meRes = try await SupabaseManager.shared.client
           .from("workouts")
-          .select("id, user_id, started_at, ended_at, kind, title")
+          .select("id, user_id, started_at, ended_at, kind, title, state")
           .eq("user_id", value: me.uuidString)
           .gte("started_at", value: iso.string(from: weekStart))
           .lt("started_at", value: iso.string(from: now))
@@ -1048,6 +1052,7 @@ private struct MonthlySummaryCard: View {
   let summary: HomeView.MonthSummary
   let onShare: (UIImage) -> Void
   @State private var expanded = false
+  @State private var cachedShareImage: UIImage? = nil
 
   var body: some View {
     VStack(alignment: .leading, spacing: 10) {
@@ -1088,14 +1093,20 @@ private struct MonthlySummaryCard: View {
               .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
           }
           .frame(height: 140)
-
+          .onAppear {
+            if cachedShareImage == nil {
+              cachedShareImage = renderCard()
+            }
+          }
           HStack {
             Spacer()
-            Button {
-              if let img = renderCard() { onShare(img) }
-            } label: {
-              Label("Share your progress", systemImage: "square.and.arrow.up")
-            }
+              Button {
+                if let img = cachedShareImage ?? renderCard() {
+                  onShare(img)
+                }
+              } label: {
+                Label("Share your progress", systemImage: "square.and.arrow.up")
+              }
             .buttonStyle(.borderedProminent)
           }
         }
@@ -1139,22 +1150,29 @@ private struct MonthlySummaryCard: View {
         Text(lineText).font(.subheadline).foregroundStyle(.secondary)
         Chart(summary.series) { p in
           LineMark(x: .value("Day", p.label), y: .value("Score", p.value))
+            .lineStyle(.init(lineWidth: 2))
             .interpolationMethod(.catmullRom)
           AreaMark(x: .value("Day", p.label), y: .value("Score", p.value)).opacity(0.15)
         }
         .chartPlotStyle { plotArea in
           plotArea
-            .background(Color.gray.opacity(0.18))
+            .background(Color.gray.opacity(0.12))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .frame(height: 140)
       }
       .padding(14)
-      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-      .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+      .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 14))
+      .overlay(
+        RoundedRectangle(cornerRadius: 14)
+          .stroke(Color.black.opacity(0.06))
+      )
+      .background(Color.white)
+      .environment(\.colorScheme, .light)
       .frame(width: 360)
     )
     renderer.scale = UIScreen.main.scale
+    renderer.isOpaque = true
     return renderer.uiImage
   }
 }
@@ -1300,46 +1318,82 @@ private struct HomeFeedCard: View {
   var body: some View {
     ZStack {
       WorkoutCardBackground(kind: item.workout.kind)
-      HStack(alignment: .top, spacing: 12) {
-        AvatarView(urlString: item.avatarURL)
-          .frame(width: 42, height: 42)
-          .clipShape(RoundedRectangle(cornerRadius: 10))
 
-        VStack(alignment: .leading, spacing: 4) {
-          HStack(spacing: 6) {
-            Text(item.username).font(.subheadline.weight(.semibold))
-          }
-          Text(item.workout.title ?? item.workout.kind.capitalized)
-            .font(.body).lineLimit(1)
-          if let d = item.workout.started_at {
-            Text(relative(d)).font(.caption2).foregroundStyle(.secondary)
+      VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .top, spacing: 12) {
+          AvatarView(urlString: item.avatarURL)
+            .frame(width: 42, height: 42)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+          VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+              Text(item.username)
+                .font(.subheadline.weight(.semibold))
+            }
+
+            if item.workout.state == "planned" {
+              Text(item.workout.title ?? item.workout.kind.capitalized)
+                .font(.body)
+                .italic()
+                .lineLimit(1)
+            } else {
+              Text(item.workout.title ?? item.workout.kind.capitalized)
+                .font(.body)
+                .lineLimit(1)
+            }
+
+            if let d = item.workout.started_at {
+              Text(relative(d))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            }
           }
 
+          Spacer()
+
+          VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 8) {
+              if let sc = item.score {
+                scorePill(score: sc, kind: item.workout.kind)
+              }
+
+              HStack(spacing: 6) {
+                Image(systemName: item.isLiked ? "heart.fill" : "heart")
+                  .symbolRenderingMode(.palette)
+                  .foregroundStyle(item.isLiked ? .red : .secondary)
+                Text("\(item.likeCount)")
+                  .font(.subheadline.weight(.semibold))
+              }
+              .padding(.vertical, 6)
+              .padding(.horizontal, 10)
+              .background(.ultraThinMaterial, in: Capsule())
+            }
+          }
+        }
+        HStack {
           Text(item.workout.kind.capitalized)
             .font(.caption2.weight(.semibold))
             .padding(.vertical, 3)
             .padding(.horizontal, 6)
             .background(Capsule().fill(workoutTint(for: item.workout.kind).opacity(0.18)))
             .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-        }
 
           Spacer()
 
-          if let sc = item.score {
-            scorePill(score: sc, kind: item.workout.kind)
+          if item.workout.state == "planned" {
+            HStack(spacing: 4) {
+              Image(systemName: "pencil")
+              Text("Draft")
+            }
+            .font(.caption2.weight(.semibold))
+            .padding(.vertical, 3)
+            .padding(.horizontal, 6)
+            .background(Capsule().fill(Color.yellow.opacity(0.22)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
           }
-
-          HStack(spacing: 6) {
-            Image(systemName: item.isLiked ? "heart.fill" : "heart")
-              .symbolRenderingMode(.palette)
-              .foregroundStyle(item.isLiked ? .red : .secondary)
-            Text("\(item.likeCount)")
-              .font(.subheadline.weight(.semibold))
-          }
-          .padding(.vertical, 6)
-          .padding(.horizontal, 10)
-          .background(.ultraThinMaterial, in: Capsule())
+        }
       }
+      .opacity(item.workout.state == "planned" ? 0.72 : 1.0)
       .padding(14)
     }
   }

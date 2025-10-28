@@ -156,7 +156,7 @@ struct CommentsSheet: View {
 
     do {
       let from = page * pageSize
-      let to   = from + pageSize - 1
+        let _ = from + pageSize - 1
         let res = try await SupabaseManager.shared.client
           .from("workout_comments")
           .select("*")
@@ -464,8 +464,6 @@ struct CommentsSheet: View {
                 .execute()
 
             await reloadSingle(commentId: commentId, at: nil)
-
-            // 🔄 Refrescar visualmente la lista tras borrar
             await MainActor.run {
                 let snapshot = items
                 items = snapshot
