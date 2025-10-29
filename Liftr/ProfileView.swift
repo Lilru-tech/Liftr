@@ -118,7 +118,7 @@ struct ProfileView: View {
   @State private var kindDistribution: [KindSlice] = []
   @State private var totalDurationMin: Int = 0
     
-    enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
+  enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
   @State private var tab: Tab = .calendar
 
   var body: some View {
@@ -177,7 +177,11 @@ struct ProfileView: View {
   }
     
     private var prsView: some View {
-      PRsListView(userId: viewingUserId)
+      PRsListView(
+        userId: viewingUserId,
+        viewedUsername: username,
+        enableCompareWithMe: !isOwnProfile
+      )
     }
 
     private var progressView: some View {
@@ -419,6 +423,17 @@ struct ProfileView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         Spacer()
+        NavigationLink {
+          AchievementsGridView(userId: viewingUserId, viewedUsername: username)
+            .gradientBG()
+        } label: {
+          Image(systemName: "trophy.fill")
+            .font(.title3.weight(.semibold))
+            .padding(8)
+            .background(.thinMaterial, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, 4)
         if !isOwnProfile {
           followButton
         }
@@ -509,7 +524,9 @@ struct ProfileView: View {
     private struct PRsListView: View {
       @EnvironmentObject var app: AppState
       let userId: UUID?
-
+      let viewedUsername: String
+      let enableCompareWithMe: Bool
+        
       enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
       @State private var filter: KindFilter = .all
       @State private var search: String = ""
@@ -563,6 +580,17 @@ struct ProfileView: View {
           .scrollContentBackground(.hidden)
           .listRowBackground(Color.clear)
           .background(Color.clear)
+        }
+        .toolbar {
+          if enableCompareWithMe, let myId = app.userId, let otherId = userId {
+            ToolbarItem(placement: .topBarTrailing) {
+              NavigationLink {
+                ComparePRsView(myUserId: myId, otherUserId: otherId, otherUsername: viewedUsername)
+              } label: {
+                Label("Compare", systemImage: "arrow.left.and.right.circle")
+              }
+            }
+          }
         }
         .task { await load() }
         .onChange(of: filter) { _, _ in Task { await load() } }
