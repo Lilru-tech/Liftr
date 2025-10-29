@@ -206,13 +206,16 @@ struct RegisterView: View {
       do {
         _ = try await client.auth.signUp(email: email, password: password, data: meta)
       } catch {
-        let msg = String(describing: error).lowercased()
+        let raw = String(describing: error)
+        print("🔴 signUp auth error:", raw)
+
+        let msg = raw.lowercased()
         if msg.contains("already registered") || msg.contains("user already registered") || msg.contains("exists") {
           self.error = "Email is already registered."
         } else if msg.contains("password") && msg.contains("length") {
           self.error = "Password must be at least 8 characters."
         } else {
-          self.error = error.localizedDescription
+          self.error = raw
         }
         return
       }

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.8.0] - 2025-10-29  
+### Added  
+- **Achievements System (v1)**  
+  - Implemented a complete **achievement framework** integrated with both frontend and database.  
+  - Achievements now automatically unlock when users meet specific milestones (e.g., workout count, distance, strength, comments, likes, followers).  
+  - Introduced **AchievementsGridView** for a clean, visual representation of all unlocked and locked achievements.  
+  - Each achievement displays its icon, progress state, and tooltip with description.  
+  - Added **meta-achievements** (e.g., unlock 10, 25, 50 achievements).  
+  - Backend function `check_and_unlock_achievements_for(user_id)` now manages unlocking logic across social, cardio, strength, and comment/like events.  
+
+- **PR Comparison (v1)**  
+  - Added **Personal Record comparison between users**, allowing athletes to see how their best lifts and times compare to other users in the community.  
+  - Comparison highlights **differences in top strength and cardio records**, showing where each user excels.  
+  - Accessible directly from **ProfileView → PRs tab**, with a clean comparative layout and stat highlighting.  
+
+### Changed  
+- **Profile → Achievements section**  
+  - Replaced static placeholder grid with fully functional `AchievementsGridView`.  
+  - Locked achievements now appear semi-transparent with tooltips explaining unlock criteria.  
+  - Layout optimized for both small and large device screens (dynamic grid columns).  
+
+### Database  
+- **Functions:**  
+  - Added `check_and_unlock_achievements_for(p_user_id uuid)` with complete logic for all achievement types.  
+  - Updated triggers to call this function automatically when relevant user actions occur (follow, like, comment, workout creation).  
+- **Tables:**  
+  - Added/updated `achievements` and `user_achievements` with all predefined milestone entries.  
+- **RLS:**  
+  - Confirmed secure visibility for achievements per authenticated user.  
+
+[0.7.2]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.8.0  
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.8.0...HEAD  
+
 ## [0.7.1] - 2025-10-28  
 ### Added  
 - **Workout Planner (v1)**  

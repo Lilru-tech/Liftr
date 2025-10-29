@@ -155,15 +155,15 @@ struct CommentsSheet: View {
     defer { Task { await MainActor.run { isLoading = false } } }
 
     do {
-      let from = page * pageSize
-        let _ = from + pageSize - 1
+        let from = page * pageSize
+        let to = from + pageSize - 1
         let res = try await SupabaseManager.shared.client
           .from("workout_comments")
-          .select("*")
+          .select("id,workout_id,parent_id,user_id,body,replies_count,likes_count,deleted_at,deleted_by,created_at,profiles!workout_comments_user_id_fkey(user_id,username,avatar_url)")
           .eq("workout_id", value: workoutId)
           .is("parent_id", value: nil)
           .order("created_at", ascending: true)
-          .limit(50)
+          .range(from: from, to: to)
           .execute()
         print("⤵️ workout_comments status:", res.status)
         if let raw = String(data: res.data, encoding: .utf8) {
