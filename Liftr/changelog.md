@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.9.0] - 2025-10-30
+### Added
+- **Workout Participants (v1)**
+  - Now you can **add users as participants** when creating or editing a workout.
+  - Participants are shown in the **WorkoutDetailView**.
+  - **Calendar highlights**:
+    - **Green** for your own workouts.
+    - **Yellow** for workouts where you participated in someone else’s session.
+  - **Day list** groups “Participated” sessions under a dedicated label.
+
+### Changed
+- **AddWorkoutSheet / EditWorkoutMetaSheet**
+  - Integrated participant picker and persistence when saving or duplicating workouts.
+- **ProfileView → Calendar**
+  - Merged own + participated activity to compute daily highlights and counts correctly.
+
+### Database
+- **Tables:** Uses existing `workout_participants` linkage.
+- **RLS:** Read policies confirmed so participants can view the workouts they joined.
+- **Functions:** No changes; handled via Supabase client inserts.
+
+[0.9.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.9.0
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.9.0...HEAD
+
 ## [0.8.0] - 2025-10-29  
 ### Added  
 - **Achievements System (v1)**  
@@ -37,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **RLS:**  
   - Confirmed secure visibility for achievements per authenticated user.  
 
-[0.7.2]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.8.0  
+[0.8.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.8.0  
 [Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.8.0...HEAD  
 
 ## [0.7.1] - 2025-10-28  

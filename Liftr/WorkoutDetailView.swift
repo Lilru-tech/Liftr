@@ -26,6 +26,14 @@ struct WorkoutDetailView: View {
   struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
   struct ScoreRow: Decodable { let workout_id: Int; let score: Decimal }
   @State private var workout: WorkoutDetailRow?
+    
+    struct ParticipantRow: Identifiable, Decodable, Hashable {
+      let user_id: UUID
+      let username: String?
+      let avatar_url: String?
+      var id: UUID { user_id }
+    }
+    
   @State private var profile: ProfileRow?
   @State private var totalScore: Double?
   @State private var loading = false
@@ -37,6 +45,7 @@ struct WorkoutDetailView: View {
   @State private var likeBusy = false
   @State private var showLikesSheet = false
   @State private var likers: [ProfileRow] = []
+  @State private var participants: [ParticipantRow] = []
   @State private var loadLikesRequestId = 0
   @State private var showCommentsSheet = false
   @State private var showErrorAlert = false
@@ -48,12 +57,13 @@ struct WorkoutDetailView: View {
       }
       .task {
         await load()
+        await loadParticipants()
         await loadLikes()
         if likeCount > 0 { await loadLikers() }
       }
       .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
         if let id = note.object as? Int, id == workoutId {
-          Task { await load() }
+          Task { await load(); await loadParticipants() }
         }
       }
       .onChange(of: app.userId) { _, _ in
@@ -111,7 +121,9 @@ private var content: some View {
     if let w = workout {
       workoutHeader(w)
     }
-
+      if !participants.isEmpty {
+        participantsBlock
+      }
     if let notes = workout?.notes,
        !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
       notesBlock(notes)
@@ -200,6 +212,35 @@ private var content: some View {
       .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
     }
 
+    private var participantsBlock: some View {
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Participants").font(.headline)
+
+        LazyVStack(spacing: 8) {
+          ForEach(participants, id: \.id) { p in
+            HStack(spacing: 10) {
+              AvatarView(urlString: p.avatar_url)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                NavigationLink {
+                  ProfileView(userId: p.user_id).id(p.user_id).gradientBG()
+                } label: {
+                  Text("@\(p.username ?? "user")")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                }
+                .buttonStyle(.plain)
+              Spacer()
+            }
+          }
+        }
+      }
+      .padding(14)
+      .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+      .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+    }
+    
     @ViewBuilder
     private func workoutDetail(_ kind: String) -> some View {
       switch kind.lowercased() {
@@ -481,6 +522,29 @@ private var content: some View {
       }
     }
     
+    private func loadParticipants() async {
+      do {
+        let res = try await SupabaseManager.shared.client
+          .from("workout_participants")
+          .select("user_id, profiles!workout_participants_user_id_fkey(username, avatar_url)")
+          .eq("workout_id", value: workoutId)
+          .execute()
+
+        struct Wire: Decodable {
+          let user_id: UUID
+          let profiles: Profile?
+          struct Profile: Decodable { let username: String?; let avatar_url: String? }
+        }
+        let rows = try JSONDecoder.supabase().decode([Wire].self, from: res.data)
+        let mapped: [ParticipantRow] = rows.map {
+          ParticipantRow(user_id: $0.user_id, username: $0.profiles?.username, avatar_url: $0.profiles?.avatar_url)
+        }
+        await MainActor.run { self.participants = mapped }
+      } catch {
+        await MainActor.run { self.participants = [] }
+      }
+    }
+    
     private func publishWorkout() async {
       guard let me = app.userId else { return }
         if let w = workout, w.state != "planned" {
@@ -538,6 +602,7 @@ private var content: some View {
           )
 
         print("[Publish] done. state=\(updated.state)")
+          await loadParticipants()
       } catch {
         print("[Publish][ERROR]", error.localizedDescription)
         await MainActor.run {
@@ -704,7 +769,29 @@ private var content: some View {
 
       default: break
       }
+        do {
+          let partRes = try await SupabaseManager.shared.client
+            .from("workout_participants")
+            .select("user_id, profiles!workout_participants_user_id_fkey(username, avatar_url)")
+            .eq("workout_id", value: workoutId)
+            .execute()
 
+          struct PWire: Decodable {
+            let user_id: UUID
+            let profiles: Profile?
+            struct Profile: Decodable { let username: String?; let avatar_url: String? }
+          }
+          let rows = try JSONDecoder.supabase().decode([PWire].self, from: partRes.data)
+          let mapped = rows.map {
+            LightweightProfile(user_id: $0.user_id,
+                               username: $0.profiles?.username,
+                               avatar_url: $0.profiles?.avatar_url)
+          }
+          let unique = Dictionary(grouping: mapped, by: { $0.user_id }).compactMap { $0.value.first }
+          draft.participants = unique
+        } catch {
+          draft.participants = []
+        }
       return draft
     }
 }

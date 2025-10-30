@@ -26,6 +26,7 @@ private struct DayActivity: Decodable, Identifiable {
 
 private struct WorkoutRow: Decodable, Identifiable {
   let id: Int
+  let user_id: UUID
   let kind: String
   let title: String?
   let started_at: Date?
@@ -102,6 +103,8 @@ struct ProfileView: View {
   @State private var monthDate = Date()
   @State private var monthDays: [Date?] = []
   @State private var activity: [Date: Int] = [:]
+  @State private var ownActivity: [Date: Int] = [:]
+  @State private var participantActivity: [Date: Int] = [:]
   @State private var selectedDay: Date?
   @State private var bio: String? = nil
   @State private var showEditProfile = false
@@ -152,6 +155,13 @@ struct ProfileView: View {
             await loadProfileHeader()
             await refreshFollowState()
             await loadProgress()
+          }
+          .onChange(of: app.userId) { _, _ in
+            Task {
+              await loadProfileHeader()
+              await refreshFollowState()
+              await loadProgress()
+            }
           }
           .onChange(of: monthDate) { _, newDate in
             monthDays = monthDaysGrid(for: newDate)
@@ -475,14 +485,28 @@ struct ProfileView: View {
           }
           ForEach(monthDays.indices, id: \.self) { idx in
             let day = monthDays[idx]
-            let count = day.flatMap { activity[$0.startOfDay] } ?? 0
 
             Button {
               if let day { selectedDay = day }
             } label: {
               ZStack {
                 RoundedRectangle(cornerRadius: 8)
-                  .fill(day != nil && count > 0 ? Color.green.opacity(min(0.15 + Double(count)*0.1, 0.35)) : Color.clear)
+                      .fill({
+                        if let day {
+                          let key = day.startOfDay
+                          let own = ownActivity[key] ?? 0
+                          let part = participantActivity[key] ?? 0
+                          let total = (activity[key] ?? (own + part))
+                          if total > 0 {
+                            if own > 0 {
+                              return Color.green.opacity(min(0.15 + Double(total) * 0.1, 0.35))
+                            } else {
+                              return Color.yellow.opacity(min(0.15 + Double(total) * 0.1, 0.35))
+                            }
+                          }
+                        }
+                        return Color.clear
+                      }())
 
                 if let day {
                   Text("\(Calendar.current.component(.day, from: day))").font(.footnote)
@@ -726,12 +750,12 @@ struct ProfileView: View {
     loading = true; defer { loading = false }
 
     do {
-      let res1 = try await SupabaseManager.shared.client
-        .from("profiles")
-        .select()
-        .eq("user_id", value: uid.uuidString)
-        .single()
-        .execute()
+        let res1 = try await SupabaseManager.shared.client
+          .from("profiles")
+          .select("user_id,username,avatar_url,bio")
+          .eq("user_id", value: uid)
+          .single()
+          .execute()
 
       let profile = try JSONDecoder.supabase().decode(ProfileRow.self, from: res1.data)
       username = profile.username
@@ -770,25 +794,59 @@ struct ProfileView: View {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         iso.timeZone = .current
-        let res = try await SupabaseManager.shared.client
-          .from("workouts")
-          .select("started_at")
-          .eq("user_id", value: uid.uuidString)
-          .gte("started_at", value: iso.string(from: monthStart))
-          .lt("started_at", value: iso.string(from: monthEnd))
-          .execute()
+          let resOwn = try await SupabaseManager.shared.client
+            .from("workouts")
+            .select("started_at")
+            .eq("user_id", value: uid.uuidString)
+            .gte("started_at", value: iso.string(from: monthStart))
+            .lt("started_at", value: iso.string(from: monthEnd))
+            .execute()
 
-        let rows = try JSONDecoder.supabase().decode([OnlyStartedAt].self, from: res.data)
-
-        var dict: [Date: Int] = [:]
-        for r in rows {
-          if let d = r.started_at {
-            let key = cal.startOfDay(for: d)
-            dict[key, default: 0] += 1
+          let rowsOwn = try JSONDecoder.supabase().decode([OnlyStartedAt].self, from: resOwn.data)
+          var dictOwn: [Date: Int] = [:]
+          for r in rowsOwn {
+            if let d = r.started_at {
+              let key = cal.startOfDay(for: d)
+              dictOwn[key, default: 0] += 1
+            }
           }
-        }
 
-        await MainActor.run { self.activity = dict }
+          let pres = try await SupabaseManager.shared.client
+            .from("workout_participants")
+            .select("workout_id")
+            .eq("user_id", value: uid.uuidString)
+            .execute()
+
+          struct PId: Decodable { let workout_id: Int }
+          let pIds = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+
+          var dictPart: [Date: Int] = [:]
+          if !pIds.isEmpty {
+            let resPartW = try await SupabaseManager.shared.client
+              .from("workouts")
+              .select("started_at")
+              .in("id", values: pIds)
+              .gte("started_at", value: iso.string(from: monthStart))
+              .lt("started_at", value: iso.string(from: monthEnd))
+              .execute()
+
+            let rowsPart = try JSONDecoder.supabase().decode([OnlyStartedAt].self, from: resPartW.data)
+            for r in rowsPart {
+              if let d = r.started_at {
+                let key = cal.startOfDay(for: d)
+                dictPart[key, default: 0] += 1
+              }
+            }
+          }
+
+          var dictTotal: [Date: Int] = dictOwn
+          for (k, v) in dictPart { dictTotal[k, default: 0] += v }
+
+          await MainActor.run {
+            self.ownActivity = dictOwn
+            self.participantActivity = dictPart
+            self.activity = dictTotal
+          }
       } catch {
         await MainActor.run { self.error = error.localizedDescription }
       }
@@ -1189,6 +1247,7 @@ private struct DayWorkoutsList: View {
   @State private var workouts: [WorkoutRow] = []
   @State private var scores: [Int: Double] = [:]
   @State private var error: String?
+  @State private var participated: [WorkoutRow] = []
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -1197,7 +1256,7 @@ private struct DayWorkoutsList: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal)
 
-        if workouts.isEmpty {
+        if workouts.isEmpty && participated.isEmpty {
           Text("No workouts this day")
             .foregroundStyle(.secondary)
             .padding(.horizontal)
@@ -1207,7 +1266,7 @@ private struct DayWorkoutsList: View {
                 LazyVStack(spacing: 12) {
                     ForEach(workouts) { w in
                         NavigationLink {
-                          WorkoutDetailView(workoutId: w.id, ownerId: userId)
+                          WorkoutDetailView(workoutId: w.id, ownerId: w.user_id)
                         } label: {
                         ZStack {
                             WorkoutCardBackground(kind: w.kind)
@@ -1245,6 +1304,62 @@ private struct DayWorkoutsList: View {
                         .padding(.horizontal)
                     }
                 }
+                    if !participated.isEmpty {
+                      Divider().opacity(0.15)
+                      ForEach(participated) { w in
+                        NavigationLink {
+                          WorkoutDetailView(workoutId: w.id, ownerId: w.user_id)
+                        } label: {
+                          ZStack {
+                            WorkoutCardBackground(kind: w.kind)
+                            HStack(alignment: .top, spacing: 12) {
+                              VStack(alignment: .leading, spacing: 4) {
+                                Text(w.title ?? w.kind.capitalized)
+                                  .font(.body.weight(.semibold))
+                                  .lineLimit(1)
+
+                                Text(timeRange(w))
+                                  .font(.caption)
+                                  .foregroundStyle(.secondary)
+
+                                HStack(spacing: 6) {
+                                  Text(w.kind.capitalized)
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.vertical, 3)
+                                    .padding(.horizontal, 6)
+                                    .background(
+                                      Capsule().fill(workoutTint(for: w.kind).opacity(0.12))
+                                    )
+                                    .overlay(
+                                      Capsule().stroke(Color.white.opacity(0.12))
+                                    )
+
+                                  Text("Participated")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.vertical, 3)
+                                    .padding(.horizontal, 6)
+                                    .background(
+                                      Capsule().fill(Color.yellow.opacity(0.20))
+                                    )
+                                    .overlay(
+                                      Capsule().stroke(Color.white.opacity(0.12))
+                                    )
+                                }
+                              }
+
+                              Spacer()
+
+                              if let sc = scores[w.id] {
+                                scorePill(score: sc, kind: w.kind)
+                                  .accessibilityLabel("Score \(scoreString(sc))")
+                              }
+                            }
+                            .padding(14)
+                          }
+                          .padding(.horizontal)
+                        }
+                      }
+                    }
               }
               Color.clear.frame(height: 8)
             }
@@ -1255,6 +1370,7 @@ private struct DayWorkoutsList: View {
     .onChange(of: selectedDay) { _, _ in
       workouts = []
       scores = [:]
+      participated = []
     }
   }
 
@@ -1271,23 +1387,41 @@ private struct DayWorkoutsList: View {
         iso.timeZone = .current
 
       do {
-        let res = try await SupabaseManager.shared.client
-          .from("workouts")
-          .select("*")
-          .eq("user_id", value: uid.uuidString)
-          .gte("started_at", value: iso.string(from: start))
-          .lt("started_at", value: iso.string(from: end))
-          .order("started_at", ascending: false)
-          .execute()
-
-          let rows = try JSONDecoder.supabase().decode([WorkoutRow].self, from: res.data)
-          let ids = rows.map { $0.id }
+          let resOwn = try await SupabaseManager.shared.client
+            .from("workouts")
+            .select("*")
+            .eq("user_id", value: uid.uuidString)
+            .gte("started_at", value: iso.string(from: start))
+            .lt("started_at", value: iso.string(from: end))
+            .order("started_at", ascending: false)
+            .execute()
+          let rowsOwn = try JSONDecoder.supabase().decode([WorkoutRow].self, from: resOwn.data)
+          let pres = try await SupabaseManager.shared.client
+            .from("workout_participants")
+            .select("workout_id")
+            .eq("user_id", value: uid.uuidString)
+            .execute()
+          struct PId: Decodable { let workout_id: Int }
+          let partIdsAll = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+          var rowsPart: [WorkoutRow] = []
+          if !partIdsAll.isEmpty {
+            let resPart = try await SupabaseManager.shared.client
+              .from("workouts")
+              .select("*")
+              .in("id", values: partIdsAll)
+              .gte("started_at", value: iso.string(from: start))
+              .lt("started_at", value: iso.string(from: end))
+              .order("started_at", ascending: false)
+              .execute()
+            rowsPart = try JSONDecoder.supabase().decode([WorkoutRow].self, from: resPart.data)
+          }
+          let allIds = rowsOwn.map { $0.id } + rowsPart.map { $0.id }
           var scoresDict: [Int: Double] = [:]
-          if !ids.isEmpty {
+          if !allIds.isEmpty {
             let scoreRes = try await SupabaseManager.shared.client
               .from("workout_scores")
               .select("workout_id, score")
-              .in("workout_id", values: ids)
+              .in("workout_id", values: allIds)
               .execute()
 
             let scoreRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: scoreRes.data)
@@ -1301,7 +1435,8 @@ private struct DayWorkoutsList: View {
           }
 
           await MainActor.run {
-            workouts = rows
+            workouts = rowsOwn
+            participated = rowsPart
             scores = scoresDict
           }
         } catch {
