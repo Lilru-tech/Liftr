@@ -32,6 +32,7 @@ struct HomeView: View {
   struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
   private struct WorkoutScoreRow: Decodable { let workout_id: Int; let score: Decimal }
   private struct LikeRow: Decodable { let workout_id: Int; let user_id: UUID }
+  private struct ParticipantRow: Decodable { let workout_id: Int; let user_id: UUID }
     
   struct PRRow: Decodable, Identifiable {
     let kind: String
@@ -67,6 +68,8 @@ struct HomeView: View {
       let score: Double?
       let likeCount: Int
       let isLiked: Bool
+      let participantIds: [UUID]
+      let coUserAvatarURL: String?
 
         func hash(into hasher: inout Hasher) {
           hasher.combine(id)
@@ -80,6 +83,8 @@ struct HomeView: View {
           hasher.combine(score ?? -1)
           hasher.combine(likeCount)
           hasher.combine(isLiked)
+          hasher.combine(participantIds.count)
+          hasher.combine(coUserAvatarURL ?? "")
         }
 
         static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
@@ -93,7 +98,9 @@ struct HomeView: View {
           (lhs.avatarURL ?? "") == (rhs.avatarURL ?? "") &&
           (lhs.score ?? -1) == (rhs.score ?? -1) &&
           lhs.likeCount == rhs.likeCount &&
-          lhs.isLiked == rhs.isLiked
+          lhs.isLiked == rhs.isLiked &&
+          lhs.participantIds.count == rhs.participantIds.count &&
+          (lhs.coUserAvatarURL ?? "") == (rhs.coUserAvatarURL ?? "")
         }
     }
     
@@ -158,7 +165,8 @@ struct HomeView: View {
             .listRowBackground(Color.clear)
           }
 
-          ForEach(Array(feed.enumerated()), id: \.element.id) { i, item in
+          ForEach(feed.indices, id: \.self) { i in
+            let item = feed[i]
             if i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at) {
               Text(dateLabel(item.workout.started_at))
                 .font(.footnote.weight(.semibold))
@@ -179,7 +187,7 @@ struct HomeView: View {
                 }
               }
 
-            if i == highlightsInsertIndex, !recentPRs.isEmpty || !weeklyTop.isEmpty {
+              if i == highlightsInsertIndex && (!recentPRs.isEmpty || !weeklyTop.isEmpty) {
                 HighlightsCard(
                   prs: recentPRs,
                   weeklyTop: weeklyTop,
@@ -260,15 +268,17 @@ struct HomeView: View {
             )
 
           Task { await MainActor.run {
-            feed[idx] = FeedItem(
-              id: old.id,
-              workout: patched,
-              username: old.username,
-              avatarURL: old.avatarURL,
-              score: newScore ?? old.score,
-              likeCount: old.likeCount,
-              isLiked: old.isLiked
-            )
+              feed[idx] = FeedItem(
+                id: old.id,
+                workout: patched,
+                username: old.username,
+                avatarURL: old.avatarURL,
+                score: newScore ?? old.score,
+                likeCount: old.likeCount,
+                isLiked: old.isLiked,
+                participantIds: old.participantIds,
+                coUserAvatarURL: old.coUserAvatarURL
+              )
               feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
               print("[Home.onReceive workoutUpdated] patched OK (title=\(title ?? "nil"), score=\(String(describing: newScore)))")
             }}
@@ -445,18 +455,39 @@ struct HomeView: View {
             }
           }
           
-        let items: [FeedItem] = workouts.map { w in
-          let prof = profiles[w.user_id]
-          return FeedItem(
-            id: w.id,
-            workout: w,
-            username: prof?.username ?? (w.user_id == me ? "You" : "—"),
-            avatarURL: prof?.avatar_url,
-            score: scoresDict[w.id],
-            likeCount: likeCountByWorkout[w.id] ?? 0,
-            isLiked: likedByMe.contains(w.id)
-          )
-        }
+          var participantIdsByWorkout: [Int: [UUID]] = [:]
+          if !ids.isEmpty {
+            let pRes = try await SupabaseManager.shared.client
+              .from("workout_participants")
+              .select("workout_id,user_id")
+              .in("workout_id", values: ids)
+              .execute()
+            let pRows = try JSONDecoder.supabase().decode([ParticipantRow].self, from: pRes.data)
+            for p in pRows {
+              participantIdsByWorkout[p.workout_id, default: []].append(p.user_id)
+            }
+            let allParticipantUids = Array(Set(pRows.map { $0.user_id }))
+            try await ensureProfilesAvailable(for: allParticipantUids)
+          }
+          
+          let items: [FeedItem] = workouts.map { w in
+            let ownerProf = profiles[w.user_id]
+            let pIds = participantIdsByWorkout[w.id] ?? []
+            let coId = pIds.first(where: { $0 != w.user_id }) ?? pIds.first
+            let coAvatar = coId.flatMap { profiles[$0]?.avatar_url }
+
+            return FeedItem(
+              id: w.id,
+              workout: w,
+              username: ownerProf?.username ?? (w.user_id == me ? "You" : "—"),
+              avatarURL: ownerProf?.avatar_url,
+              score: scoresDict[w.id],
+              likeCount: likeCountByWorkout[w.id] ?? 0,
+              isLiked: likedByMe.contains(w.id),
+              participantIds: pIds,
+              coUserAvatarURL: coAvatar
+            )
+          }
 
         await MainActor.run {
           self.feed.append(contentsOf: items)
@@ -514,17 +545,36 @@ struct HomeView: View {
             let lRows = try JSONDecoder.supabase().decode([LikeRow].self, from: lRes.data)
             likeCount = lRows.count
             if let me = app.userId { isLiked = lRows.contains(where: { $0.user_id == me }) }
-          } catch { /* ignore */ }
+          } catch { }
+          var pIds: [UUID] = []
+          var coAvatar: String? = nil
+           do {
+              let pRes = try await SupabaseManager.shared.client
+                .from("workout_participants")
+                .select("workout_id,user_id")
+                .eq("workout_id", value: id)
+                .limit(100)
+                .execute()
+              let pRows = try JSONDecoder.supabase().decode([ParticipantRow].self, from: pRes.data)
+              pIds = pRows.map { $0.user_id }
+              try await ensureProfilesAvailable(for: pIds)
+              if let coId = pIds.first(where: { $0 != w.user_id }) ?? pIds.first {
+                coAvatar = profiles[coId]?.avatar_url
+              }
+          } catch { }
           
-        let updated = FeedItem(
-          id: w.id,
-          workout: w,
-          username: prof?.username ?? (w.user_id == me ? "You" : "—"),
-          avatarURL: prof?.avatar_url,
-          score: score,
-          likeCount: likeCount,
-          isLiked: isLiked
-        )
+          
+          let updated = FeedItem(
+            id: w.id,
+            workout: w,
+            username: prof?.username ?? (w.user_id == me ? "You" : "—"),
+            avatarURL: prof?.avatar_url,
+            score: score,
+            likeCount: likeCount,
+            isLiked: isLiked,
+            participantIds: pIds,
+            coUserAvatarURL: coAvatar
+          )
         print("[Home.refreshOne] will update feed on main…")
 
         await MainActor.run {
@@ -1321,9 +1371,19 @@ private struct HomeFeedCard: View {
 
       VStack(alignment: .leading, spacing: 8) {
         HStack(alignment: .top, spacing: 12) {
-          AvatarView(urlString: item.avatarURL)
-            .frame(width: 42, height: 42)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            ZStack(alignment: .bottomTrailing) {
+              AvatarView(urlString: item.avatarURL)
+                .frame(width: 42, height: 42)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+
+              if let co = item.coUserAvatarURL {
+                AvatarView(urlString: co)
+                  .frame(width: 18, height: 18)
+                  .clipShape(Circle())
+                  .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                  .offset(x: 2, y: 2)
+              }
+            }
 
           VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {

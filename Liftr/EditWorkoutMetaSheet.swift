@@ -42,6 +42,9 @@ struct EditWorkoutMetaSheet: View {
   @State private var s_matchScoreText = ""
   @State private var s_location = ""
   @State private var s_sessionNotes = ""
+  @State private var participants: [LightweightProfile] = []
+  @State private var showParticipantsPicker = false
+  @State private var initialParticipants = Set<UUID>()
 
   struct SEditableSet: Identifiable, Hashable {
     let id = UUID()
@@ -161,6 +164,49 @@ struct EditWorkoutMetaSheet: View {
             }
           } header: { Text("GENERAL") }
           .listRowBackground(Color.clear)
+            Section {
+              SectionCard {
+                if participants.isEmpty {
+                  Text("No participants added")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+                } else {
+                  ForEach(participants, id: \.id) { p in
+                      HStack(spacing: 10) {
+                        AvatarView(urlString: p.avatar_url)
+                          .frame(width: 28, height: 28)
+                          .clipShape(RoundedRectangle(cornerRadius: 6))
+                        Text(p.username ?? "user")
+                          .font(.subheadline.weight(.semibold))
+                          .lineLimit(1)
+                          .truncationMode(.tail)
+                        Spacer()
+                        Button(role: .destructive) {
+                          participants.removeAll { $0.id == p.id }
+                        } label: {
+                          Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.borderless)
+                      }
+                    .padding(.vertical, 2)
+                  }
+                }
+
+                Divider().padding(.vertical, 6)
+
+                Button {
+                  showParticipantsPicker = true
+                } label: {
+                  Label("Add participants", systemImage: "person.crop.circle.badge.plus")
+                }
+                .buttonStyle(.borderless)
+              }
+            } header: {
+              Text("PARTICIPANTS")
+            }
+            .listRowBackground(Color.clear)
 
           switch kind.lowercased() {
           case "cardio":  cardioSection
@@ -207,7 +253,17 @@ struct EditWorkoutMetaSheet: View {
           )
         )
       }
+              .sheet(isPresented: $showParticipantsPicker) {
+                ParticipantsPickerSheet(
+                  alreadySelected: Set(participants),
+                  onPick: { picked in
+                    let set = Set(participants).union(picked)
+                    participants = Array(set)
+                  }
+                )
+              }
     }
+    .gradientBG()
   }
 
   private var cardioSection: some View {
@@ -527,6 +583,7 @@ struct EditWorkoutMetaSheet: View {
       } catch {
         self.error = error.localizedDescription
       }
+        await loadParticipants()
     }
 
     private func saveAll() async {
@@ -709,7 +766,7 @@ struct EditWorkoutMetaSheet: View {
             "score":      scorePayload
           ]
         )
-
+          try await applyParticipantsChanges()
         await onSaved()
         dismiss()
       } catch {
@@ -785,6 +842,55 @@ struct EditWorkoutMetaSheet: View {
         await MainActor.run { self.error = error.localizedDescription }
       }
     }
+    
+    private func loadParticipants() async {
+      do {
+        let decoder = JSONDecoder.supabaseCustom()
+        let res = try await SupabaseManager.shared.client
+          .from("workout_participants")
+          .select("user_id, profiles!workout_participants_user_id_fkey(username, avatar_url)")
+          .eq("workout_id", value: workoutId)
+          .execute()
+
+          struct Wire: Decodable {
+            let user_id: UUID
+            let profiles: Profile?
+            struct Profile: Decodable {
+              let username: String?
+              let avatar_url: String?
+            }
+          }
+        let rows = try decoder.decode([Wire].self, from: res.data)
+        let mapped = rows.map { LightweightProfile(user_id: $0.user_id, username: $0.profiles?.username, avatar_url: $0.profiles?.avatar_url) }
+
+        await MainActor.run {
+          participants = mapped
+          initialParticipants = Set(mapped.map { $0.user_id })
+        }
+      } catch {
+      }
+    }
+
+    private func applyParticipantsChanges() async throws {
+      let client = SupabaseManager.shared.client
+      let current = Set(participants.map { $0.user_id })
+      let toAdd    = current.subtracting(initialParticipants)
+      let toRemove = initialParticipants.subtracting(current)
+      for uid in toAdd {
+          let params = AddParticipantParams(p_workout_id: Int64(workoutId), p_user_id: uid)
+        _ = try await client.rpc("add_workout_participant", params: params).execute()
+      }
+
+      for uid in toRemove {
+        _ = try await client
+          .from("workout_participants")
+          .delete()
+          .eq("workout_id", value: workoutId)
+          .eq("user_id", value: uid)
+          .execute()
+      }
+      initialParticipants = current
+    }
 
     private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
       let H = Int(h.trimmingCharacters(in: .whitespaces)) ?? 0
@@ -846,4 +952,137 @@ extension String {
 
 extension Notification.Name {
   static let workoutUpdated = Notification.Name("workoutUpdated")
+}
+
+private struct ParticipantsPickerSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @State private var query = ""
+  @State private var loading = false
+  @State private var results: [LightweightProfile] = []
+  let alreadySelected: Set<LightweightProfile>
+  let onPick: ([LightweightProfile]) -> Void
+  @State private var tempSelected: Set<LightweightProfile> = []
+  @State private var followees: [LightweightProfile] = []
+    
+  var body: some View {
+    NavigationStack {
+      List {
+        if results.isEmpty && !query.isEmpty && !loading {
+          Text("No users found")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(results, id: \.id) { p in
+            let isOn = Binding<Bool>(
+              get: { tempSelected.contains(p) || alreadySelected.contains(p) },
+              set: { newVal in
+                if newVal { tempSelected.insert(p) } else { tempSelected.remove(p) }
+              }
+            )
+              HStack(spacing: 10) {
+                AvatarView(urlString: p.avatar_url)
+                  .frame(width: 36, height: 36)
+                  .clipShape(RoundedRectangle(cornerRadius: 8))
+                Text(p.username ?? "user")
+                  .font(.body)
+                  .lineLimit(1)
+                  .truncationMode(.tail)
+                Spacer()
+                Toggle("", isOn: isOn).labelsHidden()
+              }
+          }
+        }
+      }
+      .navigationTitle("Add participants")
+      .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Add") {
+            onPick(Array(tempSelected))
+            dismiss()
+          }
+          .disabled(tempSelected.isEmpty)
+        }
+      }
+      .task { await loadFollowees() }
+      .gradientBG()
+      .overlay {
+        if loading {
+          ProgressView("Searching…")
+            .padding()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+      }
+      .onChange(of: query) { _, new in
+        Task { await searchUsers(new) }
+      }
+    }
+  }
+
+    private func searchUsers(_ q: String) async {
+      let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard !trimmed.isEmpty else {
+        await MainActor.run { results = followees; loading = false }
+        return
+      }
+
+      await MainActor.run { loading = true }
+      defer { Task { await MainActor.run { loading = false } } }
+
+      do {
+        let client = SupabaseManager.shared.client
+        let res = try await client
+          .from("profiles")
+          .select("user_id,username,avatar_url")
+          .ilike("username", pattern: "%\(trimmed)%")
+          .limit(25)
+          .execute()
+        let me: UUID? = try? await SupabaseManager.shared.client.auth.session.user.id
+
+        let rows = try JSONDecoder().decode([LightweightProfile].self, from: res.data)
+        let filtered = rows.filter { prof in
+          guard let me else { return true }
+          return prof.user_id != me
+        }
+        let unique = Dictionary(grouping: filtered, by: { $0.user_id }).compactMap { $0.value.first }
+        await MainActor.run { results = unique }
+      } catch {
+      }
+    }
+    
+    private func loadFollowees() async {
+      do {
+        let client = SupabaseManager.shared.client
+        guard let me: UUID = try? await client.auth.session.user.id else { return }
+
+        let res = try await client
+          .from("follows")
+          .select("followee_id, profiles!follows_followee_id_fkey(user_id,username,avatar_url)")
+          .eq("follower_id", value: me)
+          .limit(200)
+          .execute()
+
+        struct Row: Decodable {
+          let followee_id: UUID
+          let profiles: LightweightProfile?
+        }
+
+        let rows = try JSONDecoder().decode([Row].self, from: res.data)
+        let profs = rows
+          .compactMap { $0.profiles }
+          .filter { $0.user_id != me }
+
+        let unique = Dictionary(grouping: profs, by: { $0.user_id }).compactMap { $0.value.first }
+
+        await MainActor.run {
+          self.followees = unique
+          if self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self.results = unique
+          }
+        }
+      } catch {
+      }
+    }
 }

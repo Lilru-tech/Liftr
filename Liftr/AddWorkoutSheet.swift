@@ -80,6 +80,17 @@ enum PublishMode: String, CaseIterable, Identifiable {
   var stateParam: String { self == .add ? "published" : "planned" }
 }
 
+struct LightweightProfile: Identifiable, Decodable, Hashable {
+  let user_id: UUID
+  let username: String?
+  let avatar_url: String?
+  var id: UUID { user_id }
+}
+struct AddParticipantParams: Encodable {
+  let p_workout_id: Int64
+  let p_user_id: UUID
+}
+
 struct ExercisePickerSheet: View {
   let all: [Exercise]
   @Binding var selected: Exercise?
@@ -357,6 +368,7 @@ struct AddWorkoutDraft {
   var kind: WorkoutKind
   var title: String = ""
   var note: String = ""
+  var participants: [LightweightProfile] = []
   var startedAt: Date = .now
   var endedAt: Date? = nil
   var perceived: WorkoutIntensity = .moderate
@@ -386,6 +398,8 @@ struct AddWorkoutSheet: View {
   @State private var perceived: WorkoutIntensity = .moderate
   @State private var banner: Banner?
   @State private var recentlyAddedExerciseId: UUID? = nil
+  @State private var participants: [LightweightProfile] = []
+  @State private var showParticipantsPicker = false
   @State private var confirmRemoveIndex: Int? = nil
   @State private var publishMode: PublishMode = .add
     
@@ -398,6 +412,7 @@ struct AddWorkoutSheet: View {
         _endedAtEnabled = State(initialValue: d.endedAt != nil)
         _endedAt   = State(initialValue: d.endedAt ?? d.startedAt)
         _perceived = State(initialValue: d.perceived)
+        _participants = State(initialValue: d.participants)
 
         switch d.kind {
         case .strength:
@@ -469,6 +484,46 @@ struct AddWorkoutSheet: View {
                     Text("GENERAL").foregroundStyle(.secondary)
                 }
                 .listRowBackground(Color.clear)
+
+                Section {
+                  SectionCard {
+                    if participants.isEmpty {
+                      Text("No participants added")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
+                    } else {
+                      ForEach(participants, id: \.id) { p in
+                        HStack {
+                          Text(p.username ?? p.user_id.uuidString)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                          Spacer()
+                          Button(role: .destructive) {
+                            participants.removeAll { $0.id == p.id }
+                          } label: {
+                            Image(systemName: "xmark.circle.fill")
+                          }
+                          .buttonStyle(.borderless)
+                        }
+                        .padding(.vertical, 2)
+                      }
+                    }
+
+                    Divider().padding(.vertical, 6)
+
+                    Button {
+                      showParticipantsPicker = true
+                    } label: {
+                      Label("Add participants", systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .buttonStyle(.borderless)
+                  }
+                } header: {
+                  Text("PARTICIPANTS").foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.clear)
                 
                 switch kind {
                 case .strength:
@@ -511,6 +566,18 @@ struct AddWorkoutSheet: View {
             }
         }
     }
+        .sheet(isPresented: $showParticipantsPicker) {
+          ParticipantsPickerSheet(
+            alreadySelected: Set(participants),
+            onPick: { picked in
+              let set = Set(participants).union(picked)
+              participants = Array(set)
+            }
+          )
+          .gradientBG()
+          .presentationDetents([.large])
+          .presentationBackground(.clear)
+        }
         .banner($banner)
         .alert(
           "Are you sure you want to remove the exercise?",
@@ -856,15 +923,16 @@ struct AddWorkoutSheet: View {
     return secs > 0 ? secs / 60 : 0
   }
 
-  private func save() async {
-    error = nil
-    loading = true
-    defer { loading = false }
+    private func save() async {
+      error = nil
+      loading = true
+      defer { loading = false }
 
-    do {
-      let client = SupabaseManager.shared.client
-      let session = try await client.auth.session
-      let userId = session.user.id
+      do {
+        let client = SupabaseManager.shared.client
+        let session = try await client.auth.session
+        let userId = session.user.id
+        var newWorkoutId: Int64? = nil
 
       let iso = ISO8601DateFormatter()
       iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -882,7 +950,10 @@ struct AddWorkoutSheet: View {
             p_perceived_intensity: perceived.rawValue,
             p_state: publishMode.stateParam
           )
-        _ = try await client.rpc("create_strength_workout", params: params).execute()
+          _ = try await client.rpc("create_strength_workout", params: params).execute()
+          if newWorkoutId == nil {
+            newWorkoutId = try await fetchLastWorkoutId(for: userId, kind: .strength)
+          }
 
       case .cardio:
         let durSecHMS = hmsToSeconds(cardio.durH, cardio.durM, cardio.durS)
@@ -906,9 +977,12 @@ struct AddWorkoutSheet: View {
             p_state: publishMode.stateParam
           )
 
-          _ = try await client
+          let res = try await client
             .rpc("create_cardio_workout_v1", params: RPCCardioWrapper(p: params))
             .execute()
+          if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
+            newWorkoutId = Int64(created)
+          }
 
       case .sport:
           let minutes = parseInt(sport.durationMin) ?? durationMinutes
@@ -935,8 +1009,14 @@ struct AddWorkoutSheet: View {
           _ = try await client
             .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
             .execute()
+          if newWorkoutId == nil {
+            newWorkoutId = try await fetchLastWorkoutId(for: userId, kind: .sport)
+          }
       }
-        await showSuccessAndGoHome(publishMode == .add ? "Workout published! 💪" : "Workout planned! 🗓️")
+          if let wid = newWorkoutId {
+            await addParticipants(to: wid)
+          }
+          await showSuccessAndGoHome(publishMode == .add ? "Workout published! 💪" : "Workout planned! 🗓️")
     } catch {
       self.error = error.localizedDescription
     }
@@ -962,6 +1042,34 @@ struct AddWorkoutSheet: View {
       try? await Task.sleep(nanoseconds: 1_600_000_000)
       resetForm()
       app.selectedTab = .home
+    }
+    
+    private func fetchLastWorkoutId(for userId: UUID, kind: WorkoutKind) async throws -> Int64? {
+      let client = SupabaseManager.shared.client
+      struct Row: Decodable { let id: Int64 }
+      let res = try await client
+        .from("workouts")
+        .select("id")
+        .eq("user_id", value: userId)
+        .eq("kind", value: kind.rawValue)
+        .order("id", ascending: false)
+        .limit(1)
+        .execute()
+      let rows = try JSONDecoder().decode([Row].self, from: res.data)
+      return rows.first?.id
+    }
+
+    private func addParticipants(to workoutId: Int64) async {
+      guard !participants.isEmpty else { return }
+      let client = SupabaseManager.shared.client
+      for p in participants {
+        do {
+          let params = AddParticipantParams(p_workout_id: workoutId, p_user_id: p.user_id)
+          _ = try await client.rpc("add_workout_participant", params: params).execute()
+        } catch {
+          print("Error adding participant \(p.user_id):", error)
+        }
+      }
     }
 
   private func parseInt(_ s: String) -> Int? {
@@ -1213,4 +1321,136 @@ private func msToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
   guard (0...59).contains(M), (0...59).contains(S), H >= 0 else { return nil }
   let total = H*3600 + M*60 + S
   return total > 0 ? total : nil
+}
+
+private struct ParticipantsPickerSheet: View {
+  @Environment(\.dismiss) private var dismiss
+  @State private var query = ""
+  @State private var loading = false
+  @State private var results: [LightweightProfile] = []
+  @State private var followees: [LightweightProfile] = []
+  let alreadySelected: Set<LightweightProfile>
+  let onPick: ([LightweightProfile]) -> Void
+
+  @State private var tempSelected: Set<LightweightProfile> = []
+
+  var body: some View {
+    NavigationStack {
+      List {
+        if results.isEmpty && !query.isEmpty && !loading {
+          Text("No users found")
+            .foregroundStyle(.secondary)
+        } else {
+          ForEach(results, id: \.id) { p in
+            let isOn = Binding<Bool>(
+              get: { tempSelected.contains(p) || alreadySelected.contains(p) },
+              set: { newVal in
+                if newVal { tempSelected.insert(p) } else { tempSelected.remove(p) }
+              }
+            )
+              HStack(spacing: 10) {
+                AvatarView(urlString: p.avatar_url)
+                  .frame(width: 36, height: 36)
+
+                Text(p.username ?? "Unknown")
+                  .lineLimit(1)
+                  .truncationMode(.tail)
+
+                Spacer()
+                Toggle("", isOn: isOn).labelsHidden()
+              }
+          }
+        }
+      }
+      .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) {
+          Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+          Button("Add") {
+            onPick(Array(tempSelected))
+            dismiss()
+          }
+          .disabled(tempSelected.isEmpty)
+        }
+      }
+      .overlay {
+        if loading {
+          ProgressView("Searching…")
+            .padding()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        }
+      }
+      .toolbarBackground(.hidden, for: .navigationBar)
+      .scrollContentBackground(.hidden)
+      .listRowBackground(Color.clear)
+      .task { await loadFolloweesAndPrime() }
+      .onChange(of: query) { _, new in
+        Task { await searchUsers(new) }
+      }
+    }
+  }
+
+    private func loadFolloweesAndPrime() async {
+      await MainActor.run { loading = true }
+      defer { Task { await MainActor.run { loading = false } } }
+      do {
+        let client = SupabaseManager.shared.client
+        let session = try await client.auth.session
+        let fRes = try await client
+          .from("follows")
+          .select("followee_id")
+          .eq("follower_id", value: session.user.id)
+          .execute()
+
+        struct FRow: Decodable { let followee_id: UUID }
+        let fRows = try JSONDecoder().decode([FRow].self, from: fRes.data)
+        let ids = fRows
+          .map { $0.followee_id }
+          .filter { $0 != session.user.id }
+
+        guard !ids.isEmpty else {
+          await MainActor.run { self.followees = []; self.results = [] }
+          return
+        }
+
+        let pRes = try await client
+          .from("profiles")
+          .select("user_id,username,avatar_url")
+          .in("user_id", values: ids)
+          .order("username", ascending: true)
+          .limit(50)
+          .execute()
+
+        let rows = try JSONDecoder().decode([LightweightProfile].self, from: pRes.data)
+
+        await MainActor.run {
+          self.followees = rows
+          if self.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self.results = rows
+          }
+        }
+      } catch {
+        await MainActor.run {
+          self.followees = []
+          self.results = []
+        }
+      }
+    }
+
+    private func searchUsers(_ q: String) async {
+      let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
+      if trimmed.isEmpty {
+        await MainActor.run { results = followees; loading = false }
+        return
+      }
+      await MainActor.run { loading = true }
+      defer { Task { await MainActor.run { loading = false } } }
+
+      let filtered = followees.filter {
+        ($0.username ?? "").localizedCaseInsensitiveContains(trimmed)
+      }
+      await MainActor.run { results = filtered }
+    }
 }
