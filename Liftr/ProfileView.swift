@@ -563,48 +563,59 @@ struct ProfileView: View {
         }
 
       var body: some View {
-        VStack(spacing: 10) {
-          HStack {
+          VStack(spacing: 10) {
+            HStack {
               Picker("Kind", selection: $filter) {
                 ForEach(KindFilter.allCases, id: \.self) { kind in
                   Text(kind.rawValue).tag(kind)
                 }
               }
-            .pickerStyle(.segmented)
-          }
-          .padding(.horizontal)
+              .pickerStyle(.segmented)
+            }
+            .padding(.horizontal)
 
-            List {
-              if loading { ProgressView().frame(maxWidth: .infinity) }
-              ForEach(sections, id: \.title) { section in
-                Section(section.title) {
+              List {
+                if loading { ProgressView().frame(maxWidth: .infinity) }
+
+                ForEach(sections, id: \.title) { section in
+                  Text(section.title)
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .listRowInsets(EdgeInsets(top: 18, leading: 16, bottom: 8, trailing: 16))
+                    .listRowBackground(Color.clear)
+
                   ForEach(section.items, id: \.id) { pr in
-                      HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                          Text(pr.label).font(.body.weight(.semibold))
-                          Text(prettyMetricName(pr.metric, kind: pr.kind))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                          Text(formatValue(pr))
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                          Text(dateOnly(pr.achieved_at))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        }
+                    HStack(alignment: .firstTextBaseline) {
+                      VStack(alignment: .leading, spacing: 2) {
+                        Text(pr.label).font(.body.weight(.semibold))
+                        Text(prettyMetricName(pr.metric, kind: pr.kind))
+                          .font(.subheadline)
+                          .foregroundStyle(.secondary)
                       }
+                      Spacer()
+                      VStack(alignment: .trailing, spacing: 2) {
+                        Text(formatValue(pr))
+                          .font(.headline).fontWeight(.semibold)
+                        Text(dateOnly(pr.achieved_at))
+                          .font(.caption2).foregroundStyle(.secondary)
+                      }
+                    }
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12)))
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowBackground(Color.clear)
                   }
                 }
               }
-            }
-          .listStyle(.insetGrouped)
-          .scrollContentBackground(.hidden)
-          .listRowBackground(Color.clear)
-          .background(Color.clear)
-        }
+              .listStyle(.plain)
+              .scrollContentBackground(.hidden)
+              .listRowBackground(Color.clear)
+              .listRowSeparator(.hidden)
+              .listSectionSeparator(.hidden)
+              .background(Color.clear)
+          }
         .toolbar {
           if enableCompareWithMe, let myId = app.userId, let otherId = userId {
             ToolbarItem(placement: .topBarTrailing) {
@@ -618,6 +629,8 @@ struct ProfileView: View {
         }
         .task { await load() }
         .onChange(of: filter) { _, _ in Task { await load() } }
+        .onAppear { UITableView.appearance().backgroundColor = .clear }
+        .onDisappear { UITableView.appearance().backgroundColor = nil }
       }
 
         private func load() async {
@@ -733,17 +746,63 @@ struct ProfileView: View {
       }
     }
 
-  private var settingsView: some View {
-    List {
-      Section("Account") {
-        Text("User ID: \(app.userId?.uuidString ?? "–")")
+    private var settingsView: some View {
+      List {
+        Section("Account") {
+          ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+              .fill(.ultraThinMaterial)
+              .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                  .stroke(.white.opacity(0.18))
+              )
+
+            HStack(spacing: 10) {
+              Text("User ID")
+                .font(.subheadline.weight(.semibold))
+              Spacer()
+              Text(app.userId?.uuidString ?? "–")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            }
+            .padding(12)
+          }
+          .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+          .listRowBackground(Color.clear)
+        }
+
+        Section {
+          ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+              .fill(.ultraThinMaterial)
+              .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                  .stroke(.white.opacity(0.18))
+              )
+
+            Button(role: .destructive) { app.signOut() } label: {
+              HStack(spacing: 10) {
+                Image(systemName: "rectangle.portrait.and.arrow.right")
+                Text("Sign out")
+                  .font(.body.weight(.semibold))
+                Spacer()
+              }
+              .padding(12)
+            }
+            .buttonStyle(.plain)
+          }
+          .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+          .listRowBackground(Color.clear)
+        }
       }
-      Section {
-        Button(role: .destructive) { app.signOut() } label: { Text("Sign out") }
-      }
+      .listStyle(.plain)
+      .scrollContentBackground(.hidden)
+      .listRowSeparator(.hidden)
+      .listSectionSeparator(.hidden)
+      .background(Color.clear)
     }
-    .scrollContentBackground(.hidden)
-  }
 
     private func loadProfileHeader() async {
       guard let uid = viewingUserId else { return }

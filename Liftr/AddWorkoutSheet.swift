@@ -110,39 +110,61 @@ struct ExercisePickerSheet: View {
 
   var body: some View {
     NavigationStack {
-      List {
-          ForEach(filtered) { ex in
-            HStack {
-              VStack(alignment: .leading, spacing: 2) {
-                Text(ex.name)
-                Text([ex.category, ex.muscle_primary, ex.equipment].compactMap { $0 }.joined(separator: " · "))
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-              }
+        List {
+          Section {
+            SectionCard {
+              LazyVStack(spacing: 0) {
+                ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, ex in
+                  HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                      Text(ex.name)
+                      Text(
+                        [ex.category, ex.muscle_primary, ex.equipment]
+                          .compactMap { $0 }
+                          .filter { $0.lowercased() != "strength" }
+                          .joined(separator: " · ")
+                      )
+                      .font(.caption)
+                      .foregroundStyle(.secondary)
+                    }
 
-              Spacer()
+                    Spacer()
 
-              Button {
-                Task { await toggleFavorite(ex.id) }
-              } label: {
-                Image(systemName: favorites.contains(ex.id) ? "star.fill" : "star")
-                  .font(.subheadline)
-                  .foregroundStyle(favorites.contains(ex.id) ? .yellow : .secondary)
-                  .opacity(0.9)
-                  .frame(width: 32, height: 32)
+                    Button {
+                      Task { await toggleFavorite(ex.id) }
+                    } label: {
+                      Image(systemName: favorites.contains(ex.id) ? "star.fill" : "star")
+                        .font(.subheadline)
+                        .foregroundStyle(favorites.contains(ex.id) ? .yellow : .secondary)
+                        .opacity(0.9)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel(favorites.contains(ex.id) ? "Unfavorite" : "Favorite")
+                        .accessibilityAddTraits(.isButton)
+                    }
+                    .buttonStyle(.plain)
+                  }
+                  .padding(.vertical, 10)
+                  .padding(.horizontal, 8)
                   .contentShape(Rectangle())
-                  .accessibilityLabel(favorites.contains(ex.id) ? "Unfavorite" : "Favorite")
-                  .accessibilityAddTraits(.isButton)
+                  .onTapGesture {
+                    selected = ex
+                    dismiss()
+                  }
+                  if idx < filtered.count - 1 {
+                    Divider()
+                      .padding(.leading, 8)
+                      .opacity(0.75)
+                  }
+                }
               }
-              .buttonStyle(.plain)
             }
-            .contentShape(Rectangle())
-            .onTapGesture {
-              selected = ex
-              dismiss()
-            }
+            .listRowBackground(Color.clear)
+            .listSectionSeparator(.hidden, edges: .top)
           }
-      }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
       .searchable(text: $query)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -162,6 +184,9 @@ struct ExercisePickerSheet: View {
           .accessibilityLabel("Filter")
         }
       }
+      .scrollContentBackground(.hidden)
+      .listRowBackground(Color.clear)
+      .toolbarBackground(.hidden, for: .navigationBar)
       .overlay {
         if loading {
           ProgressView("Loading…")
@@ -399,9 +424,13 @@ struct AddWorkoutSheet: View {
   @State private var banner: Banner?
   @State private var recentlyAddedExerciseId: UUID? = nil
   @State private var participants: [LightweightProfile] = []
+  @State private var needsInitialSync = false
+  @State private var didEditCardioDuration = false
+  @State private var didEditSportDuration  = false
   @State private var showParticipantsPicker = false
   @State private var confirmRemoveIndex: Int? = nil
   @State private var publishMode: PublishMode = .add
+  @State private var durationLabelMin: Int? = nil
     
     init(draft: AddWorkoutDraft? = nil) {
       if let d = draft {
@@ -423,6 +452,7 @@ struct AddWorkoutSheet: View {
           _sport  = State(initialValue: d.sport ?? SportForm())
         }
       }
+        _needsInitialSync = State(initialValue: _endedAtEnabled.wrappedValue)
     }
 
     var body: some View {
@@ -439,7 +469,11 @@ struct AddWorkoutSheet: View {
                             }
                             .pickerStyle(.menu)
                             .onChange(of: kind) { _, new in
-                                if new == .strength { Task { await loadCatalogIfNeeded() } }
+                              if new == .strength { Task { await loadCatalogIfNeeded() } }
+                              didEditCardioDuration = false
+                              didEditSportDuration  = false
+                              recomputeDurationLabel()
+                              syncDurationFromDates()
                             }
                         }
                         Divider()
@@ -453,16 +487,38 @@ struct AddWorkoutSheet: View {
                         Divider()
                         FieldRowPlain("Started at") {
                             DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
+                                .onChange(of: startedAt) { _, _ in
+                                  if endedAtEnabled, endedAt < startedAt { endedAt = startedAt }
+                                  didEditCardioDuration = false
+                                  didEditSportDuration  = false
+                                  recomputeDurationLabel()
+                                  syncDurationFromDates()
+                                }
                         }
                         Divider()
-                        FieldRowPlain("Finished") { Toggle("", isOn: $endedAtEnabled) }
+                        FieldRowPlain("Finished") {
+                            Toggle("", isOn: $endedAtEnabled)
+                                .onChange(of: endedAtEnabled) { _, isOn in
+                                  if isOn { endedAt = max(endedAt, startedAt) }
+                                  didEditCardioDuration = false
+                                  didEditSportDuration  = false
+                                  recomputeDurationLabel()
+                                  syncDurationFromDates()
+                                }
+                        }
                         
                         if endedAtEnabled {
                             Divider()
                             FieldRowPlain("Ended at") {
                                 DatePicker("", selection: $endedAt, in: startedAt..., displayedComponents: [.date, .hourAndMinute])
+                                    .onChange(of: endedAt) { _, _ in
+                                      didEditCardioDuration = false
+                                      didEditSportDuration  = false
+                                      recomputeDurationLabel()
+                                      syncDurationFromDates()
+                                    }
                             }
-                            if let dur = durationMinutes {
+                            if let dur = durationLabelMin {
                                 Divider()
                                 Text("Duration: \(dur) min")
                                     .font(.footnote)
@@ -560,12 +616,25 @@ struct AddWorkoutSheet: View {
                             }
                         )
                     )
+                    .gradientBG()
+                    .presentationDetents([.large])
+                    .presentationBackground(.clear)
                 } else {
                     ExercisePickerSheet(all: catalog, selected: .constant(nil))
+                        .gradientBG()
+                        .presentationDetents([.large])
+                        .presentationBackground(.clear)
                 }
             }
         }
     }
+        .onAppear {
+            if needsInitialSync {
+                needsInitialSync = false
+                recomputeDurationLabel()
+                syncDurationFromDates()
+            }
+        }
         .sheet(isPresented: $showParticipantsPicker) {
           ParticipantsPickerSheet(
             alreadySelected: Set(participants),
@@ -771,10 +840,13 @@ struct AddWorkoutSheet: View {
               VStack(alignment: .leading, spacing: 6) {
                 Text("Duration").font(.caption).foregroundStyle(.secondary)
                 HStack(spacing: 6) {
-                  TextField("h", text: $cardio.durH)
-                    .keyboardType(.numberPad)
-                    .frame(width: 36)
-                    .onChange(of: cardio.durH) { _, _ in updateAutoPaceIfNeeded() }
+                    TextField("h", text: $cardio.durH)
+                      .keyboardType(.numberPad)
+                      .frame(width: 36)
+                      .onChange(of: cardio.durH) { _, _ in
+                        didEditCardioDuration = true
+                        updateAutoPaceIfNeeded()
+                      }
 
                   Text(":")
 
@@ -846,9 +918,12 @@ struct AddWorkoutSheet: View {
           Divider()
 
           FieldRowPlain {
-            TextField("Duration (min)", text: $sport.durationMin)
-              .keyboardType(.numberPad)
-              .textFieldStyle(.plain)
+              TextField("Duration (min)", text: $sport.durationMin)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.plain)
+                .onChange(of: sport.durationMin) { _, _ in
+                  didEditSportDuration = true
+                }
           }
 
             if sportUsesNumericScore(sport.sport) {
@@ -917,12 +992,12 @@ struct AddWorkoutSheet: View {
     }
   }
 
-  private var durationMinutes: Int? {
-    guard endedAtEnabled else { return nil }
-    let secs = Int(endedAt.timeIntervalSince(startedAt))
-    return secs > 0 ? secs / 60 : 0
-  }
-
+    private func recomputeDurationLabel() {
+      guard endedAtEnabled else { durationLabelMin = nil; return }
+      let secs = Int(endedAt.timeIntervalSince(startedAt))
+      durationLabelMin = secs > 0 ? secs / 60 : 0
+    }
+    
     private func save() async {
       error = nil
       loading = true
@@ -985,7 +1060,16 @@ struct AddWorkoutSheet: View {
           }
 
       case .sport:
-          let minutes = parseInt(sport.durationMin) ?? durationMinutes
+          let minutes: Int?
+          if let typed = parseInt(sport.durationMin) {
+            minutes = typed
+          } else if let fromLabel = durationLabelMin {
+            minutes = fromLabel
+          } else if endedAtEnabled {
+            minutes = max(1, Int(endedAt.timeIntervalSince(startedAt)) / 60)
+          } else {
+            minutes = nil
+          }
           let durationMin = minutes
           let payload = RPCSportParams(
             p_user_id: userId,
@@ -1126,14 +1210,40 @@ struct AddWorkoutSheet: View {
     }
 
     private func updateAutoPaceIfNeeded() {
-      guard let p = autoPaceSec(distanceKmText: cardio.distanceKm,
-                                durH: cardio.durH, durM: cardio.durM, durS: cardio.durS)
-      else { return }
+     guard let p = autoPaceSec(distanceKmText: cardio.distanceKm,
+                               durH: cardio.durH, durM: cardio.durM, durS: cardio.durS)
+     else { return }
+     let (h,m,s) = secondsToHMS(p)
+     cardio.paceH = h == 0 ? "" : String(h)
+     cardio.paceM = String(m)
+     cardio.paceS = String(s)
+   }
 
-      let (h,m,s) = secondsToHMS(p)
-      cardio.paceH = h == 0 ? "" : String(h)
-      cardio.paceM = String(m)
-      cardio.paceS = String(s)
+   private func syncDurationFromDates() {
+     guard endedAtEnabled, endedAt >= startedAt else { return }
+     let totalSec = Int(endedAt.timeIntervalSince(startedAt))
+     guard totalSec > 0 else { return }
+
+     switch kind {
+     case .cardio:
+       guard !didEditCardioDuration else { return }
+       let h = totalSec / 3600
+       let m = (totalSec % 3600) / 60
+       let s = totalSec % 60
+       cardio.durH = h == 0 ? "" : String(h)
+       cardio.durM = String(m)
+       cardio.durS = String(s)
+       updateAutoPaceIfNeeded()
+
+     case .sport:
+       guard !didEditSportDuration else { return }
+       let minutes = max(1, totalSec / 60)
+       sport.durationMin = String(minutes)
+
+     case .strength:
+       break
+     }
+       recomputeDurationLabel()
     }
 
     private func sportUsesNumericScore(_ s: SportType) -> Bool {
@@ -1171,12 +1281,13 @@ struct EditableExercise: Identifiable {
     guard let exerciseId else { return nil }
     let cleaned = cleanSets()
     guard !cleaned.isEmpty else { return nil }
-    return .init(
-      exercise_id: exerciseId,
-      order_index: orderIndex,
-      notes: notes.isEmpty ? nil : notes,
-      sets: cleaned.map { $0.toStrengthSet() }
-    )
+      return .init(
+        exercise_id: exerciseId,
+        order_index: orderIndex,
+        notes: notes.isEmpty ? nil : notes,
+        sets: cleaned.map { $0.toStrengthSet() },
+        custom_name: exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : exerciseName
+      )
   }
 }
 
@@ -1249,7 +1360,8 @@ struct RPCStrengthParams: Encodable {
     let order_index: Int
     let notes: String?
     let sets: [StrengthSet]
-
+    let custom_name: String?
+      
     struct StrengthSet: Encodable {
       let set_number: Int
       let reps: Int?

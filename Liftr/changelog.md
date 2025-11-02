@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.9.1] - 2025-11-02
+
+### Added
+- **PRs → Empty state**
+  - When there are no PRs to compare, we now show an informative message instead of leaving the view blank.
+- **Exercise catalog metadata**
+  - Added `muscle group` and `equipment` fields to exercises (foundation for future filters and display).
+- **Participants can duplicate workouts**
+  - Users listed as participants can now **Duplicate** a workout from `WorkoutDetailView` (opens **Add** with a pre-filled draft).
+
+### Changed
+- **Unified gray cards (visual polish)**
+  - Applied the same soft gray “card/pill” style across:
+    - **Profile → PRs** rows
+    - **Profile → Settings** fields
+    - **ExercisePickerSheet** input fields
+    - **EditWorkoutMetaSheet** (participants block + fields)
+  - Consistent rounded corners and subtle white stroke for all cards.
+- **PRs section headers behavior**
+  - Unpinned section headers (**Cardio / Strength / Sport**) to avoid overlapping while scrolling.
+- **Auto duration**
+  - When both **Started at** and **Ended at** are set, **Duration** is now calculated automatically for **Cardio** and **Sport** sessions.
+
+### Fixed
+- **Custom exercise name**
+  - Custom names are correctly saved and displayed in `WorkoutDetailView`.
+- **Home → Workout Card participants**
+  - Cards now show **more than one participant** reliably.
+- **Color inconsistencies**
+  - Corrected background and field colors in the sheets listed above to match the new gray theme.
+  
+[0.9.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.9.1
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.9.1...HEAD
+
 ## [0.9.0] - 2025-10-30
 ### Added
 - **Workout Participants (v1)**
