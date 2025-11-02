@@ -45,6 +45,8 @@ struct EditWorkoutMetaSheet: View {
   @State private var participants: [LightweightProfile] = []
   @State private var showParticipantsPicker = false
   @State private var initialParticipants = Set<UUID>()
+  @State private var didEditCardioDuration = false
+  @State private var didEditSportDuration  = false
 
   struct SEditableSet: Identifiable, Hashable {
     let id = UUID()
@@ -55,11 +57,13 @@ struct EditWorkoutMetaSheet: View {
     var rpe: String = ""
     var restSec: Int?
   }
+    
     struct SEditableExercise: Identifiable {
       let id = UUID()
       let workoutExerciseId: Int
       var exerciseId: Int
       var name: String
+      var alias: String
       var notes: String
       var sets: [SEditableSet]
     }
@@ -116,220 +120,266 @@ struct EditWorkoutMetaSheet: View {
   }
 
   var body: some View {
-    NavigationStack {
-        Form {
-          Section {
-            SectionCard {
-              FieldRowPlain("Title") {
-                TextField("Title", text: $title)
-                  .textFieldStyle(.plain)
-                  .layoutPriority(1)
-              }
-
-              Divider().padding(.vertical, 6)
-
-              FieldRowPlain("Notes") {
-                TextField("Notes", text: $notes, axis: .vertical)
-                  .textFieldStyle(.plain)
-                  .lineLimit(3, reservesSpace: true)
-                  .layoutPriority(1)
-              }
-
-              Divider().padding(.vertical, 6)
-
-              FieldRowPlain("Started") {
-                DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
-              }
-
-              Divider().padding(.vertical, 6)
-
-              FieldRowPlain("Finished") {
-                Toggle("", isOn: $endedAtEnabled)
-              }
-
-              if endedAtEnabled {
-                Divider().padding(.vertical, 6)
-                FieldRowPlain("Ended") {
-                  DatePicker("", selection: $endedAt, in: startedAt..., displayedComponents: [.date, .hourAndMinute])
-                }
-              }
-
-              Divider().padding(.vertical, 6)
-
-              FieldRowPlain("Intensity") {
-                Picker("", selection: $perceived) {
-                  ForEach(WorkoutIntensity.allCases) { Text($0.label).tag($0) }
-                }
-              }
-            }
-          } header: { Text("GENERAL") }
-          .listRowBackground(Color.clear)
-            Section {
-              SectionCard {
-                if participants.isEmpty {
-                  Text("No participants added")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 4)
-                } else {
-                  ForEach(participants, id: \.id) { p in
-                      HStack(spacing: 10) {
-                        AvatarView(urlString: p.avatar_url)
-                          .frame(width: 28, height: 28)
-                          .clipShape(RoundedRectangle(cornerRadius: 6))
-                        Text(p.username ?? "user")
-                          .font(.subheadline.weight(.semibold))
-                          .lineLimit(1)
-                          .truncationMode(.tail)
-                        Spacer()
-                        Button(role: .destructive) {
-                          participants.removeAll { $0.id == p.id }
-                        } label: {
-                          Image(systemName: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.borderless)
+      NavigationStack {
+          GradientBackground {
+          Form {
+              Section {
+                  SectionCard {
+                      FieldRowPlain("Title") {
+                          TextField("Title", text: $title)
+                              .textFieldStyle(.plain)
+                              .layoutPriority(1)
                       }
-                    .padding(.vertical, 2)
+                      
+                      Divider().padding(.vertical, 6)
+                      
+                      FieldRowPlain("Notes") {
+                          TextField("Notes", text: $notes, axis: .vertical)
+                              .textFieldStyle(.plain)
+                              .lineLimit(3, reservesSpace: true)
+                              .layoutPriority(1)
+                      }
+                      
+                      Divider().padding(.vertical, 6)
+                      
+                      FieldRowPlain("Started") {
+                          DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
+                              .onChange(of: startedAt) { _, _ in
+                                  if endedAtEnabled, endedAt < startedAt { endedAt = startedAt }
+                                  didEditCardioDuration = false
+                                  didEditSportDuration  = false
+                                  syncDurationFromDates()
+                              }
+                      }
+                      
+                      Divider().padding(.vertical, 6)
+                      
+                      FieldRowPlain("Finished") {
+                          Toggle("", isOn: $endedAtEnabled)
+                              .onChange(of: endedAtEnabled) { _, isOn in
+                                  if isOn { endedAt = max(endedAt, startedAt) }
+                                  didEditCardioDuration = false
+                                  didEditSportDuration  = false
+                                  syncDurationFromDates()
+                              }
+                      }
+                      
+                      if endedAtEnabled {
+                          Divider().padding(.vertical, 6)
+                          FieldRowPlain("Ended") {
+                              DatePicker("", selection: $endedAt, in: startedAt..., displayedComponents: [.date, .hourAndMinute])
+                                  .onChange(of: endedAt) { _, _ in
+                                      didEditCardioDuration = false
+                                      didEditSportDuration  = false
+                                      syncDurationFromDates()
+                                  }
+                          }
+                      }
+                      
+                      Divider().padding(.vertical, 6)
+                      
+                      FieldRowPlain("Intensity") {
+                          Picker("", selection: $perceived) {
+                              ForEach(WorkoutIntensity.allCases) { Text($0.label).tag($0) }
+                          }
+                      }
                   }
-                }
-
-                Divider().padding(.vertical, 6)
-
-                Button {
-                  showParticipantsPicker = true
-                } label: {
-                  Label("Add participants", systemImage: "person.crop.circle.badge.plus")
-                }
-                .buttonStyle(.borderless)
+              } header: { Text("GENERAL") }
+                  .listRowBackground(Color.clear)
+              Section {
+                  SectionCard {
+                      if participants.isEmpty {
+                          Text("No participants added")
+                              .font(.footnote)
+                              .foregroundStyle(.secondary)
+                              .frame(maxWidth: .infinity, alignment: .leading)
+                              .padding(.vertical, 4)
+                      } else {
+                          ForEach(participants, id: \.id) { p in
+                              HStack(spacing: 10) {
+                                  AvatarView(urlString: p.avatar_url)
+                                      .frame(width: 28, height: 28)
+                                      .clipShape(RoundedRectangle(cornerRadius: 6))
+                                  Text(p.username ?? "user")
+                                      .font(.subheadline.weight(.semibold))
+                                      .lineLimit(1)
+                                      .truncationMode(.tail)
+                                  Spacer()
+                                  Button(role: .destructive) {
+                                      participants.removeAll { $0.id == p.id }
+                                  } label: {
+                                      Image(systemName: "xmark.circle.fill")
+                                  }
+                                  .buttonStyle(.borderless)
+                              }
+                              .padding(.vertical, 2)
+                          }
+                      }
+                      
+                      Divider().padding(.vertical, 6)
+                      
+                      Button {
+                          showParticipantsPicker = true
+                      } label: {
+                          Label("Add participants", systemImage: "person.crop.circle.badge.plus")
+                      }
+                      .buttonStyle(.borderless)
+                  }
+              } header: {
+                  Text("PARTICIPANTS")
               }
-            } header: {
-              Text("PARTICIPANTS")
-            }
-            .listRowBackground(Color.clear)
-
-          switch kind.lowercased() {
-          case "cardio":  cardioSection
-          case "sport":   sportSection
-          case "strength": strengthSection
-          default: EmptyView()
+              .listRowBackground(Color.clear)
+              
+              switch kind.lowercased() {
+              case "cardio":  cardioSection
+              case "sport":   sportSection
+              case "strength": strengthSection
+              default: EmptyView()
+              }
+              
+              if let error { Text(error).foregroundStyle(.red) }
           }
-
-          if let error { Text(error).foregroundStyle(.red) }
-        }
-      .formStyle(.grouped)
-      .scrollContentBackground(.hidden)
-      .listSectionSpacing(18)
-      .listRowBackground(Color.clear)
-      .toolbar {
-        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-        ToolbarItem(placement: .confirmationAction) {
-          Button { Task { await saveAll() } } label: {
-            if saving { ProgressView() } else { Text("Save") }
+          .formStyle(.grouped)
+          .scrollContentBackground(.hidden)
+          .listSectionSpacing(18)
+          .listRowBackground(Color.clear)
+          .toolbar {
+              ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+              ToolbarItem(placement: .confirmationAction) {
+                  Button { Task { await saveAll() } } label: {
+                      if saving { ProgressView() } else { Text("Save") }
+                  }
+                  .disabled(saving || loading)
+              }
           }
-          .disabled(saving || loading)
-        }
-      }
-      .task { await loadSpecificIfNeeded() }
-      .sheet(isPresented: $showExercisePicker) {
-        ExercisePickerSheet(
-          all: catalog,
-          selected: Binding(
-            get: { selectedExerciseForAdd },
-            set: { picked in
-              selectedExerciseForAdd = picked
-              defer {
-                showExercisePicker = false
-                exerciseIndexToRename = nil
+          .task { await loadSpecificIfNeeded() }
+          .onAppear { syncDurationFromDates() }
+          .sheet(isPresented: $showExercisePicker) {
+              NavigationStack {
+                  ExercisePickerSheet(
+                    all: catalog,
+                    selected: Binding(
+                        get: { selectedExerciseForAdd },
+                        set: { picked in
+                            selectedExerciseForAdd = picked
+                            defer {
+                                showExercisePicker = false
+                                exerciseIndexToRename = nil
+                            }
+                            guard let ex = picked else { return }
+                            if let idx = exerciseIndexToRename {
+                                s_items[idx].exerciseId = Int(ex.id)
+                                s_items[idx].name = ex.name
+                            } else {
+                                Task { await insertExercise(ex) }
+                            }
+                        }
+                    )
+                  )
               }
-              guard let ex = picked else { return }
-              if let idx = exerciseIndexToRename {
-                s_items[idx].exerciseId = Int(ex.id)
-                s_items[idx].name = ex.name
-              } else {
-                Task { await insertExercise(ex) }
+              .onAppear {
+                  UITableView.appearance().backgroundColor = .clear
               }
-            }
-          )
-        )
-      }
-              .sheet(isPresented: $showParticipantsPicker) {
-                ParticipantsPickerSheet(
-                  alreadySelected: Set(participants),
-                  onPick: { picked in
+              .onDisappear {
+                  UITableView.appearance().backgroundColor = nil
+              }
+              .gradientBG()
+          }
+          .sheet(isPresented: $showParticipantsPicker) {
+              ParticipantsPickerSheet(
+                alreadySelected: Set(participants),
+                onPick: { picked in
                     let set = Set(participants).union(picked)
                     participants = Array(set)
-                  }
-                )
-              }
+                }
+              )
+          }
+      }
     }
     .gradientBG()
   }
 
-  private var cardioSection: some View {
-    Section {
-      TextField("Modality", text: $c_modality)
-        HStack(spacing: 12) {
-          TextField("Distance (km)", text: $c_distanceKm)
-            .keyboardType(.decimalPad)
+    private var cardioSection: some View {
+      Section {
+        SectionCard {
+          TextField("Modality", text: $c_modality)
 
-          VStack(alignment: .leading, spacing: 6) {
-            Text("Duration").font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-              TextField("h", text: $c_durH).keyboardType(.numberPad).frame(width: 36)
-              Text(":")
-              TextField("m", text: $c_durM).keyboardType(.numberPad).frame(width: 36)
-              Text(":")
-              TextField("s", text: $c_durS).keyboardType(.numberPad).frame(width: 36)
-            }
-            .font(.subheadline)
-          }
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-      HStack {
-        TextField("Avg HR", text: $c_avgHR).keyboardType(.numberPad)
-        TextField("Max HR", text: $c_maxHR).keyboardType(.numberPad)
-      }
-        HStack(spacing: 12) {
-          VStack(alignment: .leading, spacing: 4) {
-            Text("Avg pace (/km)").font(.caption).foregroundStyle(.secondary)
-            Text(autoPaceLabel())
+          HStack(spacing: 12) {
+            TextField("Distance (km)", text: $c_distanceKm)
+              .keyboardType(.decimalPad)
+
+            VStack(alignment: .leading, spacing: 6) {
+              Text("Duration").font(.caption).foregroundStyle(.secondary)
+              HStack(spacing: 6) {
+                TextField("h", text: $c_durH).keyboardType(.numberPad).frame(width: 36)
+                  .onChange(of: c_durH) { _, _ in didEditCardioDuration = true }
+                Text(":")
+                TextField("m", text: $c_durM).keyboardType(.numberPad).frame(width: 36)
+                  .onChange(of: c_durM) { _, _ in didEditCardioDuration = true }
+                Text(":")
+                TextField("s", text: $c_durS).keyboardType(.numberPad).frame(width: 36)
+                  .onChange(of: c_durS) { _, _ in didEditCardioDuration = true }
+              }
               .font(.subheadline)
-              .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
 
-          TextField("Elevation gain (m)", text: $c_elevGain)
-            .keyboardType(.numberPad)
+          HStack {
+            TextField("Avg HR", text: $c_avgHR).keyboardType(.numberPad)
+            TextField("Max HR", text: $c_maxHR).keyboardType(.numberPad)
+          }
+
+          HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+              Text("Avg pace (/km)").font(.caption).foregroundStyle(.secondary)
+              Text(autoPaceLabel())
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            TextField("Elevation gain (m)", text: $c_elevGain)
+              .keyboardType(.numberPad)
+          }
+
+          TextField("Cardio notes", text: $c_notes, axis: .vertical)
         }
-      TextField("Cardio notes", text: $c_notes, axis: .vertical)
-    } header: { Text("CARDIO") }
-  }
-
+      } header: { Text("CARDIO") }
+      .listRowBackground(Color.clear)
+    }
+    
     private var sportSection: some View {
       Section {
-        Picker("Sport", selection: $s_sport) {
-          ForEach(SportType.allCases) { Text($0.label).tag($0) }
-        }
-        TextField("Duration (min)", text: $s_durationMin).keyboardType(.numberPad)
-
-        if sportUsesNumericScore(s_sport) {
-          HStack {
-            TextField("Score for", text: $s_scoreFor).keyboardType(.numberPad)
-            TextField("Score against", text: $s_scoreAgainst).keyboardType(.numberPad)
+        SectionCard {
+          Picker("Sport", selection: $s_sport) {
+            ForEach(SportType.allCases) { Text($0.label).tag($0) }
           }
-        }
 
-        if sportUsesSetText(s_sport) {
-          TextField("Sets / score text (optional)", text: $s_matchScoreText)
-        }
+          TextField("Duration (min)", text: $s_durationMin)
+            .keyboardType(.numberPad)
+            .onChange(of: s_durationMin) { _, _ in didEditSportDuration = true }
 
-        Picker("Match result", selection: $s_matchResult) {
-          ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
+          if sportUsesNumericScore(s_sport) {
+            HStack {
+              TextField("Score for", text: $s_scoreFor).keyboardType(.numberPad)
+              TextField("Score against", text: $s_scoreAgainst).keyboardType(.numberPad)
+            }
+          }
+
+          if sportUsesSetText(s_sport) {
+            TextField("Sets / score text (optional)", text: $s_matchScoreText)
+          }
+
+          Picker("Match result", selection: $s_matchResult) {
+            ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
+          }
+
+          TextField("Location (optional)", text: $s_location)
+          TextField("Session notes", text: $s_sessionNotes, axis: .vertical)
         }
-        TextField("Location (optional)", text: $s_location)
-        TextField("Session notes", text: $s_sessionNotes, axis: .vertical)
       } header: { Text("SPORT") }
+      .listRowBackground(Color.clear)
     }
 
     private var strengthSection: some View {
@@ -359,6 +409,13 @@ struct EditWorkoutMetaSheet: View {
                   }
 
                 Divider()
+                  
+                  FieldRowPlain("Alias") {
+                    TextField("Exercise name (optional)", text: $s_items[i].alias)
+                      .textFieldStyle(.plain)
+                  }
+
+                  Divider()
 
                 FieldRowPlain("Notes") {
                   TextField("Notes (exercise)", text: $s_items[i].notes)
@@ -518,7 +575,7 @@ struct EditWorkoutMetaSheet: View {
         case "strength":
           let exQ = try await SupabaseManager.shared.client
             .from("workout_exercises")
-            .select("id, exercise_id, order_index, notes, exercises(name)")
+            .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
             .eq("workout_id", value: workoutId)
             .order("order_index", ascending: true)
             .execute()
@@ -529,6 +586,7 @@ struct EditWorkoutMetaSheet: View {
             let order_index: Int
             let notes: String?
             let exercises: ExName?
+            let custom_name: String?
             struct ExName: Decodable { let name: String? }
           }
           let exWire = try decoder.decode([ExWire].self, from: exQ.data)
@@ -567,13 +625,14 @@ struct EditWorkoutMetaSheet: View {
           }
 
           let mapped: [SEditableExercise] = exWire.map { ex in
-            SEditableExercise(
-              workoutExerciseId: ex.id,
-              exerciseId: ex.exercise_id,
-              name: ex.exercises?.name ?? "Exercise",
-              notes: ex.notes ?? "",
-              sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]]
-            )
+              SEditableExercise(
+                workoutExerciseId: ex.id,
+                exerciseId: ex.exercise_id,
+                name: ex.exercises?.name ?? "Exercise",
+                alias: ex.custom_name ?? "",
+                notes: ex.notes ?? "",
+                sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]]
+              )
           }
           await MainActor.run { s_items = mapped }
 
@@ -670,12 +729,16 @@ struct EditWorkoutMetaSheet: View {
 
         case "strength":
           for ex in s_items {
-            struct ExPayload: Encodable { let exercise_id: Int; let notes: String? }
-            _ = try await SupabaseManager.shared.client
-              .from("workout_exercises")
-              .update(ExPayload(exercise_id: ex.exerciseId, notes: ex.notes.trimmedOrNil))
-              .eq("id", value: ex.workoutExerciseId)
-              .execute()
+              struct ExPayload: Encodable { let exercise_id: Int; let notes: String?; let custom_name: String? }
+              _ = try await SupabaseManager.shared.client
+                .from("workout_exercises")
+                .update(ExPayload(
+                  exercise_id: ex.exerciseId,
+                  notes: ex.notes.trimmedOrNil,
+                  custom_name: ex.alias.trimmedOrNil
+                ))
+                .eq("id", value: ex.workoutExerciseId)
+                .execute()
           }
 
           let exIds = s_items.map { $0.workoutExerciseId }
@@ -800,7 +863,8 @@ struct EditWorkoutMetaSheet: View {
             "workout_id": workoutId,
             "exercise_id": Int(ex.id),
             "order_index": nextOrder,
-            "notes": nil
+            "notes": nil,
+            "custom_name": nil
           ])
           .select("id")
           .single()
@@ -809,17 +873,18 @@ struct EditWorkoutMetaSheet: View {
         struct InsertedId: Decodable { let id: Int }
         let inserted = try JSONDecoder().decode(InsertedId.self, from: res.data)
 
-        await MainActor.run {
-            s_items.append(
-              SEditableExercise(
-                workoutExerciseId: inserted.id,
-                exerciseId: Int(ex.id),
-                name: ex.name,
-                notes: "",
-                sets: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]
+          await MainActor.run {
+              s_items.append(
+                SEditableExercise(
+                  workoutExerciseId: inserted.id,
+                  exerciseId: Int(ex.id),
+                  name: ex.name,
+                  alias: "",
+                  notes: "",
+                  sets: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]
+                )
               )
-            )
-        }
+          }
       } catch {
         await MainActor.run { self.error = error.localizedDescription }
       }
@@ -914,6 +979,31 @@ struct EditWorkoutMetaSheet: View {
       let ss = p % 60
       return String(format: "%d:%02d /km", mm, ss)
     }
+    
+    private func syncDurationFromDates() {
+      guard endedAtEnabled, endedAt >= startedAt else { return }
+      let totalSec = Int(endedAt.timeIntervalSince(startedAt))
+      guard totalSec > 0 else { return }
+
+      switch kind.lowercased() {
+      case "cardio":
+        guard !didEditCardioDuration else { return }
+        let h = totalSec / 3600
+        let m = (totalSec % 3600) / 60
+        let s = totalSec % 60
+        c_durH = h == 0 ? "" : String(h)
+        c_durM = String(m)
+        c_durS = String(s)
+
+      case "sport":
+        guard !didEditSportDuration else { return }
+        let minutes = max(1, totalSec / 60)
+        s_durationMin = String(minutes)
+
+      default:
+        break
+      }
+    }
 
     private func sportUsesNumericScore(_ s: SportType) -> Bool {
       switch s {
@@ -966,33 +1056,40 @@ private struct ParticipantsPickerSheet: View {
     
   var body: some View {
     NavigationStack {
-      List {
-        if results.isEmpty && !query.isEmpty && !loading {
-          Text("No users found")
-            .foregroundStyle(.secondary)
-        } else {
-          ForEach(results, id: \.id) { p in
-            let isOn = Binding<Bool>(
-              get: { tempSelected.contains(p) || alreadySelected.contains(p) },
-              set: { newVal in
-                if newVal { tempSelected.insert(p) } else { tempSelected.remove(p) }
-              }
-            )
-              HStack(spacing: 10) {
-                AvatarView(urlString: p.avatar_url)
-                  .frame(width: 36, height: 36)
-                  .clipShape(RoundedRectangle(cornerRadius: 8))
-                Text(p.username ?? "user")
-                  .font(.body)
-                  .lineLimit(1)
-                  .truncationMode(.tail)
-                Spacer()
-                Toggle("", isOn: isOn).labelsHidden()
-              }
+        List {
+          if results.isEmpty && !query.isEmpty && !loading {
+            Text("No users found")
+              .foregroundStyle(.secondary)
+          } else {
+            ForEach(results, id: \.id) { p in
+              let isOn = Binding<Bool>(
+                get: { tempSelected.contains(p) || alreadySelected.contains(p) },
+                set: { newVal in
+                  if newVal { tempSelected.insert(p) } else { tempSelected.remove(p) }
+                }
+              )
+                HStack(spacing: 10) {
+                  AvatarView(urlString: p.avatar_url)
+                    .frame(width: 36, height: 36)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                  Text(p.username ?? "user")
+                    .font(.body)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                  Spacer()
+                  Toggle("", isOn: isOn).labelsHidden()
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 12))
+                .listRowInsets(EdgeInsets(top: 4, leading: 12, bottom: 4, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
           }
         }
-      }
-      .navigationTitle("Add participants")
+        .scrollContentBackground(.hidden)
+        .listStyle(.plain)
+        .listRowSeparator(.hidden)
       .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always))
       .toolbar {
         ToolbarItem(placement: .cancellationAction) {
@@ -1015,6 +1112,8 @@ private struct ParticipantsPickerSheet: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
         }
       }
+      .onAppear { UITableView.appearance().backgroundColor = .clear }
+      .onDisappear { UITableView.appearance().backgroundColor = nil }
       .onChange(of: query) { _, new in
         Task { await searchUsers(new) }
       }

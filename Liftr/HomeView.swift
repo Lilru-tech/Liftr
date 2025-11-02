@@ -69,7 +69,7 @@ struct HomeView: View {
       let likeCount: Int
       let isLiked: Bool
       let participantIds: [UUID]
-      let coUserAvatarURL: String?
+      let coUserAvatarURLs: [String]
 
         func hash(into hasher: inout Hasher) {
           hasher.combine(id)
@@ -84,7 +84,7 @@ struct HomeView: View {
           hasher.combine(likeCount)
           hasher.combine(isLiked)
           hasher.combine(participantIds.count)
-          hasher.combine(coUserAvatarURL ?? "")
+          hasher.combine(coUserAvatarURLs.joined(separator: ","))
         }
 
         static func == (lhs: FeedItem, rhs: FeedItem) -> Bool {
@@ -100,7 +100,7 @@ struct HomeView: View {
           lhs.likeCount == rhs.likeCount &&
           lhs.isLiked == rhs.isLiked &&
           lhs.participantIds.count == rhs.participantIds.count &&
-          (lhs.coUserAvatarURL ?? "") == (rhs.coUserAvatarURL ?? "")
+          lhs.coUserAvatarURLs.prefix(3) == rhs.coUserAvatarURLs.prefix(3)
         }
     }
     
@@ -277,7 +277,7 @@ struct HomeView: View {
                 likeCount: old.likeCount,
                 isLiked: old.isLiked,
                 participantIds: old.participantIds,
-                coUserAvatarURL: old.coUserAvatarURL
+                coUserAvatarURLs: old.coUserAvatarURLs
               )
               feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
               print("[Home.onReceive workoutUpdated] patched OK (title=\(title ?? "nil"), score=\(String(describing: newScore)))")
@@ -473,8 +473,6 @@ struct HomeView: View {
           let items: [FeedItem] = workouts.map { w in
             let ownerProf = profiles[w.user_id]
             let pIds = participantIdsByWorkout[w.id] ?? []
-            let coId = pIds.first(where: { $0 != w.user_id }) ?? pIds.first
-            let coAvatar = coId.flatMap { profiles[$0]?.avatar_url }
 
             return FeedItem(
               id: w.id,
@@ -485,7 +483,9 @@ struct HomeView: View {
               likeCount: likeCountByWorkout[w.id] ?? 0,
               isLiked: likedByMe.contains(w.id),
               participantIds: pIds,
-              coUserAvatarURL: coAvatar
+              coUserAvatarURLs: pIds
+                .filter { $0 != w.user_id }
+                .compactMap { profiles[$0]?.avatar_url }
             )
           }
 
@@ -547,7 +547,6 @@ struct HomeView: View {
             if let me = app.userId { isLiked = lRows.contains(where: { $0.user_id == me }) }
           } catch { }
           var pIds: [UUID] = []
-          var coAvatar: String? = nil
            do {
               let pRes = try await SupabaseManager.shared.client
                 .from("workout_participants")
@@ -558,9 +557,6 @@ struct HomeView: View {
               let pRows = try JSONDecoder.supabase().decode([ParticipantRow].self, from: pRes.data)
               pIds = pRows.map { $0.user_id }
               try await ensureProfilesAvailable(for: pIds)
-              if let coId = pIds.first(where: { $0 != w.user_id }) ?? pIds.first {
-                coAvatar = profiles[coId]?.avatar_url
-              }
           } catch { }
           
           
@@ -573,7 +569,9 @@ struct HomeView: View {
             likeCount: likeCount,
             isLiked: isLiked,
             participantIds: pIds,
-            coUserAvatarURL: coAvatar
+            coUserAvatarURLs: pIds
+              .filter { $0 != w.user_id }
+              .compactMap { profiles[$0]?.avatar_url }
           )
         print("[Home.refreshOne] will update feed on main…")
 
@@ -1376,12 +1374,23 @@ private struct HomeFeedCard: View {
                 .frame(width: 42, height: 42)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
 
-              if let co = item.coUserAvatarURL {
-                AvatarView(urlString: co)
-                  .frame(width: 18, height: 18)
-                  .clipShape(Circle())
-                  .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
-                  .offset(x: 2, y: 2)
+              if !item.coUserAvatarURLs.isEmpty {
+                HStack(spacing: -8) {
+                  ForEach(Array(item.coUserAvatarURLs.prefix(3)), id: \.self) { url in
+                    AvatarView(urlString: url)
+                      .frame(width: 18, height: 18)
+                      .clipShape(Circle())
+                      .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                  }
+                  if item.coUserAvatarURLs.count > 3 {
+                    Text("+\(item.coUserAvatarURLs.count - 3)")
+                      .font(.caption2.weight(.bold))
+                      .padding(.horizontal, 6).padding(.vertical, 2)
+                      .background(Capsule().fill(Color(.systemBackground)))
+                      .overlay(Capsule().stroke(Color.black.opacity(0.1)))
+                  }
+                }
+                .offset(x: 2, y: 2)
               }
             }
 

@@ -96,6 +96,20 @@ struct ComparePRsView: View {
         ProgressView().padding(.top, 12)
       } else if let error {
         Text(error).foregroundStyle(.red).padding(.horizontal)
+      } else if mergedSections.isEmpty {
+        VStack(spacing: 10) {
+          Image(systemName: "chart.line.uptrend.xyaxis")
+            .font(.system(size: 38, weight: .semibold))
+            .foregroundStyle(.secondary)
+          Text("No comparable PRs yet")
+            .font(.headline)
+          Text("We couldn't find PRs with the same metric for you and @\(otherUsername). Keep training and come back later!")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal)
+        }
+        .frame(maxWidth: .infinity, minHeight: 220)
       } else {
         List {
           ForEach(mergedSections, id: \.title) { section in

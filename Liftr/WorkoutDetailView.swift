@@ -9,7 +9,14 @@ struct WorkoutDetailView: View {
   @State private var showDuplicate = false
   @State private var duplicateDraft: AddWorkoutDraft?
   private var canEdit: Bool { app.userId == ownerId }
+    
+    private var isParticipant: Bool {
+      guard let me = app.userId else { return false }
+      return participants.contains { $0.user_id == me }
+    }
 
+    private var canDuplicate: Bool { canEdit || isParticipant }
+    
     struct WorkoutDetailRow: Decodable {
       let id: Int
       let user_id: UUID
@@ -338,17 +345,24 @@ private var content: some View {
             .buttonStyle(.borderedProminent)
           }
         }
+      }
+
+      if canEdit || canDuplicate {
         ToolbarItem(placement: .topBarTrailing) {
           Menu {
-            Button("Edit") { showEdit = true }
-            Button("Duplicate") {
-              Task {
-                let d = await buildDuplicateDraft()
-                await MainActor.run {
-                  guard let d else { return }
-                  app.addDraft = d
-                  app.addDraftKey = UUID()
-                  app.selectedTab = .add
+            if canEdit {
+              Button("Edit") { showEdit = true }
+            }
+            if canDuplicate {
+              Button("Duplicate") {
+                Task {
+                  let d = await buildDuplicateDraft()
+                  await MainActor.run {
+                    guard let d else { return }
+                    app.addDraft = d
+                    app.addDraftKey = UUID()
+                    app.selectedTab = .add
+                  }
                 }
               }
             }
@@ -639,7 +653,7 @@ private var content: some View {
         do {
           let exRes = try await SupabaseManager.shared.client
             .from("workout_exercises")
-            .select("id, exercise_id, order_index, notes, exercises(name)")
+            .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
             .eq("workout_id", value: workoutId)
             .order("order_index", ascending: true)
             .execute()
@@ -650,6 +664,7 @@ private var content: some View {
             let order_index: Int
             let notes: String?
             let exercises: ExName?
+            let custom_name: String?
             struct ExName: Decodable { let name: String? }
           }
           let exs = try decoder.decode([ExWire].self, from: exRes.data)
@@ -687,15 +702,15 @@ private var content: some View {
             }
           }
 
-          draft.strengthItems = exs.map { ex in
-            EditableExercise(
-              exerciseId: ex.exercise_id,
-              exerciseName: ex.exercises?.name ?? "",
-              orderIndex: ex.order_index,
-              notes: ex.notes ?? "",
-              sets: setsByEx[ex.id] ?? [EditableSet(setNumber: 1)]
-            )
-          }
+            draft.strengthItems = exs.map { ex in
+              EditableExercise(
+                exerciseId: ex.exercise_id,
+                exerciseName: (ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercises?.name ?? "")),
+                orderIndex: ex.order_index,
+                notes: ex.notes ?? "",
+                sets: setsByEx[ex.id] ?? [EditableSet(setNumber: 1)]
+              )
+            }
         } catch { return nil }
 
       case "cardio":
@@ -789,6 +804,20 @@ private var content: some View {
           }
           let unique = Dictionary(grouping: mapped, by: { $0.user_id }).compactMap { $0.value.first }
           draft.participants = unique
+            if let me = app.userId, me != ownerId {
+              let amIParticipant = draft.participants.contains { $0.user_id == me }
+              if amIParticipant {
+                draft.participants.removeAll { $0.user_id == me }
+                let ownerAsParticipant = LightweightProfile(
+                  user_id: ownerId,
+                  username: profile?.username,
+                  avatar_url: profile?.avatar_url
+                )
+                if !draft.participants.contains(where: { $0.user_id == ownerId }) {
+                  draft.participants.append(ownerAsParticipant)
+                }
+              }
+            }
         } catch {
           draft.participants = []
         }
@@ -800,13 +829,15 @@ private struct StrengthDetailBlock: View {
   let workoutId: Int
   let reloadKey: UUID
 
-  private struct ExerciseRow: Decodable, Identifiable {
-    let id: Int
-    let exercise_id: Int
-    let order_index: Int
-    let notes: String?
-    let exercise_name: String?
-  }
+    private struct ExerciseRow: Decodable, Identifiable {
+      let id: Int
+      let exercise_id: Int64
+      let order_index: Int
+      let notes: String?
+      let custom_name: String?
+      let exercise_name: String?
+    }
+    
   private struct SetRow: Decodable, Identifiable {
     let id: Int
     let workout_exercise_id: Int
@@ -832,7 +863,7 @@ private struct StrengthDetailBlock: View {
       ForEach(exercises.sorted(by: { $0.order_index < $1.order_index })) { ex in
         VStack(alignment: .leading, spacing: 6) {
           HStack {
-            Text(ex.exercise_name ?? "Exercise #\(ex.exercise_id)")
+              Text((ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise #\(ex.exercise_id)")))
               .font(.subheadline.weight(.semibold))
             Spacer()
           }
@@ -887,23 +918,31 @@ private struct StrengthDetailBlock: View {
     do {
       let exQ = try await SupabaseManager.shared.client
         .from("workout_exercises")
-        .select("id, exercise_id, order_index, notes, exercises(name)")
+        .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
         .eq("workout_id", value: workoutId)
         .order("order_index", ascending: true)
         .execute()
 
-      struct ExWire: Decodable {
-        let id: Int
-        let exercise_id: Int
-        let order_index: Int
-        let notes: String?
-        let exercises: ExName?
-        struct ExName: Decodable { let name: String? }
-      }
+        struct ExWire: Decodable {
+          let id: Int
+          let exercise_id: Int64
+          let order_index: Int
+          let notes: String?
+          let custom_name: String?
+          let exercises: ExName?
+          struct ExName: Decodable { let name: String? }
+        }
       let exWire = try JSONDecoder.supabase().decode([ExWire].self, from: exQ.data)
-      let exRows: [ExerciseRow] = exWire.map {
-        .init(id: $0.id, exercise_id: $0.exercise_id, order_index: $0.order_index, notes: $0.notes, exercise_name: $0.exercises?.name)
-      }
+        let exRows: [ExerciseRow] = exWire.map {
+          .init(
+            id: $0.id,
+            exercise_id: $0.exercise_id,
+            order_index: $0.order_index,
+            notes: $0.notes,
+            custom_name: $0.custom_name,
+            exercise_name: $0.exercises?.name
+          )
+        }
       await MainActor.run { exercises = exRows }
 
       let ids = exRows.map { $0.id }
