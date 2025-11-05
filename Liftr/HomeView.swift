@@ -26,6 +26,13 @@ struct HomeView: View {
         let state: String
         let started_at: Date?
         let ended_at: Date?
+        let sport_sessions: [SportSessionRow]?
+        
+        struct SportSessionRow: Decodable {
+            let sport: String
+        }
+        
+        var sport: String? { sport_sessions?.first?.sport }
     }
     
     private struct FollowRow: Decodable { let followee_id: UUID }
@@ -264,7 +271,8 @@ struct HomeView: View {
                         title: title,
                         state: (ui["state"] as? String) ?? old.workout.state,
                         started_at: startedAt ?? old.workout.started_at,
-                        ended_at: endedAt ?? old.workout.ended_at
+                        ended_at: endedAt ?? old.workout.ended_at,
+                        sport_sessions: old.workout.sport_sessions
                     )
                     
                     Task { await MainActor.run {
@@ -398,7 +406,7 @@ struct HomeView: View {
             
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state")
+                .select("id, user_id, kind, title, started_at, ended_at, state, sport_sessions(sport)")
                 .in("user_id", values: allIds.map { $0.uuidString })
                 .or("user_id.eq.\(me.uuidString),state.neq.planned")
             
@@ -1361,6 +1369,24 @@ private struct InsightsRow: View {
 
 
 private struct HomeFeedCard: View {
+    private func sportIcon(for sport: String?) -> String {
+        switch sport {
+        case "padel", "tennis", "squash", "badminton", "table_tennis":
+            return "🎾"
+        case "football":
+            return "⚽️"
+        case "basketball":
+            return "🏀"
+        case "volleyball":
+            return "🏐"
+        case "running":
+            return "🏃‍♂️"
+        case "cycling":
+            return "🚴‍♂️"
+        default:
+            return ""
+        }
+    }
     let item: HomeView.FeedItem
     
     var body: some View {
@@ -1440,12 +1466,17 @@ private struct HomeFeedCard: View {
                     }
                 }
                 HStack {
-                    Text(item.workout.kind.capitalized)
-                        .font(.caption2.weight(.semibold))
-                        .padding(.vertical, 3)
-                        .padding(.horizontal, 6)
-                        .background(Capsule().fill(workoutTint(for: item.workout.kind).opacity(0.18)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+                    HStack(spacing: 4) {
+                        Text(item.workout.kind.capitalized)
+                        if let sport = item.workout.sport {
+                            Text(sportIcon(for: sport))
+                        }
+                    }
+                    .font(.caption2.weight(.semibold))
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 6)
+                    .background(Capsule().fill(workoutTint(for: item.workout.kind).opacity(0.18)))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.12)))
                     
                     Spacer()
                     

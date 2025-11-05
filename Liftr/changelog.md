@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.9.3] - 2025-11-05
+
+### Added
+- **Home → Sport badge with per-sport icon**
+  - Sport workouts now display a single **“Sport” pill** with a **contextual icon** (e.g., padel racket, football, basketball, tennis, volleyball).
+  - Accessibility: VoiceOver announces “Sport: {sport name}”.
+- **Intelligent title for Sport**
+  - If a Sport workout has no custom `title`, the **sport name** is used as the card title (e.g., “Padel”, “Football”).
+- **Sport-specific fields (creation & edit)**
+  - The Add/Edit flow now surfaces **custom fields per sport type**:
+    - **Football**: score for/against, match score text, location, duration.
+    - **Basketball**: score for/against, period/quarters (text), location, duration.
+    - **Volleyball**: sets won/lost, per-set score text, location, duration.
+    - **Racket sports** (Padel/Tennis/Badminton): sets/games, tie-break notes, result and duration, location.
+  - UI renders only the relevant inputs based on the selected sport.
+
+### Changed
+- **Sport pill design**
+  - Kept a **single pill** (“Sport” + icon) to minimize visual noise and keep consistency with Strength/Cardio tints.
+- **Add/Edit forms**
+  - Conditional sections ensure a compact layout: generic sport fields are shown first, followed by the sport-specific block.
+
+### Fixed
+- **Home feed update path**
+  - Workout update handler now preserves `likeCount` / `isLiked` and score when patching feed items, avoiding regressions during `.workoutUpdated`.
+
+### Database
+- **Schema (non-breaking extensions)**
+  - Extended `public.sport_sessions` with **sport-specific columns** grouped by type (nullable; backward compatible). Examples include:
+    - `football_score_for`, `football_score_against`, `basketball_period_text`,
+      `volleyball_sets_won`, `volleyball_sets_lost`,
+      `racket_sets_text`, `match_score_text`, `location`, `duration_sec`.
+- **Functions / RPC**
+  - Updated `create_sport_workout_v1(p jsonb)` to accept and persist the new **sport-specific fields** while keeping previous payloads valid.
+- **Soft decay for inactivity (score pipeline)**
+  - Introduced a **soft decay** that reduces awarded points when a user has been **inactive for X days**:
+    - New helper: `get_inactivity_multiplier(p_user_id uuid, p_at timestamptz)` → `numeric` (e.g., `1.0` down to a configured floor).
+    - The multiplier is applied when inserting into `workout_scores` (or at score aggregation), so recent consistent activity yields full points while long gaps apply a gentle reduction.
+    - Parameters (threshold, slope, floor) are configurable via constants or a settings table.
+  - RLS: unchanged; decay is applied server-side and respects existing visibility rules.
+
+### Ops / Migration Notes
+- Run lightweight migration adding the new nullable columns to `sport_sessions`.
+- Deploy the updated `create_sport_workout_v1` and the `get_inactivity_multiplier` helper.
+- No backfill required; historic scores remain intact unless you explicitly reprocess them.
+
+[0.9.3]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.9.3
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.9.3...HEAD
+
 ## [0.9.2] - 2025-11-03
 
 ### Added
