@@ -78,7 +78,7 @@ struct WorkoutDetailView: View {
         }
         .gradientBG()
         .safeAreaPadding(.top, 2)
-        .navigationTitle(workout?.title ?? workout?.kind.capitalized ?? "Workout")
+        .navigationTitle((workout?.title?.isEmpty == false ? workout!.title! : (workout?.kind.capitalized ?? "Workout")))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -182,6 +182,16 @@ struct WorkoutDetailView: View {
                         Text("• \(pi.capitalized)")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
+                    if !participants.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "person.2.fill")
+                            Text("\(participants.count)")
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .padding(.vertical, 2)
+                        .padding(.horizontal, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    }
                     Spacer()
                     if w.state == "planned" {
                         draftBadge
@@ -256,7 +266,7 @@ struct WorkoutDetailView: View {
         case "cardio":
             CardioDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
         case "sport":
-            SportDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
+            SportDetailBlock(workoutId: workoutId, reloadKey: reloadKey, canEdit: canEdit)
         default:
             EmptyView()
         }
@@ -641,8 +651,8 @@ struct WorkoutDetailView: View {
             kind: WorkoutKind(rawValue: base.kind) ?? .strength,
             title: base.title ?? "",
             note: base.notes ?? "",
-            startedAt: Date(),
-            endedAt: nil,
+            startedAt: base.started_at ?? Date(),
+            endedAt: base.ended_at,
             perceived: WorkoutIntensity(rawValue: base.perceived_intensity ?? "moderate") ?? .moderate
         )
         
@@ -759,6 +769,7 @@ struct WorkoutDetailView: View {
                     .execute()
                 
                 struct Row: Decodable {
+                    let id: Int
                     let sport: String
                     let duration_sec: Int?
                     let match_result: String?
@@ -772,6 +783,7 @@ struct WorkoutDetailView: View {
                 
                 var sf = SportForm()
                 sf.sport = SportType(rawValue: r.sport) ?? .football
+                print("[DUP][SPORT] session_id=\(r.id), sport=\(r.sport)")
                 sf.durationMin = r.duration_sec.map { "\($0/60)" } ?? ""
                 sf.scoreFor = r.score_for.map(String.init) ?? ""
                 sf.scoreAgainst = r.score_against.map(String.init) ?? ""
@@ -780,6 +792,140 @@ struct WorkoutDetailView: View {
                 sf.location = r.location ?? ""
                 sf.sessionNotes = r.notes ?? ""
                 draft.sport = sf
+                
+                let q = try await SupabaseManager.shared.client
+                    .from("vw_sport_session_full")
+                    .select("*")
+                    .eq("workout_id", value: workoutId)
+                    .single()
+                    .execute()
+                
+                struct Full: Decodable {
+                    let session_id: Int
+                    let sport: String
+                    let duration_sec: Int?
+                    let match_result: String?
+                    let score_for: Int?
+                    let score_against: Int?
+                    let match_score_text: String?
+                    let location: String?
+                    let session_notes: String?
+                    let rk_mode: String?
+                    let rk_format: String?
+                    let rk_sets_won: Int?
+                    let rk_sets_lost: Int?
+                    let rk_games_won: Int?
+                    let rk_games_lost: Int?
+                    let rk_aces: Int?
+                    let rk_double_faults: Int?
+                    let rk_winners: Int?
+                    let rk_unforced_errors: Int?
+                    let rk_break_points_won: Int?
+                    let rk_break_points_total: Int?
+                    let rk_net_points_won: Int?
+                    let rk_net_points_total: Int?
+                    let bb_points: Int?
+                    let bb_rebounds: Int?
+                    let bb_assists: Int?
+                    let bb_steals: Int?
+                    let bb_blocks: Int?
+                    let bb_fg_made: Int?
+                    let bb_fg_attempted: Int?
+                    let bb_three_made: Int?
+                    let bb_three_attempted: Int?
+                    let bb_ft_made: Int?
+                    let bb_ft_attempted: Int?
+                    let bb_turnovers: Int?
+                    let bb_fouls: Int?
+                    let fb_position: String?
+                    let fb_minutes_played: Int?
+                    let fb_goals: Int?
+                    let fb_assists: Int?
+                    let fb_shots_on_target: Int?
+                    let fb_passes_completed: Int?
+                    let fb_passes_attempted: Int?
+                    let fb_tackles: Int?
+                    let fb_interceptions: Int?
+                    let fb_saves: Int?
+                    let fb_yellow_cards: Int?
+                    let fb_red_cards: Int?
+                    let vb_points: Int?
+                    let vb_aces: Int?
+                    let vb_blocks: Int?
+                    let vb_digs: Int?
+                }
+                
+                let full = try JSONDecoder.supabase().decode(Full.self, from: q.data)
+                var sf2 = draft.sport ?? SportForm()
+                sf2.sport           = SportType(rawValue: full.sport) ?? .football
+                sf2.durationMin     = full.duration_sec.map { "\($0/60)" } ?? ""
+                sf2.scoreFor        = full.score_for.map(String.init) ?? ""
+                sf2.scoreAgainst    = full.score_against.map(String.init) ?? ""
+                sf2.matchResult     = MatchResult(rawValue: full.match_result ?? "") ?? .unfinished
+                sf2.matchScoreText  = full.match_score_text ?? ""
+                sf2.location        = full.location ?? ""
+                sf2.sessionNotes    = full.session_notes ?? ""
+                if ["padel","tennis","badminton","squash","table_tennis"].contains(full.sport) {
+                    sf2.racket = RacketStatsForm(
+                        mode: full.rk_mode ?? "",
+                        format: full.rk_format ?? "",
+                        setsWon: (full.rk_sets_won ?? 0).description,
+                        setsLost: (full.rk_sets_lost ?? 0).description,
+                        gamesWon: (full.rk_games_won ?? 0).description,
+                        gamesLost: (full.rk_games_lost ?? 0).description,
+                        aces: (full.rk_aces ?? 0).description,
+                        doubleFaults: (full.rk_double_faults ?? 0).description,
+                        winners: (full.rk_winners ?? 0).description,
+                        unforcedErrors: (full.rk_unforced_errors ?? 0).description,
+                        breakPointsWon: (full.rk_break_points_won ?? 0).description,
+                        breakPointsTotal: (full.rk_break_points_total ?? 0).description,
+                        netPointsWon: (full.rk_net_points_won ?? 0).description,
+                        netPointsTotal: (full.rk_net_points_total ?? 0).description
+                    )
+                }
+                if full.sport == "basketball" {
+                    sf2.basketball = BasketballStatsForm(
+                        points: (full.bb_points ?? 0).description,
+                        rebounds: (full.bb_rebounds ?? 0).description,
+                        assists: (full.bb_assists ?? 0).description,
+                        steals: (full.bb_steals ?? 0).description,
+                        blocks: (full.bb_blocks ?? 0).description,
+                        fgMade: (full.bb_fg_made ?? 0).description,
+                        fgAttempted: (full.bb_fg_attempted ?? 0).description,
+                        threeMade: (full.bb_three_made ?? 0).description,
+                        threeAttempted: (full.bb_three_attempted ?? 0).description,
+                        ftMade: (full.bb_ft_made ?? 0).description,
+                        ftAttempted: (full.bb_ft_attempted ?? 0).description,
+                        turnovers: (full.bb_turnovers ?? 0).description,
+                        fouls: (full.bb_fouls ?? 0).description
+                    )
+                }
+                if ["football","handball","hockey","rugby"].contains(full.sport) {
+                    sf2.football = FootballStatsForm(
+                        position: full.fb_position ?? "",
+                        minutesPlayed: (full.fb_minutes_played ?? 0).description,
+                        goals: (full.fb_goals ?? 0).description,
+                        assists: (full.fb_assists ?? 0).description,
+                        shotsOnTarget: (full.fb_shots_on_target ?? 0).description,
+                        passesCompleted: (full.fb_passes_completed ?? 0).description,
+                        passesAttempted: (full.fb_passes_attempted ?? 0).description,
+                        tackles: (full.fb_tackles ?? 0).description,
+                        interceptions: (full.fb_interceptions ?? 0).description,
+                        saves: (full.fb_saves ?? 0).description,
+                        yellowCards: (full.fb_yellow_cards ?? 0).description,
+                        redCards: (full.fb_red_cards ?? 0).description
+                    )
+                }
+                if full.sport == "volleyball" {
+                    sf2.volleyball = VolleyballStatsForm(
+                        points: (full.vb_points ?? 0).description,
+                        aces: (full.vb_aces ?? 0).description,
+                        blocks: (full.vb_blocks ?? 0).description,
+                        digs: (full.vb_digs ?? 0).description
+                    )
+                }
+                
+                draft.sport = sf2
             } catch { return nil }
             
         default: break
@@ -1073,8 +1219,10 @@ private struct CardioDetailBlock: View {
 private struct SportDetailBlock: View {
     let workoutId: Int
     let reloadKey: UUID
+    let canEdit: Bool
     
     private struct SportRow: Decodable {
+        let id: Int
         let sport: String
         let duration_sec: Int?
         let match_result: String?
@@ -1085,8 +1233,67 @@ private struct SportDetailBlock: View {
         let notes: String?
     }
     
+    private struct FootballStats: Decodable {
+        let position: String?
+        let minutes_played: Int?
+        let goals: Int?
+        let assists: Int?
+        let shots_on_target: Int?
+        let passes_completed: Int?
+        let passes_attempted: Int?
+        let tackles: Int?
+        let interceptions: Int?
+        let saves: Int?
+        let yellow_cards: Int?
+        let red_cards: Int?
+    }
+    
+    private struct BasketballStats: Decodable {
+        let points: Int?
+        let rebounds: Int?
+        let assists: Int?
+        let steals: Int?
+        let blocks: Int?
+        let fg_made: Int?
+        let fg_attempted: Int?
+        let three_made: Int?
+        let three_attempted: Int?
+        let ft_made: Int?
+        let ft_attempted: Int?
+        let turnovers: Int?
+        let fouls: Int?
+    }
+    
+    private struct RacketStats: Decodable {
+        let mode: String?
+        let format: String?
+        let sets_won: Int?
+        let sets_lost: Int?
+        let games_won: Int?
+        let games_lost: Int?
+        let aces: Int?
+        let double_faults: Int?
+        let winners: Int?
+        let unforced_errors: Int?
+        let break_points_won: Int?
+        let break_points_total: Int?
+        let net_points_won: Int?
+        let net_points_total: Int?
+    }
+    
+    private struct VolleyballStats: Decodable {
+        let points: Int?
+        let aces: Int?
+        let blocks: Int?
+        let digs: Int?
+    }
+    
     @State private var row: SportRow?
     @State private var error: String?
+    @State private var fb: FootballStats? = nil
+    @State private var bb: BasketballStats? = nil
+    @State private var rk: RacketStats? = nil
+    @State private var vb: VolleyballStats? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1097,9 +1304,69 @@ private struct SportDetailBlock: View {
                 if let s = r.duration_sec { info("Duration", durationString(Double(s))) }
                 if let res = r.match_result, !res.isEmpty { info("Result", res.capitalized) }
                 if let sf = r.score_for, let sa = r.score_against { info("Score", "\(sf) – \(sa)") }
-                if let mst = r.match_score_text, !mst.isEmpty { info("Sets", mst) }
+                if sportUsesSetText(r.sport), let mst = r.match_score_text, !mst.isEmpty { info("Sets", mst) }
                 if let loc = r.location, !loc.isEmpty { info("Location", loc) }
-                if let n = r.notes, !n.isEmpty { info("Notes", n) }
+                if let n = r.notes, !n.isEmpty {
+                    info("Session notes", n)
+                }
+                if let s = fb {
+                    Divider().padding(.vertical, 4)
+                    Text("Football stats").font(.headline)
+                    if let v = s.position, !v.isEmpty { info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized) }
+                    if let v = s.minutes_played { info("Minutes played", "\(v)") }
+                    if let v = s.goals { info("Goals", "\(v)") }
+                    if let v = s.assists { info("Assists", "\(v)") }
+                    if let v = s.shots_on_target { info("Shots on target", "\(v)") }
+                    if let v = s.passes_completed, let tot = s.passes_attempted {
+                        info("Passes", "\(v)/\(tot)")
+                    } else if let v = s.passes_completed {
+                        info("Passes completed", "\(v)")
+                    }
+                    if let v = s.tackles { info("Tackles", "\(v)") }
+                    if let v = s.interceptions { info("Interceptions", "\(v)") }
+                    if let v = s.saves { info("Saves", "\(v)") }
+                    if let v = s.yellow_cards { info("Yellow cards", "\(v)") }
+                    if let v = s.red_cards { info("Red cards", "\(v)") }
+                }
+                
+                if let s = bb {
+                    Divider().padding(.vertical, 4)
+                    Text("Basketball stats").font(.headline)
+                    if let v = s.points { info("Points", "\(v)") }
+                    if let v = s.rebounds { info("Rebounds", "\(v)") }
+                    if let v = s.assists { info("Assists", "\(v)") }
+                    if let v = s.steals { info("Steals", "\(v)") }
+                    if let v = s.blocks { info("Blocks", "\(v)") }
+                    if let m = s.fg_made, let a = s.fg_attempted { info("FG", "\(m)/\(a)") }
+                    if let m = s.three_made, let a = s.three_attempted { info("3PT", "\(m)/\(a)") }
+                    if let m = s.ft_made, let a = s.ft_attempted { info("FT", "\(m)/\(a)") }
+                    if let v = s.turnovers { info("Turnovers", "\(v)") }
+                    if let v = s.fouls { info("Fouls", "\(v)") }
+                }
+                
+                if let s = rk {
+                    Divider().padding(.vertical, 4)
+                    Text("Racket stats").font(.headline)
+                    if let v = s.mode { info("Mode", v.replacingOccurrences(of: "_", with: " ").capitalized) }
+                    if let v = s.format { info("Format", v.replacingOccurrences(of: "_", with: " ").capitalized) }
+                    if let w = s.sets_won, let l = s.sets_lost { info("Sets (W–L)", "\(w)–\(l)") }
+                    if let w = s.games_won, let l = s.games_lost { info("Games (W–L)", "\(w)–\(l)") }
+                    if let v = s.aces { info("Aces", "\(v)") }
+                    if let v = s.double_faults { info("Double faults", "\(v)") }
+                    if let v = s.winners { info("Winners", "\(v)") }
+                    if let v = s.unforced_errors { info("Unforced errors", "\(v)") }
+                    if let w = s.break_points_won, let t = s.break_points_total { info("Break points", "\(w)/\(t)") }
+                    if let w = s.net_points_won,  let t = s.net_points_total  { info("Net points", "\(w)/\(t)") }
+                }
+                
+                if let s = vb {
+                    Divider().padding(.vertical, 4)
+                    Text("Volleyball stats").font(.headline)
+                    if let v = s.points { info("Points", "\(v)") }
+                    if let v = s.aces { info("Aces", "\(v)") }
+                    if let v = s.blocks { info("Blocks", "\(v)") }
+                    if let v = s.digs { info("Digs", "\(v)") }
+                }
             } else {
                 Text("No sport session linked").foregroundStyle(.secondary).font(.caption)
             }
@@ -1122,9 +1389,71 @@ private struct SportDetailBlock: View {
                 .single()
                 .execute()
             let r = try JSONDecoder.supabase().decode(SportRow.self, from: res.data)
-            await MainActor.run { row = r }
+            await MainActor.run {
+                row = r
+                fb = nil; bb = nil; rk = nil; vb = nil
+            }
+            await loadStats(for: r)
         } catch {
             await MainActor.run { self.row = nil; self.error = error.localizedDescription }
+        }
+    }
+    
+    private func loadStats(for r: SportRow) async {
+        let client = SupabaseManager.shared.client
+        let decoder = JSONDecoder.supabase()
+        
+        switch r.sport {
+        case "football", "handball", "hockey", "rugby":
+            do {
+                let q = try await client
+                    .from("football_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(FootballStats.self, from: q.data)
+                await MainActor.run { fb = s }
+            } catch { await MainActor.run { fb = nil } }
+            
+        case "basketball":
+            do {
+                let q = try await client
+                    .from("basketball_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(BasketballStats.self, from: q.data)
+                await MainActor.run { bb = s }
+            } catch { await MainActor.run { bb = nil } }
+            
+        case "padel", "tennis", "badminton", "squash", "table_tennis":
+            do {
+                let q = try await client
+                    .from("racket_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(RacketStats.self, from: q.data)
+                await MainActor.run { rk = s }
+            } catch { await MainActor.run { rk = nil } }
+            
+        case "volleyball":
+            do {
+                let q = try await client
+                    .from("volleyball_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(VolleyballStats.self, from: q.data)
+                await MainActor.run { vb = s }
+            } catch { await MainActor.run { vb = nil } }
+            
+        default:
+            break
         }
     }
     
@@ -1143,6 +1472,19 @@ private struct SportDetailBlock: View {
         let h = s / 3600, m = (s % 3600) / 60, sec = s % 60
         if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
         return String(format: "%d:%02d", m, sec)
+    }
+}
+
+private func sportUsesNumericScore(_ s: String) -> Bool {
+    switch s {
+    case "football", "basketball", "handball", "hockey": return true
+    default: return false
+    }
+}
+private func sportUsesSetText(_ s: String) -> Bool {
+    switch s {
+    case "padel", "tennis", "badminton", "squash", "table_tennis", "volleyball": return true
+    default: return false
     }
 }
 

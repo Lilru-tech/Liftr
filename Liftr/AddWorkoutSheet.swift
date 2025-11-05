@@ -80,6 +80,46 @@ enum PublishMode: String, CaseIterable, Identifiable {
     var stateParam: String { self == .add ? "published" : "planned" }
 }
 
+enum RacketMode: String, CaseIterable, Identifiable {
+    case singles, doubles, mixedDoubles
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .singles: "Singles"
+        case .doubles: "Doubles"
+        case .mixedDoubles: "Mixed doubles"
+        }
+    }
+    var dbValue: String {
+        switch self {
+        case .singles: "singles"
+        case .doubles: "doubles"
+        case .mixedDoubles: "mixed_doubles"
+        }
+    }
+}
+
+enum RacketFormat: String, CaseIterable, Identifiable {
+    case bestOfThree, bestOfFive
+    var id: String { rawValue }
+    var label: String { self == .bestOfThree ? "Best of 3" : "Best of 5" }
+    var dbValue: String { self == .bestOfThree ? "best_of_3" : "best_of_5" }
+}
+
+enum FootballPosition: String, CaseIterable, Identifiable {
+    case goalkeeper, defender, midfielder, forward
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var dbValue: String {
+        switch self {
+        case .goalkeeper: "goalkeeper"
+        case .defender:   "defender"
+        case .midfielder: "midfielder"
+        case .forward:    "forward"
+        }
+    }
+}
+
 struct LightweightProfile: Identifiable, Decodable, Hashable {
     let user_id: UUID
     let username: String?
@@ -431,29 +471,8 @@ struct AddWorkoutSheet: View {
     @State private var confirmRemoveIndex: Int? = nil
     @State private var publishMode: PublishMode = .add
     @State private var durationLabelMin: Int? = nil
-    
-    init(draft: AddWorkoutDraft? = nil) {
-        if let d = draft {
-            _kind      = State(initialValue: d.kind)
-            _title     = State(initialValue: d.title)
-            _note      = State(initialValue: d.note)
-            _startedAt = State(initialValue: d.startedAt)
-            _endedAtEnabled = State(initialValue: d.endedAt != nil)
-            _endedAt   = State(initialValue: d.endedAt ?? d.startedAt)
-            _perceived = State(initialValue: d.perceived)
-            _participants = State(initialValue: d.participants)
-            
-            switch d.kind {
-            case .strength:
-                _items  = State(initialValue: d.strengthItems.isEmpty ? [EditableExercise()] : d.strengthItems)
-            case .cardio:
-                _cardio = State(initialValue: d.cardio ?? CardioForm())
-            case .sport:
-                _sport  = State(initialValue: d.sport ?? SportForm())
-            }
-        }
-        _needsInitialSync = State(initialValue: _endedAtEnabled.wrappedValue)
-    }
+    @State private var didApplyDraft = false
+    @State private var isApplyingDraft = false
     
     var body: some View {
         NavigationStack {
@@ -629,6 +648,12 @@ struct AddWorkoutSheet: View {
             }
         }
         .onAppear {
+            if !didApplyDraft, let d = app.addDraft {
+                isApplyingDraft = true
+                applyDraft(d)
+                didApplyDraft = true
+                isApplyingDraft = false
+            }
             if needsInitialSync {
                 needsInitialSync = false
                 recomputeDurationLabel()
@@ -646,6 +671,14 @@ struct AddWorkoutSheet: View {
             .gradientBG()
             .presentationDetents([.large])
             .presentationBackground(.clear)
+        }
+        .onChange(of: app.addDraftKey) { _, _ in
+            if let d = app.addDraft {
+                isApplyingDraft = true
+                applyDraft(d)
+                didApplyDraft = true
+                isApplyingDraft = false
+            }
         }
         .banner($banner)
         .alert(
@@ -908,11 +941,18 @@ struct AddWorkoutSheet: View {
             SectionCard {
                 FieldRowPlain {
                     Picker("", selection: $sport.sport) {
-                        ForEach(SportType.allCases) { s in
+                        ForEach(SportType.allCases.filter { $0 != .hockey && $0 != .handball && $0 != .rugby }) { s in
                             Text(s.label).tag(s)
                         }
                     }
                     .pickerStyle(.menu)
+                    .onChange(of: sport.sport) { _, new in
+                        if sportUsesNumericScore(new) {
+                            sport.matchScoreText = ""
+                        } else if sportUsesSetText(new) {
+                            sport.scoreFor = ""; sport.scoreAgainst = ""
+                        }
+                    }
                 }
                 
                 Divider()
@@ -951,14 +991,16 @@ struct AddWorkoutSheet: View {
                 }
                 Divider()
                 
+                Divider()
+
                 FieldRowPlain {
                     Picker("", selection: $sport.matchResult) {
-                        ForEach(MatchResult.allCases) { r in
-                            Text(r.label).tag(r)
-                        }
+                        ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
                     }
                     .pickerStyle(.menu)
                 }
+                
+                sportSpecificFields()
                 
                 Divider()
                 
@@ -989,6 +1031,143 @@ struct AddWorkoutSheet: View {
             return !cardio.modality.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .sport:
             return true
+        }
+    }
+    
+    @ViewBuilder
+    private func sportSpecificFields() -> some View {
+        switch sport.sport {
+        case .football:
+            Divider()
+            FieldRowPlain {
+                Picker("", selection: $sport.fbPosition) {
+                    ForEach(FootballPosition.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.menu)
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Assists", text: $sport.fbAssists).keyboardType(.numberPad)
+                    TextField("Shots on target", text: $sport.fbShotsOnTarget).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Passes completed", text: $sport.fbPassesCompleted).keyboardType(.numberPad)
+                    TextField("Tackles", text: $sport.fbTackles).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Saves (GK)", text: $sport.fbSaves).keyboardType(.numberPad)
+                    TextField("Yellow cards", text: $sport.fbYellow).keyboardType(.numberPad)
+                    TextField("Red cards", text: $sport.fbRed).keyboardType(.numberPad)
+                }
+            }
+            
+        case .basketball:
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Points", text: $sport.bbPoints).keyboardType(.numberPad)
+                    TextField("Rebounds", text: $sport.bbRebounds).keyboardType(.numberPad)
+                    TextField("Assists", text: $sport.bbAssists).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Steals", text: $sport.bbSteals).keyboardType(.numberPad)
+                    TextField("Blocks", text: $sport.bbBlocks).keyboardType(.numberPad)
+                    TextField("Turnovers", text: $sport.bbTurnovers).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                TextField("Fouls", text: $sport.bbFouls).keyboardType(.numberPad)
+            }
+            
+        case .padel, .tennis, .badminton, .squash, .table_tennis:
+            Divider()
+            FieldRowPlain {
+                Picker("", selection: $sport.racketMode) {
+                    ForEach(RacketMode.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.menu)
+            }
+            Divider()
+            FieldRowPlain {
+                Picker("", selection: $sport.racketFormat) {
+                    ForEach(RacketFormat.allCases) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented)
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Aces",            text: $sport.rkAces).keyboardType(.numberPad)
+                    TextField("Double faults",   text: $sport.rkDoubleFaults).keyboardType(.numberPad)
+                    TextField("Winners",         text: $sport.rkWinners).keyboardType(.numberPad)
+                }
+            }
+            
+            Divider()
+            FieldRowPlain {
+                TextField("Unforced errors", text: $sport.rkUnforcedErrors).keyboardType(.numberPad)
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Sets won",  text: $sport.rkSetsWon).keyboardType(.numberPad)
+                    TextField("Sets lost", text: $sport.rkSetsLost).keyboardType(.numberPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Games won",  text: $sport.rkGamesWon).keyboardType(.numberPad)
+                    TextField("Games lost", text: $sport.rkGamesLost).keyboardType(.numberPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Break pts won",   text: $sport.rkBreakPointsWon).keyboardType(.numberPad)
+                    TextField("Break pts total", text: $sport.rkBreakPointsTotal).keyboardType(.numberPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Net pts won",   text: $sport.rkNetPointsWon).keyboardType(.numberPad)
+                    TextField("Net pts total", text: $sport.rkNetPointsTotal).keyboardType(.numberPad)
+                }
+            }
+            
+        case .volleyball:
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Points", text: $sport.vbPoints).keyboardType(.numberPad)
+                    TextField("Aces", text: $sport.vbAces).keyboardType(.numberPad)
+                }
+            }
+            
+        case .handball, .hockey, .rugby:
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    Text("Use 'Score for/against' arriba y notes si necesitas más detalles.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
     }
     
@@ -1060,6 +1239,10 @@ struct AddWorkoutSheet: View {
                 }
                 
             case .sport:
+                if sport.sport == .hockey || sport.sport == .handball || sport.sport == .rugby {
+                    self.error = "El deporte \(sport.sport.label) aún no está soportado."
+                    return
+                }
                 let minutes: Int?
                 if let typed = parseInt(sport.durationMin) {
                     minutes = typed
@@ -1071,6 +1254,9 @@ struct AddWorkoutSheet: View {
                     minutes = nil
                 }
                 let durationMin = minutes
+                let scoreFor      = sportUsesNumericScore(sport.sport) ? parseInt(sport.scoreFor) : nil
+                let scoreAgainst  = sportUsesNumericScore(sport.sport) ? parseInt(sport.scoreAgainst) : nil
+                let matchScoreTxt = sportUsesSetText(sport.sport) ? sport.matchScoreText.trimmedOrNil : nil
                 let payload = RPCSportParams(
                     p_user_id: userId,
                     p_sport: sport.sport.rawValue,
@@ -1080,21 +1266,24 @@ struct AddWorkoutSheet: View {
                     p_notes: note.isEmpty ? nil : note,
                     p_duration_min: durationMin,
                     p_duration_sec: nil,
-                    p_score_for: parseInt(sport.scoreFor),
-                    p_score_against: parseInt(sport.scoreAgainst),
+                    p_score_for: scoreFor,
+                    p_score_against: scoreAgainst,
                     p_match_result: sport.matchResult.rawValue,
-                    p_match_score_text: sport.matchScoreText.trimmedOrNil,
+                    p_match_score_text: matchScoreTxt,
                     p_location: sport.location.trimmedOrNil,
                     p_session_notes: sport.sessionNotes.trimmedOrNil,
                     p_perceived_intensity: perceived.rawValue,
                     p_state: publishMode.stateParam
                 )
                 
-                _ = try await client
-                    .rpc("create_sport_workout_v1", params: RPCSportWrapper(p: payload))
+                let statsJSON = try buildSportStatsJSON(from: sport)
+                
+                let res = try await client
+                    .rpc("create_sport_workout_v2", params: RPCSportV2Wrapper(p: payload, p_stats: statsJSON))
                     .execute()
-                if newWorkoutId == nil {
-                    newWorkoutId = try await fetchLastWorkoutId(for: userId, kind: .sport)
+                
+                if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
+                    newWorkoutId = Int64(created)
                 }
             }
             if let wid = newWorkoutId {
@@ -1164,6 +1353,67 @@ struct AddWorkoutSheet: View {
     private func parseDouble(_ s: String) -> Double? {
         let t = s.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : Double(t)
+    }
+    
+    private func buildSportStatsJSON(from f: SportForm) throws -> AnyJSON {
+        func strOrNil(_ s: String) -> String? {
+            let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return t.isEmpty ? nil : t
+        }
+        switch f.sport {
+        case .football:
+            var out: [String: AnyJSON] = [:]
+            out["position"] = try .init(f.fbPosition.dbValue)
+            if let v = parseInt(f.fbAssists)         { out["assists"]          = try .init(v) }
+            if let v = parseInt(f.fbShotsOnTarget)   { out["shots_on_target"]  = try .init(v) }
+            if let v = parseInt(f.fbPassesCompleted) { out["passes_completed"] = try .init(v) }
+            if let v = parseInt(f.fbTackles)         { out["tackles"]          = try .init(v) }
+            if let v = parseInt(f.fbSaves)           { out["saves"]            = try .init(v) }
+            if let v = parseInt(f.fbYellow)          { out["yellow_cards"]     = try .init(v) }
+            if let v = parseInt(f.fbRed)             { out["red_cards"]        = try .init(v) }
+            return try AnyJSON(out)
+            
+        case .basketball:
+            var out: [String: AnyJSON] = [:]
+            if let v = parseInt(f.bbPoints)    { out["points"]    = try .init(v) }
+            if let v = parseInt(f.bbRebounds)  { out["rebounds"]  = try .init(v) }
+            if let v = parseInt(f.bbAssists)   { out["assists"]   = try .init(v) }
+            if let v = parseInt(f.bbSteals)    { out["steals"]    = try .init(v) }
+            if let v = parseInt(f.bbBlocks)    { out["blocks"]    = try .init(v) }
+            if let v = parseInt(f.bbTurnovers) { out["turnovers"] = try .init(v) }
+            if let v = parseInt(f.bbFouls)     { out["fouls"]     = try .init(v) }
+            return try AnyJSON(out)
+            
+        case .padel, .tennis, .badminton, .squash, .table_tennis:
+            var out: [String: AnyJSON] = [:]
+            if let v = parseInt(f.rkAces)           { out["aces"]              = try .init(v) }
+            if let v = parseInt(f.rkDoubleFaults)   { out["double_faults"]     = try .init(v) }
+            if let v = parseInt(f.rkWinners)        { out["winners"]           = try .init(v) }
+            if let v = parseInt(f.rkUnforcedErrors) { out["unforced_errors"]   = try .init(v) }
+            if let v = parseInt(f.rkSetsWon)        { out["sets_won"]          = try .init(v) }
+            if let v = parseInt(f.rkSetsLost)       { out["sets_lost"]         = try .init(v) }
+            if let v = parseInt(f.rkGamesWon)       { out["games_won"]         = try .init(v) }
+            if let v = parseInt(f.rkGamesLost)      { out["games_lost"]        = try .init(v) }
+            if let v = parseInt(f.rkBreakPointsWon)   { out["break_points_won"]   = try .init(v) }
+            if let v = parseInt(f.rkBreakPointsTotal) { out["break_points_total"] = try .init(v) }
+            if let v = parseInt(f.rkNetPointsWon)     { out["net_points_won"]     = try .init(v) }
+            if let v = parseInt(f.rkNetPointsTotal)   { out["net_points_total"]   = try .init(v) }
+            out["racket_mode"]   = try .init(f.racketMode.dbValue)
+            out["racket_format"] = try .init(f.racketFormat.dbValue)
+            return try AnyJSON(out)
+            
+        case .volleyball:
+            var out: [String: AnyJSON] = [:]
+            if let v = parseInt(f.vbPoints)  { out["points"] = try .init(v) }
+            if let v = parseInt(f.vbAces)    { out["aces"]   = try .init(v) }
+            if let v = parseInt(f.vbBlocks)  { out["blocks"] = try .init(v) }
+            if let v = parseInt(f.vbDigs)    { out["digs"]   = try .init(v) }
+            return try AnyJSON(out)
+            
+        case .handball, .hockey, .rugby:
+            let out: [String: AnyJSON] = [:]
+            return try AnyJSON(out)
+        }
     }
     
     private func exerciseSelected(_ ex: EditableExercise) -> Bool {
@@ -1246,9 +1496,104 @@ struct AddWorkoutSheet: View {
         recomputeDurationLabel()
     }
     
+    private func applyDraft(_ d: AddWorkoutDraft) {
+        kind      = d.kind
+        title     = d.title
+        note      = d.note
+        startedAt = d.startedAt
+        if let end = d.endedAt {
+            endedAtEnabled = true
+            endedAt = max(end, startedAt)
+        } else {
+            endedAtEnabled = false
+            endedAt = startedAt
+        }
+        perceived   = d.perceived
+        participants = d.participants
+        
+        // Contenido por tipo
+        switch d.kind {
+        case .strength:
+            items = d.strengthItems.isEmpty ? [EditableExercise()] : d.strengthItems
+            
+        case .cardio:
+            cardio = d.cardio ?? CardioForm()
+            
+        case .sport:
+            var s = d.sport ?? SportForm()
+            if let vb = s.volleyball {
+                s.vbPoints = vb.points
+                s.vbAces   = vb.aces
+                s.vbBlocks = vb.blocks
+                s.vbDigs   = vb.digs
+            }
+            if let bb = s.basketball {
+                s.bbPoints    = bb.points
+                s.bbRebounds  = bb.rebounds
+                s.bbAssists   = bb.assists
+                s.bbSteals    = bb.steals
+                s.bbBlocks    = bb.blocks
+                s.bbTurnovers = bb.turnovers
+                s.bbFouls     = bb.fouls
+            }
+            if let fb = s.football {
+                if let pos = FootballPosition(rawValue: fb.position) {
+                    s.fbPosition = pos
+                }
+                s.fbAssists         = fb.assists
+                s.fbShotsOnTarget   = fb.shotsOnTarget
+                s.fbPassesCompleted = fb.passesCompleted
+                s.fbTackles         = fb.tackles
+                s.fbSaves           = fb.saves
+                s.fbYellow          = fb.yellowCards
+                s.fbRed             = fb.redCards
+            }
+            if let rk = s.racket {
+                let modeNorm   = rk.mode.lowercased().replacingOccurrences(of: " ", with: "_")
+                let formatNorm = rk.format.lowercased().replacingOccurrences(of: " ", with: "_")
+                switch modeNorm {
+                case "singles":       s.racketMode = .singles
+                case "doubles":       s.racketMode = .doubles
+                case "mixed_doubles": s.racketMode = .mixedDoubles
+                default: break
+                }
+                switch formatNorm {
+                case "best_of_3": s.racketFormat = .bestOfThree
+                case "best_of_5": s.racketFormat = .bestOfFive
+                default: break
+                }
+                s.rkAces             = rk.aces
+                s.rkDoubleFaults     = rk.doubleFaults
+                s.rkWinners          = rk.winners
+                s.rkUnforcedErrors   = rk.unforcedErrors
+                s.rkSetsWon          = rk.setsWon
+                s.rkSetsLost         = rk.setsLost
+                s.rkGamesWon         = rk.gamesWon
+                s.rkGamesLost        = rk.gamesLost
+                s.rkBreakPointsWon   = rk.breakPointsWon
+                s.rkBreakPointsTotal = rk.breakPointsTotal
+                s.rkNetPointsWon     = rk.netPointsWon
+                s.rkNetPointsTotal   = rk.netPointsTotal
+            }
+            
+            s.scoreFor     = (d.sport?.scoreFor.isEmpty == false)     ? (d.sport?.scoreFor ?? s.scoreFor)         : s.scoreFor
+            s.scoreAgainst = (d.sport?.scoreAgainst.isEmpty == false) ? (d.sport?.scoreAgainst ?? s.scoreAgainst) : s.scoreAgainst
+            
+            if sportUsesNumericScore(s.sport) { s.matchScoreText = "" }
+            sport = s
+            print("[DUP][INIT][SPORT] type=\(s.sport.rawValue) scoreFor=\(s.scoreFor) scoreAgainst=\(s.scoreAgainst) matchScoreText=\(s.matchScoreText)")
+            print("[DUP][INIT][RACKET] mode=\(s.racketMode.dbValue) format=\(s.racketFormat.dbValue)")
+            print("[DUP][INIT][RACKET] aces=\(s.rkAces) dblFaults=\(s.rkDoubleFaults) winners=\(s.rkWinners) unforced=\(s.rkUnforcedErrors)")
+            print("[DUP][INIT][RACKET] setsWon=\(s.rkSetsWon) setsLost=\(s.rkSetsLost) gamesWon=\(s.rkGamesWon) gamesLost=\(s.rkGamesLost)")
+            print("[DUP][INIT][RACKET] bpWon=\(s.rkBreakPointsWon)/\(s.rkBreakPointsTotal) netWon=\(s.rkNetPointsWon)/\(s.rkNetPointsTotal)")
+        }
+        recomputeDurationLabel()
+        syncDurationFromDates()
+    }
+    
     private func sportUsesNumericScore(_ s: SportType) -> Bool {
         switch s {
-        case .football, .basketball, .handball, .hockey, .rugby: return true
+        case .football, .basketball, .handball, .hockey: return true
         default: return false
         }
     }
@@ -1334,7 +1679,7 @@ struct CardioForm {
 }
 
 struct SportForm {
-    var sport: SportType = .football
+    var sport: SportType = .padel
     var durationMin: String = ""
     var scoreFor: String = ""
     var scoreAgainst: String = ""
@@ -1342,6 +1687,43 @@ struct SportForm {
     var matchScoreText: String = ""
     var location: String = ""
     var sessionNotes: String = ""
+    var football: FootballStatsForm? = nil
+    var basketball: BasketballStatsForm? = nil
+    var racket: RacketStatsForm? = nil
+    var volleyball: VolleyballStatsForm? = nil
+    var fbPosition: FootballPosition = .forward
+    var fbAssists: String = ""
+    var fbShotsOnTarget: String = ""
+    var fbPassesCompleted: String = ""
+    var fbTackles: String = ""
+    var fbSaves: String = ""
+    var fbYellow: String = ""
+    var fbRed: String = ""
+    var bbPoints: String = ""
+    var bbRebounds: String = ""
+    var bbAssists: String = ""
+    var bbSteals: String = ""
+    var bbBlocks: String = ""
+    var bbTurnovers: String = ""
+    var bbFouls: String = ""
+    var rkAces: String = ""
+    var rkDoubleFaults: String = ""
+    var rkWinners: String = ""
+    var racketMode: RacketMode = .singles
+    var racketFormat: RacketFormat = .bestOfThree
+    var rkSetsWon: String = ""
+    var rkSetsLost: String = ""
+    var rkGamesWon: String = ""
+    var rkGamesLost: String = ""
+    var rkBreakPointsWon: String = ""
+    var rkBreakPointsTotal: String = ""
+    var rkNetPointsWon: String = ""
+    var rkNetPointsTotal: String = ""
+    var rkUnforcedErrors: String = ""
+    var vbPoints: String = ""
+    var vbAces: String = ""
+    var vbBlocks: String = ""
+    var vbDigs: String = ""
 }
 
 struct RPCStrengthParams: Encodable {
@@ -1371,6 +1753,61 @@ struct RPCStrengthParams: Encodable {
             let notes: String?
         }
     }
+}
+
+struct FootballStatsForm: Codable {
+    var position: String
+    var minutesPlayed: String
+    var goals: String
+    var assists: String
+    var shotsOnTarget: String
+    var passesCompleted: String
+    var passesAttempted: String
+    var tackles: String
+    var interceptions: String
+    var saves: String
+    var yellowCards: String
+    var redCards: String
+}
+
+struct BasketballStatsForm: Codable {
+    var points: String
+    var rebounds: String
+    var assists: String
+    var steals: String
+    var blocks: String
+    var fgMade: String
+    var fgAttempted: String
+    var threeMade: String
+    var threeAttempted: String
+    var ftMade: String
+    var ftAttempted: String
+    var turnovers: String
+    var fouls: String
+}
+
+struct RacketStatsForm: Codable {
+    var mode: String
+    var format: String
+    var setsWon: String
+    var setsLost: String
+    var gamesWon: String
+    var gamesLost: String
+    var aces: String
+    var doubleFaults: String
+    var winners: String
+    var unforcedErrors: String
+    var breakPointsWon: String
+    var breakPointsTotal: String
+    var netPointsWon: String
+    var netPointsTotal: String
+}
+
+struct VolleyballStatsForm: Codable {
+    var points: String
+    var aces: String
+    var blocks: String
+    var digs: String
 }
 
 struct RPCCardioParams: Encodable {
@@ -1415,6 +1852,11 @@ struct RPCSportParams: Encodable {
 
 struct RPCSportWrapper: Encodable {
     let p: RPCSportParams
+}
+
+struct RPCSportV2Wrapper: Encodable {
+    let p: RPCSportParams
+    let p_stats: AnyJSON
 }
 
 private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {

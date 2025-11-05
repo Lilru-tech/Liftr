@@ -17,7 +17,7 @@ struct RootView: View {
                 .tabItem { Label("Search", systemImage: "magnifyingglass") }
             
             NavigationStack {
-                AddWorkoutSheet(draft: app.addDraft)
+                AddWorkoutSheet()
                     .gradientBG()
                     .id(app.addDraftKey)
             }
@@ -38,11 +38,11 @@ struct RootView: View {
                 showAuthAlert = true
             }
         }
-        .alert("Necesitas iniciar sesión", isPresented: $showAuthAlert) {
-            Button("Ir a Perfil") { app.selectedTab = .profile }
-            Button("Cancelar", role: .cancel) {}
+        .alert("You need to log in", isPresented: $showAuthAlert) {
+            Button("Go to Profile") { app.selectedTab = .profile }
+            Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Crea una cuenta o inicia sesión para registrar entrenos.")
+            Text("Sign up or login to register your workouts.")
         }
     }
 }
