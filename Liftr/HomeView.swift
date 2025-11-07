@@ -27,12 +27,18 @@ struct HomeView: View {
         let started_at: Date?
         let ended_at: Date?
         let sport_sessions: [SportSessionRow]?
+        let cardio_sessions: [CardioSessionRow]?
         
         struct SportSessionRow: Decodable {
             let sport: String
         }
         
+        struct CardioSessionRow: Decodable {
+            let activity_code: String?
+        }
+        
         var sport: String? { sport_sessions?.first?.sport }
+        var cardioActivity: String? { cardio_sessions?.first?.activity_code }
     }
     
     private struct FollowRow: Decodable { let followee_id: UUID }
@@ -272,7 +278,8 @@ struct HomeView: View {
                         state: (ui["state"] as? String) ?? old.workout.state,
                         started_at: startedAt ?? old.workout.started_at,
                         ended_at: endedAt ?? old.workout.ended_at,
-                        sport_sessions: old.workout.sport_sessions
+                        sport_sessions: old.workout.sport_sessions,
+                        cardio_sessions: old.workout.cardio_sessions
                     )
                     
                     Task { await MainActor.run {
@@ -403,12 +410,12 @@ struct HomeView: View {
         do {
             let allIds = [me] + followees
             print("[Home.loadPage] fetching page=\(page) pageSize=\(pageSize) userIds=\(allIds.count)")
-            
+
+            let idsCSV = allIds.map { $0.uuidString }.joined(separator: ",")
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state, sport_sessions(sport)")
-                .in("user_id", values: allIds.map { $0.uuidString })
-                .or("user_id.eq.\(me.uuidString),state.neq.planned")
+                .select("id, user_id, kind, title, started_at, ended_at, state, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
+                .or("user_id.eq.\(me.uuidString),and(user_id.in.(\(idsCSV)),state.neq.planned)")
             
             if filter != .all {
                 q = q.eq("kind", value: filter.rawValue.lowercased())
@@ -520,7 +527,7 @@ struct HomeView: View {
         do {
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state")
+                .select("id, user_id, kind, title, started_at, ended_at, state, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
                 .eq("id", value: id)
                 .single()
                 .execute()
@@ -1387,6 +1394,23 @@ private struct HomeFeedCard: View {
             return ""
         }
     }
+    
+    private func cardioIcon(for activity: String?) -> String {
+        switch (activity ?? "").lowercased() {
+        case "run", "outdoor_run", "trail_run": return "🏃‍♂️"
+        case "treadmill":                       return "🏃‍♀️"
+        case "walk", "hike":                    return "🚶‍♂️"
+        case "cycling", "road_cycling":         return "🚴‍♂️"
+        case "indoor_cycling", "spinning":      return "🚲"
+        case "rowerg", "rowing":                return "🚣‍♂️"
+        case "ski_erg":                         return "⛷️"
+        case "elliptical":                      return "🌀"
+        case "stairs", "stairmaster":           return "🪜"
+        case "swim_pool":                       return "🏊‍♂️"
+        case "swim_open_water":                 return "🌊"
+        default:                                return "❤️‍🔥"
+        }
+    }
     let item: HomeView.FeedItem
     
     var body: some View {
@@ -1468,8 +1492,17 @@ private struct HomeFeedCard: View {
                 HStack {
                     HStack(spacing: 4) {
                         Text(item.workout.kind.capitalized)
-                        if let sport = item.workout.sport {
-                            Text(sportIcon(for: sport))
+                        switch item.workout.kind {
+                        case "sport":
+                            if let sport = item.workout.sport {
+                                Text(sportIcon(for: sport))
+                            }
+                        case "cardio":
+                            Text(cardioIcon(for: item.workout.cardioActivity))
+                        case "strength":
+                            Text("🏋️‍♂️")
+                        default:
+                            EmptyView()
                         }
                     }
                     .font(.caption2.weight(.semibold))
@@ -1477,7 +1510,7 @@ private struct HomeFeedCard: View {
                     .padding(.horizontal, 6)
                     .background(Capsule().fill(workoutTint(for: item.workout.kind).opacity(0.18)))
                     .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                    
+
                     Spacer()
                     
                     if item.workout.state == "planned" {

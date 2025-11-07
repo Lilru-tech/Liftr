@@ -1,6 +1,136 @@
 import SwiftUI
 import Supabase
 
+@inline(__always)
+func symbolForAchievement(code: String, category: String) -> String {
+    let c = code.lowercased()
+    let k = category.lowercased()
+
+    switch true {
+    case c.hasPrefix("max_weight_"),
+         c.hasPrefix("est_1rm_"),
+         c.hasPrefix("total_volume_"),
+         c.hasPrefix("total_reps_"),
+         c.hasPrefix("strength_workouts_"),
+         c.hasPrefix("strength_pr_"),
+         c.hasPrefix("strength_session_streak_"),
+         c.hasPrefix("strength_"):
+        return "dumbbell.fill"
+
+    case c.hasPrefix("run_"), c.hasPrefix("pace_"):
+        return "figure.run"
+        
+    case c.hasPrefix("bike_"),
+         c.hasPrefix("ebike_"),
+         c.hasPrefix("mtb_"),
+         c.hasPrefix("indoor_cycling_"),
+         c.hasPrefix("treadmill_"):
+        return "bicycle"
+
+    case c.hasPrefix("rowerg_"):
+        return "water.waves"
+
+    case c.hasPrefix("swim_pool_"),
+         c.hasPrefix("swim_ow_"):
+        return "water.waves"
+
+    case c.hasPrefix("walk_"):
+        return "figure.walk"
+    case c.hasPrefix("hike_"):
+        return "figure.hiking"
+
+    case c.hasPrefix("hyrox_"):
+        return "stopwatch"
+
+    case c.hasPrefix("cardio_"),
+         c.hasPrefix("duration_"),
+        c.hasPrefix("elev_gain_"):
+        return "heart.circle.fill"
+
+    case c.hasPrefix("padel_"),
+         c.hasPrefix("tennis_"),
+         c.hasPrefix("table_tennis_"),
+         c.hasPrefix("squash_"):
+        return "sportscourt.fill"
+    case c.hasPrefix("football_"):
+        return "soccerball"
+    case c.hasPrefix("basketball_"):
+        return "basketball"
+    case c.hasPrefix("volleyball_"):
+        return "volleyball"
+    case c.hasPrefix("badminton_"):
+        return "sportscourt.fill"
+
+    case c.hasPrefix("likes_given_"),
+         c.hasPrefix("likes_received_"),
+         c.hasPrefix("followers_"),
+         c.hasPrefix("first_follow"),
+         c.hasPrefix("first_comment"),
+         c.hasPrefix("comments_"),
+         c.hasPrefix("follows_"):
+        return "person.2.fill"
+
+    case c.hasPrefix("ranking_"):
+        return "trophy.fill"
+
+    case c.hasPrefix("streak_"),
+         c.hasPrefix("multi_streak_"):
+        return "flame.fill"
+
+    case c.hasPrefix("first_workout"),
+         c.hasPrefix("workouts_"),
+         c.hasPrefix("achievements_"),
+         c.hasPrefix("first_fail"),
+         c.hasPrefix("night_workout"),
+         c.hasPrefix("morning_workout"),
+         c.hasPrefix("double_session"),
+         c.hasPrefix("zero_day"):
+        return "star.circle.fill"
+
+    default:
+        break
+    }
+
+    switch k {
+    case "strength": return "dumbbell.fill"
+    case "cardio":   return "figure.run"
+    case "sport":    return "sportscourt.fill"
+    case "streak":   return "flame.fill"
+    case "ranking":  return "trophy.fill"
+    case "social":   return "person.2.fill"
+    default:         return "star.circle.fill"
+    }
+}
+
+@inline(__always)
+func prettySubtype(from code: String, fallbackCategory: String) -> String {
+    let c = code.lowercased()
+    switch true {
+    case c.hasPrefix("run_"), c.hasPrefix("pace_"): return "Running"
+    case c.hasPrefix("bike_"): return "Cycling"
+    case c.hasPrefix("ebike_"): return "E-Bike"
+    case c.hasPrefix("mtb_"): return "MTB"
+    case c.hasPrefix("indoor_cycling_"): return "Indoor Cycling"
+    case c.hasPrefix("rowerg_"): return "RowErg"
+    case c.hasPrefix("swim_pool_"): return "Pool Swim"
+    case c.hasPrefix("swim_ow_"): return "Open-Water Swim"
+    case c.hasPrefix("walk_"): return "Walking"
+    case c.hasPrefix("hike_"): return "Hiking"
+    case c.hasPrefix("treadmill_"): return "Treadmill"
+    case c.hasPrefix("hyrox_"): return "HYROX"
+    case c.hasPrefix("padel_"): return "Padel"
+    case c.hasPrefix("tennis_"): return "Tennis"
+    case c.hasPrefix("table_tennis_"): return "Table Tennis"
+    case c.hasPrefix("squash_"): return "Squash"
+    case c.hasPrefix("football_"): return "Football"
+    case c.hasPrefix("basketball_"): return "Basketball"
+    case c.hasPrefix("volleyball_"): return "Volleyball"
+    case c.hasPrefix("badminton_"): return "Badminton"
+    default:
+        return fallbackCategory.capitalized
+    }
+}
+
 struct AchievementsGridView: View {
     let userId: UUID?
     let viewedUsername: String
@@ -19,6 +149,8 @@ struct AchievementsGridView: View {
     @State private var lockFilter: LockFilter = .all
     @State private var category: CategoryFilter = .all
     @State private var search = ""
+    @State private var showSearch = false
+    @FocusState private var searchFocused: Bool
     @State private var items: [AchievementRow] = []
     @State private var loading = false
     @State private var error: String?
@@ -105,9 +237,60 @@ struct AchievementsGridView: View {
                 }
                 .padding(.horizontal)
             }
-            TextField("Search", text: $search)
-                .textFieldStyle(.roundedBorder)
-                .padding(.horizontal)
+            Group {
+                if showSearch {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+
+                        TextField("Search", text: $search)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($searchFocused)
+
+                        if !search.isEmpty {
+                            Button {
+                                search = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        Button("Cancel") {
+                            withAnimation(.snappy) { showSearch = false }
+                            searchFocused = false
+                        }
+                        .font(.callout)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.08), lineWidth: 1))
+                    .padding(.horizontal)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { searchFocused = true }
+                    }
+                } else {
+                    HStack {
+                        Spacer()
+                        Button {
+                            withAnimation(.snappy) { showSearch = true }
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .font(.headline)
+                                .padding(10)
+                                .background(Capsule().fill(.white.opacity(0.12)))
+                                .overlay(Capsule().stroke(.white.opacity(0.2), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+                }
+            }
         }
     }
     
@@ -209,12 +392,14 @@ private struct AchievementTile: View {
                             switch phase {
                             case .empty: ProgressView()
                             case .success(let img): img.resizable().scaledToFit().padding(10)
-                            case .failure: Image(systemName: symbolName).resizable().scaledToFit().padding(12)
+                            case .failure: Image(systemName: symbolForAchievement(code: item.code, category: item.category))
+                                    .resizable().scaledToFit().padding(12)
                             @unknown default: EmptyView()
                             }
                         }
                     } else {
-                        Image(systemName: symbolName).resizable().scaledToFit().padding(12)
+                        Image(systemName: symbolForAchievement(code: item.code, category: item.category))
+                            .resizable().scaledToFit().padding(12)
                     }
                 }
                 .opacity(item.is_unlocked ? 1.0 : 0.35)
@@ -237,18 +422,7 @@ private struct AchievementTile: View {
                 .opacity(item.is_unlocked ? 1 : 0.6)
         }
     }
-    
-    private var symbolName: String {
-        switch item.category.lowercased() {
-        case "strength": return "dumbbell.fill"
-        case "cardio":   return "figure.run"
-        case "sport":    return "sportscourt.fill"
-        case "streak":   return "flame.fill"
-        case "ranking":  return "trophy.fill"
-        case "social":   return "person.2.fill"
-        default:         return "star.circle.fill"
-        }
-    }
+
 }
 
 private struct AchievementDetailSheet: View {
@@ -261,12 +435,14 @@ private struct AchievementDetailSheet: View {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14).fill(.ultraThinMaterial).frame(width: 64, height: 64)
-                    Image(systemName: symbolName).font(.system(size: 28, weight: .regular))
+                    Image(systemName: symbolForAchievement(code: row.code, category: row.category))
+                        .font(.system(size: 28, weight: .regular))
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.title).font(.headline)
                     HStack(spacing: 6) {
-                        Text(row.category.capitalized).font(.caption2.weight(.semibold))
+                        Text(prettySubtype(from: row.code, fallbackCategory: row.category))
+                            .font(.caption2.weight(.semibold))
                             .padding(.vertical, 3).padding(.horizontal, 6)
                             .background(Capsule().fill(Color.black.opacity(0.08)))
                         if row.is_unlocked, let d = row.unlocked_at {
@@ -288,18 +464,6 @@ private struct AchievementDetailSheet: View {
             }
             
             Spacer(minLength: 10)
-        }
-    }
-    
-    private var symbolName: String {
-        switch row.category.lowercased() {
-        case "strength": return "dumbbell.fill"
-        case "cardio":   return "figure.run"
-        case "sport":    return "sportscourt.fill"
-        case "streak":   return "flame.fill"
-        case "ranking":  return "trophy.fill"
-        case "social":   return "person.2.fill"
-        default:         return "star.circle.fill"
         }
     }
     
