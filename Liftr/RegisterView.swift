@@ -221,7 +221,7 @@ struct RegisterView: View {
         }
         
         guard let session = try? await client.auth.session else {
-            await showSuccessAndPop("Account created! Welcome 🎉")
+            await BannerAction.showSuccessAndDismiss("Account created! Welcome 🎉", banner: $banner, dismiss: dismiss)
             return
         }
         
@@ -252,14 +252,7 @@ struct RegisterView: View {
         } catch {
         }
         
-        await showSuccessAndPop("Account created! Welcome 🎉")
-    }
-    
-    @MainActor
-    private func showSuccessAndPop(_ message: String) async {
-        banner = Banner(message: message, type: .success)
-        try? await Task.sleep(nanoseconds: 2_000_000_000)
-        dismiss()
+        await BannerAction.showSuccessAndDismiss("Account created! Welcome 🎉", banner: $banner, dismiss: dismiss)
     }
 }
 

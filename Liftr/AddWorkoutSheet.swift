@@ -15,10 +15,10 @@ enum WorkoutIntensity: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .easy: "Easy"
-        case .moderate: "Moderate"
-        case .hard: "Hard"
-        case .max: "Max"
+        case .easy:     return "Easy"
+        case .moderate: return "Moderate"
+        case .hard:     return "Hard"
+        case .max:      return "Max"
         }
     }
 }
@@ -31,30 +31,31 @@ enum SortMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .alphabetic: "A–Z"
-        case .mostUsed:   "Más usados"
-        case .favorites:  "Favoritos"
-        case .recent:     "Últimos usados"
+        case .alphabetic: return "A–Z"
+        case .mostUsed:   return "Más usados"
+        case .favorites:  return "Favoritos"
+        case .recent:     return "Últimos usados"
         }
     }
 }
 
 enum SportType: String, CaseIterable, Identifiable {
-    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby
+    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby, hyrox
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .padel: "Padel"
-        case .tennis: "Tennis"
-        case .football: "Football"
-        case .basketball: "Basketball"
-        case .badminton: "Badminton"
-        case .squash: "Squash"
-        case .table_tennis: "Table Tennis"
-        case .volleyball: "Volleyball"
-        case .handball: "Handball"
-        case .hockey: "Hockey"
-        case .rugby: "Rugby"
+        case .padel:         return "Padel"
+        case .tennis:        return "Tennis"
+        case .football:      return "Football"
+        case .basketball:    return "Basketball"
+        case .badminton:     return "Badminton"
+        case .squash:        return "Squash"
+        case .table_tennis:  return "Table Tennis"
+        case .volleyball:    return "Volleyball"
+        case .handball:      return "Handball"
+        case .hockey:        return "Hockey"
+        case .rugby:         return "Rugby"
+        case .hyrox:         return "Hyrox"
         }
     }
 }
@@ -64,11 +65,11 @@ enum MatchResult: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .win: "Win"
-        case .loss: "Loss"
-        case .draw: "Draw"
-        case .unfinished: "Unfinished"
-        case .forfeit: "Forfeit"
+        case .win:        return "Win"
+        case .loss:       return "Loss"
+        case .draw:       return "Draw"
+        case .unfinished: return "Unfinished"
+        case .forfeit:    return "Forfeit"
         }
     }
 }
@@ -85,16 +86,16 @@ enum RacketMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .singles: "Singles"
-        case .doubles: "Doubles"
-        case .mixedDoubles: "Mixed doubles"
+        case .singles:       return "Singles"
+        case .doubles:       return "Doubles"
+        case .mixedDoubles:  return "Mixed doubles"
         }
     }
     var dbValue: String {
         switch self {
-        case .singles: "singles"
-        case .doubles: "doubles"
-        case .mixedDoubles: "mixed_doubles"
+        case .singles:       return "singles"
+        case .doubles:       return "doubles"
+        case .mixedDoubles:  return "mixed_doubles"
         }
     }
 }
@@ -112,10 +113,10 @@ enum FootballPosition: String, CaseIterable, Identifiable {
     var label: String { rawValue.capitalized }
     var dbValue: String {
         switch self {
-        case .goalkeeper: "goalkeeper"
-        case .defender:   "defender"
-        case .midfielder: "midfielder"
-        case .forward:    "forward"
+        case .goalkeeper: return "goalkeeper"
+        case .defender:   return "defender"
+        case .midfielder: return "midfielder"
+        case .forward:    return "forward"
         }
     }
 }
@@ -125,6 +126,9 @@ struct LightweightProfile: Identifiable, Decodable, Hashable {
     let username: String?
     let avatar_url: String?
     var id: UUID { user_id }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.user_id == rhs.user_id }
+    func hash(into hasher: inout Hasher) { hasher.combine(user_id) }
 }
 struct AddParticipantParams: Encodable {
     let p_workout_id: Int64
@@ -547,7 +551,15 @@ struct AddWorkoutSheet: View {
                             }
                             
                             Divider()
-                            FieldRowPlain("Notes") { TextField("Notes", text: $note, axis: .vertical).textFieldStyle(.plain) }
+                            FieldRowPlain("Notes") {
+                                VStack(alignment: .leading, spacing: 0) {
+                                    TextField("Notes", text: $note, axis: .vertical)
+                                        .textFieldStyle(.plain)
+                                        .lineLimit(1...4)
+                                        .padding(.vertical, 6)
+                                }
+                                .alignmentGuide(.firstTextBaseline) { d in d[.bottom] }
+                            }
                             Divider()
                             FieldRowPlain("Intensity") {
                                 Picker("", selection: $perceived) {
@@ -647,12 +659,14 @@ struct AddWorkoutSheet: View {
                 }
             }
         }
-        .onAppear {
+        .task {
             if !didApplyDraft, let d = app.addDraft {
                 isApplyingDraft = true
-                applyDraft(d)
-                didApplyDraft = true
-                isApplyingDraft = false
+                await MainActor.run {
+                    applyDraft(d)
+                    didApplyDraft = true
+                    isApplyingDraft = false
+                }
             }
             if needsInitialSync {
                 needsInitialSync = false
@@ -857,19 +871,24 @@ struct AddWorkoutSheet: View {
     private var cardioSection: some View {
         Section {
             SectionCard {
-                FieldRowPlain {
-                    TextField("Modality (e.g. Run, Bike…)", text: $cardio.modality)
-                        .textFieldStyle(.plain)
+                FieldRowPlain("Activity") {
+                    Picker("", selection: $cardio.activity) {
+                        ForEach(CardioActivityType.allCases) { a in
+                            Text(a.label).tag(a)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 }
-                
+
                 Divider()
-                
+
                 HStack(spacing: 12) {
                     TextField("Distance (km)", text: $cardio.distanceKm)
                         .keyboardType(.decimalPad)
                         .onChange(of: cardio.distanceKm) { _, _ in
                             updateAutoPaceIfNeeded()
                         }
+
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Duration").font(.caption).foregroundStyle(.secondary)
                         HStack(spacing: 6) {
@@ -880,16 +899,16 @@ struct AddWorkoutSheet: View {
                                     didEditCardioDuration = true
                                     updateAutoPaceIfNeeded()
                                 }
-                            
+
                             Text(":")
-                            
+
                             TextField("m", text: $cardio.durM)
                                 .keyboardType(.numberPad)
                                 .frame(width: 36)
                                 .onChange(of: cardio.durM) { _, _ in updateAutoPaceIfNeeded() }
-                            
+
                             Text(":")
-                            
+
                             TextField("s", text: $cardio.durS)
                                 .keyboardType(.numberPad)
                                 .frame(width: 36)
@@ -899,16 +918,16 @@ struct AddWorkoutSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                
+
                 Divider()
-                
+
                 HStack {
                     TextField("Avg HR", text: $cardio.avgHR).keyboardType(.numberPad)
                     TextField("Max HR", text: $cardio.maxHR).keyboardType(.numberPad)
                 }
-                
+
                 Divider()
-                
+
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Avg pace (/km)").font(.caption).foregroundStyle(.secondary)
@@ -921,13 +940,55 @@ struct AddWorkoutSheet: View {
                         }
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    TextField("Elevation gain (m)", text: $cardio.elevationGainM)
-                        .keyboardType(.numberPad)
+
+                    if cardio.activity.showsElevation {
+                        TextField("Elevation gain (m)", text: $cardio.elevationGainM)
+                            .keyboardType(.numberPad)
+                    }
                 }
-                Divider()
+
+                if cardio.activity.showsIncline {
+                    Divider()
+                    FieldRowPlain {
+                        TextField("Incline (%)", text: $cardio.inclinePercent)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+
+                if cardio.activity.showsCadenceRpm {
+                    Divider()
+                    FieldRowPlain {
+                        HStack {
+                            TextField("Cadence (rpm/spm)", text: $cardio.cadenceRpm).keyboardType(.numberPad)
+                            if cardio.activity.showsWatts {
+                                TextField("Avg watts", text: $cardio.wattsAvg).keyboardType(.numberPad)
+                            }
+                        }
+                    }
+                }
+
+                if cardio.activity.showsSplit500m {
+                    Divider()
+                    FieldRowPlain {
+                        TextField("Split (sec/500m)", text: $cardio.splitSecPer500m).keyboardType(.numberPad)
+                    }
+                }
+
+                if cardio.activity.showsSwimFields {
+                    Divider()
+                    FieldRowPlain {
+                        HStack {
+                            TextField("Laps", text: $cardio.swimLaps).keyboardType(.numberPad)
+                            TextField("Pool length (m)", text: $cardio.poolLengthM).keyboardType(.numberPad)
+                        }
+                    }
+                    Divider()
+                    FieldRowPlain {
+                        TextField("Swim style", text: $cardio.swimStyle).textFieldStyle(.plain)
+                    }
+                }
             }
-            
+
             saveButton
                 .padding(.top, 8)
         } header: {
@@ -941,7 +1002,7 @@ struct AddWorkoutSheet: View {
             SectionCard {
                 FieldRowPlain {
                     Picker("", selection: $sport.sport) {
-                        ForEach(SportType.allCases.filter { $0 != .hockey && $0 != .handball && $0 != .rugby }) { s in
+                        ForEach(SportType.allCases) { s in
                             Text(s.label).tag(s)
                         }
                     }
@@ -1028,7 +1089,7 @@ struct AddWorkoutSheet: View {
             }
             return true
         case .cardio:
-            return !cardio.modality.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            return true
         case .sport:
             return true
         }
@@ -1159,7 +1220,7 @@ struct AddWorkoutSheet: View {
                 }
             }
             
-        case .handball, .hockey, .rugby:
+        case .handball, .hockey, .rugby, .hyrox:
             Divider()
             FieldRowPlain {
                 HStack {
@@ -1213,10 +1274,11 @@ struct AddWorkoutSheet: View {
                 let durSecHMS = hmsToSeconds(cardio.durH, cardio.durM, cardio.durS)
                 let paceAuto  = autoPaceSec(distanceKmText: cardio.distanceKm,
                                             durH: cardio.durH, durM: cardio.durM, durS: cardio.durS)
-                
-                let params = RPCCardioParams(
+                let statsJSON = try buildCardioStatsJSON(from: cardio)
+
+                let params = RPCCardioV2Params(
                     p_user_id: userId,
-                    p_modality: cardio.modality,
+                    p_activity_code: cardio.activity.rawValue,
                     p_title: title.isEmpty ? nil : title,
                     p_started_at: iso.string(from: startedAt),
                     p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
@@ -1226,13 +1288,14 @@ struct AddWorkoutSheet: View {
                     p_avg_hr: parseInt(cardio.avgHR),
                     p_max_hr: parseInt(cardio.maxHR),
                     p_avg_pace_sec_per_km: paceAuto ?? parseInt(cardio.avgPaceSecPerKm),
-                    p_elevation_gain_m: parseInt(cardio.elevationGainM),
+                    p_elevation_gain_m: cardio.activity.showsElevation ? parseInt(cardio.elevationGainM) : nil,
                     p_perceived_intensity: perceived.rawValue,
-                    p_state: publishMode.stateParam
+                    p_state: publishMode.stateParam,
+                    p_stats: statsJSON
                 )
-                
+
                 let res = try await client
-                    .rpc("create_cardio_workout_v1", params: RPCCardioWrapper(p: params))
+                    .rpc("create_cardio_workout_v2", params: RPCCardioV2Wrapper(p: params))
                     .execute()
                 if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
                     newWorkoutId = Int64(created)
@@ -1410,10 +1473,22 @@ struct AddWorkoutSheet: View {
             if let v = parseInt(f.vbDigs)    { out["digs"]   = try .init(v) }
             return try AnyJSON(out)
             
-        case .handball, .hockey, .rugby:
+        case .handball, .hockey, .rugby, .hyrox:
             let out: [String: AnyJSON] = [:]
             return try AnyJSON(out)
         }
+    }
+    
+    private func buildCardioStatsJSON(from f: CardioForm) throws -> AnyJSON {
+        var out: [String: AnyJSON] = [:]
+        if f.cadenceRpm.trimmedOrNil != nil, let v = Int(f.cadenceRpm) { out["cadence_rpm"] = try .init(v) }
+        if f.wattsAvg.trimmedOrNil != nil, let v = Int(f.wattsAvg)     { out["watts_avg"]   = try .init(v) }
+        if f.inclinePercent.trimmedOrNil != nil, let v = Double(f.inclinePercent.replacingOccurrences(of: ",", with: ".")) { out["incline_pct"] = try .init(v) }
+        if f.swimLaps.trimmedOrNil != nil, let v = Int(f.swimLaps)     { out["swim_laps"]   = try .init(v) }
+        if f.poolLengthM.trimmedOrNil != nil, let v = Int(f.poolLengthM) { out["pool_length_m"] = try .init(v) }
+        if let style = f.swimStyle.trimmedOrNil { out["swim_style"] = try .init(style) }
+        if f.splitSecPer500m.trimmedOrNil != nil, let v = Int(f.splitSecPer500m) { out["split_sec_per_500m"] = try .init(v) }
+        return try AnyJSON(out)
     }
     
     private func exerciseSelected(_ ex: EditableExercise) -> Bool {
@@ -1510,8 +1585,7 @@ struct AddWorkoutSheet: View {
         }
         perceived   = d.perceived
         participants = d.participants
-        
-        // Contenido por tipo
+ 
         switch d.kind {
         case .strength:
             items = d.strengthItems.isEmpty ? [EditableExercise()] : d.strengthItems
@@ -1599,8 +1673,10 @@ struct AddWorkoutSheet: View {
     }
     private func sportUsesSetText(_ s: SportType) -> Bool {
         switch s {
-        case .padel, .tennis, .badminton, .squash, .table_tennis, .volleyball: return true
-        default: return false
+        case .padel, .tennis, .badminton, .squash, .table_tennis, .volleyball:
+            return true
+        default:
+            return false
         }
     }
 }
@@ -1663,7 +1739,7 @@ struct EditableSet: Identifiable {
 }
 
 struct CardioForm {
-    var modality: String = "Run"
+    var activity: CardioActivityType = .run
     var distanceKm: String = ""
     var durH: String = ""
     var durM: String = ""
@@ -1676,6 +1752,13 @@ struct CardioForm {
     var elevationGainM: String = ""
     var durationSec: String = ""
     var avgPaceSecPerKm: String = ""
+    var cadenceRpm: String = ""
+    var wattsAvg: String = ""
+    var inclinePercent: String = ""
+    var swimLaps: String = ""
+    var poolLengthM: String = ""
+    var swimStyle: String = ""
+    var splitSecPer500m: String = ""
 }
 
 struct SportForm {
@@ -1825,10 +1908,33 @@ struct RPCCardioParams: Encodable {
     let p_elevation_gain_m: Int?
     let p_perceived_intensity: String?
     let p_state: String
+    let p_activity_type: String?
+    let p_details: AnyJSON?
 }
 
 struct RPCCardioWrapper: Encodable {
     let p: RPCCardioParams
+}
+
+struct RPCCardioV2Params: Encodable {
+    let p_user_id: UUID
+    let p_activity_code: String
+    let p_title: String?
+    let p_started_at: String?
+    let p_ended_at: String?
+    let p_notes: String?
+    let p_distance_km: Double?
+    let p_duration_sec: Int?
+    let p_avg_hr: Int?
+    let p_max_hr: Int?
+    let p_avg_pace_sec_per_km: Int?
+    let p_elevation_gain_m: Int?
+    let p_perceived_intensity: String?
+    let p_state: String
+    let p_stats: AnyJSON
+}
+struct RPCCardioV2Wrapper: Encodable {
+    let p: RPCCardioV2Params
 }
 
 struct RPCSportParams: Encodable {

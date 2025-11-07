@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.9.4] - 2025-11-07
+
+### Added
+- **Global TopBanner (reusable)**
+  - Unified success/error/info banners with `BannerPresenter` + `BannerAction` (auto-hide, tap-to-dismiss, haptics).
+  - Adopted across flows:
+    - **Editing a workout**: after saving, show a success message (e.g., “Workout updated! 💪”).
+    - **Profile → Personal information**: after saving, show **“Profile updated! ✅”** and exit edit mode.
+    - **RegisterView**: migrated to the same banner system for success/errors.
+- **Profile → Personal information**
+  - New **edit pencil** in the top-right to toggle edit mode.
+  - Users can now change **weight** and **date of birth** (age is derived).
+- **PRs**
+  - Added a **Search** option (toggleable search bar like in other lists).
+- **Home → Workout cards**
+  - Added **type icons** for **Strength / Cardio / Sport**, plus per-sport icons (e.g., padel/football/basketball/tennis/volleyball).
+
+### Changed
+- **Profile → Save changes**
+  - Pressing **Save changes** now **closes edit mode** and returns to read-only view while showing a success banner.
+- **Cardio & Sport forms**
+  - Added/refined **specific fields** for Cardio and Sport sessions to match the latest scoring and PR/achievement definitions.
+- **PRs & Achievements catalogs**
+  - Reviewed and **expanded PRs** and **Achievements** to cover **sport-specific** and **cardio** metrics added recently.
+
+### Fixed
+- **Sport selector**
+  - **Hyrox** was missing in the selector — now visible and selectable.
+- **Notes input trimming**
+  - Fixed multi-line **Notes** being visually cut off in relevant editors.
+- **Achievements**
+  - **Search input hidden by default**, mirroring the PRs behavior (toggleable when needed).
+- **Strength points after editing**
+  - Editing strength workouts now **recalculates points correctly** (no stale scores).
+- **Points consistency**
+  - Reviewed/tuned **Strength** scoring and **Cardio/Sport** point calculations to reflect the new specific fields and ensure consistent totals.
+- **Thread-safety & warnings**
+  - Removed `MainActor.run { Task { ... } }` misuse and ensured state updates on the main actor (fixes “Result of call to 'run(...)' is unused” warning).
+
+### Database
+- **No breaking changes.**
+- Updated server logic to ensure **score recalculation** on **Strength** edits and to incorporate the refined **Cardio/Sport** metrics.
+- Expanded PRs/Achievements sources to include the newly supported **sport-specific** and **cardio** fields.
+
+[0.9.4]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.9.4
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.9.4...HEAD
+
 ## [0.9.3] - 2025-11-05
 
 ### Added

@@ -2,12 +2,13 @@ import SwiftUI
 import Supabase
 
 private enum JV: Encodable {
-    case s(String), i(Int)
+    case s(String), i(Int), d(Double)
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         switch self {
         case .s(let v): try c.encode(v)
         case .i(let n): try c.encode(n)
+        case .d(let x): try c.encode(x)
         }
     }
 }
@@ -76,7 +77,13 @@ struct EditWorkoutMetaSheet: View {
     @State private var c_maxHR = ""
     @State private var c_avgPace = ""
     @State private var c_elevGain = ""
-    @State private var c_notes = ""
+    @State private var c_cadenceRpm = ""
+    @State private var c_wattsAvg = ""
+    @State private var c_inclinePct = ""
+    @State private var c_split500m = ""
+    @State private var c_swimLaps = ""
+    @State private var c_poolLengthM = ""
+    @State private var c_swimStyle = ""
     @State private var s_sport: SportType = .football
     @State private var s_durationMin = ""
     @State private var s_scoreFor = ""
@@ -378,7 +385,26 @@ struct EditWorkoutMetaSheet: View {
     private var cardioSection: some View {
         Section {
             SectionCard {
-                TextField("Modality", text: $c_modality)
+                FieldRowPlain("Activity") {
+                    Picker("", selection: Binding<CardioActivityType>(
+                        get: {
+                            let v = mapToCardioType(c_modality)
+                            print("[CARDIO][Picker.get] c_modality='\(c_modality)' -> \(v.rawValue)")
+                            return v
+                        },
+                        set: { newVal in
+                            print("[CARDIO][Picker.set] user selected = \(newVal.rawValue)")
+                            c_modality = newVal.rawValue
+                            debugCardio("after Picker.set")
+                        }
+                    )) {
+                        ForEach(CardioActivityType.allCases) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                }
+                .onChange(of: c_modality) { _, _ in
+                    print("[CARDIO] c_modality changed to '\(c_modality)'")
+                }
                 
                 HStack(spacing: 12) {
                     TextField("Distance (km)", text: $c_distanceKm)
@@ -415,11 +441,39 @@ struct EditWorkoutMetaSheet: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     
-                    TextField("Elevation gain (m)", text: $c_elevGain)
-                        .keyboardType(.numberPad)
+                    if showsElevation(for: c_modality) {
+                        TextField("Elevation gain (m)", text: $c_elevGain)
+                            .keyboardType(.numberPad)
+                    }
                 }
                 
-                TextField("Cardio notes", text: $c_notes, axis: .vertical)
+                if showsCadence(for: c_modality) {
+                    Divider().padding(.vertical, 6)
+                    HStack {
+                        TextField("Cadence (rpm/spm)", text: $c_cadenceRpm).keyboardType(.numberPad)
+                        TextField("Avg Watts", text: $c_wattsAvg).keyboardType(.numberPad)
+                    }
+                }
+                
+                if showsIncline(for: c_modality) {
+                    Divider().padding(.vertical, 6)
+                    TextField("Incline (%)", text: $c_inclinePct).keyboardType(.decimalPad)
+                }
+                
+                if showsSplit500m(for: c_modality) {
+                    Divider().padding(.vertical, 6)
+                    TextField("Split (sec/500m)", text: $c_split500m).keyboardType(.numberPad)
+                }
+                
+                if showsSwimFields(for: c_modality) {
+                    Divider().padding(.vertical, 6)
+                    HStack {
+                        TextField("Laps", text: $c_swimLaps).keyboardType(.numberPad)
+                        TextField("Pool length (m)", text: $c_poolLengthM).keyboardType(.numberPad)
+                    }
+                    Divider().padding(.vertical, 6)
+                    TextField("Swim style", text: $c_swimStyle)
+                }
             }
         } header: { Text("CARDIO") }
             .listRowBackground(Color.clear)
@@ -635,7 +689,9 @@ struct EditWorkoutMetaSheet: View {
                     .eq("workout_id", value: workoutId)
                     .single()
                     .execute()
+                print("[CARDIO] raw cardio_sessions JSON:", String(data: res.data, encoding: .utf8) ?? "<non-utf8>")
                 struct Row: Decodable {
+                    let id: Int
                     let modality: String
                     let distance_km: Decimal?
                     let duration_sec: Int?
@@ -644,16 +700,21 @@ struct EditWorkoutMetaSheet: View {
                     let avg_pace_sec_per_km: Int?
                     let elevation_gain_m: Int?
                     let notes: String?
+                    let activity_code: String?
                 }
                 let r = try decoder.decode(Row.self, from: res.data)
-                c_modality   = r.modality
+                let source = (r.activity_code?.isEmpty == false) ? r.activity_code! : r.modality
+                print("[CARDIO] r.modality='\(r.modality)' activity_code='\(r.activity_code ?? "nil")' -> source='\(source)'")
+                let mapped = mapToCardioType(source)
+                print("[CARDIO] source mapped to = '\(mapped.rawValue)'")
+                c_modality = mapped.rawValue
+                debugCardio("after load from DB")
                 c_distanceKm = r.distance_km.map { "\($0)" } ?? ""
                 c_durationSec = r.duration_sec.map { "\($0)" } ?? ""
                 c_avgHR      = r.avg_hr.map { "\($0)" } ?? ""
                 c_maxHR      = r.max_hr.map { "\($0)" } ?? ""
                 c_avgPace    = r.avg_pace_sec_per_km.map { "\($0)" } ?? ""
                 c_elevGain   = r.elevation_gain_m.map { "\($0)" } ?? ""
-                c_notes      = r.notes ?? ""
                 if let sec = r.duration_sec, sec > 0 {
                     let h = sec / 3600
                     let m = (sec % 3600) / 60
@@ -663,6 +724,40 @@ struct EditWorkoutMetaSheet: View {
                     c_durS = String(s)
                 } else {
                     c_durH = ""; c_durM = ""; c_durS = ""
+                }
+                do {
+                    let statsRes = try await SupabaseManager.shared.client
+                        .from("cardio_session_stats")
+                        .select("stats")
+                        .eq("session_id", value: r.id)
+                        .single()
+                        .execute()
+                    
+                    struct StatsWire: Decodable {
+                        struct Body: Decodable {
+                            let cadence_rpm: Int?
+                            let watts_avg: Int?
+                            let incline_pct: Double?
+                            let swim_laps: Int?
+                            let pool_length_m: Int?
+                            let swim_style: String?
+                            let split_sec_per_500m: Int?
+                        }
+                        let stats: Body?
+                    }
+                    
+                    let stats = try JSONDecoder.supabaseCustom().decode(StatsWire.self, from: statsRes.data)
+                    
+                    c_cadenceRpm = stats.stats?.cadence_rpm.map(String.init) ?? ""
+                    c_wattsAvg   = stats.stats?.watts_avg.map(String.init) ?? ""
+                    if let inc = stats.stats?.incline_pct { c_inclinePct = String(inc) } else { c_inclinePct = "" }
+                    c_swimLaps      = stats.stats?.swim_laps.map(String.init) ?? ""
+                    c_poolLengthM   = stats.stats?.pool_length_m.map(String.init) ?? ""
+                    c_swimStyle     = stats.stats?.swim_style ?? ""
+                    c_split500m     = stats.stats?.split_sec_per_500m.map(String.init) ?? ""
+                } catch {
+                    c_cadenceRpm = ""; c_wattsAvg = ""; c_inclinePct = ""
+                    c_swimLaps = ""; c_poolLengthM = ""; c_swimStyle = ""; c_split500m = ""
                 }
                 
             case "sport":
@@ -693,7 +788,7 @@ struct EditWorkoutMetaSheet: View {
                 s_matchScoreText = r.match_score_text ?? ""
                 s_location = r.location ?? ""
                 s_sessionNotes = r.notes ?? ""
-
+                
                 let client = SupabaseManager.shared.client
                 
                 switch s_sport {
@@ -797,7 +892,7 @@ struct EditWorkoutMetaSheet: View {
                             let net_points_total: Int?
                         }
                         let s = try decoder.decode(RK.self, from: q.data)
-
+                        
                         switch (s.mode ?? "").lowercased().replacingOccurrences(of: " ", with: "_") {
                         case "singles":       racketMode = .singles
                         case "doubles":       racketMode = .doubles
@@ -809,7 +904,7 @@ struct EditWorkoutMetaSheet: View {
                         case "best_of_5": racketFormat = .bestOfFive
                         default: break
                         }
-
+                        
                         rkAces             = s.aces.map(String.init) ?? ""
                         rkDoubleFaults     = s.double_faults.map(String.init) ?? ""
                         rkWinners          = s.winners.map(String.init) ?? ""
@@ -850,6 +945,9 @@ struct EditWorkoutMetaSheet: View {
                     } catch {
                         vbPoints = ""; vbAces = ""; vbBlocks = ""; vbDigs = ""
                     }
+                    
+                case .hyrox:
+                    break
                 }
                 
             case "strength":
@@ -958,28 +1056,48 @@ struct EditWorkoutMetaSheet: View {
             case "cardio":
                 struct CardioPayload: Encodable {
                     let modality: String
+                    let activity_code: String?
                     let distance_km: Double?
                     let duration_sec: Int?
                     let avg_hr: Int?
                     let max_hr: Int?
                     let avg_pace_sec_per_km: Int?
                     let elevation_gain_m: Int?
-                    let notes: String?
                 }
                 let payload = CardioPayload(
                     modality: c_modality,
+                    activity_code: c_modality,
                     distance_km: parseDouble(c_distanceKm),
                     duration_sec: hmsToSeconds(c_durH, c_durM, c_durS) ?? parseInt(c_durationSec),
                     avg_hr: parseInt(c_avgHR),
                     max_hr: parseInt(c_maxHR),
                     avg_pace_sec_per_km: autoPaceSec(distanceKmText: c_distanceKm, durH: c_durH, durM: c_durM, durS: c_durS) ?? parseInt(c_avgPace),
-                    elevation_gain_m: parseInt(c_elevGain),
-                    notes: c_notes.trimmedOrNil
+                    elevation_gain_m: parseInt(c_elevGain)
                 )
+                print("[CARDIO][SAVE] sending modality='\(payload.modality)' activity_code='\(payload.activity_code ?? "nil")'")
                 _ = try await SupabaseManager.shared.client
                     .from("cardio_sessions")
                     .update(payload)
                     .eq("workout_id", value: workoutId)
+                    .execute()
+                
+                let sessRes = try await SupabaseManager.shared.client
+                    .from("cardio_sessions")
+                    .select("id")
+                    .eq("workout_id", value: workoutId)
+                    .single()
+                    .execute()
+                struct Sess: Decodable { let id: Int }
+                let sess = try JSONDecoder().decode(Sess.self, from: sessRes.data)
+                let statsDict = buildCardioStatsJSON_Edit(modality: c_modality)
+                struct CardioStatsUpsert: Encodable {
+                    let session_id: Int
+                    let stats: JStats
+                }
+                
+                _ = try await SupabaseManager.shared.client
+                    .from("cardio_session_stats")
+                    .upsert(CardioStatsUpsert(session_id: sess.id, stats: JStats(values: statsDict)))
                     .execute()
                 
             case "sport":
@@ -1285,6 +1403,67 @@ struct EditWorkoutMetaSheet: View {
         return String(format: "%d:%02d /km", mm, ss)
     }
     
+    private func normalizedModality(_ s: String) -> String {
+        s.lowercased().replacingOccurrences(of: " ", with: "_")
+    }
+    private func mapToCardioType(_ s: String) -> CardioActivityType {
+        let t = s
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "_")
+            .replacingOccurrences(of: "-", with: "_")
+            .replacingOccurrences(of: "(", with: "")
+            .replacingOccurrences(of: ")", with: "")
+        switch t {
+        case "run", "running":                       return .run
+        case "walk", "walking":                      return .walk
+        case "hike", "hiking":                       return .hike
+        case "treadmill", "treadmill_run", "treadmill_running":
+            return .treadmill
+        case "bike", "cycling", "road_bike":         return .bike
+        case "e_bike", "ebike":                      return .e_bike
+        case "mtb", "mountain_bike", "mountain_biking":
+            return .mtb
+        case "indoor_cycling", "spinning", "spin_bike":
+            return .indoor_cycling
+        case "rowerg", "row", "rowing", "indoor_rowing":
+            return .rowerg
+        case "swim_pool", "pool_swim", "pool_swimming":
+            return .swim_pool
+        case "swim_open_water", "open_water_swim", "open_water":
+            return .swim_open_water
+        default:                                     return .run
+        }
+    }
+    private func currentCardioType() -> CardioActivityType? {
+        mapToCardioType(c_modality)
+    }
+    private func debugCardio(_ stage: String) {
+        let raw = c_modality
+        let norm = normalizedModality(raw)
+        let mapped = mapToCardioType(raw)
+        print("[CARDIO][\(stage)] raw='\(raw)' norm='\(norm)' mapped=\(mapped.rawValue)")
+        print("[CARDIO][\(stage)] flags: cadence=\(showsCadence(for: raw)) watts=\(showsWatts(for: raw)) incline=\(showsIncline(for: raw)) split500=\(showsSplit500m(for: raw)) swimFields=\(showsSwimFields(for: raw))")
+    }
+    private func showsCadence(for modality: String) -> Bool {
+        currentCardioType()?.showsCadenceRpm == true
+    }
+    private func showsWatts(for modality: String) -> Bool {
+        currentCardioType()?.showsWatts == true
+    }
+    private func showsIncline(for modality: String) -> Bool {
+        currentCardioType()?.showsIncline == true
+    }
+    private func showsSplit500m(for modality: String) -> Bool {
+        currentCardioType()?.showsSplit500m == true
+    }
+    private func showsSwimFields(for modality: String) -> Bool {
+        currentCardioType()?.showsSwimFields == true
+    }
+    private func showsElevation(for modality: String) -> Bool {
+        currentCardioType()?.showsElevation == true
+    }
+    
     private func syncDurationFromDates() {
         guard endedAtEnabled, endedAt >= startedAt else { return }
         let totalSec = Int(endedAt.timeIntervalSince(startedAt))
@@ -1318,8 +1497,10 @@ struct EditWorkoutMetaSheet: View {
     }
     private func sportUsesSetText(_ s: SportType) -> Bool {
         switch s {
-        case .padel, .tennis, .badminton, .squash, .table_tennis: return true
-        default: return false
+        case .padel, .tennis, .badminton, .squash, .table_tennis, .volleyball:
+            return true
+        default:
+            return false
         }
     }
     
@@ -1458,7 +1639,7 @@ struct EditWorkoutMetaSheet: View {
                 }
             }
             
-        case .handball, .hockey, .rugby:
+        case .handball, .hockey, .rugby, .hyrox:
             Divider()
             FieldRowPlain {
                 Text("Usa 'Score for/against' y notes si necesitas más detalles.")
@@ -1475,6 +1656,28 @@ struct EditWorkoutMetaSheet: View {
     private func parseDouble(_ s: String) -> Double? {
         let t = s.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : Double(t)
+    }
+    
+    private func buildCardioStatsJSON_Edit(modality: String) -> [String: JV] {
+        var out: [String: JV] = [:]
+        if showsCadence(for: modality) {
+            if let v = parseInt(c_cadenceRpm) { out["cadence_rpm"] = .i(v) }
+            if let v = parseInt(c_wattsAvg)   { out["watts_avg"]   = .i(v) }
+        }
+        if showsIncline(for: modality) {
+            if let v = parseDouble(c_inclinePct) { out["incline_pct"] = .d(v) }
+        }
+        if showsSplit500m(for: modality) {
+            if let v = parseInt(c_split500m) { out["split_sec_per_500m"] = .i(v) }
+        }
+        if showsSwimFields(for: modality) {
+            if let v = parseInt(c_swimLaps)      { out["swim_laps"]      = .i(v) }
+            if let v = parseInt(c_poolLengthM)   { out["pool_length_m"]  = .i(v) }
+            if !c_swimStyle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out["swim_style"] = .s(c_swimStyle)
+            }
+        }
+        return out
     }
     
     private func buildSportStatsJSON_Edit() throws -> [String: JV] {
@@ -1534,7 +1737,7 @@ struct EditWorkoutMetaSheet: View {
             if let v = parseInt(vbDigs)   { out["digs"]   = .i(v) }
             return out
             
-        case .handball, .hockey, .rugby:
+        case .handball, .hockey, .rugby, .hyrox:
             return [:]
         }
     }

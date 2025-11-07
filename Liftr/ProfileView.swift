@@ -16,6 +16,9 @@ private struct ProfileRow: Decodable {
     let username: String
     let avatar_url: String?
     let bio: String?
+    let height_cm: Int?
+    let weight_kg: Double?
+    let birth_date: Date?
 }
 
 private struct DayActivity: Decodable, Identifiable {
@@ -76,6 +79,14 @@ extension JSONDecoder {
                 if let d = f.date(from: s) { return d }
             }
             
+            do {
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "en_US_POSIX")
+                f.timeZone = TimeZone(secondsFromGMT: 0)
+                f.dateFormat = "yyyy-MM-dd"
+                if let d = f.date(from: s) { return d }
+            }
+            
             throw DecodingError.dataCorrupted(
                 .init(codingPath: decoder.codingPath,
                       debugDescription: "Invalid ISO/RFC3339 date: \(s)")
@@ -98,6 +109,7 @@ struct ProfileView: View {
     @State private var avatarURL: String?
     @State private var loading = false
     @State private var error: String?
+    @State private var banner: Banner?
     @State private var pickedItem: PhotosPickerItem?
     @State private var uploadingAvatar = false
     @State private var monthDate = Date()
@@ -123,6 +135,12 @@ struct ProfileView: View {
     @State private var progressSubtab: ProgressSubtab = .activity
     @State private var kindDistribution: [KindSlice] = []
     @State private var totalDurationMin: Int = 0
+    @State private var email: String? = nil
+    @State private var editingProfile = false
+    @State private var heightCm: String = ""
+    @State private var weightKg: String = ""
+    @State private var birthDate: Date = Date()
+    @State private var hasBirthDate: Bool = false
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
@@ -152,6 +170,7 @@ struct ProfileView: View {
         .foregroundStyle(.primary)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .banner($banner)
         .task {
             let session = try? await SupabaseManager.shared.client.auth.session
             print("[Auth] user.id:", session?.user.id.uuidString ?? "nil")
@@ -606,12 +625,13 @@ struct ProfileView: View {
         enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
         @State private var filter: KindFilter = .all
         @State private var search: String = ""
+        @State private var showSearch = false
         @State private var prs: [PRRow] = []
         @State private var loading = false
         @State private var error: String?
         
         private var sections: [(title: String, items: [PRRow])] {
-            grouped(by: sectionKey)
+            grouped(by: Self.sectionTitle)
         }
         
         var body: some View {
@@ -625,16 +645,47 @@ struct ProfileView: View {
                     .pickerStyle(.segmented)
                 }
                 .padding(.horizontal)
+
+                if showSearch {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                        TextField("Search PRs", text: $search)
+                            .textFieldStyle(.roundedBorder)
+                        if !search.isEmpty {
+                            Button { search = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
                 
                 List {
                     if loading { ProgressView().frame(maxWidth: .infinity) }
                     
-                    ForEach(sections, id: \.title) { section in
-                        Text(section.title)
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .listRowInsets(EdgeInsets(top: 18, leading: 16, bottom: 8, trailing: 16))
-                            .listRowBackground(Color.clear)
+                    ForEach(Array(sections.enumerated()), id: \.element.title) { index, section in
+                        HStack {
+                            Text(section.title)
+                                .font(.headline)
+                                .textCase(nil)
+                            Spacer()
+                            if index == 0 {
+                                Button {
+                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
+                                        showSearch.toggle()
+                                    }
+                                } label: {
+                                    Image(systemName: showSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Toggle search")
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .listRowInsets(EdgeInsets(top: 18, leading: 16, bottom: 8, trailing: 16))
+                        .listRowBackground(Color.clear)
                         
                         ForEach(section.items, id: \.id) { pr in
                             HStack(alignment: .firstTextBaseline) {
@@ -647,7 +698,8 @@ struct ProfileView: View {
                                 Spacer()
                                 VStack(alignment: .trailing, spacing: 2) {
                                     Text(formatValue(pr))
-                                        .font(.headline).fontWeight(.semibold)
+                                        .font(.title3.weight(.bold))
+                                        .monospacedDigit()
                                     Text(dateOnly(pr.achieved_at))
                                         .font(.caption2).foregroundStyle(.secondary)
                                 }
@@ -710,18 +762,30 @@ struct ProfileView: View {
             }
         }
         
-        private func sectionKey(_ pr: PRRow) -> String {
-            switch pr.kind {
-            case "strength": return "Strength"
-            case "cardio":   return "Cardio"
-            case "sport":    return "Sport"
-            default:         return "Other"
-            }
+        private static func sectionTitle(_ pr: PRRow) -> String {
+            let kind = pr.kind.capitalized
+            let label = pr.label.capitalized
+            return "\(kind) · \(label)"
         }
         
         private func grouped(by key: (PRRow) -> String) -> [(title: String, items: [PRRow])] {
             let dict = Dictionary(grouping: filtered(prs), by: key)
-            return dict.keys.sorted().map { ($0, dict[$0]!.sorted { $0.achieved_at > $1.achieved_at }) }
+            func orderTuple(_ title: String) -> (Int, String) {
+                let lower = title.lowercased()
+                if lower.hasPrefix("strength") { return (0, lower) }
+                if lower.hasPrefix("cardio")   { return (1, lower) }
+                if lower.hasPrefix("sport")    { return (2, lower) }
+                return (3, lower)
+            }
+
+            let sortedKeys = dict.keys.sorted { a, b in
+                let oa = orderTuple(a), ob = orderTuple(b)
+                return oa.0 == ob.0 ? oa.1 < ob.1 : oa.0 < ob.0
+            }
+            return sortedKeys.map { key in
+                let items = (dict[key] ?? []).sorted { $0.achieved_at > $1.achieved_at }
+                return (title: key, items: items)
+            }
         }
         
         private func filtered(_ items: [PRRow]) -> [PRRow] {
@@ -810,14 +874,108 @@ struct ProfileView: View {
                         )
                     
                     HStack(spacing: 10) {
-                        Text("User ID")
+                        Text("Email")
                             .font(.subheadline.weight(.semibold))
                         Spacer()
-                        Text(app.userId?.uuidString ?? "–")
+                        Text(email ?? "–")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
+                    }
+                    .padding(12)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
+            Section("Personal information") {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+                    
+                    VStack(spacing: 10) {
+                        HStack {
+                            Spacer()
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { editingProfile.toggle() }
+                            } label: {
+                                Image(systemName: editingProfile ? "checkmark.circle.fill" : "pencil")
+                                    .font(.subheadline.weight(.semibold))
+                                    .padding(6)
+                                    .background(.thinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(editingProfile ? "Done" : "Edit")
+                        }
+                        
+                        Divider().opacity(0.15)
+                        HStack {
+                            Text("Height (cm)")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if editingProfile {
+                                TextField("—", text: $heightCm)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(maxWidth: 120)
+                            } else {
+                                Text(heightCm.isEmpty ? "–" : "\(heightCm) cm")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        
+                        Divider().opacity(0.15)
+                        HStack {
+                            Text("Weight (kg)")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if editingProfile {
+                                TextField("—", text: $weightKg)
+                                    .keyboardType(.decimalPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(maxWidth: 120)
+                            } else {
+                                Text(weightKg.isEmpty ? "–" : "\(weightKg)")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        
+                        Divider().opacity(0.15)
+                        if editingProfile {
+                            HStack {
+                                Text("Birth date")
+                                Spacer()
+                                DatePicker("", selection: $birthDate, displayedComponents: .date)
+                                    .labelsHidden()
+                            }
+                        }
+                        
+                        HStack {
+                            Text("Age")
+                            Spacer()
+                            Text(ageYears.map(String.init) ?? "—")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        if editingProfile {
+                            Divider().opacity(0.15)
+                            Button {
+                                Task { await saveProfileMetrics() }
+                            } label: {
+                                HStack {
+                                    Spacer()
+                                    Text("Save changes").font(.body.weight(.semibold))
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
                     }
                     .padding(12)
                 }
@@ -856,6 +1014,50 @@ struct ProfileView: View {
         .background(Color.clear)
     }
     
+    private var ageYears: Int? {
+        guard hasBirthDate else { return nil }
+        let cal = Calendar.current
+        let now = Date()
+        return cal.dateComponents([.year], from: birthDate, to: now).year
+    }
+    
+    private func saveProfileMetrics() async {
+        guard let uid = app.userId else { return }
+        struct ProfileMetricsUpdate: Encodable {
+            let height_cm: Int?
+            let weight_kg: Double?
+            let date_of_birth: String?
+        }
+        do {
+            let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
+            let height = Int(hText).flatMap { $0 > 0 ? $0 : nil }
+
+            let wText = weightKg
+                .replacingOccurrences(of: ",", with: ".")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let weight = Double(wText).flatMap { $0 > 0 ? $0 : nil }
+            
+            let df = DateFormatter()
+            df.timeZone = .current
+            df.dateFormat = "yyyy-MM-dd"
+            let birth = df.string(from: birthDate)
+            
+            let update = ProfileMetricsUpdate(height_cm: height, weight_kg: weight, date_of_birth: birth)
+            guard update.height_cm != nil || update.weight_kg != nil || update.date_of_birth != nil else { return }
+            
+            _ = try await SupabaseManager.shared.client
+                .from("profiles")
+                .update(update)
+                .eq("user_id", value: uid.uuidString)
+                .execute()
+            await loadProfileHeader()
+            await MainActor.run { editingProfile = false }
+            BannerAction.showSuccess("Profile updated! ✅", banner: $banner)
+        } catch {
+            await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+    
     private func loadProfileHeader() async {
         guard let uid = viewingUserId else { return }
         loading = true; defer { loading = false }
@@ -863,7 +1065,7 @@ struct ProfileView: View {
         do {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
-                .select("user_id,username,avatar_url,bio")
+                .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth")
                 .eq("user_id", value: uid)
                 .single()
                 .execute()
@@ -873,6 +1075,13 @@ struct ProfileView: View {
             avatarURL = profile.avatar_url
             bio = profile.bio
             
+            if let session = try? await SupabaseManager.shared.client.auth.session {
+                self.email = session.user.email
+            }
+            self.heightCm = profile.height_cm.map { "\($0)" } ?? ""
+            self.weightKg = profile.weight_kg.map { String(format: "%.1f", $0) } ?? ""
+            self.hasBirthDate = profile.birth_date != nil
+            self.birthDate = profile.birth_date ?? Date()
             let res2 = try await SupabaseManager.shared.client
                 .from("vw_profile_counts")
                 .select()
@@ -1283,38 +1492,38 @@ struct ProfileView: View {
     private func follow() async {
         guard !mutatingFollow,
               let me = app.userId,
-              let other = viewingUserId
-        else { return }
-        
-        await MainActor.run { mutatingFollow = true }
+              let other = viewingUserId,
+              me != other else { return }
+
+        await MainActor.run { mutatingFollow = true; error = nil }
         defer { Task { await MainActor.run { mutatingFollow = false } } }
-        
+
         do {
             let payload: [String: String] = [
                 "follower_id": me.uuidString,
                 "followee_id": other.uuidString
             ]
-            
             _ = try await SupabaseManager.shared.client
                 .from("follows")
-                .insert(payload)
+                .upsert(payload, onConflict: "follower_id,followee_id")
                 .execute()
-            
+
             await refreshFollowState()
             await loadProfileHeader()
         } catch {
+            await MainActor.run { self.error = "Follow failed: \(error.localizedDescription)" }
+            print("[Follow][ERROR]", error.localizedDescription)
         }
     }
     
     private func unfollow() async {
         guard !mutatingFollow,
               let me = app.userId,
-              let other = viewingUserId
-        else { return }
-        
-        await MainActor.run { mutatingFollow = true }
+              let other = viewingUserId else { return }
+
+        await MainActor.run { mutatingFollow = true; error = nil }
         defer { Task { await MainActor.run { mutatingFollow = false } } }
-        
+
         do {
             _ = try await SupabaseManager.shared.client
                 .from("follows")
@@ -1322,10 +1531,12 @@ struct ProfileView: View {
                 .eq("follower_id", value: me.uuidString)
                 .eq("followee_id", value: other.uuidString)
                 .execute()
-            
+
             await refreshFollowState()
             await loadProfileHeader()
         } catch {
+            await MainActor.run { self.error = "Unfollow failed: \(error.localizedDescription)" }
+            print("[Unfollow][ERROR]", error.localizedDescription)
         }
     }
 }

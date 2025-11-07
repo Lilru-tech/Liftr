@@ -81,3 +81,45 @@ extension View {
         modifier(BannerPresenter(banner: banner, autoHide: autoHide, duration: duration))
     }
 }
+
+// Acciones reutilizables para mostrar banners y encadenar acciones
+enum BannerAction {
+    @MainActor
+    static func showSuccess(_ message: String, banner: Binding<Banner?>) {
+        banner.wrappedValue = Banner(message: message, type: .success)
+    }
+    @MainActor
+    static func showError(_ message: String, banner: Binding<Banner?>) {
+        banner.wrappedValue = Banner(message: message, type: .error)
+    }
+    @MainActor
+    static func showInfo(_ message: String, banner: Binding<Banner?>) {
+        banner.wrappedValue = Banner(message: message, type: .info)
+    }
+
+    /// Muestra éxito, espera y luego hace dismiss (equivalente a showSuccessAndPop)
+    @MainActor
+    static func showSuccessAndDismiss(
+        _ message: String,
+        banner: Binding<Banner?>,
+        dismiss: DismissAction,
+        delay: Double = 2.0
+    ) async {
+        banner.wrappedValue = Banner(message: message, type: .success)
+        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        dismiss()
+    }
+
+    /// Muestra éxito, espera y luego ejecuta una acción (útil para “go home”, etc.)
+    @MainActor
+    static func showSuccessThen(
+        _ message: String,
+        banner: Binding<Banner?>,
+        delay: Double = 2.0,
+        _ action: @escaping () -> Void
+    ) async {
+        banner.wrappedValue = Banner(message: message, type: .success)
+        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        action()
+    }
+}

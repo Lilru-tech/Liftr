@@ -733,7 +733,9 @@ struct WorkoutDetailView: View {
                     .execute()
                 
                 struct Row: Decodable {
-                    let modality: String
+                    let id: Int
+                    let activity_code: String?
+                    let modality: String?
                     let distance_km: Decimal?
                     let duration_sec: Int?
                     let avg_hr: Int?
@@ -745,7 +747,7 @@ struct WorkoutDetailView: View {
                 let r = try decoder.decode(Row.self, from: res.data)
                 
                 var cf = CardioForm()
-                cf.modality = r.modality
+                cf.activity = CardioActivityType(rawValue: r.activity_code ?? r.modality ?? "run") ?? .run
                 cf.distanceKm = r.distance_km.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? ""
                 if let s = r.duration_sec, s > 0 {
                     cf.durH = String(s/3600); cf.durM = String((s%3600)/60); cf.durS = String(s%60)
@@ -756,6 +758,40 @@ struct WorkoutDetailView: View {
                     cf.paceH = ""; cf.paceM = String(p/60); cf.paceS = String(p%60)
                 }
                 cf.elevationGainM = r.elevation_gain_m.map { "\($0)" } ?? ""
+                do {
+                    let statsRes = try await SupabaseManager.shared.client
+                        .from("cardio_session_stats")
+                        .select("stats")
+                        .eq("session_id", value: r.id)
+                        .single()
+                        .execute()
+
+                    struct StatsWire: Decodable {
+                        struct StatsBody: Decodable {
+                            let cadence_rpm: Int?
+                            let watts_avg: Int?
+                            let incline_pct: Double?
+                            let swim_laps: Int?
+                            let pool_length_m: Int?
+                            let swim_style: String?
+                            let split_sec_per_500m: Int?
+                        }
+                        let stats: StatsBody?
+                    }
+
+                    let stats = try JSONDecoder.supabase().decode(StatsWire.self, from: statsRes.data)
+
+                    if let s = stats.stats {
+                        if let v = s.cadence_rpm         { cf.cadenceRpm        = String(v) }
+                        if let v = s.watts_avg           { cf.wattsAvg          = String(v) }
+                        if let v = s.incline_pct         { cf.inclinePercent    = String(v) }
+                        if let v = s.swim_laps           { cf.swimLaps          = String(v) }
+                        if let v = s.pool_length_m       { cf.poolLengthM       = String(v) }
+                        if let v = s.swim_style, !v.isEmpty { cf.swimStyle     = v }
+                        if let v = s.split_sec_per_500m  { cf.splitSecPer500m   = String(v) }
+                    }
+                } catch {
+                }
                 draft.cardio = cf
             } catch { return nil }
             
@@ -1139,7 +1175,9 @@ private struct CardioDetailBlock: View {
     let reloadKey: UUID
     
     private struct CardioRow: Decodable {
-        let modality: String
+        let id: Int
+        let activity_code: String?
+        let modality: String?
         let distance_km: Decimal?
         let duration_sec: Int?
         let avg_hr: Int?
@@ -1151,13 +1189,23 @@ private struct CardioDetailBlock: View {
     
     @State private var row: CardioRow?
     @State private var error: String?
+    private struct CardioExtras: Decodable {
+        let cadence_rpm: Int?
+        let watts_avg: Int?
+        let incline_pct: Double?
+        let swim_laps: Int?
+        let pool_length_m: Int?
+        let swim_style: String?
+        let split_sec_per_500m: Int?
+    }
+    @State private var extras: CardioExtras?
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Cardio").font(.headline)
             
             if let r = row {
-                info("Modality", r.modality)
+                info("Activity", activityLabel(r))
                 if let d = r.distance_km { info("Distance", String(format: "%.2f km", NSDecimalNumber(decimal: d).doubleValue)) }
                 if let s = r.duration_sec { info("Duration", durationString(Double(s))) }
                 if let p = r.avg_pace_sec_per_km { info("Avg pace", paceString(Double(p))) }
@@ -1165,6 +1213,23 @@ private struct CardioDetailBlock: View {
                 if let mh = r.max_hr { info("Max HR", "\(mh) bpm") }
                 if let elev = r.elevation_gain_m { info("Elevation gain", "\(elev) m") }
                 if let n = r.notes, !n.isEmpty { info("Notes", n) }
+                if showsCadence(for: r.activity_code), let cad = extras?.cadence_rpm {
+                    info("Cadence", "\(cad) \((r.activity_code ?? "") == "rowerg" ? "spm" : "rpm")")
+                }
+                if showsWatts(for: r.activity_code), let w = extras?.watts_avg {
+                    info("Avg watts", "\(w) W")
+                }
+                if showsIncline(for: r.activity_code), let inc = extras?.incline_pct {
+                    info("Incline", String(format: "%.1f %%", inc))
+                }
+                if showsSplit500m(for: r.activity_code), let split = extras?.split_sec_per_500m {
+                    info("Split", "\(liftrMMSS(split)) /500m")
+                }
+                if showsSwimFields(for: r.activity_code) {
+                    if let laps = extras?.swim_laps { info("Laps", "\(laps)") }
+                    if let len  = extras?.pool_length_m { info("Pool length", "\(len) m") }
+                    if let st   = extras?.swim_style, !st.isEmpty { info("Swim style", st.capitalized) }
+                }
             } else {
                 Text("No cardio session linked").foregroundStyle(.secondary).font(.caption)
             }
@@ -1188,6 +1253,20 @@ private struct CardioDetailBlock: View {
                 .execute()
             let r = try JSONDecoder.supabase().decode(CardioRow.self, from: res.data)
             await MainActor.run { row = r }
+            do {
+                let statsRes = try await SupabaseManager.shared.client
+                    .from("cardio_session_stats")
+                    .select("stats")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+
+                struct Wire: Decodable { let stats: CardioExtras? }
+                let w = try JSONDecoder.supabase().decode(Wire.self, from: statsRes.data)
+                await MainActor.run { self.extras = w.stats }
+            } catch {
+                await MainActor.run { self.extras = nil }
+            }
         } catch {
             await MainActor.run { self.row = nil; self.error = error.localizedDescription }
         }
@@ -1201,6 +1280,11 @@ private struct CardioDetailBlock: View {
         }
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+    
+    private func activityLabel(_ r: CardioRow) -> String {
+        let code = (r.activity_code ?? r.modality ?? "cardio")
+        return code.replacingOccurrences(of: "_", with: " ").capitalized
     }
     
     private func durationString(_ secondsDouble: Double) -> String {
@@ -1546,4 +1630,33 @@ private struct LikersSheet: View {
         }
         .padding(16)
     }
+}
+
+@inline(__always)
+private func liftrMMSS(_ seconds: Int) -> String {
+    let m = max(0, seconds) / 60
+    let s = max(0, seconds) % 60
+    return String(format: "%d:%02d", m, s)
+}
+
+private func showsCadence(for code: String?) -> Bool {
+    guard let c = code else { return false }
+    return ["bike","e_bike","mtb","indoor_cycling","rowerg"].contains(c)
+}
+
+private func showsWatts(for code: String?) -> Bool {
+    guard let c = code else { return false }
+    return ["bike","e_bike","indoor_cycling","rowerg","mtb"].contains(c)
+}
+
+private func showsIncline(for code: String?) -> Bool {
+    return code == "treadmill"
+}
+
+private func showsSplit500m(for code: String?) -> Bool {
+    return code == "rowerg"
+}
+
+private func showsSwimFields(for code: String?) -> Bool {
+    return code == "swim_pool"
 }
