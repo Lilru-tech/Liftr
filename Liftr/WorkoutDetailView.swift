@@ -58,6 +58,8 @@ struct WorkoutDetailView: View {
     @State private var showErrorAlert = false
     @State private var alertMessage = ""
     @State private var compareCandidateId: Int? = nil
+    @State private var compareCandidates: [CompareCandidate] = []
+    @State private var showComparePicker = false
     @State private var compareReady = false
     @State private var compareComputing = false
     @State private var showCompare = false
@@ -71,7 +73,7 @@ struct WorkoutDetailView: View {
             await loadParticipants()
             await loadLikes()
             if likeCount > 0 { await loadLikers() }
-            await computeCompareCandidate()
+            await loadCompareCandidates()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
             if let id = note.object as? Int, id == workoutId {
@@ -81,7 +83,7 @@ struct WorkoutDetailView: View {
         .onChange(of: app.userId) { _, _ in
             Task {
                 await loadLikes()
-                await computeCompareCandidate()
+                await loadCompareCandidates()
             }
         }
         .gradientBG()
@@ -105,6 +107,15 @@ struct WorkoutDetailView: View {
             .environmentObject(app)
             .presentationDetents(Set([.large]))
             .presentationBackground(.ultraThinMaterial)
+        }
+        .sheet(isPresented: $showComparePicker) {
+            CompareCandidatePicker(items: compareCandidates) { chosen in
+                compareCandidateId = chosen
+                showCompare = true
+            }
+            .gradientBG()
+            .presentationDetents([.fraction(0.45), .medium])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showEdit) {
             if let w = workout {
@@ -376,8 +387,15 @@ struct WorkoutDetailView: View {
         if canEdit || canDuplicate || compareReady {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    if compareReady, let _ = compareCandidateId {
-                        Button("Compare") { showCompare = true }
+                    if compareReady {
+                        if compareCandidates.count > 1 {
+                            Button("Compare…") { showComparePicker = true }
+                        } else if let only = (compareCandidates.first?.id ?? compareCandidateId) {
+                            Button("Compare") {
+                                compareCandidateId = only
+                                showCompare = true
+                            }
+                        }
                     }
                     if canEdit {
                         Button("Edit") { showEdit = true }
@@ -1025,11 +1043,62 @@ struct WorkoutDetailView: View {
         return draft
     }
     
+    struct CompareCandidate: Decodable, Identifiable {
+        let candidate_id: Int
+        let title: String?
+        let kind: String
+        let sport: String?
+        let activity: String?
+        let started_at: Date
+        var id: Int { candidate_id }
+
+        var displayTitle: String {
+            if let t = title, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return t }
+            if kind == "sport"  { return (sport ?? "Sport").replacingOccurrences(of: "_", with: " ").capitalized }
+            if kind == "cardio" { return (activity ?? "Cardio").replacingOccurrences(of: "_", with: " ").capitalized }
+            return "Workout"
+        }
+    }
+    
     private struct CanCompareParams: Encodable {
         let p_viewer: UUID
         let p_workout: Int
     }
 
+    private func loadCompareCandidates() async {
+        guard let me = app.userId else {
+            await MainActor.run {
+                compareCandidates = []
+                compareCandidateId = nil
+                compareReady = false
+            }
+            return
+        }
+        if compareComputing { return }
+        await MainActor.run { compareComputing = true }
+        defer { Task { await MainActor.run { compareComputing = false } } }
+
+        do {
+            struct Params: Encodable { let p_viewer: UUID; let p_workout: Int; let p_limit: Int }
+            let res = try await SupabaseManager.shared.client
+                .rpc("list_comparable_workouts_v1",
+                     params: Params(p_viewer: me, p_workout: workoutId, p_limit: 50))
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([CompareCandidate].self, from: res.data)
+            await MainActor.run {
+                compareCandidates = rows
+                compareCandidateId = rows.first?.id
+                compareReady = !rows.isEmpty
+            }
+        } catch {
+            await MainActor.run {
+                compareCandidates = []
+                compareCandidateId = nil
+                compareReady = false
+            }
+        }
+    }
+    
     private struct CanCompareRes: Decodable {
         let viewer_can_compare_with_owner: Bool
         let viewer_has_comparable_workout: Bool
@@ -1705,6 +1774,37 @@ private struct LikersSheet: View {
             }
         }
         .padding(16)
+    }
+}
+
+private struct CompareCandidatePicker: View {
+    let items: [WorkoutDetailView.CompareCandidate]
+    let onPick: (Int) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(items) { c in
+                Button {
+                    onPick(c.id)
+                    dismiss()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(c.displayTitle)
+                            .font(.headline)
+                            .lineLimit(1)
+                        Text(c.started_at.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .listRowBackground(Color.clear)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Choose workout")
+            .navigationBarTitleDisplayMode(.inline)
+        }
     }
 }
 

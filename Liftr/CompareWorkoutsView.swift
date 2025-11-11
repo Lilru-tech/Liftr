@@ -23,6 +23,9 @@ struct CompareWorkoutsView: View {
     @State private var error: String?
     @State private var metrics: [ComparableMetric] = []
     @State private var workoutKind: String? = nil
+    @State private var bothMine = false
+    private static let leftColor  = Color(red: 0.82, green: 0.12, blue: 0.18)
+    private static let rightColor = Color(red: 0.02, green: 0.55, blue: 0.32)
 
     var body: some View {
         VStack(spacing: 16) {
@@ -43,9 +46,9 @@ struct CompareWorkoutsView: View {
 
             if let k = workoutKind {
                 HStack(spacing: 6) {
-                    Text("His/Her").foregroundStyle(.red)
+                    Text(bothMine ? "Yours" : "His/Her").foregroundStyle(CompareWorkoutsView.leftColor)
                     Text("vs").foregroundStyle(.secondary)
-                    Text("Yours").foregroundStyle(.green)
+                    Text("Yours").foregroundStyle(CompareWorkoutsView.rightColor)
                     Text("— \(k.capitalized)").foregroundStyle(.secondary)
                 }
                 .font(.subheadline)
@@ -56,7 +59,7 @@ struct CompareWorkoutsView: View {
             } else if let e = error {
                 Text(e).foregroundStyle(.red).padding(.top, 12)
             } else if metrics.isEmpty {
-                Text("Nothing to compare for these workouts.")
+                Text("Nothing to compare for these workouts. Please add more data to your workout")
                     .foregroundStyle(.secondary)
                     .padding(.top, 12)
             } else {
@@ -105,13 +108,13 @@ struct CompareWorkoutsView: View {
                 HStack(spacing: 10) {
                     Text(formatValue(m.left_value, unit: m.unit))
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(CompareWorkoutsView.leftColor)
                     Text("vs")
                         .font(.caption)
                         .foregroundStyle(.secondary.opacity(0.7))
                     Text(formatValue(m.right_value, unit: m.unit))
                         .font(.caption)
-                        .foregroundStyle(.green)
+                        .foregroundStyle(CompareWorkoutsView.rightColor)
                 }
 
                 GeometryReader { geo in
@@ -133,19 +136,21 @@ struct CompareWorkoutsView: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Capsule()
                                 .fill(LinearGradient(
-                                    gradient: Gradient(colors: [Color.red, Color.red.opacity(0.7)]),
+                                    gradient: Gradient(colors: [CompareWorkoutsView.leftColor,
+                                                                CompareWorkoutsView.leftColor.opacity(0.7)]),
                                     startPoint: .leading, endPoint: .trailing
                                 ))
                                 .frame(width: leftW, height: 10)
-                                .shadow(color: Color.red.opacity(0.18), radius: 1, x: 0, y: 0)
+                                .shadow(color: CompareWorkoutsView.leftColor.opacity(0.25), radius: 1, x: 0, y: 0)
 
                             Capsule()
                                 .fill(LinearGradient(
-                                    gradient: Gradient(colors: [Color.green, Color.green.opacity(0.7)]),
+                                    gradient: Gradient(colors: [CompareWorkoutsView.rightColor,
+                                                                CompareWorkoutsView.rightColor.opacity(0.7)]),
                                     startPoint: .leading, endPoint: .trailing
                                 ))
                                 .frame(width: rightW, height: 10)
-                                .shadow(color: Color.green.opacity(0.18), radius: 1, x: 0, y: 0)
+                                .shadow(color: CompareWorkoutsView.rightColor.opacity(0.25), radius: 1, x: 0, y: 0)
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 10)
@@ -263,11 +268,11 @@ struct CompareWorkoutsView: View {
         let client = SupabaseManager.shared.client
         let decoder = JSONDecoder.supabase()
 
-        struct WRow: Decodable { let id: Int; let kind: String; let title: String? }
+        struct WRow: Decodable { let id: Int; let kind: String; let title: String?; let user_id: UUID }
 
         do {
-            let lRes = try await client.from("workouts").select("id, kind, title").eq("id", value: currentWorkoutId).single().execute()
-            let rRes = try await client.from("workouts").select("id, kind, title").eq("id", value: myOtherWorkoutId).single().execute()
+            let lRes = try await client.from("workouts").select("id, kind, title, user_id").eq("id", value: currentWorkoutId).single().execute()
+            let rRes = try await client.from("workouts").select("id, kind, title, user_id").eq("id", value: myOtherWorkoutId).single().execute()
             let L = try decoder.decode(WRow.self, from: lRes.data)
             let R = try decoder.decode(WRow.self, from: rRes.data)
 
@@ -278,6 +283,7 @@ struct CompareWorkoutsView: View {
 
             await MainActor.run {
                 workoutKind = L.kind
+                bothMine = (L.user_id == R.user_id)
             }
 
             switch L.kind.lowercased() {
@@ -364,10 +370,36 @@ struct CompareWorkoutsView: View {
     private struct SportRow: Decodable { let id: Int; let sport: String; let duration_sec: Int?; let score_for: Int?; let score_against: Int? }
 
     private func buildSportMetrics(decoder: JSONDecoder, client: SupabaseClient) async throws {
-        let lQ = try await client.from("sport_sessions").select("id, sport, duration_sec, score_for, score_against").eq("workout_id", value: currentWorkoutId).single().execute()
-        let rQ = try await client.from("sport_sessions").select("id, sport, duration_sec, score_for, score_against").eq("workout_id", value: myOtherWorkoutId).single().execute()
-        let L = try decoder.decode(SportRow.self, from: lQ.data)
-        let R = try decoder.decode(SportRow.self, from: rQ.data)
+        struct SportRow: Decodable {
+            let id: Int
+            let sport: String
+            let duration_sec: Int?
+            let score_for: Int?
+            let score_against: Int?
+        }
+        struct WMeta: Decodable {
+            let duration_min: Int?
+            let started_at: Date?
+            let ended_at: Date?
+        }
+
+        async let lS = client.from("sport_sessions")
+            .select("id, sport, duration_sec, score_for, score_against")
+            .eq("workout_id", value: currentWorkoutId).single().execute()
+        async let rS = client.from("sport_sessions")
+            .select("id, sport, duration_sec, score_for, score_against")
+            .eq("workout_id", value: myOtherWorkoutId).single().execute()
+        async let lW = client.from("workouts")
+            .select("duration_min, started_at, ended_at")
+            .eq("id", value: currentWorkoutId).single().execute()
+        async let rW = client.from("workouts")
+            .select("duration_min, started_at, ended_at")
+            .eq("id", value: myOtherWorkoutId).single().execute()
+
+        let L = try decoder.decode(SportRow.self, from: try await lS.data)
+        let R = try decoder.decode(SportRow.self, from: try await rS.data)
+        let LM = try decoder.decode(WMeta.self, from: try await lW.data)
+        let RM = try decoder.decode(WMeta.self, from: try await rW.data)
 
         let ls = L.sport.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let rs = R.sport.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -376,13 +408,25 @@ struct CompareWorkoutsView: View {
             return
         }
 
+        func bestDurationSec(_ sess: Int?, _ meta: WMeta) -> Int? {
+            if let s = sess, s > 0 { return s }
+            if let m = meta.duration_min, m > 0 { return m * 60 }
+            if let s = meta.started_at, let e = meta.ended_at {
+                let sec = Int(e.timeIntervalSince(s).rounded())
+                return sec > 0 ? sec : nil
+            }
+            return nil
+        }
+
         var out: [ComparableMetric] = []
         func add(_ metric: String, _ unit: String, _ lv: Double?, _ rv: Double?) {
             guard let lv, let rv else { return }
             out.append(.init(metric: metric, unit: unit, left_value: lv, right_value: rv))
         }
 
-        add("duration_sec", "sec", L.duration_sec.map(Double.init), R.duration_sec.map(Double.init))
+        let lDurSec = bestDurationSec(L.duration_sec, LM)
+        let rDurSec = bestDurationSec(R.duration_sec, RM)
+        add("duration_sec", "sec", lDurSec.map(Double.init), rDurSec.map(Double.init))
         add("score_for", "pts", L.score_for.map(Double.init), R.score_for.map(Double.init))
         add("score_against", "pts", L.score_against.map(Double.init), R.score_against.map(Double.init))
 
@@ -489,8 +533,7 @@ struct CompareWorkoutsView: View {
                 }
             }
 
-        default:
-            break
+        default: break
         }
 
         await MainActor.run { metrics = out }

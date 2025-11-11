@@ -9,6 +9,7 @@ struct RegisterView: View {
     @State private var username = ""
     @State private var sex: Sex = .prefer_not_to_say
     @State private var dateOfBirth: Date = Calendar.current.date(byAdding: .year, value: -20, to: .now) ?? .now
+    @State private var includeDOB = false
     @State private var height: String = ""
     @State private var weight: String = ""
     
@@ -105,16 +106,21 @@ struct RegisterView: View {
                                 .foregroundStyle(.secondary)
                         }
                         .labelStyle(.titleOnly)
-                        
-                        LabeledContent {
-                            DatePicker("", selection: $dateOfBirth, displayedComponents: .date)
-                                .datePickerStyle(.compact)
-                        } label: {
-                            Text("Date of birth")
-                                .foregroundStyle(.secondary)
+
+                        Toggle("Share date of birth (optional)", isOn: $includeDOB)
+                            .padding(.vertical, 2)
+
+                        if includeDOB {
+                            LabeledContent {
+                                DatePicker("", selection: $dateOfBirth, displayedComponents: .date)
+                                    .datePickerStyle(.compact)
+                            } label: {
+                                Text("Date of birth")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .labelStyle(.titleOnly)
+                            .padding(.vertical, 2)
                         }
-                        .labelStyle(.titleOnly)
-                        .padding(.vertical, 2)
                         
                         TextField("Height (cm)", text: $height).keyboardType(.decimalPad)
                         TextField("Weight (kg)", text: $weight).keyboardType(.decimalPad)
@@ -173,7 +179,7 @@ struct RegisterView: View {
         var meta: [String: AnyJSON] = [:]
         if !cleanUsername.isEmpty, let v = try? AnyJSON(cleanUsername) { meta["username"] = v }
         if let v = try? AnyJSON(sex.rawValue) { meta["sex"] = v }
-        if let v = try? AnyJSON(DateFormatter.yyyyMMdd.string(from: dateOfBirth)) { meta["date_of_birth"] = v }
+        if includeDOB, let v = try? AnyJSON(DateFormatter.yyyyMMdd.string(from: dateOfBirth)) { meta["date_of_birth"] = v }
         if let h = Double(height.replacingOccurrences(of: ",", with: ".")), let v = try? AnyJSON(h) { meta["height_cm"] = v }
         if let w = Double(weight.replacingOccurrences(of: ",", with: ".")), let v = try? AnyJSON(w) { meta["weight_kg"] = v }
         
@@ -239,7 +245,7 @@ struct RegisterView: View {
             user_id: userId,
             username: cleanUsername.isEmpty ? nil : cleanUsername,
             sex: sex.rawValue,
-            date_of_birth: DateFormatter.yyyyMMdd.string(from: dateOfBirth),
+            date_of_birth: includeDOB ? DateFormatter.yyyyMMdd.string(from: dateOfBirth) : nil,
             height_cm: parseDouble(height),
             weight_kg: parseDouble(weight)
         )
