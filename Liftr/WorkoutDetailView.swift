@@ -57,6 +57,10 @@ struct WorkoutDetailView: View {
     @State private var showCommentsSheet = false
     @State private var showErrorAlert = false
     @State private var alertMessage = ""
+    @State private var compareCandidateId: Int? = nil
+    @State private var compareReady = false
+    @State private var compareComputing = false
+    @State private var showCompare = false
     
     var body: some View {
         ScrollView {
@@ -67,6 +71,7 @@ struct WorkoutDetailView: View {
             await loadParticipants()
             await loadLikes()
             if likeCount > 0 { await loadLikers() }
+            await computeCompareCandidate()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
             if let id = note.object as? Int, id == workoutId {
@@ -74,7 +79,10 @@ struct WorkoutDetailView: View {
             }
         }
         .onChange(of: app.userId) { _, _ in
-            Task { await loadLikes() }
+            Task {
+                await loadLikes()
+                await computeCompareCandidate()
+            }
         }
         .gradientBG()
         .safeAreaPadding(.top, 2)
@@ -118,6 +126,14 @@ struct WorkoutDetailView: View {
                 )
                 .gradientBG()
                 .presentationDetents(Set([.medium, .large]))
+            }
+        }
+        .sheet(isPresented: $showCompare) {
+            if let otherId = compareCandidateId {
+                CompareWorkoutsView(currentWorkoutId: workoutId, myOtherWorkoutId: otherId)
+                    .gradientBG()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
             }
         }
     }
@@ -357,9 +373,12 @@ struct WorkoutDetailView: View {
             }
         }
         
-        if canEdit || canDuplicate {
+        if canEdit || canDuplicate || compareReady {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    if compareReady, let _ = compareCandidateId {
+                        Button("Compare") { showCompare = true }
+                    }
                     if canEdit {
                         Button("Edit") { showEdit = true }
                     }
@@ -1005,6 +1024,63 @@ struct WorkoutDetailView: View {
         }
         return draft
     }
+    
+    private struct CanCompareParams: Encodable {
+        let p_viewer: UUID
+        let p_workout: Int
+    }
+
+    private struct CanCompareRes: Decodable {
+        let viewer_can_compare_with_owner: Bool
+        let viewer_has_comparable_workout: Bool
+        let target_kind: String?
+        let target_sport: String?
+        let target_activity: String?
+        let target_title: String?
+        let sample_viewer_match_id: Int?
+    }
+    
+    private func computeCompareCandidate() async {
+        guard let me = app.userId else {
+            await MainActor.run { compareReady = false; compareCandidateId = nil }
+            return
+        }
+        guard workout != nil else {
+            await MainActor.run { compareReady = false; compareCandidateId = nil }
+            return
+        }
+        if compareComputing { return }
+        await MainActor.run { compareComputing = true }
+        defer { Task { await MainActor.run { compareComputing = false } } }
+
+        do {
+            let params = CanCompareParams(p_viewer: me, p_workout: workoutId)
+            let res = try await SupabaseManager.shared.client
+                .rpc("can_compare_workout_v1", params: params)
+                .execute()
+
+            let rows = try JSONDecoder.supabase().decode([CanCompareRes].self, from: res.data)
+            let r = rows.first
+
+            let candidate = (r?.sample_viewer_match_id != nil && r?.sample_viewer_match_id != workoutId)
+                ? r?.sample_viewer_match_id
+                : nil
+            let ready = (r?.viewer_can_compare_with_owner == true)
+                     && (r?.viewer_has_comparable_workout == true)
+                     && (candidate != nil)
+
+            await MainActor.run {
+                compareCandidateId = candidate
+                compareReady = ready
+            }
+        } catch {
+            await MainActor.run {
+                compareCandidateId = nil
+                compareReady = false
+            }
+        }
+    }
+
 }
 
 private struct StrengthDetailBlock: View {

@@ -10,11 +10,11 @@ struct RootView: View {
         TabView(selection: $app.selectedTab) {
             NavigationStack { HomeView().gradientBG() }
                 .tag(Tab.home)
-                .tabItem { Label("Home", systemImage: "house.fill") }
+                .tabItem { Label("", systemImage: "house.fill") }
             
             NavigationStack { SearchView().gradientBG() }
                 .tag(Tab.search)
-                .tabItem { Label("Search", systemImage: "magnifyingglass") }
+                .tabItem { Label("", systemImage: "magnifyingglass") }
             
             NavigationStack {
                 AddWorkoutSheet()
@@ -22,15 +22,15 @@ struct RootView: View {
                     .id(app.addDraftKey)
             }
             .tag(Tab.add)
-            .tabItem { Label("Add", systemImage: "plus.circle.fill") }
+            .tabItem { Label("", systemImage: "plus.circle.fill") }
             
             NavigationStack { RankingView().gradientBG() }
                 .tag(Tab.ranking)
-                .tabItem { Label("Ranking", systemImage: "trophy.fill") }
+                .tabItem { Label("", systemImage: "trophy.fill") }
             
             NavigationStack { ProfileGate().gradientBG() }
                 .tag(Tab.profile)
-                .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                .tabItem { Label("", systemImage: "person.crop.circle") }
         }
         .onChange(of: app.selectedTab) { old, new in
             if new == .add && !app.isAuthenticated {

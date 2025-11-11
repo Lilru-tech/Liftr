@@ -141,6 +141,7 @@ struct ProfileView: View {
     @State private var weightKg: String = ""
     @State private var birthDate: Date = Date()
     @State private var hasBirthDate: Bool = false
+    @State private var showAvatarPreview = false
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
@@ -205,6 +206,11 @@ struct ProfileView: View {
                 .gradientBG()
                 .presentationDetents([.fraction(0.30)])
                 .presentationDragIndicator(.visible)
+            }
+        }
+        .fullScreenCover(isPresented: $showAvatarPreview) {
+            if !isOwnProfile {
+                AvatarZoomPreview(urlString: avatarURL)
             }
         }
     }
@@ -370,6 +376,9 @@ struct ProfileView: View {
             } else {
                 AvatarView(urlString: avatarURL)
                     .frame(width: 64, height: 64)
+                    .contentShape(Rectangle())
+                    .onTapGesture { if avatarURL != nil { showAvatarPreview = true } }
+                    .accessibilityHint("Tap to preview")
             }
             
             VStack(alignment: .leading, spacing: 6) {
@@ -1560,6 +1569,113 @@ struct AvatarView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct AvatarZoomPreview: View {
+    let urlString: String?
+    @Environment(\.dismiss) private var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var lastScale: CGFloat = 1
+    @State private var lastOffset: CGSize = .zero
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            Group {
+                if let urlString, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .empty:
+                            ProgressView()
+                        case .success(let img):
+                            img
+                                .resizable()
+                                .scaledToFit()
+                                .scaleEffect(scale)
+                                .offset(offset)
+                                .gesture(
+                                    MagnificationGesture()
+                                        .onChanged { value in
+                                            scale = clamp(lastScale * value, min: 1, max: 4)
+                                        }
+                                        .onEnded { _ in
+                                            lastScale = scale
+                                            if scale <= 1 {
+                                                withAnimation(.spring) {
+                                                    offset = .zero
+                                                    lastOffset = .zero
+                                                }
+                                            }
+                                        }
+                                )
+                                .simultaneousGesture(
+                                    DragGesture()
+                                        .onChanged { g in
+                                            guard scale > 1 else { return }
+                                            offset = CGSize(width: lastOffset.width + g.translation.width,
+                                                            height: lastOffset.height + g.translation.height)
+                                        }
+                                        .onEnded { _ in
+                                            lastOffset = offset
+                                        }
+                                )
+                                .onTapGesture(count: 2) {
+                                    withAnimation(.spring) {
+                                        if scale > 1 {
+                                            scale = 1
+                                            lastScale = 1
+                                            offset = .zero
+                                            lastOffset = .zero
+                                        } else {
+                                            scale = 2
+                                            lastScale = 2
+                                        }
+                                    }
+                                }
+                        case .failure:
+                            Image(systemName: "person.fill")
+                                .resizable()
+                                .scaledToFit()
+                                .foregroundColor(.white.opacity(0.6))
+                                .padding(40)
+                        @unknown default:
+                            EmptyView()
+                        }
+                    }
+                } else {
+                    Image(systemName: "person.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(40)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            .safeAreaInset(edge: .top) {
+                HStack {
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+            }
+        }
+    }
+
+    private func clamp(_ v: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
+        Swift.min(Swift.max(v, min), max)
     }
 }
 

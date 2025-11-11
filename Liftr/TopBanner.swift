@@ -82,7 +82,6 @@ extension View {
     }
 }
 
-// Acciones reutilizables para mostrar banners y encadenar acciones
 enum BannerAction {
     @MainActor
     static func showSuccess(_ message: String, banner: Binding<Banner?>) {
@@ -97,7 +96,6 @@ enum BannerAction {
         banner.wrappedValue = Banner(message: message, type: .info)
     }
 
-    /// Muestra éxito, espera y luego hace dismiss (equivalente a showSuccessAndPop)
     @MainActor
     static func showSuccessAndDismiss(
         _ message: String,
@@ -110,7 +108,6 @@ enum BannerAction {
         dismiss()
     }
 
-    /// Muestra éxito, espera y luego ejecuta una acción (útil para “go home”, etc.)
     @MainActor
     static func showSuccessThen(
         _ message: String,
