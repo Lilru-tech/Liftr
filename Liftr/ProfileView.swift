@@ -142,6 +142,8 @@ struct ProfileView: View {
     @State private var birthDate: Date = Date()
     @State private var hasBirthDate: Bool = false
     @State private var showAvatarPreview = false
+    @State private var showDeleteConfirm = false
+    @State private var deletingAccount = false
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
@@ -1000,6 +1002,28 @@ struct ProfileView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(.white.opacity(0.18))
                         )
+
+                    Button(role: .destructive) { showDeleteConfirm = true } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "trash")
+                            Text(deletingAccount ? "Deleting…" : "Delete account")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                        }
+                        .padding(12)
+                        .foregroundColor(deletingAccount ? .secondary : .red)                    }
+                    .disabled(deletingAccount)
+                    .buttonStyle(.plain)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
                     
                     Button(role: .destructive) { app.signOut() } label: {
                         HStack(spacing: 10) {
@@ -1021,6 +1045,15 @@ struct ProfileView: View {
         .listRowSeparator(.hidden)
         .listSectionSeparator(.hidden)
         .background(Color.clear)
+        .alert("Delete account?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                showDeleteConfirm = false
+                Task { await performDeleteAccount() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete your account and data. This action cannot be undone.")
+        }
     }
     
     private var ageYears: Int? {
@@ -1064,6 +1097,33 @@ struct ProfileView: View {
             BannerAction.showSuccess("Profile updated! ✅", banner: $banner)
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+    
+    private func performDeleteAccount() async {
+        guard !deletingAccount else { return }
+        await MainActor.run { deletingAccount = true; error = nil }
+        defer { Task { await MainActor.run { deletingAccount = false } } }
+        do {
+            _ = try await SupabaseManager.shared.client
+                .rpc("delete_my_account")
+                .execute()
+        } catch {
+            print("[Delete] public RPC error:", error.localizedDescription)
+        }
+
+        do {
+            _ = try await SupabaseManager.shared.client.functions
+                .invoke("delete-auth-user")
+            await MainActor.run {
+                BannerAction.showSuccess("Account deleted. Goodbye 👋", banner: $banner)
+                app.signOut()
+            }
+        } catch {
+            await MainActor.run {
+                self.error = "We removed your app data, but couldn't remove the Auth user. Contact support."
+                app.signOut()
+            }
         }
     }
     

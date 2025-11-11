@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.9.6] - 2025-11-12
+
+### Added
+- **Account deletion (end-to-end)**
+  - New DB function: `public.delete_user_cascade(p_user uuid)` and wrapper RPC `public.delete_my_account()`.
+  - New Edge Function: `delete-auth-user` (service role) to remove the Supabase **Auth** user.
+  - App flow (Profile → Settings → Delete account) now calls the Edge Function and falls back to the RPC, ensuring both **public** data and **auth** identity are deleted.
+  - Idempotent behavior: safe if the user or related rows were already removed.
+
+### Changed
+- **Workout comparison (v1.1)**
+  - When the viewer has **multiple eligible workouts**, a **selector sheet** is shown to pick which one to compare.
+  - Sorted by **date (newest first)** with clear labels; if there’s only one candidate, it’s auto-selected as before.
+
+### Fixed
+- Minor SwiftUI styling mismatch in destructive button foreground style (consistency across iOS versions).
+
+### Database
+- Functions:
+  - `delete_user_cascade(uuid)` — `SECURITY DEFINER`; `GRANT EXECUTE TO anon, authenticated, service_role`.
+  - `delete_my_account()` — `SECURITY DEFINER`; `GRANT EXECUTE TO authenticated, service_role`.
+- No RLS changes; deletion runs server-side under controlled privileges.
+
+### Ops
+- Deployed Edge Function `delete-auth-user`.
+- Project secrets configured for the function: `SERVICE_ROLE_KEY`, `PROJECT_URL` (no `SUPABASE_` prefix).
+
+[0.9.6]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.9.6
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.9.6...HEAD
+
 ## [0.9.5] - 2025-11-11
 
 ### Added
