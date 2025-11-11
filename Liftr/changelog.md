@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 - …
 
+## [0.9.5] - 2025-11-11
+
+### Added
+- **Workout comparison (v1)**
+  - New sheet from `WorkoutDetailView` to compare **His/Her (red)** vs **Yours (green)**.
+  - Contextual header “His/Her vs Yours — {Kind}”.
+  - Metrics by type:
+    - **Strength**: *Total volume (kg)*, *Exercises*, *Sets*.
+    - **Cardio**: distance, duration, avg pace, avg/max HR, elevation; optional extras when present (cadence, watts, incline, swim laps, pool length, split/500m).
+    - **Sport**: duration, score for/against + sport-specific KPIs (racket, basketball, football, volleyball).
+  - Row shows **% difference badge** and **polished bars** (translucent track + gradient capsules with subtle shadow).
+  - Empty state and loading via `ProgressView`.
+- **Ranking → Profile navigation**
+  - Tapping a row in **RankingView** now opens the selected user’s **Profile** (deep-link aware; preserves existing filters on back).
+- **Profile photo preview**
+  - Tap the avatar to open a **full-screen preview** of the profile photo (dismiss with tap or swipe).
+
+### Changed
+- **Sheet presentation**
+  - `.presentationDetents([.fraction(0.88), .large])`, `.presentationDragIndicator(.visible)`, and `gradientBG()` for a tighter, polished look.
+  - Persistent **Close** (✕) button on the top-left.
+  - Workout IDs are hidden; shows **His/Her** and **Yours** labels with colors instead.
+  - Metric cards: increased inner padding, rounded corners, subtle stroke, and clipping to avoid any bar overflow.
+
+### Fixed
+- **Strength compare not showing** (e.g., 205 vs 148): adjusted comparison logic so Strength no longer depends on identical titles.
+- **Swift 6**: local concurrent functions marked `@Sendable`; fixed static use of `prettyMetric`.
+- Prevented visual **overflow** of bars beyond the card.
+
+### Database
+- **RPC `can_compare_workout_v1(p_viewer uuid, p_workout bigint)`**
+  - Now allows comparing **any Strength workout** from the viewer (own or participated), without requiring the same title.
+  - Keeps the existing rules for **Cardio** (same activity/modality) and **Sport** (same sport).
+  - Returns `sample_viewer_match_id` plus flags `viewer_can_compare_with_owner` / `viewer_has_comparable_workout`.
+  - No schema or RLS changes.
+
+[0.9.5]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.9.5
+[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.9.5...HEAD
+
 ## [0.9.4] - 2025-11-07
 
 ### Added

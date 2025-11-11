@@ -171,7 +171,6 @@ struct RankingView: View {
             }
             .padding(.horizontal, 12)
         }
-        .navigationTitle("Ranking")
         .onAppear { vm.load() }
         .onChange(of: vm.scope)  { _, _ in vm.load() }
         .onChange(of: vm.period) { _, _ in vm.load() }
@@ -278,9 +277,15 @@ struct RankingView: View {
                                 .frame(width: 36, height: 36)
                             
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(row.username ?? "user")
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
                                 Text("\(row.workouts_cnt) workouts")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -310,9 +315,15 @@ struct RankingView: View {
                                 .frame(width: 36, height: 36)
                             
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(row.username ?? "user")
-                                    .font(.subheadline.weight(.semibold))
-                                    .lineLimit(1)
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
                                 Text("Level \(row.level)")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
