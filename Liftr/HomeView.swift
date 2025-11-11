@@ -141,6 +141,8 @@ struct HomeView: View {
     @State private var bestSportScore = 0
     @State private var bestSportLabel = ""
     @State private var shareItem: ShareItem?
+    @State private var showMessages = false
+    @State private var showAuthAlert = false
     
     private let highlightsInsertIndex = 5
     
@@ -330,6 +332,34 @@ struct HomeView: View {
         .onChange(of: filter) { _, _ in Task { await reloadAll() } }
         .sheet(item: $shareItem) { item in
             ShareSheet(items: [item.image])
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    if app.isAuthenticated {
+                        showMessages = true
+                    } else {
+                        showAuthAlert = true
+                    }
+                } label: {
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                }
+                .accessibilityLabel("Messages")
+            }
+        }
+        .sheet(isPresented: $showMessages) {
+            NavigationStack {
+                ConversationsListView()
+                    .gradientBG()
+                    .navigationTitle("Messages")
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        }
+        .alert("You need to log in", isPresented: $showAuthAlert) {
+            Button("Go to Profile") { app.selectedTab = .profile }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sign up or login to use Messages.")
         }
     }
     
