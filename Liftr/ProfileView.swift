@@ -422,13 +422,19 @@ struct ProfileView: View {
                 HStack(spacing: 8) {
                     Text("LV \(myLevel)")
                         .font(.caption.weight(.black))
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .layoutPriority(2)
                         .padding(.vertical, 4)
                         .padding(.horizontal, 8)
                         .background(Capsule().fill(Color.yellow.opacity(0.25)))
                         .overlay(Capsule().stroke(Color.white.opacity(0.18)))
                     
-                    Text("\(myXP) XP")
+                    Text("\(formatXP(myXP)) XP")
                         .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .layoutPriority(1)
                         .foregroundStyle(.secondary)
                     
                     Spacer(minLength: 8)
@@ -437,12 +443,14 @@ struct ProfileView: View {
                         RankingView()
                             .navigationTitle("Level Ranking")
                     } label: {
-                        HStack(spacing: 6) {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "trophy")
+                                Text("Ranking")
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                            }
                             Image(systemName: "trophy")
-                            Text("Ranking")
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .fixedSize()
                         }
                         .font(.caption.weight(.semibold))
                         .padding(.vertical, 4)
@@ -2058,4 +2066,10 @@ private func formatMinutes(_ minutes: Int) -> String {
     let r = m % 60
     if h > 0 { return "\(h)h \(r)m" }
     return "\(r)m"
+}
+
+private func formatXP(_ xp: Int64) -> String {
+    if xp >= 1_000_000 { return String(format: "%.1fM", Double(xp) / 1_000_000) }
+    if xp >= 1_000     { return String(format: "%.1fk", Double(xp) / 1_000) }
+    return "\(xp)"
 }
