@@ -46,7 +46,7 @@ enum LBAgeBand: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-private struct SectionCard<Content: View>: View {
+private struct Section<Content: View>: View {
     @ViewBuilder var content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
@@ -267,7 +267,7 @@ struct RankingView: View {
         Group {
             if vm.metric == .score {
                 List(vm.rows) { row in
-                    SectionCard {
+                    Section {
                         HStack(spacing: 12) {
                             Text("\(row.rank).")
                                 .font(.headline)
@@ -305,7 +305,7 @@ struct RankingView: View {
                 .scrollIndicators(.never)
             } else {
                 List(vm.levelRows) { row in
-                    SectionCard {
+                    Section {
                         HStack(spacing: 12) {
                             Text("\(row.rank).")
                                 .font(.headline)

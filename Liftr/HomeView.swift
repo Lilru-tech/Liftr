@@ -153,8 +153,12 @@ struct HomeView: View {
             .padding(.horizontal)
             
             VStack(spacing: 6) {
-                TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
-                StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
+                if todayCount > 0 {
+                    TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
+                }
+                if weekWorkouts > 0 {
+                    StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
+                }
                 InsightsRow(strongestWeekPts: strongestWeekPtsMTD,
                             bestSportScore: bestSportScore,
                             bestSportLabel: bestSportLabel)
@@ -167,7 +171,7 @@ struct HomeView: View {
                     ProgressView().frame(maxWidth: .infinity)
                 }
                 
-                if let summary = monthSummary {
+                if let summary = monthSummary, summary.workouts > 0 {
                     MonthlySummaryCard(
                         summary: summary,
                         onShare: { image in
@@ -1100,7 +1104,9 @@ private struct StreakWeekCard: View {
     let weekPoints: Int
     var body: some View {
         HStack {
-            Label("\(streak)-day streak", systemImage: "flame.fill")
+            if streak > 0 {
+                Label("\(streak)-day streak", systemImage: "flame.fill")
+            }
             Spacer()
             Text("\(weekWorkouts) this week • \(weekPoints) pts")
         }
@@ -1353,7 +1359,9 @@ private struct InsightsRow: View {
     
     var body: some View {
         HStack(spacing: 8) {
-            InsightPill(text: "💪 Strongest week: \(strongestWeekPts) pts")
+            if strongestWeekPts > 0 {
+                InsightPill(text: "💪 Strongest week: \(strongestWeekPts) pts")
+            }
             if bestSportScore > 0 {
                 Spacer(minLength: 8)
                 InsightPill(text: "⚽ Best sport: \(bestSportScore) (\(bestSportLabel))")
@@ -1390,6 +1398,16 @@ private struct HomeFeedCard: View {
             return "🏃‍♂️"
         case "cycling":
             return "🚴‍♂️"
+        case "rugby":
+            return "🏉"
+        case "hockey", "field_hockey":
+            return "🏑"
+        case "ice_hockey":
+            return "🏒"
+        case "handball":
+            return "🤾‍♂️"
+        case "hyrox":
+            return "🔥"
         default:
             return ""
         }

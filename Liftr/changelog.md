@@ -4,10 +4,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
-- …
+## [1.0.1] - 2025-12-02
 
-## [0.9.6] - 2025-11-12
+### Added
+- **Profile → Contact support**
+  - New in-app contact form under **Profile → Settings → Support**, with subject picker and message field.
+  - Messages are stored in the `contact_messages` table so support can be handled from your backend/DB instead of via Mail.
+
+- **Profile calendar → Draft workouts highlight**
+  - Days that contain only **draft workouts** are now highlighted in a muted **burgundy/red** color to distinguish them from published sessions.
+
+- **ActiveWorkout for draft sessions**
+  - You can now start a workout directly from a draft using the new **ActiveWorkout** flow, turning planned sessions into live workouts.
+
+- **Profile workout cards → Avatars**
+  - Workout cards in the profile now show the **profile image of the current user** and of other users who have added you as a participant, when available.
+
+- **Workout deletion**
+  - Added the ability to **delete workouts** from the profile/detail flow, with proper UI refresh and data sync.
+
+- **Extra sport-specific fields**
+  - Added more specific fields for **Hyrox, Handball, Hockey and Rugby**, both in the workout forms and in the stored session data.
+
+- **Richer comparisons for Sports & Strength**
+  - Strength and Sport comparison views now include additional metrics, making it easier to understand how two sessions differ.
+
+### Changed
+- **Home → Empty state**
+  - When there are no workout data for the user, the **summary / today points / insights** cards are hidden so the Home screen doesn’t feel empty or broken.
+
+### Fixed
+- **Strength workouts without notes**
+  - Fixed a bug where **Strength** workouts could not be saved if the **Notes** field was empty. Notes are now fully optional again.
+
+[1.0.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.0.1
+[Released]: https://github.com/Lilru-tech/Liftr/compare/v1.0.1...HEAD
+
+## [1.0.0] - 2025-11-12
 
 ### Added
 - **Account deletion (end-to-end)**
@@ -34,8 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Deployed Edge Function `delete-auth-user`.
 - Project secrets configured for the function: `SERVICE_ROLE_KEY`, `PROJECT_URL` (no `SUPABASE_` prefix).
 
-[0.9.6]: https://github.com/Lilru-tech/Liftr/releases/tag/v0.9.6
-[Unreleased]: https://github.com/Lilru-tech/Liftr/compare/v0.9.6...HEAD
+[1.0.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.0.0
+[Released]: https://github.com/Lilru-tech/Liftr/compare/v1.0.0...HEAD
 
 ## [0.9.5] - 2025-11-11
 
