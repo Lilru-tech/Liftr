@@ -3,6 +3,7 @@ import Supabase
 
 struct WorkoutDetailView: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
     let workoutId: Int
     let ownerId: UUID
     @State private var showEdit = false
@@ -16,6 +17,10 @@ struct WorkoutDetailView: View {
     }
     
     private var canDuplicate: Bool { canEdit || isParticipant }
+    
+    private var showStartButton: Bool {
+        canEdit && (workout?.state == "planned")
+    }
     
     struct WorkoutDetailRow: Decodable {
         let id: Int
@@ -63,10 +68,49 @@ struct WorkoutDetailView: View {
     @State private var compareReady = false
     @State private var compareComputing = false
     @State private var showCompare = false
+    @State private var showDeleteConfirm = false
+    @State private var showActiveStrength = false
+    @State private var showActiveCardio = false
+    @State private var showActiveSport = false
+    @State private var deleteBusy = false
     
+    @ViewBuilder
+    private var editDestination: some View {
+        if let w = workout {
+            EditWorkoutMetaSheet(
+                kind: w.kind,
+                workoutId: workoutId,
+                initial: .init(
+                    title: w.title ?? "",
+                    notes: w.notes ?? "",
+                    startedAt: w.started_at ?? .now,
+                    endedAt: w.ended_at,
+                    perceived: w.perceived_intensity ?? "moderate"
+                ),
+                onSaved: {
+                    await load()
+                    await loadLikes()
+                    reloadKey = UUID()
+                }
+            )
+            .gradientBG()
+        } else {
+            EmptyView()
+        }
+    }
+        
     var body: some View {
-        ScrollView {
-            content
+        ZStack {
+            ScrollView {
+                content
+                    .padding(.bottom, showStartButton ? 140 : 0)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if showStartButton {
+                startButtonBar
+                    .padding(.bottom, 32)
+            }
         }
         .task {
             await load()
@@ -93,6 +137,14 @@ struct WorkoutDetailView: View {
         .toolbar(.visible, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar { toolbarContent }
+        .alert("Delete workout?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                Task { await deleteWorkout() }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This will permanently delete this workout and its sets.")
+        }
         .sheet(isPresented: $showLikesSheet) { LikersSheet(likers: likers)
                 .onAppear { Task { await loadLikers() } }
                 .presentationDetents(Set([.medium, .large]))
@@ -117,28 +169,6 @@ struct WorkoutDetailView: View {
             .presentationDetents([.fraction(0.45), .medium])
             .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: $showEdit) {
-            if let w = workout {
-                EditWorkoutMetaSheet(
-                    kind: w.kind,
-                    workoutId: workoutId,
-                    initial: .init(
-                        title: w.title ?? "",
-                        notes: w.notes ?? "",
-                        startedAt: w.started_at ?? .now,
-                        endedAt: w.ended_at,
-                        perceived: w.perceived_intensity ?? "moderate"
-                    ),
-                    onSaved: {
-                        await load()
-                        await loadLikes()
-                        reloadKey = UUID()
-                    }
-                )
-                .gradientBG()
-                .presentationDetents(Set([.medium, .large]))
-            }
-        }
         .sheet(isPresented: $showCompare) {
             if let otherId = compareCandidateId {
                 CompareWorkoutsView(currentWorkoutId: workoutId, myOtherWorkoutId: otherId)
@@ -146,6 +176,54 @@ struct WorkoutDetailView: View {
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
             }
+        }
+        .navigationDestination(isPresented: $showEdit) {
+            editDestination
+        }
+        .fullScreenCover(
+            isPresented: $showActiveStrength,
+            onDismiss: {
+                Task {
+                    await load()
+                    await loadParticipants()
+                    await loadCompareCandidates()
+                    reloadKey = UUID()
+                }
+            }
+        ) {
+            ActiveStrengthWorkoutView(workoutId: workoutId)
+                .environmentObject(app)
+                .gradientBG()
+        }
+        .fullScreenCover(
+            isPresented: $showActiveCardio,
+            onDismiss: {
+                Task {
+                    await load()
+                    await loadParticipants()
+                    await loadCompareCandidates()
+                    reloadKey = UUID()
+                }
+            }
+        ) {
+            ActiveCardioWorkoutView(workoutId: workoutId)
+                .environmentObject(app)
+                .gradientBG()
+        }
+        .fullScreenCover(
+            isPresented: $showActiveSport,
+            onDismiss: {
+                Task {
+                    await load()
+                    await loadParticipants()
+                    await loadCompareCandidates()
+                    reloadKey = UUID()
+                }
+            }
+        ) {
+            ActiveSportWorkoutView(workoutId: workoutId)
+                .environmentObject(app)
+                .gradientBG()
         }
     }
     
@@ -313,6 +391,33 @@ struct WorkoutDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
     }
     
+    private var startButtonBar: some View {
+        Button {
+            switch workout?.kind.lowercased() {
+            case "strength":
+                showActiveStrength = true
+            case "cardio":
+                showActiveCardio = true
+            case "sport":
+                showActiveSport = true
+            default:
+                break
+            }
+        } label: {
+            Text("Start")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(Color.accentColor)
+                )
+                .foregroundColor(.white)
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+    }
+    
     private var likeButtonGroup: some View {
         HStack(spacing: 0) {
             Button {
@@ -411,6 +516,13 @@ struct WorkoutDetailView: View {
                                     app.selectedTab = .add
                                 }
                             }
+                        }
+                    }
+                    if canEdit {
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Text("Delete workout")
                         }
                     }
                 } label: {
@@ -674,6 +786,44 @@ struct WorkoutDetailView: View {
         }
     }
     
+    private func deleteWorkout() async {
+        guard let me = app.userId else { return }
+        if deleteBusy { return }
+
+        await MainActor.run { deleteBusy = true }
+        defer {
+            Task { await MainActor.run { deleteBusy = false } }
+        }
+
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("workouts")
+                .delete()
+                .eq("id", value: workoutId)
+                .eq("user_id", value: me.uuidString)
+                .select("id")
+                .single()
+                .execute()
+
+            let bodyStr = String(data: res.data, encoding: .utf8) ?? ""
+            let trimmed = bodyStr.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed == "[]" {
+                throw NSError(
+                    domain: "DeleteWorkout",
+                    code: 0,
+                    userInfo: [NSLocalizedDescriptionKey:
+                                "Workout not found or you don't have permission to delete it."]
+                )
+            }
+
+            await MainActor.run {
+                dismiss()
+            }
+        } catch {
+            print("[DeleteWorkout][ERROR]", error.localizedDescription)
+        }
+    }
+    
     private func dateRange(_ w: WorkoutDetailRow) -> String {
         let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .medium
         guard let s = w.started_at else { return "—" }
@@ -926,6 +1076,58 @@ struct WorkoutDetailView: View {
                     let vb_aces: Int?
                     let vb_blocks: Int?
                     let vb_digs: Int?
+                    let hb_position: String?
+                    let hb_minutes_played: Int?
+                    let hb_goals: Int?
+                    let hb_shots: Int?
+                    let hb_shots_on_target: Int?
+                    let hb_assists: Int?
+                    let hb_steals: Int?
+                    let hb_blocks: Int?
+                    let hb_turnovers_lost: Int?
+                    let hb_seven_m_goals: Int?
+                    let hb_seven_m_attempts: Int?
+                    let hb_saves: Int?
+                    let hb_yellow_cards: Int?
+                    let hb_two_min_suspensions: Int?
+                    let hb_red_cards: Int?
+                    let hk_position: String?
+                    let hk_minutes_played: Int?
+                    let hk_goals: Int?
+                    let hk_assists: Int?
+                    let hk_shots_on_goal: Int?
+                    let hk_plus_minus: Int?
+                    let hk_hits: Int?
+                    let hk_blocks: Int?
+                    let hk_faceoffs_won: Int?
+                    let hk_faceoffs_total: Int?
+                    let hk_saves: Int?
+                    let hk_penalty_minutes: Int?
+                    let rg_position: String?
+                    let rg_minutes_played: Int?
+                    let rg_tries: Int?
+                    let rg_conversions_made: Int?
+                    let rg_conversions_attempted: Int?
+                    let rg_penalty_goals_made: Int?
+                    let rg_penalty_goals_attempted: Int?
+                    let rg_runs: Int?
+                    let rg_meters_gained: Int?
+                    let rg_offloads: Int?
+                    let rg_tackles_made: Int?
+                    let rg_tackles_missed: Int?
+                    let rg_turnovers_won: Int?
+                    let rg_yellow_cards: Int?
+                    let rg_red_cards: Int?
+                    let hy_division: String?
+                    let hy_category: String?
+                    let hy_age_group: String?
+                    let hy_official_time_sec: Int?
+                    let hy_rank_overall: Int?
+                    let hy_rank_category: Int?
+                    let hy_no_reps: Int?
+                    let hy_penalty_time_sec: Int?
+                    let hy_avg_hr: Int?
+                    let hy_max_hr: Int?
                 }
                 
                 let full = try JSONDecoder.supabase().decode(Full.self, from: q.data)
@@ -938,6 +1140,7 @@ struct WorkoutDetailView: View {
                 sf2.matchScoreText  = full.match_score_text ?? ""
                 sf2.location        = full.location ?? ""
                 sf2.sessionNotes    = full.session_notes ?? ""
+                
                 if ["padel","tennis","badminton","squash","table_tennis"].contains(full.sport) {
                     sf2.racket = RacketStatsForm(
                         mode: full.rk_mode ?? "",
@@ -956,6 +1159,7 @@ struct WorkoutDetailView: View {
                         netPointsTotal: (full.rk_net_points_total ?? 0).description
                     )
                 }
+                
                 if full.sport == "basketball" {
                     sf2.basketball = BasketballStatsForm(
                         points: (full.bb_points ?? 0).description,
@@ -973,7 +1177,8 @@ struct WorkoutDetailView: View {
                         fouls: (full.bb_fouls ?? 0).description
                     )
                 }
-                if ["football","handball","hockey","rugby"].contains(full.sport) {
+                
+                if full.sport == "football" {
                     sf2.football = FootballStatsForm(
                         position: full.fb_position ?? "",
                         minutesPlayed: (full.fb_minutes_played ?? 0).description,
@@ -989,6 +1194,7 @@ struct WorkoutDetailView: View {
                         redCards: (full.fb_red_cards ?? 0).description
                     )
                 }
+                
                 if full.sport == "volleyball" {
                     sf2.volleyball = VolleyballStatsForm(
                         points: (full.vb_points ?? 0).description,
@@ -998,11 +1204,73 @@ struct WorkoutDetailView: View {
                     )
                 }
                 
+                if full.sport == "handball" {
+                    sf2.hbPosition       = full.hb_position ?? ""
+                    sf2.hbGoals          = (full.hb_goals ?? 0).description
+                    sf2.hbShots          = (full.hb_shots ?? 0).description
+                    sf2.hbShotsOnTarget  = (full.hb_shots_on_target ?? 0).description
+                    sf2.hbAssists        = (full.hb_assists ?? 0).description
+                    sf2.hbSteals         = (full.hb_steals ?? 0).description
+                    sf2.hbBlocks         = (full.hb_blocks ?? 0).description
+                    sf2.hbTurnoversLost  = (full.hb_turnovers_lost ?? 0).description
+                    sf2.hbSevenMGoals    = (full.hb_seven_m_goals ?? 0).description
+                    sf2.hbSevenMAttempts = (full.hb_seven_m_attempts ?? 0).description
+                    sf2.hbSaves          = (full.hb_saves ?? 0).description
+                    sf2.hbYellow         = (full.hb_yellow_cards ?? 0).description
+                    sf2.hbTwoMin         = (full.hb_two_min_suspensions ?? 0).description
+                    sf2.hbRed            = (full.hb_red_cards ?? 0).description
+                }
+                
+                if full.sport == "hockey" {
+                    sf2.hkPosition      = full.hk_position ?? ""
+                    sf2.hkGoals         = (full.hk_goals ?? 0).description
+                    sf2.hkAssists       = (full.hk_assists ?? 0).description
+                    sf2.hkShotsOnGoal   = (full.hk_shots_on_goal ?? 0).description
+                    sf2.hkPlusMinus     = (full.hk_plus_minus ?? 0).description
+                    sf2.hkHits          = (full.hk_hits ?? 0).description
+                    sf2.hkBlocks        = (full.hk_blocks ?? 0).description
+                    sf2.hkFaceoffsWon   = (full.hk_faceoffs_won ?? 0).description
+                    sf2.hkFaceoffsTotal = (full.hk_faceoffs_total ?? 0).description
+                    sf2.hkSaves         = (full.hk_saves ?? 0).description
+                    sf2.hkPenaltyMinutes = (full.hk_penalty_minutes ?? 0).description
+                }
+                
+                if full.sport == "rugby" {
+                    sf2.rgPosition             = full.rg_position ?? ""
+                    sf2.rgTries                = (full.rg_tries ?? 0).description
+                    sf2.rgConversionsMade      = (full.rg_conversions_made ?? 0).description
+                    sf2.rgConversionsAttempted = (full.rg_conversions_attempted ?? 0).description
+                    sf2.rgPenaltyGoalsMade     = (full.rg_penalty_goals_made ?? 0).description
+                    sf2.rgPenaltyGoalsAttempted = (full.rg_penalty_goals_attempted ?? 0).description
+                    sf2.rgRuns                 = (full.rg_runs ?? 0).description
+                    sf2.rgMetersGained         = (full.rg_meters_gained ?? 0).description
+                    sf2.rgOffloads             = (full.rg_offloads ?? 0).description
+                    sf2.rgTacklesMade          = (full.rg_tackles_made ?? 0).description
+                    sf2.rgTacklesMissed        = (full.rg_tackles_missed ?? 0).description
+                    sf2.rgTurnoversWon         = (full.rg_turnovers_won ?? 0).description
+                    sf2.rgYellow               = (full.rg_yellow_cards ?? 0).description
+                    sf2.rgRed                  = (full.rg_red_cards ?? 0).description
+                }
+                
+                if full.sport == "hyrox" {
+                    sf2.hyDivision        = full.hy_division ?? ""
+                    sf2.hyCategory        = full.hy_category ?? ""
+                    sf2.hyAgeGroup        = full.hy_age_group ?? ""
+                    sf2.hyOfficialTimeSec = (full.hy_official_time_sec ?? 0).description
+                    sf2.hyRankOverall     = (full.hy_rank_overall ?? 0).description
+                    sf2.hyRankCategory    = (full.hy_rank_category ?? 0).description
+                    sf2.hyNoReps          = (full.hy_no_reps ?? 0).description
+                    sf2.hyPenaltyTimeSec  = (full.hy_penalty_time_sec ?? 0).description
+                    sf2.hyAvgHR           = (full.hy_avg_hr ?? 0).description
+                    sf2.hyMaxHR           = (full.hy_max_hr ?? 0).description
+                }
+                
                 draft.sport = sf2
             } catch { return nil }
             
         default: break
         }
+        
         do {
             let partRes = try await SupabaseManager.shared.client
                 .from("workout_participants")
@@ -1517,12 +1785,81 @@ private struct SportDetailBlock: View {
         let digs: Int?
     }
     
+    private struct HandballStats: Decodable {
+        let position: String?
+        let minutes_played: Int?
+        let goals: Int?
+        let shots: Int?
+        let shots_on_target: Int?
+        let assists: Int?
+        let steals: Int?
+        let blocks: Int?
+        let turnovers_lost: Int?
+        let seven_m_goals: Int?
+        let seven_m_attempts: Int?
+        let saves: Int?
+        let yellow_cards: Int?
+        let two_min_suspensions: Int?
+        let red_cards: Int?
+    }
+    
+    private struct HockeyStats: Decodable {
+        let position: String?
+        let minutes_played: Int?
+        let goals: Int?
+        let assists: Int?
+        let shots_on_goal: Int?
+        let plus_minus: Int?
+        let hits: Int?
+        let blocks: Int?
+        let faceoffs_won: Int?
+        let faceoffs_total: Int?
+        let saves: Int?
+        let penalty_minutes: Int?
+    }
+    
+    private struct RugbyStats: Decodable {
+        let position: String?
+        let minutes_played: Int?
+        let tries: Int?
+        let conversions_made: Int?
+        let conversions_attempted: Int?
+        let penalty_goals_made: Int?
+        let penalty_goals_attempted: Int?
+        let runs: Int?
+        let meters_gained: Int?
+        let offloads: Int?
+        let tackles_made: Int?
+        let tackles_missed: Int?
+        let turnovers_won: Int?
+        let yellow_cards: Int?
+        let red_cards: Int?
+    }
+    
+    private struct HyroxStats: Decodable {
+        let division: String?
+        let category: String?
+        let age_group: String?
+        let official_time_sec: Int?
+        let rank_overall: Int?
+        let rank_category: Int?
+        let no_reps: Int?
+        let penalty_time_sec: Int?
+        let avg_hr: Int?
+        let max_hr: Int?
+    }
+    
     @State private var row: SportRow?
     @State private var error: String?
+    
     @State private var fb: FootballStats? = nil
     @State private var bb: BasketballStats? = nil
     @State private var rk: RacketStats? = nil
     @State private var vb: VolleyballStats? = nil
+    @State private var hb: HandballStats? = nil
+    @State private var hk: HockeyStats? = nil
+    @State private var rg: RugbyStats? = nil
+    @State private var hy: HyroxStats? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1530,53 +1867,151 @@ private struct SportDetailBlock: View {
             
             if let r = row {
                 info("Sport", r.sport.capitalized)
-                if let s = r.duration_sec { info("Duration", durationString(Double(s))) }
-                if let res = r.match_result, !res.isEmpty { info("Result", res.capitalized) }
-                if let sf = r.score_for, let sa = r.score_against { info("Score", "\(sf) – \(sa)") }
-                if sportUsesSetText(r.sport), let mst = r.match_score_text, !mst.isEmpty { info("Sets", mst) }
-                if let loc = r.location, !loc.isEmpty { info("Location", loc) }
+                
+                if let s = r.duration_sec {
+                    info("Duration", durationString(Double(s)))
+                }
+                if let res = r.match_result, !res.isEmpty {
+                    info("Result", res.capitalized)
+                }
+                if sportUsesNumericScore(r.sport),
+                   let sf = r.score_for,
+                   let sa = r.score_against {
+                    info("Score", "\(sf) – \(sa)")
+                }
+                if sportUsesSetText(r.sport),
+                   let mst = r.match_score_text,
+                   !mst.isEmpty {
+                    info("Sets", mst)
+                }
+                if let loc = r.location, !loc.isEmpty {
+                    info("Location", loc)
+                }
                 if let n = r.notes, !n.isEmpty {
                     info("Session notes", n)
                 }
-                if let s = fb {
+                
+                if r.sport == "football", let s = fb {
                     Divider().padding(.vertical, 4)
                     Text("Football stats").font(.headline)
-                    if let v = s.position, !v.isEmpty { info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized) }
+                    if let v = s.position, !v.isEmpty {
+                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
+                    }
                     if let v = s.minutes_played { info("Minutes played", "\(v)") }
-                    if let v = s.goals { info("Goals", "\(v)") }
-                    if let v = s.assists { info("Assists", "\(v)") }
+                    if let v = s.goals          { info("Goals", "\(v)") }
+                    if let v = s.assists        { info("Assists", "\(v)") }
                     if let v = s.shots_on_target { info("Shots on target", "\(v)") }
                     if let v = s.passes_completed, let tot = s.passes_attempted {
                         info("Passes", "\(v)/\(tot)")
                     } else if let v = s.passes_completed {
                         info("Passes completed", "\(v)")
                     }
-                    if let v = s.tackles { info("Tackles", "\(v)") }
-                    if let v = s.interceptions { info("Interceptions", "\(v)") }
-                    if let v = s.saves { info("Saves", "\(v)") }
-                    if let v = s.yellow_cards { info("Yellow cards", "\(v)") }
-                    if let v = s.red_cards { info("Red cards", "\(v)") }
+                    if let v = s.tackles        { info("Tackles", "\(v)") }
+                    if let v = s.interceptions  { info("Interceptions", "\(v)") }
+                    if let v = s.saves          { info("Saves", "\(v)") }
+                    if let v = s.yellow_cards   { info("Yellow cards", "\(v)") }
+                    if let v = s.red_cards      { info("Red cards", "\(v)") }
                 }
                 
-                if let s = bb {
+                if r.sport == "handball", let s = hb {
+                    Divider().padding(.vertical, 4)
+                    Text("Handball stats").font(.headline)
+                    if let v = s.position, !v.isEmpty {
+                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
+                    }
+                    if let v = s.minutes_played   { info("Minutes played", "\(v)") }
+                    if let v = s.goals            { info("Goals", "\(v)") }
+                    if let v = s.shots            { info("Shots", "\(v)") }
+                    if let v = s.shots_on_target  { info("Shots on target", "\(v)") }
+                    if let v = s.assists          { info("Assists", "\(v)") }
+                    if let v = s.steals           { info("Steals", "\(v)") }
+                    if let v = s.blocks           { info("Blocks", "\(v)") }
+                    if let v = s.turnovers_lost   { info("Turnovers lost", "\(v)") }
+                    if let g = s.seven_m_goals, let a = s.seven_m_attempts {
+                        info("7m goals", "\(g)/\(a)")
+                    } else if let g = s.seven_m_goals {
+                        info("7m goals", "\(g)")
+                    }
+                    if let v = s.saves            { info("Saves", "\(v)") }
+                    if let v = s.yellow_cards     { info("Yellow cards", "\(v)") }
+                    if let v = s.two_min_suspensions { info("2-min suspensions", "\(v)") }
+                    if let v = s.red_cards        { info("Red cards", "\(v)") }
+                }
+                
+                if r.sport == "hockey", let s = hk {
+                    Divider().padding(.vertical, 4)
+                    Text("Hockey stats").font(.headline)
+                    if let v = s.position, !v.isEmpty {
+                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
+                    }
+                    if let v = s.minutes_played   { info("Minutes played", "\(v)") }
+                    if let v = s.goals            { info("Goals", "\(v)") }
+                    if let v = s.assists          { info("Assists", "\(v)") }
+                    if let v = s.shots_on_goal    { info("Shots on goal", "\(v)") }
+                    if let v = s.plus_minus       { info("+ / -", "\(v)") }
+                    if let v = s.hits             { info("Hits", "\(v)") }
+                    if let v = s.blocks           { info("Blocks", "\(v)") }
+                    if let w = s.faceoffs_won, let t = s.faceoffs_total {
+                        info("Faceoffs", "\(w)/\(t)")
+                    }
+                    if let v = s.saves            { info("Saves", "\(v)") }
+                    if let v = s.penalty_minutes  { info("Penalty minutes", "\(v)") }
+                }
+                
+                if r.sport == "rugby", let s = rg {
+                    Divider().padding(.vertical, 4)
+                    Text("Rugby stats").font(.headline)
+                    if let v = s.position, !v.isEmpty {
+                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
+                    }
+                    if let v = s.minutes_played        { info("Minutes played", "\(v)") }
+                    if let v = s.tries                 { info("Tries", "\(v)") }
+                    if let m = s.conversions_made, let a = s.conversions_attempted {
+                        info("Conversions", "\(m)/\(a)")
+                    } else if let m = s.conversions_made {
+                        info("Conversions made", "\(m)")
+                    }
+                    if let m = s.penalty_goals_made, let a = s.penalty_goals_attempted {
+                        info("Penalty goals", "\(m)/\(a)")
+                    } else if let m = s.penalty_goals_made {
+                        info("Penalty goals made", "\(m)")
+                    }
+                    if let v = s.runs                  { info("Runs", "\(v)") }
+                    if let v = s.meters_gained         { info("Meters gained", "\(v)") }
+                    if let v = s.offloads              { info("Offloads", "\(v)") }
+                    if let v = s.tackles_made          { info("Tackles made", "\(v)") }
+                    if let v = s.tackles_missed        { info("Tackles missed", "\(v)") }
+                    if let v = s.turnovers_won         { info("Turnovers won", "\(v)") }
+                    if let v = s.yellow_cards          { info("Yellow cards", "\(v)") }
+                    if let v = s.red_cards             { info("Red cards", "\(v)") }
+                }
+                
+                if r.sport == "basketball", let s = bb {
                     Divider().padding(.vertical, 4)
                     Text("Basketball stats").font(.headline)
-                    if let v = s.points { info("Points", "\(v)") }
-                    if let v = s.rebounds { info("Rebounds", "\(v)") }
-                    if let v = s.assists { info("Assists", "\(v)") }
-                    if let v = s.steals { info("Steals", "\(v)") }
-                    if let v = s.blocks { info("Blocks", "\(v)") }
-                    if let m = s.fg_made, let a = s.fg_attempted { info("FG", "\(m)/\(a)") }
-                    if let m = s.three_made, let a = s.three_attempted { info("3PT", "\(m)/\(a)") }
-                    if let m = s.ft_made, let a = s.ft_attempted { info("FT", "\(m)/\(a)") }
+                    if let v = s.points    { info("Points", "\(v)") }
+                    if let v = s.rebounds  { info("Rebounds", "\(v)") }
+                    if let v = s.assists   { info("Assists", "\(v)") }
+                    if let v = s.steals    { info("Steals", "\(v)") }
+                    if let v = s.blocks    { info("Blocks", "\(v)") }
+                    if let m = s.fg_made, let a = s.fg_attempted {
+                        info("FG", "\(m)/\(a)")
+                    }
+                    if let m = s.three_made, let a = s.three_attempted {
+                        info("3PT", "\(m)/\(a)")
+                    }
+                    if let m = s.ft_made, let a = s.ft_attempted {
+                        info("FT", "\(m)/\(a)")
+                    }
                     if let v = s.turnovers { info("Turnovers", "\(v)") }
-                    if let v = s.fouls { info("Fouls", "\(v)") }
+                    if let v = s.fouls     { info("Fouls", "\(v)") }
                 }
                 
-                if let s = rk {
+                if ["padel","tennis","badminton","squash","table_tennis"].contains(r.sport),
+                   let s = rk {
                     Divider().padding(.vertical, 4)
                     Text("Racket stats").font(.headline)
-                    if let v = s.mode { info("Mode", v.replacingOccurrences(of: "_", with: " ").capitalized) }
+                    if let v = s.mode   { info("Mode", v.replacingOccurrences(of: "_", with: " ").capitalized) }
                     if let v = s.format { info("Format", v.replacingOccurrences(of: "_", with: " ").capitalized) }
                     if let w = s.sets_won, let l = s.sets_lost { info("Sets (W–L)", "\(w)–\(l)") }
                     if let w = s.games_won, let l = s.games_lost { info("Games (W–L)", "\(w)–\(l)") }
@@ -1584,20 +2019,42 @@ private struct SportDetailBlock: View {
                     if let v = s.double_faults { info("Double faults", "\(v)") }
                     if let v = s.winners { info("Winners", "\(v)") }
                     if let v = s.unforced_errors { info("Unforced errors", "\(v)") }
-                    if let w = s.break_points_won, let t = s.break_points_total { info("Break points", "\(w)/\(t)") }
-                    if let w = s.net_points_won,  let t = s.net_points_total  { info("Net points", "\(w)/\(t)") }
+                    if let w = s.break_points_won, let t = s.break_points_total {
+                        info("Break points", "\(w)/\(t)")
+                    }
+                    if let w = s.net_points_won, let t = s.net_points_total {
+                        info("Net points", "\(w)/\(t)")
+                    }
                 }
                 
-                if let s = vb {
+                if r.sport == "volleyball", let s = vb {
                     Divider().padding(.vertical, 4)
                     Text("Volleyball stats").font(.headline)
                     if let v = s.points { info("Points", "\(v)") }
-                    if let v = s.aces { info("Aces", "\(v)") }
+                    if let v = s.aces   { info("Aces", "\(v)") }
                     if let v = s.blocks { info("Blocks", "\(v)") }
-                    if let v = s.digs { info("Digs", "\(v)") }
+                    if let v = s.digs   { info("Digs", "\(v)") }
                 }
+                
+                if r.sport == "hyrox", let s = hy {
+                    Divider().padding(.vertical, 4)
+                    Text("Hyrox stats").font(.headline)
+                    if let v = s.division, !v.isEmpty   { info("Division", v) }
+                    if let v = s.category, !v.isEmpty   { info("Category", v) }
+                    if let v = s.age_group, !v.isEmpty  { info("Age group", v) }
+                    if let t = s.official_time_sec      { info("Official time", durationString(Double(t))) }
+                    if let v = s.rank_overall           { info("Overall rank", "#\(v)") }
+                    if let v = s.rank_category          { info("Category rank", "#\(v)") }
+                    if let v = s.no_reps                { info("No reps", "\(v)") }
+                    if let t = s.penalty_time_sec       { info("Penalty time", durationString(Double(t))) }
+                    if let v = s.avg_hr                 { info("Avg HR", "\(v) bpm") }
+                    if let v = s.max_hr                 { info("Max HR", "\(v) bpm") }
+                }
+                
             } else {
-                Text("No sport session linked").foregroundStyle(.secondary).font(.caption)
+                Text("No sport session linked")
+                    .foregroundStyle(.secondary)
+                    .font(.caption)
             }
         }
         .padding(14)
@@ -1621,10 +2078,14 @@ private struct SportDetailBlock: View {
             await MainActor.run {
                 row = r
                 fb = nil; bb = nil; rk = nil; vb = nil
+                hb = nil; hk = nil; rg = nil; hy = nil
             }
             await loadStats(for: r)
         } catch {
-            await MainActor.run { self.row = nil; self.error = error.localizedDescription }
+            await MainActor.run {
+                self.row = nil
+                self.error = error.localizedDescription
+            }
         }
     }
     
@@ -1633,7 +2094,7 @@ private struct SportDetailBlock: View {
         let decoder = JSONDecoder.supabase()
         
         switch r.sport {
-        case "football", "handball", "hockey", "rugby":
+        case "football":
             do {
                 let q = try await client
                     .from("football_session_stats")
@@ -1644,6 +2105,54 @@ private struct SportDetailBlock: View {
                 let s = try decoder.decode(FootballStats.self, from: q.data)
                 await MainActor.run { fb = s }
             } catch { await MainActor.run { fb = nil } }
+            
+        case "handball":
+            do {
+                let q = try await client
+                    .from("handball_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(HandballStats.self, from: q.data)
+                await MainActor.run { hb = s }
+            } catch { await MainActor.run { hb = nil } }
+            
+        case "hockey":
+            do {
+                let q = try await client
+                    .from("hockey_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(HockeyStats.self, from: q.data)
+                await MainActor.run { hk = s }
+            } catch { await MainActor.run { hk = nil } }
+            
+        case "rugby":
+            do {
+                let q = try await client
+                    .from("rugby_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(RugbyStats.self, from: q.data)
+                await MainActor.run { rg = s }
+            } catch { await MainActor.run { rg = nil } }
+            
+        case "hyrox":
+            do {
+                let q = try await client
+                    .from("hyrox_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(HyroxStats.self, from: q.data)
+                await MainActor.run { hy = s }
+            } catch { await MainActor.run { hy = nil } }
             
         case "basketball":
             do {
@@ -1686,7 +2195,8 @@ private struct SportDetailBlock: View {
         }
     }
     
-    @ViewBuilder private func info(_ label: String, _ value: String) -> some View {
+    @ViewBuilder
+    private func info(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label).font(.subheadline.weight(.semibold))
             Spacer()

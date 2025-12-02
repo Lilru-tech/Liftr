@@ -14,7 +14,8 @@ struct CompareWorkoutsView: View {
         var diff: Double { left_value - right_value }
         var diffPct: Double? {
             guard right_value != 0 else { return nil }
-            return (left_value - right_value) / right_value * 100.0
+            let pct = (left_value - right_value) / right_value * 100.0
+            return abs(pct) < 0.05 ? 0.0 : pct
         }
     }
 
@@ -184,6 +185,22 @@ struct CompareWorkoutsView: View {
             case "pct":      return String(format: "%.1f %%", v)
             case "count", "sets", "games", "pts", "laps", "min":
                 return String(format: "%.0f %@", v, unit == "count" ? "" : unit)
+            case "kg_per_min":
+                return String(format: "%.1f kg/min", v)
+            case "sets_per_min":
+                return String(format: "%.2f sets/min", v)
+            case "reps_per_min":
+                return String(format: "%.2f reps/min", v)
+            case "kg_per_rep":
+                return String(format: "%.2f kg/rep", v)
+            case "kg_per_set":
+                return String(format: "%.2f kg/set", v)
+            case "rpe":
+                return String(format: "%.1f", v)
+            case "reps_per_exercise":
+                return String(format: "%.1f reps/ex", v)
+            case "sets_per_exercise":
+                return String(format: "%.1f sets/ex", v)
             default:
                 return String(format: "%.2f %@", v, unit)
             }
@@ -256,6 +273,69 @@ struct CompareWorkoutsView: View {
             case "exercises_count": return "Exercises"
             case "sets_count": return "Sets"
             case "total_volume_kg": return "Total volume"
+            case "total_reps": return "Total reps"
+            case "avg_weight_per_rep_kg": return "Avg weight / rep"
+            case "avg_weight_per_set_kg": return "Avg weight / set"
+            case "volume_per_min_kg": return "Volume / min"
+            case "sets_per_min": return "Sets / min"
+            case "reps_per_min": return "Reps / min"
+            case "max_weight_kg": return "Heaviest set"
+            case "max_set_volume_kg": return "Top set volume"
+            case "avg_rpe": return "Average RPE"
+            case "hard_sets_count": return "Hard sets (RPE ≥ 8)"
+            case "avg_reps_per_exercise": return "Reps / exercise"
+            case "avg_sets_per_exercise": return "Sets / exercise"
+            case "vb_points": return "Points"
+            case "vb_aces": return "Aces"
+            case "vb_blocks": return "Blocks"
+            case "vb_digs": return "Digs"
+            case "hb_minutes_played": return "Minutes played"
+            case "hb_goals": return "Goals"
+            case "hb_shots": return "Shots"
+            case "hb_shots_on_target": return "Shots on target"
+            case "hb_assists": return "Assists"
+            case "hb_steals": return "Steals"
+            case "hb_blocks": return "Blocks"
+            case "hb_turnovers_lost": return "Turnovers lost"
+            case "hb_seven_m_goals": return "7 m goals"
+            case "hb_seven_m_attempts": return "7 m attempts"
+            case "hb_saves": return "Saves"
+            case "hb_yellow_cards": return "Yellow cards"
+            case "hb_two_min_suspensions": return "2-min suspensions"
+            case "hb_red_cards": return "Red cards"
+            case "hk_minutes_played": return "Minutes played"
+            case "hk_goals": return "Goals"
+            case "hk_assists": return "Assists"
+            case "hk_shots_on_goal": return "Shots on goal"
+            case "hk_plus_minus": return "+/-"
+            case "hk_hits": return "Hits"
+            case "hk_blocks": return "Blocks"
+            case "hk_faceoffs_won": return "Faceoffs won"
+            case "hk_faceoffs_total": return "Faceoffs total"
+            case "hk_saves": return "Saves"
+            case "hk_penalty_minutes": return "Penalty minutes"
+            case "rg_minutes_played": return "Minutes played"
+            case "rg_tries": return "Tries"
+            case "rg_conversions_made": return "Conversions made"
+            case "rg_conversions_attempted": return "Conversions attempted"
+            case "rg_penalty_goals_made": return "Penalty goals made"
+            case "rg_penalty_goals_attempted": return "Penalty goals attempted"
+            case "rg_runs": return "Runs"
+            case "rg_meters_gained": return "Meters gained"
+            case "rg_offloads": return "Offloads"
+            case "rg_tackles_made": return "Tackles made"
+            case "rg_tackles_missed": return "Tackles missed"
+            case "rg_turnovers_won": return "Turnovers won"
+            case "rg_yellow_cards": return "Yellow cards"
+            case "rg_red_cards": return "Red cards"
+            case "hx_official_time_sec": return "Official time"
+            case "hx_rank_overall": return "Overall rank"
+            case "hx_rank_category": return "Category rank"
+            case "hx_no_reps": return "No-reps"
+            case "hx_penalty_time_sec": return "Penalty time"
+            case "hx_avg_hr": return "Avg HR"
+            case "hx_max_hr": return "Max HR"
+
             default: return m.replacingOccurrences(of: "_", with: " ").capitalized
             }
         }
@@ -491,12 +571,19 @@ struct CompareWorkoutsView: View {
                 }
             }
 
-        case "football", "handball", "hockey", "rugby":
+        case "football":
             struct FB: Decodable {
-                let minutes_played: Int?; let goals: Int?; let assists: Int?; let shots_on_target: Int?
-                let passes_completed: Int?; let passes_attempted: Int?
-                let tackles: Int?; let interceptions: Int?; let saves: Int?
-                let yellow_cards: Int?; let red_cards: Int?
+                let minutes_played: Int?
+                let goals: Int?
+                let assists: Int?
+                let shots_on_target: Int?
+                let passes_completed: Int?
+                let passes_attempted: Int?
+                let tackles: Int?
+                let interceptions: Int?
+                let saves: Int?
+                let yellow_cards: Int?
+                let red_cards: Int?
             }
             let lFB = try? await client.from("football_session_stats").select("*").eq("session_id", value: L.id).single().execute()
             let rFB = try? await client.from("football_session_stats").select("*").eq("session_id", value: R.id).single().execute()
@@ -515,6 +602,146 @@ struct CompareWorkoutsView: View {
                     add("fb_saves", "count", a.saves.map(Double.init), b.saves.map(Double.init))
                     add("fb_yellow_cards", "count", a.yellow_cards.map(Double.init), b.yellow_cards.map(Double.init))
                     add("fb_red_cards", "count", a.red_cards.map(Double.init), b.red_cards.map(Double.init))
+                }
+            }
+
+        case "handball":
+            struct HB: Decodable {
+                let minutes_played: Int?
+                let goals: Int?
+                let shots: Int?
+                let shots_on_target: Int?
+                let assists: Int?
+                let steals: Int?
+                let blocks: Int?
+                let turnovers_lost: Int?
+                let seven_m_goals: Int?
+                let seven_m_attempts: Int?
+                let saves: Int?
+                let yellow_cards: Int?
+                let two_min_suspensions: Int?
+                let red_cards: Int?
+            }
+            let lHB = try? await client.from("handball_session_stats").select("*").eq("session_id", value: L.id).single().execute()
+            let rHB = try? await client.from("handball_session_stats").select("*").eq("session_id", value: R.id).single().execute()
+            if let lHB, let rHB {
+                let a = try? decoder.decode(HB.self, from: lHB.data)
+                let b = try? decoder.decode(HB.self, from: rHB.data)
+                if let a, let b {
+                    add("hb_minutes_played", "min", a.minutes_played.map(Double.init), b.minutes_played.map(Double.init))
+                    add("hb_goals", "count", a.goals.map(Double.init), b.goals.map(Double.init))
+                    add("hb_shots", "count", a.shots.map(Double.init), b.shots.map(Double.init))
+                    add("hb_shots_on_target", "count", a.shots_on_target.map(Double.init), b.shots_on_target.map(Double.init))
+                    add("hb_assists", "count", a.assists.map(Double.init), b.assists.map(Double.init))
+                    add("hb_steals", "count", a.steals.map(Double.init), b.steals.map(Double.init))
+                    add("hb_blocks", "count", a.blocks.map(Double.init), b.blocks.map(Double.init))
+                    add("hb_turnovers_lost", "count", a.turnovers_lost.map(Double.init), b.turnovers_lost.map(Double.init))
+                    add("hb_seven_m_goals", "count", a.seven_m_goals.map(Double.init), b.seven_m_goals.map(Double.init))
+                    add("hb_seven_m_attempts", "count", a.seven_m_attempts.map(Double.init), b.seven_m_attempts.map(Double.init))
+                    add("hb_saves", "count", a.saves.map(Double.init), b.saves.map(Double.init))
+                    add("hb_yellow_cards", "count", a.yellow_cards.map(Double.init), b.yellow_cards.map(Double.init))
+                    add("hb_two_min_suspensions", "count", a.two_min_suspensions.map(Double.init), b.two_min_suspensions.map(Double.init))
+                    add("hb_red_cards", "count", a.red_cards.map(Double.init), b.red_cards.map(Double.init))
+                }
+            }
+
+        case "hockey":
+            struct HK: Decodable {
+                let minutes_played: Int?
+                let goals: Int?
+                let assists: Int?
+                let shots_on_goal: Int?
+                let plus_minus: Int?
+                let hits: Int?
+                let blocks: Int?
+                let faceoffs_won: Int?
+                let faceoffs_total: Int?
+                let saves: Int?
+                let penalty_minutes: Int?
+            }
+            let lHK = try? await client.from("hockey_session_stats").select("*").eq("session_id", value: L.id).single().execute()
+            let rHK = try? await client.from("hockey_session_stats").select("*").eq("session_id", value: R.id).single().execute()
+            if let lHK, let rHK {
+                let a = try? decoder.decode(HK.self, from: lHK.data)
+                let b = try? decoder.decode(HK.self, from: rHK.data)
+                if let a, let b {
+                    add("hk_minutes_played", "min", a.minutes_played.map(Double.init), b.minutes_played.map(Double.init))
+                    add("hk_goals", "count", a.goals.map(Double.init), b.goals.map(Double.init))
+                    add("hk_assists", "count", a.assists.map(Double.init), b.assists.map(Double.init))
+                    add("hk_shots_on_goal", "count", a.shots_on_goal.map(Double.init), b.shots_on_goal.map(Double.init))
+                    add("hk_plus_minus", "count", a.plus_minus.map(Double.init), b.plus_minus.map(Double.init))
+                    add("hk_hits", "count", a.hits.map(Double.init), b.hits.map(Double.init))
+                    add("hk_blocks", "count", a.blocks.map(Double.init), b.blocks.map(Double.init))
+                    add("hk_faceoffs_won", "count", a.faceoffs_won.map(Double.init), b.faceoffs_won.map(Double.init))
+                    add("hk_faceoffs_total", "count", a.faceoffs_total.map(Double.init), b.faceoffs_total.map(Double.init))
+                    add("hk_saves", "count", a.saves.map(Double.init), b.saves.map(Double.init))
+                    add("hk_penalty_minutes", "min", a.penalty_minutes.map(Double.init), b.penalty_minutes.map(Double.init))
+                }
+            }
+
+        case "rugby":
+            struct RG: Decodable {
+                let minutes_played: Int?
+                let tries: Int?
+                let conversions_made: Int?
+                let conversions_attempted: Int?
+                let penalty_goals_made: Int?
+                let penalty_goals_attempted: Int?
+                let runs: Int?
+                let meters_gained: Int?
+                let offloads: Int?
+                let tackles_made: Int?
+                let tackles_missed: Int?
+                let turnovers_won: Int?
+                let yellow_cards: Int?
+                let red_cards: Int?
+            }
+            let lRG = try? await client.from("rugby_session_stats").select("*").eq("session_id", value: L.id).single().execute()
+            let rRG = try? await client.from("rugby_session_stats").select("*").eq("session_id", value: R.id).single().execute()
+            if let lRG, let rRG {
+                let a = try? decoder.decode(RG.self, from: lRG.data)
+                let b = try? decoder.decode(RG.self, from: rRG.data)
+                if let a, let b {
+                    add("rg_minutes_played", "min", a.minutes_played.map(Double.init), b.minutes_played.map(Double.init))
+                    add("rg_tries", "count", a.tries.map(Double.init), b.tries.map(Double.init))
+                    add("rg_conversions_made", "count", a.conversions_made.map(Double.init), b.conversions_made.map(Double.init))
+                    add("rg_conversions_attempted", "count", a.conversions_attempted.map(Double.init), b.conversions_attempted.map(Double.init))
+                    add("rg_penalty_goals_made", "count", a.penalty_goals_made.map(Double.init), b.penalty_goals_made.map(Double.init))
+                    add("rg_penalty_goals_attempted", "count", a.penalty_goals_attempted.map(Double.init), b.penalty_goals_attempted.map(Double.init))
+                    add("rg_runs", "count", a.runs.map(Double.init), b.runs.map(Double.init))
+                    add("rg_meters_gained", "m", a.meters_gained.map(Double.init), b.meters_gained.map(Double.init))
+                    add("rg_offloads", "count", a.offloads.map(Double.init), b.offloads.map(Double.init))
+                    add("rg_tackles_made", "count", a.tackles_made.map(Double.init), b.tackles_made.map(Double.init))
+                    add("rg_tackles_missed", "count", a.tackles_missed.map(Double.init), b.tackles_missed.map(Double.init))
+                    add("rg_turnovers_won", "count", a.turnovers_won.map(Double.init), b.turnovers_won.map(Double.init))
+                    add("rg_yellow_cards", "count", a.yellow_cards.map(Double.init), b.yellow_cards.map(Double.init))
+                    add("rg_red_cards", "count", a.red_cards.map(Double.init), b.red_cards.map(Double.init))
+                }
+            }
+
+        case "hyrox":
+            struct HX: Decodable {
+                let official_time_sec: Int?
+                let rank_overall: Int?
+                let rank_category: Int?
+                let no_reps: Int?
+                let penalty_time_sec: Int?
+                let avg_hr: Int?
+                let max_hr: Int?
+            }
+            let lHX = try? await client.from("hyrox_session_stats").select("*").eq("session_id", value: L.id).single().execute()
+            let rHX = try? await client.from("hyrox_session_stats").select("*").eq("session_id", value: R.id).single().execute()
+            if let lHX, let rHX {
+                let a = try? decoder.decode(HX.self, from: lHX.data)
+                let b = try? decoder.decode(HX.self, from: rHX.data)
+                if let a, let b {
+                    add("hx_official_time_sec", "sec", a.official_time_sec.map(Double.init), b.official_time_sec.map(Double.init))
+                    add("hx_rank_overall", "rank", a.rank_overall.map(Double.init), b.rank_overall.map(Double.init))
+                    add("hx_rank_category", "rank", a.rank_category.map(Double.init), b.rank_category.map(Double.init))
+                    add("hx_no_reps", "count", a.no_reps.map(Double.init), b.no_reps.map(Double.init))
+                    add("hx_penalty_time_sec", "sec", a.penalty_time_sec.map(Double.init), b.penalty_time_sec.map(Double.init))
+                    add("hx_avg_hr", "bpm", a.avg_hr.map(Double.init), b.avg_hr.map(Double.init))
+                    add("hx_max_hr", "bpm", a.max_hr.map(Double.init), b.max_hr.map(Double.init))
                 }
             }
 
@@ -540,41 +767,195 @@ struct CompareWorkoutsView: View {
     }
 
     private func buildStrengthMetrics(decoder: JSONDecoder, client: SupabaseClient) async throws {
-        struct V: Decodable { let total_volume_kg: Decimal? }
-        @Sendable func volume(for id: Int) async throws -> Double? {
-            do {
-                let q = try await client.from("vw_workout_volume").select("total_volume_kg").eq("workout_id", value: id).single().execute()
-                let v = try decoder.decode(V.self, from: q.data).total_volume_kg
-                return v.map { NSDecimalNumber(decimal: $0).doubleValue }
-            } catch { return nil }
+        struct WMeta: Decodable {
+            let duration_min: Int?
+            let started_at: Date?
+            let ended_at: Date?
+        }
+        struct WE: Decodable { let id: Int }
+        struct SetRow: Decodable {
+            let reps: Int?
+            let weight_kg: Decimal?
+            let rpe: Decimal?
+        }
+        struct StrengthStats {
+            let exercisesCount: Int
+            let setsCount: Int
+            let totalReps: Int
+            let totalVolumeKg: Double
+            let maxWeightKg: Double?
+            let maxSetVolumeKg: Double?
+            let avgRpe: Double?
+            let hardSetsCount: Int
         }
 
-        @Sendable func exercisesCount(for id: Int) async throws -> Int? {
-            let q = try await client.from("workout_exercises").select("id", head: true, count: .exact).eq("workout_id", value: id).execute()
-            return q.count
+        @Sendable
+        func stats(for workoutId: Int) async throws -> StrengthStats {
+            let exRes = try await client
+                .from("workout_exercises")
+                .select("id")
+                .eq("workout_id", value: workoutId)
+                .execute()
+            let exIds = try decoder.decode([WE].self, from: exRes.data).map { $0.id }
+
+            guard !exIds.isEmpty else {
+                return StrengthStats(
+                    exercisesCount: 0,
+                    setsCount: 0,
+                    totalReps: 0,
+                    totalVolumeKg: 0,
+                    maxWeightKg: nil,
+                    maxSetVolumeKg: nil,
+                    avgRpe: nil,
+                    hardSetsCount: 0
+                )
+            }
+
+            let setsRes = try await client
+                .from("exercise_sets")
+                .select("reps, weight_kg, rpe")
+                .in("workout_exercise_id", values: exIds)
+                .execute()
+            let sets = try decoder.decode([SetRow].self, from: setsRes.data)
+
+            var totalReps = 0
+            var totalVolumeKg = 0.0
+            var maxWeightKg: Double? = nil
+            var maxSetVolumeKg: Double? = nil
+            var rpeSum = 0.0
+            var rpeCount = 0
+            var hardSets = 0
+
+            for s in sets {
+                let reps = max(s.reps ?? 0, 0)
+                let w = s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue } ?? 0
+                totalReps += reps
+
+                let setVol = Double(reps) * w
+                totalVolumeKg += setVol
+
+                if w > 0 {
+                    if let current = maxWeightKg {
+                        if w > current { maxWeightKg = w }
+                    } else {
+                        maxWeightKg = w
+                    }
+                }
+                if setVol > 0 {
+                    if let current = maxSetVolumeKg {
+                        if setVol > current { maxSetVolumeKg = setVol }
+                    } else {
+                        maxSetVolumeKg = setVol
+                    }
+                }
+
+                if let rpeDec = s.rpe {
+                    let r = NSDecimalNumber(decimal: rpeDec).doubleValue
+                    rpeSum += r
+                    rpeCount += 1
+                    if r >= 8.0 { hardSets += 1 }
+                }
+            }
+
+            let avgRpe = rpeCount > 0 ? (rpeSum / Double(rpeCount)) : nil
+
+            return StrengthStats(
+                exercisesCount: exIds.count,
+                setsCount: sets.count,
+                totalReps: totalReps,
+                totalVolumeKg: totalVolumeKg,
+                maxWeightKg: maxWeightKg,
+                maxSetVolumeKg: maxSetVolumeKg,
+                avgRpe: avgRpe,
+                hardSetsCount: hardSets
+            )
         }
 
-        @Sendable func setsCount(for id: Int) async throws -> Int? {
-            let idsQ = try await client.from("workout_exercises").select("id").eq("workout_id", value: id).execute()
-            struct Row: Decodable { let id: Int }
-            let ids = try decoder.decode([Row].self, from: idsQ.data).map { $0.id }
-            guard !ids.isEmpty else { return 0 }
-            let sQ = try await client.from("exercise_sets").select("id", head: true, count: .exact).in("workout_exercise_id", values: ids).execute()
-            return sQ.count
+        func bestDurationSec(_ meta: WMeta) -> Double? {
+            if let m = meta.duration_min, m > 0 {
+                return Double(m * 60)
+            }
+            if let s = meta.started_at, let e = meta.ended_at {
+                let sec = e.timeIntervalSince(s)
+                return sec > 0 ? sec : nil
+            }
+            return nil
         }
 
-        async let lVol = volume(for: currentWorkoutId)
-        async let rVol = volume(for: myOtherWorkoutId)
-        async let lEx  = exercisesCount(for: currentWorkoutId)
-        async let rEx  = exercisesCount(for: myOtherWorkoutId)
-        async let lSets = setsCount(for: currentWorkoutId)
-        async let rSets = setsCount(for: myOtherWorkoutId)
+        async let lMetaRes = client
+            .from("workouts")
+            .select("duration_min, started_at, ended_at")
+            .eq("id", value: currentWorkoutId)
+            .single()
+            .execute()
+        async let rMetaRes = client
+            .from("workouts")
+            .select("duration_min, started_at, ended_at")
+            .eq("id", value: myOtherWorkoutId)
+            .single()
+            .execute()
+        async let lStatsAsync = stats(for: currentWorkoutId)
+        async let rStatsAsync = stats(for: myOtherWorkoutId)
 
-        let out = [
-            makeMetric("total_volume_kg", "kg", try await lVol, try await rVol),
-            makeMetric("exercises_count", "count", (try await lEx).map(Double.init), (try await rEx).map(Double.init)),
-            makeMetric("sets_count", "count", (try await lSets).map(Double.init), (try await rSets).map(Double.init))
-        ].compactMap { $0 }
+        let lMeta = try decoder.decode(WMeta.self, from: try await lMetaRes.data)
+        let rMeta = try decoder.decode(WMeta.self, from: try await rMetaRes.data)
+        let lStats = try await lStatsAsync
+        let rStats = try await rStatsAsync
+
+        let lDurSec = bestDurationSec(lMeta)
+        let rDurSec = bestDurationSec(rMeta)
+
+        func perMin(_ value: Double, durationSec: Double?) -> Double? {
+            guard let durationSec, durationSec > 0 else { return nil }
+            let minutes = durationSec / 60.0
+            guard minutes > 0 else { return nil }
+            return value / minutes
+        }
+
+        func add(_ metric: String, _ unit: String, _ lv: Double?, _ rv: Double?, to array: inout [ComparableMetric]) {
+            guard let lv, let rv else { return }
+            array.append(.init(metric: metric, unit: unit, left_value: lv, right_value: rv))
+        }
+
+        var out: [ComparableMetric] = []
+
+        add("duration_sec", "sec", lDurSec, rDurSec, to: &out)
+        add("total_volume_kg", "kg", lStats.totalVolumeKg, rStats.totalVolumeKg, to: &out)
+        add("exercises_count", "count", Double(lStats.exercisesCount), Double(rStats.exercisesCount), to: &out)
+        add("sets_count", "count", Double(lStats.setsCount), Double(rStats.setsCount), to: &out)
+        add("total_reps", "count", Double(lStats.totalReps), Double(rStats.totalReps), to: &out)
+
+        let lAvgWeightPerRep = (lStats.totalReps > 0) ? lStats.totalVolumeKg / Double(lStats.totalReps) : nil
+        let rAvgWeightPerRep = (rStats.totalReps > 0) ? rStats.totalVolumeKg / Double(rStats.totalReps) : nil
+        add("avg_weight_per_rep_kg", "kg_per_rep", lAvgWeightPerRep, rAvgWeightPerRep, to: &out)
+
+        let lAvgWeightPerSet = (lStats.setsCount > 0) ? lStats.totalVolumeKg / Double(lStats.setsCount) : nil
+        let rAvgWeightPerSet = (rStats.setsCount > 0) ? rStats.totalVolumeKg / Double(rStats.setsCount) : nil
+        add("avg_weight_per_set_kg", "kg_per_set", lAvgWeightPerSet, rAvgWeightPerSet, to: &out)
+
+        let lAvgRepsPerExercise = (lStats.exercisesCount > 0) ? Double(lStats.totalReps) / Double(lStats.exercisesCount) : nil
+        let rAvgRepsPerExercise = (rStats.exercisesCount > 0) ? Double(rStats.totalReps) / Double(rStats.exercisesCount) : nil
+        add("avg_reps_per_exercise", "reps_per_exercise", lAvgRepsPerExercise, rAvgRepsPerExercise, to: &out)
+
+        let lAvgSetsPerExercise = (lStats.exercisesCount > 0) ? Double(lStats.setsCount) / Double(lStats.exercisesCount) : nil
+        let rAvgSetsPerExercise = (rStats.exercisesCount > 0) ? Double(rStats.setsCount) / Double(rStats.exercisesCount) : nil
+        add("avg_sets_per_exercise", "sets_per_exercise", lAvgSetsPerExercise, rAvgSetsPerExercise, to: &out)
+
+        let lVolPerMin = perMin(lStats.totalVolumeKg, durationSec: lDurSec)
+        let rVolPerMin = perMin(rStats.totalVolumeKg, durationSec: rDurSec)
+        add("volume_per_min_kg", "kg_per_min", lVolPerMin, rVolPerMin, to: &out)
+
+        let lSetsPerMin = perMin(Double(lStats.setsCount), durationSec: lDurSec)
+        let rSetsPerMin = perMin(Double(rStats.setsCount), durationSec: rDurSec)
+        add("sets_per_min", "sets_per_min", lSetsPerMin, rSetsPerMin, to: &out)
+
+        let lRepsPerMin = perMin(Double(lStats.totalReps), durationSec: lDurSec)
+        let rRepsPerMin = perMin(Double(rStats.totalReps), durationSec: rDurSec)
+        add("reps_per_min", "reps_per_min", lRepsPerMin, rRepsPerMin, to: &out)
+        add("max_weight_kg", "kg", lStats.maxWeightKg, rStats.maxWeightKg, to: &out)
+        add("max_set_volume_kg", "kg", lStats.maxSetVolumeKg, rStats.maxSetVolumeKg, to: &out)
+        add("avg_rpe", "rpe", lStats.avgRpe, rStats.avgRpe, to: &out)
+        add("hard_sets_count", "count", Double(lStats.hardSetsCount), Double(rStats.hardSetsCount), to: &out)
 
         await MainActor.run { metrics = out }
     }

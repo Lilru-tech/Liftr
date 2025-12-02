@@ -1,15 +1,6 @@
 import SwiftUI
 import Supabase
 
-struct Exercise: Identifiable, Decodable {
-    let id: Int64
-    let name: String
-    let category: String?
-    let modality: String?
-    let muscle_primary: String?
-    let equipment: String?
-}
-
 enum WorkoutIntensity: String, CaseIterable, Identifiable {
     case easy, moderate, hard, max
     var id: String { rawValue }
@@ -19,22 +10,6 @@ enum WorkoutIntensity: String, CaseIterable, Identifiable {
         case .moderate: return "Moderate"
         case .hard:     return "Hard"
         case .max:      return "Max"
-        }
-    }
-}
-
-enum SortMode: String, CaseIterable, Identifiable {
-    case alphabetic = "Alphabetic"
-    case mostUsed   = "Most used"
-    case favorites  = "Favorites"
-    case recent     = "Recently used"
-    var id: String { rawValue }
-    var label: String {
-        switch self {
-        case .alphabetic: return "A–Z"
-        case .mostUsed:   return "Más usados"
-        case .favorites:  return "Favoritos"
-        case .recent:     return "Últimos usados"
         }
     }
 }
@@ -135,262 +110,6 @@ struct AddParticipantParams: Encodable {
     let p_user_id: UUID
 }
 
-struct ExercisePickerSheet: View {
-    let all: [Exercise]
-    @Binding var selected: Exercise?
-    @Environment(\.dismiss) private var dismiss
-    
-    @State private var query = ""
-    @State private var sortMode: SortMode = .alphabetic
-    @State private var loading = false
-    @State private var exercises: [Exercise] = []
-    @State private var favorites = Set<Int64>()
-    
-    var filtered: [Exercise] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !q.isEmpty else { return exercises }
-        return exercises.filter { $0.name.lowercased().contains(q) }
-    }
-    
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    SectionCard {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, ex in
-                                HStack(alignment: .center, spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(ex.name)
-                                        Text(
-                                            [ex.category, ex.muscle_primary, ex.equipment]
-                                                .compactMap { $0 }
-                                                .filter { $0.lowercased() != "strength" }
-                                                .joined(separator: " · ")
-                                        )
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    }
-                                    
-                                    Spacer()
-                                    
-                                    Button {
-                                        Task { await toggleFavorite(ex.id) }
-                                    } label: {
-                                        Image(systemName: favorites.contains(ex.id) ? "star.fill" : "star")
-                                            .font(.subheadline)
-                                            .foregroundStyle(favorites.contains(ex.id) ? .yellow : .secondary)
-                                            .opacity(0.9)
-                                            .frame(width: 32, height: 32)
-                                            .contentShape(Rectangle())
-                                            .accessibilityLabel(favorites.contains(ex.id) ? "Unfavorite" : "Favorite")
-                                            .accessibilityAddTraits(.isButton)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 8)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    selected = ex
-                                    dismiss()
-                                }
-                                if idx < filtered.count - 1 {
-                                    Divider()
-                                        .padding(.leading, 8)
-                                        .opacity(0.75)
-                                }
-                            }
-                        }
-                    }
-                    .listRowBackground(Color.clear)
-                    .listSectionSeparator(.hidden, edges: .top)
-                }
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .searchable(text: $query)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        ForEach(SortMode.allCases) { mode in
-                            Button(mode.label) {
-                                sortMode = mode
-                                Task { await loadExercises() }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "line.3.horizontal.decrease.circle")
-                    }
-                    .accessibilityLabel("Filter")
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .listRowBackground(Color.clear)
-            .toolbarBackground(.hidden, for: .navigationBar)
-            .overlay {
-                if loading {
-                    ProgressView("Loading…")
-                        .padding()
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                }
-            }
-            .task { await loadExercises() }
-        }
-    }
-    
-    private func loadExercises() async {
-        loading = true
-        defer { loading = false }
-        do {
-            await loadFavorites()
-            
-            switch sortMode {
-            case .alphabetic:
-                let res = try await SupabaseManager.shared.client
-                    .from("exercises")
-                    .select("*")
-                    .eq("is_public", value: true)
-                    .eq("modality", value: "strength")
-                    .order("name", ascending: true)
-                    .execute()
-                exercises = try JSONDecoder().decode([Exercise].self, from: res.data)
-                
-            case .mostUsed:
-                let params: [String: AnyJSON] = [
-                    "p_modality": try .init("strength"),
-                    "p_search":   try .init(AnyJSON.null),
-                    "p_limit":    try .init(200)
-                ]
-                let res = try await SupabaseManager.shared.client
-                    .rpc("get_exercises_usage", params: params)
-                    .execute()
-                let used = try JSONDecoder.supabaseCustom().decode([ExerciseUsage].self, from: res.data)
-                exercises = used.map { Exercise(id: $0.id, name: $0.name, category: nil, modality: "strength", muscle_primary: nil, equipment: nil) }
-                
-            case .favorites:
-                if favorites.isEmpty {
-                    exercises = []
-                } else {
-                    let ids = favorites.map(Int.init)
-                    let res = try await SupabaseManager.shared.client
-                        .from("exercises")
-                        .select("*")
-                        .eq("is_public", value: true)
-                        .eq("modality", value: "strength")
-                        .in("id", values: ids)
-                        .order("name", ascending: true)
-                        .execute()
-                    exercises = try JSONDecoder().decode([Exercise].self, from: res.data)
-                }
-            case .recent:
-                let params: [String: AnyJSON] = [
-                    "p_modality": try .init("strength"),
-                    "p_search":   try .init(AnyJSON.null),
-                    "p_limit":    try .init(200)
-                ]
-                let res = try await SupabaseManager.shared.client
-                    .rpc("get_exercises_usage", params: params)
-                    .execute()
-                
-                let used = try JSONDecoder.supabaseCustom().decode([ExerciseUsage].self, from: res.data)
-                
-                let sorted = used
-                    .filter { $0.last_used_at != nil && $0.times_used > 0 }
-                    .sorted { (a, b) in
-                        (a.last_used_at ?? .distantPast) > (b.last_used_at ?? .distantPast)
-                    }
-                
-                exercises = sorted.map {
-                    Exercise(
-                        id: $0.id,
-                        name: $0.name,
-                        category: nil,
-                        modality: "strength",
-                        muscle_primary: nil,
-                        equipment: nil
-                    )
-                }
-            }
-        } catch {
-            print("Error loading exercises:", error)
-        }
-    }
-    
-    private func loadFavorites() async {
-        do {
-            let res = try await SupabaseManager.shared.client
-                .from("user_favorite_exercises")
-                .select("exercise_id")
-                .execute()
-            
-            struct Row: Decodable { let exercise_id: Int64 }
-            let rows = try JSONDecoder().decode([Row].self, from: res.data)
-            
-            await MainActor.run {
-                favorites = Set(rows.map { $0.exercise_id })
-            }
-        } catch {
-            print("Error loading favorites:", error)
-        }
-    }
-    
-    private struct FavoriteRow: Encodable {
-        let user_id: UUID
-        let exercise_id: Int64
-    }
-    
-    private func toggleFavorite(_ exerciseId: Int64) async {
-        let client = SupabaseManager.shared.client
-        
-        if favorites.contains(exerciseId) {
-            await MainActor.run {
-                _ = favorites.remove(exerciseId)
-                if sortMode == .favorites {
-                    exercises.removeAll { $0.id == exerciseId }
-                }
-            }
-            
-            do {
-                let session = try await client.auth.session
-                _ = try await client
-                    .from("user_favorite_exercises")
-                    .delete()
-                    .eq("user_id", value: session.user.id)
-                    .eq("exercise_id", value: Int(exerciseId))
-                    .execute()
-            } catch {
-                await MainActor.run { _ = favorites.insert(exerciseId) }
-                print("Error unfavorite:", error)
-            }
-        } else {
-            await MainActor.run { _ = favorites.insert(exerciseId) }
-            
-            do {
-                let session = try await client.auth.session
-                struct FavInsert: Encodable { let user_id: UUID; let exercise_id: Int }
-                let row = FavInsert(user_id: session.user.id, exercise_id: Int(exerciseId))
-                
-                _ = try await client
-                    .from("user_favorite_exercises")
-                    .upsert([row], onConflict: "user_id,exercise_id", returning: .minimal)
-                    .execute()
-            } catch let err as PostgrestError {
-                if err.code != "23505" {
-                    await MainActor.run { _ = favorites.remove(exerciseId) }
-                    print("Error favorite:", err)
-                }
-            } catch {
-                await MainActor.run { _ = favorites.remove(exerciseId) }
-                print("Error favorite:", error)
-            }
-        }
-    }
-}
-
 struct ExerciseUsage: Decodable {
     let id: Int64
     let name: String
@@ -398,11 +117,7 @@ struct ExerciseUsage: Decodable {
     let last_used_at: Date?
 }
 
-private struct PickerHandle: Identifiable {
-    let id: UUID
-}
-
-private struct SectionCard<Content: View>: View {
+struct SectionCard<Content: View>: View {
     @ViewBuilder var content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     
@@ -412,24 +127,6 @@ private struct SectionCard<Content: View>: View {
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
             .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.22), lineWidth: 0.8))
             .shadow(color: .black.opacity(0.06), radius: 4, y: 2)
-    }
-}
-
-private struct FieldRowPlain<Content: View>: View {
-    let title: String?
-    @ViewBuilder var content: Content
-    init(_ title: String? = nil, @ViewBuilder content: () -> Content) {
-        self.title = title; self.content = content()
-    }
-    
-    var body: some View {
-        LabeledContent {
-            content
-                .labelsHidden()
-        } label: {
-            if let title { Text(title) }
-        }
-        .padding(.vertical, 10)
     }
 }
 
@@ -449,6 +146,11 @@ struct AddWorkoutDraft {
 struct AddWorkoutSheet: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var app: AppState
+    @AppStorage("exerciseLanguage") private var exerciseLanguageRaw: String = ExerciseLanguage.spanish.rawValue
+    
+    private var exerciseLanguage: ExerciseLanguage {
+        ExerciseLanguage(rawValue: exerciseLanguageRaw) ?? .spanish
+    }
     
     @State private var kind: WorkoutKind = .strength
     @State private var title: String = ""
@@ -459,6 +161,7 @@ struct AddWorkoutSheet: View {
     @State private var items: [EditableExercise] = [EditableExercise()]
     @State private var cardio = CardioForm()
     @State private var sport = SportForm()
+    @State private var skipNextSportScoreReset = false
     @State private var catalog: [Exercise] = []
     @State private var loadingCatalog = false
     @State private var pickerHandle: PickerHandle? = nil
@@ -641,8 +344,10 @@ struct AddWorkoutSheet: View {
                                 },
                                 set: { picked in
                                     items[idx].exerciseId = picked?.id
-                                    if items[idx].exerciseName.isEmpty {
-                                        items[idx].exerciseName = picked?.name ?? ""
+                                    if let ex = picked {
+                                        items[idx].exerciseName = ex.localizedName(for: exerciseLanguageFromGlobalStorage())
+                                    } else {
+                                        items[idx].exerciseName = ""
                                     }
                                 }
                             )
@@ -692,6 +397,7 @@ struct AddWorkoutSheet: View {
                 applyDraft(d)
                 didApplyDraft = true
                 isApplyingDraft = false
+                pickerHandle = nil
             }
         }
         .banner($banner)
@@ -1008,6 +714,10 @@ struct AddWorkoutSheet: View {
                     }
                     .pickerStyle(.menu)
                     .onChange(of: sport.sport) { _, new in
+                        if skipNextSportScoreReset {
+                            skipNextSportScoreReset = false
+                            return
+                        }
                         if sportUsesNumericScore(new) {
                             sport.matchScoreText = ""
                         } else if sportUsesSetText(new) {
@@ -1219,14 +929,164 @@ struct AddWorkoutSheet: View {
                     TextField("Aces", text: $sport.vbAces).keyboardType(.numberPad)
                 }
             }
-            
-        case .handball, .hockey, .rugby, .hyrox:
+
+        case .handball:
+            Divider()
+            FieldRowPlain {
+                TextField("Position (optional)", text: $sport.hbPosition)
+                    .textFieldStyle(.plain)
+            }
             Divider()
             FieldRowPlain {
                 HStack {
-                    Text("Use 'Score for/against' arriba y notes si necesitas más detalles.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                    TextField("Goals", text: $sport.hbGoals).keyboardType(.numberPad)
+                    TextField("Shots", text: $sport.hbShots).keyboardType(.numberPad)
+                    TextField("Shots on target", text: $sport.hbShotsOnTarget).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Assists", text: $sport.hbAssists).keyboardType(.numberPad)
+                    TextField("Steals", text: $sport.hbSteals).keyboardType(.numberPad)
+                    TextField("Blocks", text: $sport.hbBlocks).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Turnovers lost", text: $sport.hbTurnoversLost).keyboardType(.numberPad)
+                    TextField("7m goals", text: $sport.hbSevenMGoals).keyboardType(.numberPad)
+                    TextField("7m attempts", text: $sport.hbSevenMAttempts).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Saves (GK)", text: $sport.hbSaves).keyboardType(.numberPad)
+                    TextField("Yellow cards", text: $sport.hbYellow).keyboardType(.numberPad)
+                    TextField("2-min susp.", text: $sport.hbTwoMin).keyboardType(.numberPad)
+                    TextField("Red cards", text: $sport.hbRed).keyboardType(.numberPad)
+                }
+            }
+
+        case .hockey:
+            Divider()
+            FieldRowPlain {
+                TextField("Position (optional)", text: $sport.hkPosition)
+                    .textFieldStyle(.plain)
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Goals", text: $sport.hkGoals).keyboardType(.numberPad)
+                    TextField("Assists", text: $sport.hkAssists).keyboardType(.numberPad)
+                    TextField("Shots on goal", text: $sport.hkShotsOnGoal).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("+/-", text: $sport.hkPlusMinus).keyboardType(.numberPad)
+                    TextField("Hits", text: $sport.hkHits).keyboardType(.numberPad)
+                    TextField("Blocks", text: $sport.hkBlocks).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Faceoffs won", text: $sport.hkFaceoffsWon).keyboardType(.numberPad)
+                    TextField("Faceoffs total", text: $sport.hkFaceoffsTotal).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Saves (GK)", text: $sport.hkSaves).keyboardType(.numberPad)
+                    TextField("Penalty minutes", text: $sport.hkPenaltyMinutes).keyboardType(.numberPad)
+                }
+            }
+
+        case .rugby:
+            Divider()
+            FieldRowPlain {
+                TextField("Position (optional)", text: $sport.rgPosition)
+                    .textFieldStyle(.plain)
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Tries", text: $sport.rgTries).keyboardType(.numberPad)
+                    TextField("Conv. made", text: $sport.rgConversionsMade).keyboardType(.numberPad)
+                    TextField("Conv. att.", text: $sport.rgConversionsAttempted).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Pen. goals made", text: $sport.rgPenaltyGoalsMade).keyboardType(.numberPad)
+                    TextField("Pen. goals att.", text: $sport.rgPenaltyGoalsAttempted).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Runs", text: $sport.rgRuns).keyboardType(.numberPad)
+                    TextField("Meters gained", text: $sport.rgMetersGained).keyboardType(.numberPad)
+                    TextField("Offloads", text: $sport.rgOffloads).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Tackles made", text: $sport.rgTacklesMade).keyboardType(.numberPad)
+                    TextField("Tackles missed", text: $sport.rgTacklesMissed).keyboardType(.numberPad)
+                    TextField("Turnovers won", text: $sport.rgTurnoversWon).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Yellow cards", text: $sport.rgYellow).keyboardType(.numberPad)
+                    TextField("Red cards", text: $sport.rgRed).keyboardType(.numberPad)
+                }
+            }
+
+        case .hyrox:
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Division (Open/Pro…)", text: $sport.hyDivision)
+                        .textFieldStyle(.plain)
+                    TextField("Category (Men/Women…)", text: $sport.hyCategory)
+                        .textFieldStyle(.plain)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                TextField("Age group (e.g. 30–34)", text: $sport.hyAgeGroup)
+                    .textFieldStyle(.plain)
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Official time (sec)", text: $sport.hyOfficialTimeSec).keyboardType(.numberPad)
+                    TextField("Penalty time (sec)", text: $sport.hyPenaltyTimeSec).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("No reps", text: $sport.hyNoReps).keyboardType(.numberPad)
+                    TextField("Rank overall", text: $sport.hyRankOverall).keyboardType(.numberPad)
+                    TextField("Rank category", text: $sport.hyRankCategory).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Avg HR", text: $sport.hyAvgHR).keyboardType(.numberPad)
+                    TextField("Max HR", text: $sport.hyMaxHR).keyboardType(.numberPad)
                 }
             }
         }
@@ -1302,10 +1162,6 @@ struct AddWorkoutSheet: View {
                 }
                 
             case .sport:
-                if sport.sport == .hockey || sport.sport == .handball || sport.sport == .rugby {
-                    self.error = "El deporte \(sport.sport.label) aún no está soportado."
-                    return
-                }
                 let minutes: Int?
                 if let typed = parseInt(sport.durationMin) {
                     minutes = typed
@@ -1423,10 +1279,17 @@ struct AddWorkoutSheet: View {
             let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
             return t.isEmpty ? nil : t
         }
+
         switch f.sport {
+
         case .football:
             var out: [String: AnyJSON] = [:]
+
             out["position"] = try .init(f.fbPosition.dbValue)
+            if let mins = parseInt(f.durationMin) {
+                out["minutes_played"] = try .init(mins)
+            }
+
             if let v = parseInt(f.fbAssists)         { out["assists"]          = try .init(v) }
             if let v = parseInt(f.fbShotsOnTarget)   { out["shots_on_target"]  = try .init(v) }
             if let v = parseInt(f.fbPassesCompleted) { out["passes_completed"] = try .init(v) }
@@ -1434,8 +1297,9 @@ struct AddWorkoutSheet: View {
             if let v = parseInt(f.fbSaves)           { out["saves"]            = try .init(v) }
             if let v = parseInt(f.fbYellow)          { out["yellow_cards"]     = try .init(v) }
             if let v = parseInt(f.fbRed)             { out["red_cards"]        = try .init(v) }
+
             return try AnyJSON(out)
-            
+
         case .basketball:
             var out: [String: AnyJSON] = [:]
             if let v = parseInt(f.bbPoints)    { out["points"]    = try .init(v) }
@@ -1446,25 +1310,25 @@ struct AddWorkoutSheet: View {
             if let v = parseInt(f.bbTurnovers) { out["turnovers"] = try .init(v) }
             if let v = parseInt(f.bbFouls)     { out["fouls"]     = try .init(v) }
             return try AnyJSON(out)
-            
+
         case .padel, .tennis, .badminton, .squash, .table_tennis:
             var out: [String: AnyJSON] = [:]
-            if let v = parseInt(f.rkAces)           { out["aces"]              = try .init(v) }
-            if let v = parseInt(f.rkDoubleFaults)   { out["double_faults"]     = try .init(v) }
-            if let v = parseInt(f.rkWinners)        { out["winners"]           = try .init(v) }
-            if let v = parseInt(f.rkUnforcedErrors) { out["unforced_errors"]   = try .init(v) }
-            if let v = parseInt(f.rkSetsWon)        { out["sets_won"]          = try .init(v) }
-            if let v = parseInt(f.rkSetsLost)       { out["sets_lost"]         = try .init(v) }
-            if let v = parseInt(f.rkGamesWon)       { out["games_won"]         = try .init(v) }
-            if let v = parseInt(f.rkGamesLost)      { out["games_lost"]        = try .init(v) }
-            if let v = parseInt(f.rkBreakPointsWon)   { out["break_points_won"]   = try .init(v) }
+            if let v = parseInt(f.rkAces)             { out["aces"]              = try .init(v) }
+            if let v = parseInt(f.rkDoubleFaults)     { out["double_faults"]     = try .init(v) }
+            if let v = parseInt(f.rkWinners)          { out["winners"]           = try .init(v) }
+            if let v = parseInt(f.rkUnforcedErrors)   { out["unforced_errors"]   = try .init(v) }
+            if let v = parseInt(f.rkSetsWon)          { out["sets_won"]          = try .init(v) }
+            if let v = parseInt(f.rkSetsLost)         { out["sets_lost"]         = try .init(v) }
+            if let v = parseInt(f.rkGamesWon)         { out["games_won"]         = try .init(v) }
+            if let v = parseInt(f.rkGamesLost)        { out["games_lost"]        = try .init(v) }
+            if let v = parseInt(f.rkBreakPointsWon)   { out["break_points_won"]  = try .init(v) }
             if let v = parseInt(f.rkBreakPointsTotal) { out["break_points_total"] = try .init(v) }
-            if let v = parseInt(f.rkNetPointsWon)     { out["net_points_won"]     = try .init(v) }
-            if let v = parseInt(f.rkNetPointsTotal)   { out["net_points_total"]   = try .init(v) }
+            if let v = parseInt(f.rkNetPointsWon)     { out["net_points_won"]    = try .init(v) }
+            if let v = parseInt(f.rkNetPointsTotal)   { out["net_points_total"]  = try .init(v) }
             out["racket_mode"]   = try .init(f.racketMode.dbValue)
             out["racket_format"] = try .init(f.racketFormat.dbValue)
             return try AnyJSON(out)
-            
+
         case .volleyball:
             var out: [String: AnyJSON] = [:]
             if let v = parseInt(f.vbPoints)  { out["points"] = try .init(v) }
@@ -1472,9 +1336,73 @@ struct AddWorkoutSheet: View {
             if let v = parseInt(f.vbBlocks)  { out["blocks"] = try .init(v) }
             if let v = parseInt(f.vbDigs)    { out["digs"]   = try .init(v) }
             return try AnyJSON(out)
-            
-        case .handball, .hockey, .rugby, .hyrox:
-            let out: [String: AnyJSON] = [:]
+
+        case .handball:
+            var out: [String: AnyJSON] = [:]
+            if let s = strOrNil(f.hbPosition)        { out["position"]            = try .init(s) }
+            if let mins = parseInt(f.durationMin)    { out["minutes_played"]      = try .init(mins) }
+            if let v = parseInt(f.hbGoals)           { out["goals"]               = try .init(v) }
+            if let v = parseInt(f.hbShots)           { out["shots"]               = try .init(v) }
+            if let v = parseInt(f.hbShotsOnTarget)   { out["shots_on_target"]     = try .init(v) }
+            if let v = parseInt(f.hbAssists)         { out["assists"]             = try .init(v) }
+            if let v = parseInt(f.hbSteals)          { out["steals"]              = try .init(v) }
+            if let v = parseInt(f.hbBlocks)          { out["blocks"]              = try .init(v) }
+            if let v = parseInt(f.hbTurnoversLost)   { out["turnovers_lost"]      = try .init(v) }
+            if let v = parseInt(f.hbSevenMGoals)     { out["seven_m_goals"]       = try .init(v) }
+            if let v = parseInt(f.hbSevenMAttempts)  { out["seven_m_attempts"]    = try .init(v) }
+            if let v = parseInt(f.hbSaves)           { out["saves"]               = try .init(v) }
+            if let v = parseInt(f.hbYellow)          { out["yellow_cards"]        = try .init(v) }
+            if let v = parseInt(f.hbTwoMin)          { out["two_min_suspensions"] = try .init(v) }
+            if let v = parseInt(f.hbRed)             { out["red_cards"]           = try .init(v) }
+            return try AnyJSON(out)
+
+        case .hockey:
+            var out: [String: AnyJSON] = [:]
+            if let s = strOrNil(f.hkPosition)        { out["position"]        = try .init(s) }
+            if let mins = parseInt(f.durationMin)    { out["minutes_played"]  = try .init(mins) }
+            if let v = parseInt(f.hkGoals)           { out["goals"]           = try .init(v) }
+            if let v = parseInt(f.hkAssists)         { out["assists"]         = try .init(v) }
+            if let v = parseInt(f.hkShotsOnGoal)     { out["shots_on_goal"]   = try .init(v) }
+            if let v = parseInt(f.hkPlusMinus)       { out["plus_minus"]      = try .init(v) }
+            if let v = parseInt(f.hkHits)            { out["hits"]            = try .init(v) }
+            if let v = parseInt(f.hkBlocks)          { out["blocks"]          = try .init(v) }
+            if let v = parseInt(f.hkFaceoffsWon)     { out["faceoffs_won"]    = try .init(v) }
+            if let v = parseInt(f.hkFaceoffsTotal)   { out["faceoffs_total"]  = try .init(v) }
+            if let v = parseInt(f.hkSaves)           { out["saves"]           = try .init(v) }
+            if let v = parseInt(f.hkPenaltyMinutes)  { out["penalty_minutes"] = try .init(v) }
+            return try AnyJSON(out)
+
+        case .rugby:
+            var out: [String: AnyJSON] = [:]
+            if let s = strOrNil(f.rgPosition)             { out["position"]                = try .init(s) }
+            if let mins = parseInt(f.durationMin)         { out["minutes_played"]          = try .init(mins) }
+            if let v = parseInt(f.rgTries)               { out["tries"]                   = try .init(v) }
+            if let v = parseInt(f.rgConversionsMade)     { out["conversions_made"]        = try .init(v) }
+            if let v = parseInt(f.rgConversionsAttempted){ out["conversions_attempted"]   = try .init(v) }
+            if let v = parseInt(f.rgPenaltyGoalsMade)    { out["penalty_goals_made"]      = try .init(v) }
+            if let v = parseInt(f.rgPenaltyGoalsAttempted){ out["penalty_goals_attempted"] = try .init(v) }
+            if let v = parseInt(f.rgRuns)                { out["runs"]                    = try .init(v) }
+            if let v = parseInt(f.rgMetersGained)        { out["meters_gained"]           = try .init(v) }
+            if let v = parseInt(f.rgOffloads)            { out["offloads"]                = try .init(v) }
+            if let v = parseInt(f.rgTacklesMade)         { out["tackles_made"]            = try .init(v) }
+            if let v = parseInt(f.rgTacklesMissed)       { out["tackles_missed"]          = try .init(v) }
+            if let v = parseInt(f.rgTurnoversWon)        { out["turnovers_won"]           = try .init(v) }
+            if let v = parseInt(f.rgYellow)              { out["yellow_cards"]            = try .init(v) }
+            if let v = parseInt(f.rgRed)                 { out["red_cards"]               = try .init(v) }
+            return try AnyJSON(out)
+
+        case .hyrox:
+            var out: [String: AnyJSON] = [:]
+            if let s = strOrNil(f.hyDivision)        { out["division"]          = try .init(s) }
+            if let s = strOrNil(f.hyCategory)        { out["category"]          = try .init(s) }
+            if let s = strOrNil(f.hyAgeGroup)        { out["age_group"]         = try .init(s) }
+            if let v = parseInt(f.hyOfficialTimeSec) { out["official_time_sec"] = try .init(v) }
+            if let v = parseInt(f.hyRankOverall)     { out["rank_overall"]      = try .init(v) }
+            if let v = parseInt(f.hyRankCategory)    { out["rank_category"]     = try .init(v) }
+            if let v = parseInt(f.hyNoReps)          { out["no_reps"]           = try .init(v) }
+            if let v = parseInt(f.hyPenaltyTimeSec)  { out["penalty_time_sec"]  = try .init(v) }
+            if let v = parseInt(f.hyAvgHR)           { out["avg_hr"]            = try .init(v) }
+            if let v = parseInt(f.hyMaxHR)           { out["max_hr"]            = try .init(v) }
             return try AnyJSON(out)
         }
     }
@@ -1498,7 +1426,7 @@ struct AddWorkoutSheet: View {
     private func exerciseLabel(for ex: EditableExercise) -> String {
         if let exid = ex.exerciseId,
            let found = catalog.first(where: { $0.id == exid }) {
-            return found.name
+            return found.localizedName(for: exerciseLanguage)
         }
         return catalog.isEmpty ? "Loading exercises…" : "Choose exercise"
     }
@@ -1654,6 +1582,7 @@ struct AddWorkoutSheet: View {
             s.scoreAgainst = (d.sport?.scoreAgainst.isEmpty == false) ? (d.sport?.scoreAgainst ?? s.scoreAgainst) : s.scoreAgainst
             
             if sportUsesNumericScore(s.sport) { s.matchScoreText = "" }
+            skipNextSportScoreReset = true
             sport = s
             print("[DUP][INIT][SPORT] type=\(s.sport.rawValue) scoreFor=\(s.scoreFor) scoreAgainst=\(s.scoreAgainst) matchScoreText=\(s.matchScoreText)")
             print("[DUP][INIT][RACKET] mode=\(s.racketMode.dbValue) format=\(s.racketFormat.dbValue)")
@@ -1667,7 +1596,7 @@ struct AddWorkoutSheet: View {
     
     private func sportUsesNumericScore(_ s: SportType) -> Bool {
         switch s {
-        case .football, .basketball, .handball, .hockey: return true
+        case .football, .basketball, .handball, .hockey, .rugby: return true
         default: return false
         }
     }
@@ -1807,6 +1736,55 @@ struct SportForm {
     var vbAces: String = ""
     var vbBlocks: String = ""
     var vbDigs: String = ""
+    var hbPosition: String = ""
+    var hbGoals: String = ""
+    var hbShots: String = ""
+    var hbShotsOnTarget: String = ""
+    var hbAssists: String = ""
+    var hbSteals: String = ""
+    var hbBlocks: String = ""
+    var hbTurnoversLost: String = ""
+    var hbSevenMGoals: String = ""
+    var hbSevenMAttempts: String = ""
+    var hbSaves: String = ""
+    var hbYellow: String = ""
+    var hbTwoMin: String = ""
+    var hbRed: String = ""
+    var hkPosition: String = ""
+    var hkGoals: String = ""
+    var hkAssists: String = ""
+    var hkShotsOnGoal: String = ""
+    var hkPlusMinus: String = ""
+    var hkHits: String = ""
+    var hkBlocks: String = ""
+    var hkFaceoffsWon: String = ""
+    var hkFaceoffsTotal: String = ""
+    var hkSaves: String = ""
+    var hkPenaltyMinutes: String = ""
+    var rgPosition: String = ""
+    var rgTries: String = ""
+    var rgConversionsMade: String = ""
+    var rgConversionsAttempted: String = ""
+    var rgPenaltyGoalsMade: String = ""
+    var rgPenaltyGoalsAttempted: String = ""
+    var rgRuns: String = ""
+    var rgMetersGained: String = ""
+    var rgOffloads: String = ""
+    var rgTacklesMade: String = ""
+    var rgTacklesMissed: String = ""
+    var rgTurnoversWon: String = ""
+    var rgYellow: String = ""
+    var rgRed: String = ""
+    var hyDivision: String = ""
+    var hyCategory: String = ""
+    var hyAgeGroup: String = ""
+    var hyOfficialTimeSec: String = ""
+    var hyRankOverall: String = ""
+    var hyRankCategory: String = ""
+    var hyNoReps: String = ""
+    var hyPenaltyTimeSec: String = ""
+    var hyAvgHR: String = ""
+    var hyMaxHR: String = ""
 }
 
 struct RPCStrengthParams: Encodable {

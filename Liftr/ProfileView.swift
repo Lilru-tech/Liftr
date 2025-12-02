@@ -34,6 +34,7 @@ private struct WorkoutRow: Decodable, Identifiable {
     let title: String?
     let started_at: Date?
     let ended_at: Date?
+    let state: String?
 }
 
 private struct WorkoutScoreRow: Decodable {
@@ -43,6 +44,7 @@ private struct WorkoutScoreRow: Decodable {
 
 private struct OnlyStartedAt: Decodable {
     let started_at: Date?
+    let state: String?
 }
 
 private struct GetMonthActivityParams: Encodable {
@@ -117,6 +119,7 @@ struct ProfileView: View {
     @State private var activity: [Date: Int] = [:]
     @State private var ownActivity: [Date: Int] = [:]
     @State private var participantActivity: [Date: Int] = [:]
+    @State private var draftActivity: [Date: Bool] = [:]
     @State private var selectedDay: Date?
     @State private var bio: String? = nil
     @State private var showEditProfile = false
@@ -587,12 +590,20 @@ struct ProfileView: View {
                                         let own = ownActivity[key] ?? 0
                                         let part = participantActivity[key] ?? 0
                                         let total = (activity[key] ?? (own + part))
+
                                         if total > 0 {
-                                            if own > 0 {
-                                                return Color.green.opacity(min(0.15 + Double(total) * 0.1, 0.35))
-                                            } else {
-                                                return Color.yellow.opacity(min(0.15 + Double(total) * 0.1, 0.35))
+                                            if draftActivity[key] == true {
+                                                return Color(red: 0.6, green: 0.1, blue: 0.2)
+                                                    .opacity(min(0.20 + Double(total) * 0.05, 0.45))
                                             }
+
+                                            if own > 0 {
+                                                return Color.green
+                                                    .opacity(min(0.15 + Double(total) * 0.1, 0.35))
+                                            }
+
+                                            return Color.yellow
+                                                .opacity(min(0.15 + Double(total) * 0.1, 0.35))
                                         }
                                     }
                                     return Color.clear
@@ -907,6 +918,31 @@ struct ProfileView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
             }
+            Section("Support") {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+
+                    NavigationLink {
+                        ContactSupportForm()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "envelope")
+                            Text("Contact support")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                        }
+                        .padding(12)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
             Section("Personal information") {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1193,7 +1229,7 @@ struct ProfileView: View {
             iso.timeZone = .current
             let resOwn = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("started_at")
+                .select("started_at,state")
                 .eq("user_id", value: uid.uuidString)
                 .gte("started_at", value: iso.string(from: monthStart))
                 .lt("started_at", value: iso.string(from: monthEnd))
@@ -1201,10 +1237,15 @@ struct ProfileView: View {
             
             let rowsOwn = try JSONDecoder.supabase().decode([OnlyStartedAt].self, from: resOwn.data)
             var dictOwn: [Date: Int] = [:]
+            var dictDraft: [Date: Bool] = [:]
+
             for r in rowsOwn {
                 if let d = r.started_at {
                     let key = cal.startOfDay(for: d)
                     dictOwn[key, default: 0] += 1
+                    if (r.state ?? "published") == "planned" {
+                        dictDraft[key] = true
+                    }
                 }
             }
             
@@ -1221,7 +1262,7 @@ struct ProfileView: View {
             if !pIds.isEmpty {
                 let resPartW = try await SupabaseManager.shared.client
                     .from("workouts")
-                    .select("started_at")
+                    .select("started_at,state")
                     .in("id", values: pIds)
                     .gte("started_at", value: iso.string(from: monthStart))
                     .lt("started_at", value: iso.string(from: monthEnd))
@@ -1232,6 +1273,9 @@ struct ProfileView: View {
                     if let d = r.started_at {
                         let key = cal.startOfDay(for: d)
                         dictPart[key, default: 0] += 1
+                        if (r.state ?? "published") == "planned" {
+                            dictDraft[key] = true
+                        }
                     }
                 }
             }
@@ -1243,6 +1287,7 @@ struct ProfileView: View {
                 self.ownActivity = dictOwn
                 self.participantActivity = dictPart
                 self.activity = dictTotal
+                self.draftActivity = dictDraft
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
@@ -1750,10 +1795,13 @@ struct AvatarZoomPreview: View {
 private struct DayWorkoutsList: View {
     let userId: UUID
     let selectedDay: Date
+    @EnvironmentObject var app: AppState
     @State private var workouts: [WorkoutRow] = []
     @State private var scores: [Int: Double] = [:]
     @State private var error: String?
     @State private var participated: [WorkoutRow] = []
+    @State private var owners: [UUID: ProfileRow] = [:]
+    @State private var workoutParticipants: [Int: [UUID]] = [:]
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1776,26 +1824,56 @@ private struct DayWorkoutsList: View {
                                 } label: {
                                     ZStack {
                                         WorkoutCardBackground(kind: w.kind)
+                                            .opacity((w.state ?? "published") == "planned" ? 0.55 : 1.0)
+
+                                        if (w.state ?? "published") == "planned" {
+                                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                                .stroke(Color.yellow.opacity(0.7), lineWidth: 2)
+                                        }
+
                                         HStack(alignment: .top, spacing: 12) {
+                                            avatarStack(for: w)
+                                            
                                             VStack(alignment: .leading, spacing: 4) {
                                                 Text(w.title ?? w.kind.capitalized)
                                                     .font(.body.weight(.semibold))
                                                     .lineLimit(1)
                                                 
+                                                if let username = owners[w.user_id]?.username {
+                                                    Text(username)
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                
                                                 Text(timeRange(w))
                                                     .font(.caption)
                                                     .foregroundStyle(.secondary)
                                                 
-                                                Text(w.kind.capitalized)
-                                                    .font(.caption2.weight(.semibold))
-                                                    .padding(.vertical, 3)
-                                                    .padding(.horizontal, 6)
-                                                    .background(
-                                                        Capsule().fill(workoutTint(for: w.kind).opacity(0.12))
-                                                    )
-                                                    .overlay(
-                                                        Capsule().stroke(Color.white.opacity(0.12))
-                                                    )
+                                                HStack(spacing: 6) {
+                                                    Text(w.kind.capitalized)
+                                                        .font(.caption2.weight(.semibold))
+                                                        .padding(.vertical, 3)
+                                                        .padding(.horizontal, 6)
+                                                        .background(
+                                                            Capsule().fill(workoutTint(for: w.kind).opacity(0.12))
+                                                        )
+                                                        .overlay(
+                                                            Capsule().stroke(Color.white.opacity(0.12))
+                                                        )
+                                                    
+                                                    if (w.state ?? "published") == "planned" {
+                                                        Text("Draft")
+                                                            .font(.caption2.weight(.semibold))
+                                                            .padding(.vertical, 3)
+                                                            .padding(.horizontal, 6)
+                                                            .background(
+                                                                Capsule().fill(Color.yellow.opacity(0.20))
+                                                            )
+                                                            .overlay(
+                                                                Capsule().stroke(Color.white.opacity(0.12))
+                                                            )
+                                                    }
+                                                }
                                             }
                                             
                                             Spacer()
@@ -1818,7 +1896,16 @@ private struct DayWorkoutsList: View {
                                     } label: {
                                         ZStack {
                                             WorkoutCardBackground(kind: w.kind)
+                                                .opacity((w.state ?? "published") == "planned" ? 0.55 : 1.0)
+
+                                            if (w.state ?? "published") == "planned" {
+                                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                                    .stroke(Color.yellow.opacity(0.7), lineWidth: 2)
+                                            }
+
                                             HStack(alignment: .top, spacing: 12) {
+                                                avatarStack(for: w)
+                                                
                                                 VStack(alignment: .leading, spacing: 4) {
                                                     Text(w.title ?? w.kind.capitalized)
                                                         .font(.body.weight(.semibold))
@@ -1850,6 +1937,19 @@ private struct DayWorkoutsList: View {
                                                             .overlay(
                                                                 Capsule().stroke(Color.white.opacity(0.12))
                                                             )
+                                                        
+                                                        if (w.state ?? "published") == "planned" {
+                                                            Text("Draft")
+                                                                .font(.caption2.weight(.semibold))
+                                                                .padding(.vertical, 3)
+                                                                .padding(.horizontal, 6)
+                                                                .background(
+                                                                    Capsule().fill(Color.yellow.opacity(0.20))
+                                                                )
+                                                                .overlay(
+                                                                    Capsule().stroke(Color.white.opacity(0.12))
+                                                                )
+                                                        }
                                                     }
                                                 }
                                                 
@@ -1922,6 +2022,22 @@ private struct DayWorkoutsList: View {
                 rowsPart = try JSONDecoder.supabase().decode([WorkoutRow].self, from: resPart.data)
             }
             let allIds = rowsOwn.map { $0.id } + rowsPart.map { $0.id }
+            
+            var participantsByWorkout: [Int: [UUID]] = [:]
+            if !allIds.isEmpty {
+                let presAll = try await SupabaseManager.shared.client
+                    .from("workout_participants")
+                    .select("workout_id,user_id")
+                    .in("workout_id", values: allIds)
+                    .execute()
+                
+                struct PRow: Decodable { let workout_id: Int; let user_id: UUID }
+                let pRowsAll = try JSONDecoder.supabase().decode([PRow].self, from: presAll.data)
+                for row in pRowsAll {
+                    participantsByWorkout[row.workout_id, default: []].append(row.user_id)
+                }
+            }
+            
             var scoresDict: [Int: Double] = [:]
             if !allIds.isEmpty {
                 let scoreRes = try await SupabaseManager.shared.client
@@ -1940,13 +2056,82 @@ private struct DayWorkoutsList: View {
                 scoresDict = tmp
             }
             
+            let participantUserIds = Set(participantsByWorkout.values.flatMap { $0 })
+            var allUsers = Set(rowsOwn.map { $0.user_id } + rowsPart.map { $0.user_id })
+            for u in participantUserIds {
+                allUsers.insert(u)
+            }
+            
+            var ownerDict: [UUID: ProfileRow] = [:]
+
+            if !allUsers.isEmpty {
+                let resProfiles = try await SupabaseManager.shared.client
+                    .from("profiles")
+                    .select("user_id,username,avatar_url")
+                    .in("user_id", values: allUsers.map { $0.uuidString })
+                    .execute()
+                
+                let profRows = try JSONDecoder.supabase().decode([ProfileRow].self, from: resProfiles.data)
+                for p in profRows {
+                    ownerDict[p.user_id] = p
+                }
+            }
+            
             await MainActor.run {
                 workouts = rowsOwn
                 participated = rowsPart
                 scores = scoresDict
+                owners = ownerDict
+                workoutParticipants = participantsByWorkout
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+    
+    private func avatarURLs(for workout: WorkoutRow) -> (String?, String?) {
+        let ownerAvatar = owners[workout.user_id]?.avatar_url
+        let participants = workoutParticipants[workout.id] ?? []
+        
+        guard let meId = app.userId else {
+            return (ownerAvatar, nil)
+        }
+        
+        if workout.user_id == meId {
+            if let otherId = participants.first(where: { $0 != meId }),
+               let otherAvatar = owners[otherId]?.avatar_url {
+                return (ownerAvatar, otherAvatar)
+            } else {
+                return (ownerAvatar, nil)
+            }
+        } else {
+            if participants.contains(meId),
+               let myAvatar = owners[meId]?.avatar_url {
+                return (ownerAvatar, myAvatar)
+            } else if let first = participants.first,
+                      let firstAvatar = owners[first]?.avatar_url {
+                return (ownerAvatar, firstAvatar)
+            } else {
+                return (ownerAvatar, nil)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func avatarStack(for workout: WorkoutRow) -> some View {
+        let (primary, secondary) = avatarURLs(for: workout)
+        ZStack(alignment: .bottomTrailing) {
+            AvatarView(urlString: primary)
+                .frame(width: 42, height: 42)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            
+            if let secondary {
+                AvatarView(urlString: secondary)
+                    .frame(width: 18, height: 18)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
+                    .offset(x: 2, y: 2)
+            }
         }
     }
     
