@@ -3,6 +3,7 @@ import Supabase
 
 struct SearchView: View {
     @EnvironmentObject var app: AppState
+    @AppStorage("isPremium") private var isPremium: Bool = false
     @State private var query = ""
     @State private var results: [UserRow] = []
     @State private var loading = false
@@ -51,6 +52,13 @@ struct SearchView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            
+            if !isPremium {
+                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                    .frame(height: 50)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+            }
         }
         .onChange(of: query) { _, newValue in
             searchTask?.cancel()

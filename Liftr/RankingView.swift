@@ -21,6 +21,19 @@ struct LevelRankRow: Decodable, Identifiable {
     let xp: Int64
 }
 
+struct WorkoutLeaderRow: Decodable, Identifiable {
+    var id: String { "\(workout_id)-\(rank)" }
+    let rank: Int
+    let workout_id: Int64
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let kind: String
+    let title: String?
+    let started_at: Date
+    let score: Decimal
+}
+
 enum LBScope: String, CaseIterable, Identifiable {
     case global = "Global", friends = "Friends"
     var id: String { rawValue }
@@ -37,7 +50,7 @@ enum LBKind: String, CaseIterable, Identifiable {
 }
 
 enum LBMetric: String, CaseIterable, Identifiable {
-    case score = "Score", level = "Level"
+    case score = "Score", level = "Level", bestWorkout = "Top workouts"
     var id: String { rawValue }
 }
 
@@ -64,6 +77,7 @@ private struct Section<Content: View>: View {
 final class RankingVM: ObservableObject {
     @Published var rows: [LeaderRow] = []
     @Published var levelRows: [LevelRankRow] = []
+    @Published var workoutRows: [WorkoutLeaderRow] = []
     @Published var loading = false
     @Published var error: String?
     @Published var scope: LBScope = .global
@@ -119,11 +133,40 @@ final class RankingVM: ObservableObject {
             await MainActor.run {
                 self.levelRows = decoded
                 self.rows = []
+                self.workoutRows = []
             }
         } catch {
             await MainActor.run {
                 self.error = error.localizedDescription
                 self.levelRows = []
+            }
+        }
+    }
+    
+    private func fetchBestWorkoutsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"]     = ajString(scope == .global ? "global" : "friends")
+            params["p_period"]    = ajString(mapPeriod(period))
+            params["p_kind"]      = ajString(mapKind(kind))
+            params["p_limit"]     = ajInt(100)
+            params["p_sex"]       = ajString(sexOpt?.rawValue)
+            params["p_age_band"]  = ajString(mapAge(age))
+
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_best_workouts_leaderboard_v1", params: params)
+                .execute()
+
+            let decoded = try JSONDecoder.supabase().decode([WorkoutLeaderRow].self, from: res.data)
+            await MainActor.run {
+                self.workoutRows = decoded
+                self.rows = []
+                self.levelRows = []
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.workoutRows = []
             }
         }
     }
@@ -134,6 +177,10 @@ final class RankingVM: ObservableObject {
         
         if metric == .level {
             await fetchLevelLeaderboard()
+            return
+        }
+        if metric == .bestWorkout {
+            await fetchBestWorkoutsLeaderboard()
             return
         }
         
@@ -153,6 +200,8 @@ final class RankingVM: ObservableObject {
             
             let decoded = try JSONDecoder.supabase().decode([LeaderRow].self, from: res.data)
             self.rows = decoded
+            self.levelRows = []
+            self.workoutRows = []
         } catch {
             self.error = error.localizedDescription
             self.rows = []
@@ -162,12 +211,19 @@ final class RankingVM: ObservableObject {
 
 struct RankingView: View {
     @StateObject private var vm = RankingVM()
-    
+    @AppStorage("isPremium") private var isPremium: Bool = false
+
     var body: some View {
         GradientBackground {
             VStack(spacing: 12) {
                 headerBars
                 listContent
+                if !isPremium {
+                    BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                        .frame(height: 50)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                }
             }
             .padding(.horizontal, 12)
         }
@@ -191,7 +247,7 @@ struct RankingView: View {
                     }
                     .pickerStyle(.segmented)
                     
-                    if vm.metric == .score {
+                    if vm.metric != .level {
                         Picker("Period", selection: $vm.period) {
                             ForEach(LBPeriod.allCases) {
                                 Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
@@ -208,7 +264,7 @@ struct RankingView: View {
                     }
                     .pickerStyle(.segmented)
                     
-                    if vm.metric == .score {
+                    if vm.metric != .level {
                         Picker("Period", selection: $vm.period) {
                             ForEach(LBPeriod.allCases) {
                                 Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
@@ -227,7 +283,7 @@ struct RankingView: View {
             }
             
             HStack(spacing: 10) {
-                if vm.metric == .score {
+                if vm.metric != .level {
                     Menu {
                         Picker("Type", selection: $vm.kind) {
                             ForEach(LBKind.allCases) {
@@ -303,7 +359,8 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
-            } else {
+                
+            } else if vm.metric == .level {
                 List(vm.levelRows) { row in
                     Section {
                         HStack(spacing: 12) {
@@ -341,23 +398,83 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
+
+            } else {
+                List(vm.workoutRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
+                                Text(row.title?.isEmpty == false ? row.title! : row.kind.capitalized)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Text(dateFormatted(row.started_at))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary.opacity(0.7))
+                            }
+                            
+                            Spacer()
+                            
+                            Text(scoreString(row.score))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             }
         }
         .overlay {
             if vm.loading {
-                ProgressView("Loading…").padding()
+                ProgressView("Loading…")
+                    .padding()
             } else if let e = vm.error {
-                Text(e).foregroundStyle(.red).padding(.vertical, 24)
-            } else if (vm.metric == .score && vm.rows.isEmpty) || (vm.metric == .level && vm.levelRows.isEmpty) {
+                Text(e)
+                    .foregroundStyle(.red)
+                    .padding(.vertical, 24)
+            } else if
+                (vm.metric == .score && vm.rows.isEmpty) ||
+                (vm.metric == .level && vm.levelRows.isEmpty) ||
+                (vm.metric == .bestWorkout && vm.workoutRows.isEmpty)
+            {
                 VStack(spacing: 8) {
                     Image(systemName: "person.3.sequence")
                         .font(.largeTitle)
                         .opacity(0.6)
-                    Text("No results").foregroundStyle(.secondary)
+                    Text("No results")
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 24)
             }
         }
+    }
+    
+    private func dateFormatted(_ d: Date) -> String {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f.string(from: d)
     }
     
     private func scoreString(_ d: Decimal) -> String {
