@@ -7,6 +7,16 @@ final class AppState: ObservableObject {
     @Published var addDraft: AddWorkoutDraft?
     @Published var addDraftKey = UUID()
     
+    enum NotificationDestination: Equatable {
+        case none
+        case followerProfile(userId: UUID)
+        case workout(workoutId: Int, ownerId: UUID?)
+        case achievements
+    }
+    
+    @Published var notificationDestination: NotificationDestination = .none
+    @Published var pendingNotification: (id: Int?, type: String, data: [String: Any])?
+    
     @MainActor
     func openAdd(with draft: AddWorkoutDraft?) {
         self.addDraft = draft
@@ -43,6 +53,82 @@ final class AppState: ObservableObject {
     func signOut() {
         Task {
             try? await SupabaseManager.shared.client.auth.signOut()
+        }
+    }
+    
+    @MainActor
+    func handlePushNotificationTap(notificationId: Int?, type: String, data: [String: Any]) {
+        print("📩 [AppState] handlePushNotificationTap id=\(notificationId ?? -1) type=\(type) data=\(data)")
+        pendingNotification = (notificationId, type, data)
+    }
+    
+    @MainActor
+    func processNotification(notificationId: Int?, type: String, data: [String: Any]) {
+        print("📩 [AppState] processNotification id=\(notificationId ?? -1) type=\(type) data=\(data)")
+        if let notificationId {
+            Task {
+                struct UpdatePayload: Encodable {
+                    let is_read: Bool
+                    let read_at: String
+                }
+                let formatter = ISO8601DateFormatter()
+                formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                formatter.timeZone = .current
+                
+                let payload = UpdatePayload(
+                    is_read: true,
+                    read_at: formatter.string(from: Date())
+                )
+                
+                do {
+                    _ = try await SupabaseManager.shared.client
+                        .from("notifications")
+                        .update(payload)
+                        .eq("id", value: notificationId)
+                        .execute()
+                } catch {
+                    print("[Push] markAsRead error:", error.localizedDescription)
+                }
+            }
+        }
+        
+        switch type {
+        case "new_follower":
+            print("📩 [AppState] routing to followerProfile")
+            if let followerIdStr = data["follower_id"] as? String,
+               let followerId = UUID(uuidString: followerIdStr) {
+                notificationDestination = .followerProfile(userId: followerId)
+            } else {
+                print("⚠️ [AppState] follower_id not found or invalid in data:", data)
+                notificationDestination = .none
+            }
+            
+        case "workout_like",
+             "workout_comment",
+             "comment_reply",
+             "comment_like",
+             "added_as_participant":
+            print("📩 [AppState] routing to workout")
+            if let workoutIdStr = data["workout_id"] as? String,
+               let workoutId = Int(workoutIdStr) {
+                
+                let ownerId: UUID?
+                if let ownerIdStr = data["owner_id"] as? String {
+                    ownerId = UUID(uuidString: ownerIdStr)
+                } else {
+                    ownerId = nil
+                }
+                notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+            } else {
+                print("⚠️ [AppState] workout_id missing/invalid in data:", data)
+                notificationDestination = .none
+            }
+            
+        case "achievement_unlocked":
+            notificationDestination = .achievements
+            
+        default:
+            notificationDestination = .none
         }
     }
     

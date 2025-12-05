@@ -4,6 +4,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2025-12-05
+
+### Added
+- **Banner ads on main screens**
+  - Added banner ads to the **Home**, **Search**, **Ranking**, and **Profile** tabs.
+
+- **Premium (ad-free) mode**
+  - New in-app **Premium** option that removes banner ads across the app once purchased or restored.
+  - Premium state is persisted locally so the app remains ad-free on subsequent launches.
+
+- **Ranking → Top workouts metric**
+  - Added a new **“Top workouts”** metric to `RankingView` that shows the best individual workouts ordered by score.
+  - Fully compatible with existing filters: **Scope** (Global/Friends), **Period**, **Type** (Strength/Cardio/Sport), **Sex**, and **Age band**.
+
+- **Profile → Settings → FAQs**
+  - Added an **FAQ** section under profile settings with common questions and answers about using Liftr, scoring, and privacy.
+
+- **Profile → Themes**
+  - New **Themes** section in profile settings that lets you change the **app background gradient / theme color**.
+  - The selected theme is stored per user and applied across all main screens.
+
+- **Push notifications**
+  - Added push notifications for:
+    - New **comments** on your workouts.
+    - **Likes** on workouts.
+    - **Likes** on comments.
+    - **Replies** to your comments.
+    - New **followers**.
+    - When someone **adds you as a participant** in a workout.
+    - Newly unlocked **achievements**.
+
+### Changed
+- **Workout comments UX**
+  - Moved the comment input field from the **top** of the thread to the **bottom**, closer to the latest messages.
+  - Fixed background color inconsistencies in the comments view to better match the rest of the app.
+  - Tapping on a commenter’s avatar or username now navigates directly to their **profile**.
+
+[1.1.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.1.0
+
 ## [1.0.1] - 2025-12-02
 
 ### Added

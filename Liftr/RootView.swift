@@ -32,10 +32,94 @@ struct RootView: View {
                 .tag(Tab.profile)
                 .tabItem { Label("", systemImage: "person.crop.circle") }
         }
-        .onChange(of: app.selectedTab) { old, new in
-            if new == .add && !app.isAuthenticated {
-                app.selectedTab = old
-                showAuthAlert = true
+        .onAppear {
+            if let pending = app.pendingNotification {
+                print("🧭 [RootView] onAppear with pendingNotification:", pending)
+                Task { @MainActor in
+                    app.processNotification(
+                        notificationId: pending.id,
+                        type: pending.type,
+                        data: pending.data
+                    )
+                    app.pendingNotification = nil
+                }
+            }
+        }
+        .onReceive(app.$pendingNotification) { pending in
+            guard let pending else { return }
+            print("🧭 [RootView] onReceive pendingNotification:", pending)
+            Task { @MainActor in
+                app.processNotification(
+                    notificationId: pending.id,
+                    type: pending.type,
+                    data: pending.data
+                )
+                app.pendingNotification = nil
+            }
+        }
+        .onChange(of: app.notificationDestination) { _, dest in
+            print("🧭 [RootView] notificationDestination changed:", dest)
+            switch dest {
+            case .none:
+                break
+            case .followerProfile:
+                app.selectedTab = .search
+            case .workout:
+                app.selectedTab = .home
+            case .achievements:
+                app.selectedTab = .profile
+            }
+        }
+        .onChange(of: app.notificationDestination) { _, dest in
+            switch dest {
+            case .none:
+                break
+            case .followerProfile:
+                app.selectedTab = .search
+            case .workout:
+                app.selectedTab = .home
+            case .achievements:
+                app.selectedTab = .profile
+            }
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { app.notificationDestination != .none },
+                set: { newValue in
+                    if !newValue {
+                        app.notificationDestination = .none
+                    }
+                }
+            )
+        ) {
+            switch app.notificationDestination {
+            case .none:
+                EmptyView()
+                
+            case .followerProfile(let userId):
+                ProfileView(userId: userId)
+                    .gradientBG()
+                
+            case .workout(let workoutId, let ownerId):
+                if let ownerId {
+                    WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
+                        .gradientBG()
+                } else if let currentUserId = app.userId {
+                    WorkoutDetailView(workoutId: workoutId, ownerId: currentUserId)
+                        .gradientBG()
+                } else {
+                    Text("Workout not found")
+                        .padding()
+                }
+                
+            case .achievements:
+                if let currentUserId = app.userId {
+                    AchievementsGridView(userId: currentUserId, viewedUsername: "")
+                        .gradientBG()
+                } else {
+                    Text("Achievements")
+                        .padding()
+                }
             }
         }
         .alert("You need to log in", isPresented: $showAuthAlert) {

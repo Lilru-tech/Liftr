@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CFB0221D2EE0579F00E3E3D7 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = CFB0221C2EE0579F00E3E3D7 /* FirebaseAnalytics */; };
+		CFB0221F2EE0579F00E3E3D7 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = CFB0221E2EE0579F00E3E3D7 /* FirebaseMessaging */; };
+		CFB022312EE1BD2D00E3E3D7 /* GoogleMobileAds in Frameworks */ = {isa = PBXBuildFile; productRef = CFB022302EE1BD2D00E3E3D7 /* GoogleMobileAds */; };
 		CFBC437F2E9FA7EC002E1FCA /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC437E2E9FA7EC002E1FCA /* Auth */; };
 		CFBC43812E9FA7EC002E1FCA /* Functions in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43802E9FA7EC002E1FCA /* Functions */; };
 		CFBC43832E9FA7EC002E1FCA /* PostgREST in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43822E9FA7EC002E1FCA /* PostgREST */; };
@@ -38,9 +41,22 @@
 		CFBC43092E9F8FA5002E1FCA /* LiftrUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiftrUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		CFB022292EE0629000E3E3D7 /* Exceptions for "Liftr" folder in "Liftr" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = CFBC42EE2E9F8FA3002E1FCA /* Liftr */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		CFBC42F12E9F8FA3002E1FCA /* Liftr */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CFB022292EE0629000E3E3D7 /* Exceptions for "Liftr" folder in "Liftr" target */,
+			);
 			path = Liftr;
 			sourceTree = "<group>";
 		};
@@ -61,7 +77,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CFB0221F2EE0579F00E3E3D7 /* FirebaseMessaging in Frameworks */,
+				CFB0221D2EE0579F00E3E3D7 /* FirebaseAnalytics in Frameworks */,
 				CFBC43832E9FA7EC002E1FCA /* PostgREST in Frameworks */,
+				CFB022312EE1BD2D00E3E3D7 /* GoogleMobileAds in Frameworks */,
 				CFBC43812E9FA7EC002E1FCA /* Functions in Frameworks */,
 				CFBC43AC2E9FA8D9002E1FCA /* Supabase in Frameworks */,
 				CFBC437F2E9FA7EC002E1FCA /* Auth in Frameworks */,
@@ -141,6 +160,9 @@
 				CFBC43842E9FA7EC002E1FCA /* Realtime */,
 				CFBC43862E9FA7EC002E1FCA /* Storage */,
 				CFBC43AB2E9FA8D9002E1FCA /* Supabase */,
+				CFB0221C2EE0579F00E3E3D7 /* FirebaseAnalytics */,
+				CFB0221E2EE0579F00E3E3D7 /* FirebaseMessaging */,
+				CFB022302EE1BD2D00E3E3D7 /* GoogleMobileAds */,
 			);
 			productName = Liftr;
 			productReference = CFBC42EF2E9F8FA3002E1FCA /* Liftr.app */;
@@ -226,6 +248,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				CFBC437D2E9FA7EC002E1FCA /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				CFB0221B2EE0579F00E3E3D7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				CFB0222F2EE1BD2D00E3E3D7 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CFBC42F02E9F8FA3002E1FCA /* Products */;
@@ -429,11 +453,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Liftr/Liftr.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Liftr/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Liftr/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to the camera to take your avatar photo.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photos to set your avatar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -445,7 +471,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -459,11 +485,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Liftr/Liftr.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Liftr/Preview Content\"";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Liftr/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to the camera to take your avatar photo.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photos to set your avatar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -475,7 +503,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -594,6 +622,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		CFB0221B2EE0579F00E3E3D7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.6.0;
+			};
+		};
+		CFB0222F2EE1BD2D00E3E3D7 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/googleads/swift-package-manager-google-mobile-ads";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.14.0;
+			};
+		};
 		CFBC437D2E9FA7EC002E1FCA /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/supabase-community/supabase-swift";
@@ -605,6 +649,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		CFB0221C2EE0579F00E3E3D7 /* FirebaseAnalytics */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CFB0221B2EE0579F00E3E3D7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalytics;
+		};
+		CFB0221E2EE0579F00E3E3D7 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CFB0221B2EE0579F00E3E3D7 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+		CFB022302EE1BD2D00E3E3D7 /* GoogleMobileAds */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CFB0222F2EE1BD2D00E3E3D7 /* XCRemoteSwiftPackageReference "swift-package-manager-google-mobile-ads" */;
+			productName = GoogleMobileAds;
+		};
 		CFBC437E2E9FA7EC002E1FCA /* Auth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = CFBC437D2E9FA7EC002E1FCA /* XCRemoteSwiftPackageReference "supabase-swift" */;

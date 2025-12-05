@@ -54,22 +54,6 @@ struct CommentsSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
-                HStack(alignment: .top, spacing: 10) {
-                    AvatarView(urlString: profiles[app.userId ?? UUID()]?.avatar_url)
-                        .frame(width: 32, height: 32)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    TextField("Add a comment…", text: $newBody, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...4)
-                    Button {
-                        Task { await sendComment(parentId: nil) }
-                    } label: {
-                        if sending { ProgressView() } else { Text("Send").font(.callout.weight(.semibold)) }
-                    }
-                    .disabled(sending || newBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .padding(.horizontal, 12)
-                
                 List {
                     ForEach(items) { it in
                         CommentRowView(
@@ -87,7 +71,7 @@ struct CommentsSheet: View {
                                 Task { await loadPage(reset: false) }
                             }
                         }
-                        
+
                         if it.isExpanded {
                             ForEach(it.replies) { r in
                                 CommentRowView(
@@ -104,7 +88,7 @@ struct CommentsSheet: View {
                             }
                         }
                     }
-                    
+
                     if isLoading && !items.isEmpty {
                         HStack { Spacer(); ProgressView(); Spacer() }
                             .listRowBackground(Color.clear)
@@ -112,19 +96,35 @@ struct CommentsSheet: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+
+                HStack(alignment: .top, spacing: 10) {
+                    AvatarView(urlString: profiles[app.userId ?? UUID()]?.avatar_url)
+                        .frame(width: 32, height: 32)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                    TextField("Add a comment…", text: $newBody, axis: .vertical)
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(1...4)
+
+                    Button {
+                        Task { await sendComment(parentId: nil) }
+                    } label: {
+                        if sending {
+                            ProgressView()
+                        } else {
+                            Text("Send")
+                                .font(.callout.weight(.semibold))
+                        }
+                    }
+                    .disabled(sending || newBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
             }
             .padding(.top, 8)
-            .navigationTitle("Comments")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        Task { await refreshAll() }
-                    } label: { Image(systemName: "arrow.clockwise") }
-                }
-            }
             .task { await refreshAll() }
         }
+        .gradientBG()
     }
     
     private func refreshAll() async {
@@ -499,31 +499,42 @@ private struct CommentRowView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                AvatarView(urlString: profile?.avatar_url)
-                    .frame(width: 32, height: 32)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(profile.map { "@\($0.username)" } ?? "@user")
-                            .font(.subheadline.weight(.semibold))
-                        Text("• \(relative(item.createdAt))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    if let body = item.body {
-                        Text(body).font(.subheadline)
-                    } else {
-                        Text("Comment deleted")
-                            .font(.subheadline.italic())
-                            .foregroundStyle(.secondary)
+                NavigationLink {
+                    ProfileView(userId: profile?.user_id ?? item.userId)
+                        .gradientBG()
+                } label: {
+                    HStack(spacing: 10) {
+                        AvatarView(urlString: profile?.avatar_url)
+                            .frame(width: 32, height: 32)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(profile.map { "@\($0.username)" } ?? "@user")
+                                    .font(.subheadline.weight(.semibold))
+                                Text("• \(relative(item.createdAt))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            if let body = item.body {
+                                Text(body).font(.subheadline)
+                            } else {
+                                Text("Comment deleted")
+                                    .font(.subheadline.italic())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
                     }
                 }
-                
+                .buttonStyle(.plain)
+
                 Spacer()
                 
-                Button { print("♥️ Like tapped for item \(item.id)"); Task { await onToggleLike() } } label: {
+                Button {
+                    print("♥️ Like tapped for item \(item.id)")
+                    Task { await onToggleLike() }
+                } label: {
                     HStack(spacing: 6) {
                         Image(systemName: item.likedByMe ? "heart.fill" : "heart")
                             .symbolRenderingMode(.palette)
@@ -531,7 +542,8 @@ private struct CommentRowView: View {
                         Text("\(item.likesCount)")
                             .font(.subheadline.weight(.semibold))
                     }
-                    .padding(.vertical, 6).padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
                     .background(.ultraThinMaterial, in: Capsule())
                     .contentShape(Rectangle())
                 }
