@@ -14,6 +14,7 @@ private struct ShareItem: Identifiable {
 
 struct HomeView: View {
     @EnvironmentObject var app: AppState
+    @AppStorage("isPremium") private var isPremium = false
     
     enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
     @State private var filter: KindFilter = .all
@@ -146,87 +147,95 @@ struct HomeView: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            Picker("", selection: $filter) {
-                ForEach(KindFilter.allCases, id: \.self) { k in Text(k.rawValue).tag(k) }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
-            
-            VStack(spacing: 6) {
-                if todayCount > 0 {
-                    TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
+            VStack(spacing: 8) {
+                Picker("", selection: $filter) {
+                    ForEach(KindFilter.allCases, id: \.self) { k in Text(k.rawValue).tag(k) }
                 }
-                if weekWorkouts > 0 {
-                    StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
-                }
-                InsightsRow(strongestWeekPts: strongestWeekPtsMTD,
-                            bestSportScore: bestSportScore,
-                            bestSportLabel: bestSportLabel)
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 2)
-            
-            List {
-                if initialLoading && feed.isEmpty {
-                    ProgressView().frame(maxWidth: .infinity)
-                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
                 
-                if let summary = monthSummary, summary.workouts > 0 {
-                    MonthlySummaryCard(
-                        summary: summary,
-                        onShare: { image in
-                            self.shareItem = ShareItem(image: image)
-                        }
-                    )
-                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                    .listRowBackground(Color.clear)
+                VStack(spacing: 6) {
+                    if todayCount > 0 {
+                        TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
+                    }
+                    if weekWorkouts > 0 {
+                        StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
+                    }
+                    InsightsRow(strongestWeekPts: strongestWeekPtsMTD,
+                                bestSportScore: bestSportScore,
+                                bestSportLabel: bestSportLabel)
                 }
+                .padding(.horizontal)
+                .padding(.bottom, 2)
                 
-                ForEach(feed.indices, id: \.self) { i in
-                    let item = feed[i]
-                    if i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at) {
-                        Text(dateLabel(item.workout.started_at))
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 16).padding(.top, 6)
-                            .listRowBackground(Color.clear)
+                List {
+                    if initialLoading && feed.isEmpty {
+                        ProgressView().frame(maxWidth: .infinity)
                     }
                     
-                    HomeFeedCard(item: item)
-                        .contentShape(Rectangle())
-                        .onTapGesture { selectedItem = item }
+                    if let summary = monthSummary, summary.workouts > 0 {
+                        MonthlySummaryCard(
+                            summary: summary,
+                            onShare: { image in
+                                self.shareItem = ShareItem(image: image)
+                            }
+                        )
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
-                        .onAppear {
-                            if i == feed.count - 1 {
-                                print("[Home.cell.onAppear] last cell reached → loadPage(reset:false)")
-                                Task { await loadPage(reset: false) }
-                            }
-                        }
+                    }
                     
-                    if i == highlightsInsertIndex && (!recentPRs.isEmpty || !weeklyTop.isEmpty) {
-                        HighlightsCard(
-                            prs: recentPRs,
-                            weeklyTop: weeklyTop,
-                            profileFor: { uid in profiles[uid] }
-                        )
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
+                    ForEach(feed.indices, id: \.self) { i in
+                        let item = feed[i]
+                        if i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at) {
+                            Text(dateLabel(item.workout.started_at))
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 16).padding(.top, 6)
+                                .listRowBackground(Color.clear)
+                        }
+                        
+                        HomeFeedCard(item: item)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selectedItem = item }
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                            .onAppear {
+                                if i == feed.count - 1 {
+                                    print("[Home.cell.onAppear] last cell reached → loadPage(reset:false)")
+                                    Task { await loadPage(reset: false) }
+                                }
+                            }
+                        
+                        if i == highlightsInsertIndex && (!recentPRs.isEmpty || !weeklyTop.isEmpty) {
+                            HighlightsCard(
+                                prs: recentPRs,
+                                weeklyTop: weeklyTop,
+                                profileFor: { uid in profiles[uid] }
+                            )
+                            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                        }
+                    }
+                    
+                    if !initialLoading && feed.isEmpty {
+                        Text("Sin entrenos recientes").foregroundStyle(.secondary)
+                    }
+                    
+                    if isLoadingPage && !feed.isEmpty {
+                        HStack { Spacer(); ProgressView(); Spacer() }
+                            .listRowBackground(Color.clear)
                     }
                 }
-                
-                if !initialLoading && feed.isEmpty {
-                    Text("Sin entrenos recientes").foregroundStyle(.secondary)
-                }
-                
-                if isLoadingPage && !feed.isEmpty {
-                    HStack { Spacer(); ProgressView(); Spacer() }
-                        .listRowBackground(Color.clear)
-                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .refreshable { await reloadAll() }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .refreshable { await reloadAll() }
+            if !isPremium {
+                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                    .frame(height: 50)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+            }
         }
         .onChange(of: selectedItem) { old, new in
             print("[Home.selectedItem] \(old?.id.description ?? "nil") → \(new?.id.description ?? "nil") main=\(Thread.isMainThread)")
@@ -303,7 +312,7 @@ struct HomeView: View {
                     }}
                     if ui["state"] == nil { Task { await refreshOne(id: id) } }
                     Task { await recalcHomeSummaries() }
-                    if (ui["state"] as? String) != nil { return } 
+                    if (ui["state"] as? String) != nil { return }
                 } else {
                     print("[Home.onReceive workoutUpdated] id=\(id) no estaba en feed visible → refreshOne()")
                 }
@@ -414,7 +423,7 @@ struct HomeView: View {
         do {
             let allIds = [me] + followees
             print("[Home.loadPage] fetching page=\(page) pageSize=\(pageSize) userIds=\(allIds.count)")
-
+            
             let idsCSV = allIds.map { $0.uuidString }.joined(separator: ",")
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
                 .from("workouts")
@@ -1528,7 +1537,7 @@ private struct HomeFeedCard: View {
                     .padding(.horizontal, 6)
                     .background(Capsule().fill(workoutTint(for: item.workout.kind).opacity(0.18)))
                     .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-
+                    
                     Spacer()
                     
                     if item.workout.state == "planned" {

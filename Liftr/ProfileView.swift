@@ -3,6 +3,7 @@ import Supabase
 import PhotosUI
 import UIKit
 import Charts
+import StoreKit
 
 private struct ProfileCounts: Decodable, Identifiable {
     let user_id: UUID
@@ -100,6 +101,8 @@ extension JSONDecoder {
 
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
+    @AppStorage("isPremium") private var isPremium: Bool = false
+    @AppStorage("backgroundTheme") private var backgroundTheme: String = "mintBlue"
     let userId: UUID?
     private var viewingUserId: UUID? { userId ?? app.userId }
     private var isOwnProfile: Bool { viewingUserId != nil && viewingUserId == app.userId }
@@ -112,6 +115,7 @@ struct ProfileView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var banner: Banner?
+    @State private var hasUnreadNotifications = false
     @State private var pickedItem: PhotosPickerItem?
     @State private var uploadingAvatar = false
     @State private var monthDate = Date()
@@ -147,30 +151,43 @@ struct ProfileView: View {
     @State private var showAvatarPreview = false
     @State private var showDeleteConfirm = false
     @State private var deletingAccount = false
+    @State private var premiumProduct: Product?
+    @State private var isPurchasingPremium = false
+    @State private var premiumError: String?
+    private let premiumProductID = "com.liftr.premium.monthly"
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
     
     var body: some View {
         VStack(spacing: 12) {
-            headerCard
-            
-            Picker("", selection: $tab) {
-                Text("Calendar").tag(Tab.calendar)
-                Text("PRs").tag(Tab.prs)
-                Text("Progress").tag(Tab.progress)
-                if isOwnProfile {
-                    Text("Settings").tag(Tab.settings)
+            VStack(spacing: 12) {
+                headerCard
+                
+                Picker("", selection: $tab) {
+                    Text("Calendar").tag(Tab.calendar)
+                    Text("PRs").tag(Tab.prs)
+                    Text("Progress").tag(Tab.progress)
+                    if isOwnProfile {
+                        Text("Settings").tag(Tab.settings)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                
+                switch tab {
+                case .calendar: calendarView
+                case .prs: prsView
+                case .progress: progressView
+                case .settings: settingsView
                 }
             }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
             
-            switch tab {
-            case .calendar: calendarView
-            case .prs: prsView
-            case .progress: progressView
-            case .settings: settingsView
+            if !isPremium {
+                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                    .frame(height: 50)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
             }
         }
         .foregroundStyle(.primary)
@@ -184,12 +201,17 @@ struct ProfileView: View {
             await refreshFollowState()
             await loadProgress()
             await loadUserLevel()
+            await loadUnreadNotifications()
+            if isOwnProfile {
+                await loadPremiumProduct()
+            }
         }
         .onChange(of: app.userId) { _, _ in
             Task {
                 await loadProfileHeader()
                 await refreshFollowState()
                 await loadProgress()
+                await loadUnreadNotifications()
             }
         }
         .onChange(of: monthDate) { _, newDate in
@@ -525,16 +547,38 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 8) {
-                NavigationLink {
-                    AchievementsGridView(userId: viewingUserId, viewedUsername: username)
-                        .gradientBG()
-                } label: {
-                    Image(systemName: "trophy.fill")
-                        .font(.subheadline.weight(.bold))
-                        .padding(8)
-                        .background(.thinMaterial, in: Circle())
+                HStack(spacing: 8) {
+                    NavigationLink {
+                        NotificationsListView()
+                            .gradientBG()
+                    } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "bell.fill")
+                                .font(.subheadline.weight(.bold))
+                                .padding(8)
+                                .background(.thinMaterial, in: Circle())
+                            
+                            if hasUnreadNotifications {
+                                Circle()
+                                    .fill(Color.red)
+                                    .frame(width: 10, height: 10)
+                                    .offset(x: 4, y: -4)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    
+                    NavigationLink {
+                        AchievementsGridView(userId: viewingUserId, viewedUsername: username)
+                            .gradientBG()
+                    } label: {
+                        Image(systemName: "trophy.fill")
+                            .font(.subheadline.weight(.bold))
+                            .padding(8)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
                 
                 if !isOwnProfile {
                     followButton
@@ -894,6 +938,70 @@ struct ProfileView: View {
     
     private var settingsView: some View {
         List {
+            Section("Premium") {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+                    
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "star.circle.fill")
+                            Text(isPremium ? "You are Premium" : "Remove ads")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                        }
+                        
+                        if let product = premiumProduct, !isPremium {
+                            Text("Subscribe for \(product.displayPrice) per month to remove ads.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else if isPremium {
+                            Text("Ads are disabled on this account.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                        
+                        if !isPremium {
+                            Button {
+                                Task { await purchasePremium() }
+                            } label: {
+                                HStack {
+                                    if isPurchasingPremium {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                    }
+                                    Text("Continue")
+                                        .font(.body.weight(.semibold))
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isPurchasingPremium || premiumProduct == nil)
+                            
+                            Button {
+                                Task { await restorePremium() }
+                            } label: {
+                                Text("Restore purchases")
+                                    .font(.footnote.weight(.semibold))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        
+                        if let msg = premiumError {
+                            Text(msg)
+                                .font(.footnote)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding(12)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
             Section("Account") {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -918,6 +1026,33 @@ struct ProfileView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
             }
+            Section("Appearance") {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+                    
+                    HStack(spacing: 10) {
+                        Text("Background")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Picker("", selection: $backgroundTheme) {
+                            Text("Default").tag("mintBlue")
+                            Text("Sunset").tag("sunset")
+                            Text("Forest").tag("forest")
+                            Text("Midnight").tag("midnight")
+                        }
+                        .pickerStyle(.menu)
+                        .font(.footnote)
+                    }
+                    .padding(12)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
             Section("Support") {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -933,6 +1068,32 @@ struct ProfileView: View {
                         HStack(spacing: 10) {
                             Image(systemName: "envelope")
                             Text("Contact support")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                        }
+                        .padding(12)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
+            Section("FAQs") {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+
+                    NavigationLink {
+                        FAQsView()
+                            .gradientBG()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "questionmark.circle")
+                            Text("See frequently asked questions")
                                 .font(.body.weight(.semibold))
                             Spacer()
                         }
@@ -1167,6 +1328,38 @@ struct ProfileView: View {
             await MainActor.run {
                 self.error = "We removed your app data, but couldn't remove the Auth user. Contact support."
                 app.signOut()
+            }
+        }
+    }
+    
+    private func loadUnreadNotifications() async {
+        if !isOwnProfile {
+            await MainActor.run { hasUnreadNotifications = false }
+            return
+        }
+        guard let uid = app.userId else {
+            await MainActor.run { hasUnreadNotifications = false }
+            return
+        }
+        
+        struct NId: Decodable { let id: Int }
+        
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("notifications")
+                .select("id")
+                .eq("user_id", value: uid.uuidString)
+                .eq("is_read", value: false)
+                .limit(1)
+                .execute()
+            
+            let rows = try JSONDecoder.supabase().decode([NId].self, from: res.data)
+            await MainActor.run {
+                self.hasUnreadNotifications = !rows.isEmpty
+            }
+        } catch {
+            await MainActor.run {
+                self.hasUnreadNotifications = false
             }
         }
     }
@@ -1659,6 +1852,100 @@ struct ProfileView: View {
         } catch {
             await MainActor.run { self.error = "Unfollow failed: \(error.localizedDescription)" }
             print("[Unfollow][ERROR]", error.localizedDescription)
+        }
+    }
+    
+    private func loadPremiumProduct() async {
+        guard premiumProduct == nil else { return }
+        await MainActor.run {
+            premiumError = nil
+        }
+        do {
+            let products = try await Product.products(for: [premiumProductID])
+            print("[StoreKit] products:", products)
+            await MainActor.run {
+                self.premiumProduct = products.first
+            }
+        } catch {
+            print("[StoreKit] error:", error)
+            await MainActor.run {
+                self.premiumError = error.localizedDescription
+            }
+        }
+    }
+    
+    private func purchasePremium() async {
+        guard let product = premiumProduct else { return }
+        await MainActor.run {
+            isPurchasingPremium = true
+            premiumError = nil
+        }
+        defer {
+            Task { await MainActor.run { isPurchasingPremium = false } }
+        }
+        
+        do {
+            let result = try await product.purchase()
+            switch result {
+            case .success(let verification):
+                if let transaction = verifiedTransaction(from: verification) {
+                    await MainActor.run {
+                        self.isPremium = true
+                    }
+                    await transaction.finish()
+                } else {
+                    await MainActor.run {
+                        self.premiumError = "Purchase verification failed."
+                    }
+                }
+            case .pending:
+                break
+            case .userCancelled:
+                break
+            @unknown default:
+                break
+            }
+        } catch {
+            await MainActor.run {
+                self.premiumError = error.localizedDescription
+            }
+        }
+    }
+    
+    private func restorePremium() async {
+        await MainActor.run {
+            isPurchasingPremium = true
+            premiumError = nil
+        }
+        defer {
+            Task { await MainActor.run { isPurchasingPremium = false } }
+        }
+
+        var found = false
+        for await result in StoreKit.Transaction.currentEntitlements {
+            if let transaction = verifiedTransaction(from: result),
+               transaction.productID == premiumProductID {
+                found = true
+                await MainActor.run {
+                    self.isPremium = true
+                }
+                break
+            }
+        }
+
+        if !found {
+            await MainActor.run {
+                self.premiumError = "No active subscription found for this Apple ID."
+            }
+        }
+    }
+    
+    private func verifiedTransaction(from result: StoreKit.VerificationResult<StoreKit.Transaction>) -> StoreKit.Transaction? {
+        switch result {
+        case .unverified:
+            return nil
+        case .verified(let transaction):
+            return transaction
         }
     }
 }
