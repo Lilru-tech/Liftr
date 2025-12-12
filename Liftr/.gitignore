@@ -33,6 +33,7 @@ fastlane/test_output
 *.swo
 *.tmp
 *.log
+*.storekit
 
 # Secrets
 *.p8

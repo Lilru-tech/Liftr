@@ -155,6 +155,8 @@ struct ProfileView: View {
     @State private var isPurchasingPremium = false
     @State private var premiumError: String?
     private let premiumProductID = "com.liftr.premium.monthly"
+    private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
+    private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
@@ -212,6 +214,9 @@ struct ProfileView: View {
                 await refreshFollowState()
                 await loadProgress()
                 await loadUnreadNotifications()
+                if isOwnProfile {
+                    await loadPremiumProduct()
+                }
             }
         }
         .onChange(of: monthDate) { _, newDate in
@@ -935,7 +940,7 @@ struct ProfileView: View {
             return f.string(from: d)
         }
     }
-    
+    @Environment(\.openURL) private var openURL
     private var settingsView: some View {
         List {
             Section("Premium") {
@@ -989,6 +994,38 @@ struct ProfileView: View {
                                     .font(.footnote.weight(.semibold))
                             }
                             .buttonStyle(.plain)
+                        }
+                        
+                        Divider().opacity(0.15)
+
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let product = premiumProduct {
+                                Text("Subscription: \(product.displayName) (\(product.displayPrice) / month). Auto-renewable. Cancel anytime in your Apple ID settings.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Subscription is auto-renewable. Cancel anytime in your Apple ID settings.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                Button {
+                                    openURL(privacyPolicyURL)
+                                } label: {
+                                    Text("Privacy Policy")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    openURL(termsOfUseURL)
+                                } label: {
+                                    Text("OPEN APPLE EULA")
+                                        .font(.caption.weight(.semibold))
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                         
                         if let msg = premiumError {
@@ -1861,8 +1898,16 @@ struct ProfileView: View {
             premiumError = nil
         }
         do {
+            let bundleID = Bundle.main.bundleIdentifier ?? "nil"
+            print("[StoreKit] Requesting product for id:", premiumProductID, "bundle:", bundleID)
+
             let products = try await Product.products(for: [premiumProductID])
-            print("[StoreKit] products:", products)
+
+            print("[StoreKit] Received products count:", products.count)
+            for p in products {
+                print("[StoreKit] Product id:", p.id, "price:", p.displayPrice)
+            }
+
             await MainActor.run {
                 self.premiumProduct = products.first
             }
