@@ -1115,6 +1115,32 @@ struct ProfileView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
             }
+            Section("Feedback") {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+
+                    NavigationLink {
+                        FeatureRequestsListView()
+                            .gradientBG()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "lightbulb")
+                            Text("Feature requests")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                        }
+                        .padding(12)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
             Section("FAQs") {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)

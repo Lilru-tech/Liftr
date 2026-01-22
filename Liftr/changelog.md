@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.2] - 2026-01-22
+
+### Added
+- **User functionality suggestions**
+  - Added a new suggestions list to track and prioritize user-requested improvements.
+
+- **New exercises**
+  - Expanded the exercise catalog with new entries.
+
+### Fixed
+- **Notifications view**
+  - Fixed layout/behavior issues in the notifications screen.
+
+- **Strength workouts publishing without title**
+  - Fixed a bug where workouts could not be published when the Title field was empty (Title is now optional).
+  
+[1.1.2]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.1.2
+
 ## [1.1.1] - 2025-12-15
 
 ### Added
