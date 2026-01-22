@@ -1,5 +1,39 @@
 import SwiftUI
 
+enum JSONValue: Decodable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.singleValueContainer()
+
+        if c.decodeNil() { self = .null; return }
+        if let v = try? c.decode(Bool.self) { self = .bool(v); return }
+        if let v = try? c.decode(Int.self) { self = .int(v); return }
+        if let v = try? c.decode(Double.self) { self = .double(v); return }
+        if let v = try? c.decode(String.self) { self = .string(v); return }
+        if let v = try? c.decode([String: JSONValue].self) { self = .object(v); return }
+        if let v = try? c.decode([JSONValue].self) { self = .array(v); return }
+
+        throw DecodingError.dataCorruptedError(in: c, debugDescription: "Unsupported JSONValue")
+    }
+
+    var stringValue: String? {
+        switch self {
+        case .string(let s): return s
+        case .int(let i): return String(i)
+        case .double(let d): return String(d)
+        case .bool(let b): return String(b)
+        default: return nil
+        }
+    }
+}
+
 struct NotificationRow: Decodable, Identifiable {
     let id: Int
     let type: String
@@ -8,19 +42,26 @@ struct NotificationRow: Decodable, Identifiable {
     let created_at: Date
     let sent_at: Date?
     let sendError: String?
-    var is_read: Bool?
-    let data: [String: String]?
-    
+    var is_read: Bool
+    let data: [String: JSONValue]?
+
     enum CodingKeys: String, CodingKey {
-        case id
-        case type
-        case title
-        case body
-        case created_at
-        case sent_at
+        case id, type, title, body, created_at, sent_at, is_read, data
         case sendError = "send_error"
-        case is_read
-        case data
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = try c.decode(Int.self, forKey: .id)
+        type = try c.decode(String.self, forKey: .type)
+        title = try c.decode(String.self, forKey: .title)
+        body = try c.decodeIfPresent(String.self, forKey: .body)
+        created_at = try c.decode(Date.self, forKey: .created_at)
+        sent_at = try c.decodeIfPresent(Date.self, forKey: .sent_at)
+        sendError = try c.decodeIfPresent(String.self, forKey: .sendError)
+        is_read = (try? c.decode(Bool.self, forKey: .is_read)) ?? false
+        data = try c.decodeIfPresent([String: JSONValue].self, forKey: .data)
     }
 }
 
@@ -64,7 +105,7 @@ struct NotificationsListView: View {
                                 .task { await markAsRead(n) }   // 👈 ahora aquí
                         } label: {
                             HStack(alignment: .top, spacing: 8) {
-                                if n.is_read != true {
+                                if !n.is_read {
                                     Circle()
                                         .fill(Color.red)
                                         .frame(width: 8, height: 8)
@@ -143,10 +184,9 @@ struct NotificationsListView: View {
     private func destinationView(for n: NotificationRow) -> some View {
         switch n.type {
         case "new_follower":
-            if let followerId = n.data?["follower_id"],
+            if let followerId = n.data?["follower_id"]?.stringValue,
                let uid = UUID(uuidString: followerId) {
-                ProfileView(userId: uid)
-                    .gradientBG()
+                ProfileView(userId: uid).gradientBG()
             } else {
                 Text("User not found")
             }
@@ -156,10 +196,10 @@ struct NotificationsListView: View {
              "comment_reply",
              "comment_like",
              "added_as_participant":
-            if let workoutIdStr = n.data?["workout_id"],
+            if let workoutIdStr = n.data?["workout_id"]?.stringValue,
                let workoutId = Int(workoutIdStr) {
 
-                if let ownerIdStr = n.data?["owner_id"],
+                if let ownerIdStr = n.data?["owner_id"]?.stringValue,
                    let ownerId = UUID(uuidString: ownerIdStr) {
                     WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
                 } else if let fallbackOwner = app.userId {
@@ -222,6 +262,8 @@ struct NotificationsListView: View {
         await MainActor.run { loading = true; error = nil }
         defer { Task { await MainActor.run { loading = false } } }
         
+        var resData: Data = Data()
+
         do {
             let res = try await SupabaseManager.shared.client
                 .from("notifications")
@@ -230,17 +272,31 @@ struct NotificationsListView: View {
                 .order("created_at", ascending: false)
                 .limit(100)
                 .execute()
-            
+
+            resData = res.data
+
             let rows = try JSONDecoder.supabase().decode([NotificationRow].self, from: res.data)
             await MainActor.run { self.notifications = rows }
-            
+
         } catch {
+            if let decodingError = error as? DecodingError {
+                print("[Notifications] DecodingError:", decodingError)
+            } else {
+                print("[Notifications] Error:", error)
+            }
+
+            if resData.isEmpty {
+                print("[Notifications] Raw JSON: <empty>")
+            } else if let jsonString = String(data: resData, encoding: .utf8) {
+                print("[Notifications] Raw JSON:", jsonString)
+            }
+
             await MainActor.run { self.error = error.localizedDescription }
         }
     }
     
     private func markAsRead(_ n: NotificationRow) async {
-        guard n.is_read != true else { return }
+        guard !n.is_read else { return }
 
         struct UpdatePayload: Encodable {
             let is_read: Bool
@@ -249,7 +305,7 @@ struct NotificationsListView: View {
 
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        formatter.timeZone = .current
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
 
         let payload = UpdatePayload(
             is_read: true,
