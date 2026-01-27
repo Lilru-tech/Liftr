@@ -135,6 +135,18 @@ struct ProfileView: View {
     @State private var progressPoints: [ProgressPoint] = []
     @State private var progressLoading = false
     @State private var progressError: String?
+    @State private var caloriesTotal: Double = 0
+    @State private var caloriesAvgPerWorkout: Double = 0
+    @State private var caloriesBestLabel: String = "—"
+    @State private var caloriesBestValue: Double = 0
+    @State private var caloriesStreakDays: Int = 0
+    @State private var caloriesPerMinute: Double = 0
+    @State private var scoreTotal: Double = 0
+    @State private var scoreAvgPerWorkout: Double = 0
+    @State private var scoreBestLabel: String = "—"
+    @State private var scoreBestValue: Double = 0
+    @State private var scoreStreakDays: Int = 0
+    @State private var scorePerMinute: Double = 0
     @State private var myLevel: Int = 1
     @State private var myXP: Int64 = 0
     @State private var nextLevelXP: Int64 = 120
@@ -278,6 +290,7 @@ struct ProfileView: View {
                     Picker("Metric", selection: $progressMetric) {
                         Text("Workouts").tag(ProgressMetric.workouts)
                         Text("Score").tag(ProgressMetric.score)
+                        Text("Calories").tag(ProgressMetric.calories)
                     }
                     .pickerStyle(.segmented)
                 }
@@ -337,6 +350,155 @@ struct ProfileView: View {
                 Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
                 
             } else {
+                if progressSubtab == .activity && progressMetric == .calories {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(.white.opacity(0.18), lineWidth: 0.8)
+                            )
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Calories summary")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(progressRange == .week ? "Week" : (progressRange == .month ? "Month" : "Year"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Total")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(Int(caloriesTotal.rounded())) kcal")
+                                        .font(.title3.weight(.bold))
+                                        .monospacedDigit()
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Avg / workout")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(Int(caloriesAvgPerWorkout.rounded())) kcal")
+                                        .font(.title3.weight(.bold))
+                                        .monospacedDigit()
+                                }
+                            }
+
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Best day")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(caloriesBestValue > 0 ? "\(caloriesBestLabel) · \(Int(caloriesBestValue.rounded())) kcal" : "—")
+                                        .font(.footnote.weight(.semibold))
+                                        .monospacedDigit()
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text("Streak")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(progressRange == .year ? "—" : "\(caloriesStreakDays)d")
+                                        .font(.footnote.weight(.semibold))
+                                        .monospacedDigit()
+                                }
+                            }
+
+                            if caloriesPerMinute > 0 {
+                                Text("Efficiency: \(String(format: "%.2f", caloriesPerMinute)) kcal/min")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                        .padding(12)
+                    }
+                    .padding(.horizontal)
+                }
+                
+                if progressSubtab == .activity && progressMetric == .score {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .stroke(.white.opacity(0.18), lineWidth: 0.8)
+                            )
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("Score summary")
+                                    .font(.subheadline.weight(.semibold))
+                                Spacer()
+                                Text(progressRange == .week ? "Week" : (progressRange == .month ? "Month" : "Year"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Total")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(Int(scoreTotal.rounded()))")
+                                        .font(.title3.weight(.bold))
+                                        .monospacedDigit()
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Avg / workout")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("\(Int(scoreAvgPerWorkout.rounded()))")
+                                        .font(.title3.weight(.bold))
+                                        .monospacedDigit()
+                                }
+                            }
+
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Best day")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(scoreBestValue > 0 ? "\(scoreBestLabel) · \(Int(scoreBestValue.rounded()))" : "—")
+                                        .font(.footnote.weight(.semibold))
+                                        .monospacedDigit()
+                                }
+
+                                Spacer()
+
+                                VStack(alignment: .trailing, spacing: 4) {
+                                    Text("Streak")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text(progressRange == .year ? "—" : "\(scoreStreakDays)d")
+                                        .font(.footnote.weight(.semibold))
+                                        .monospacedDigit()
+                                }
+                            }
+
+                            if scorePerMinute > 0 {
+                                Text("Efficiency: \(String(format: "%.2f", scorePerMinute)) score/min")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                        .padding(12)
+                    }
+                    .padding(.horizontal)
+                }
                 let maxY = progressPoints.map { $0.value }.max() ?? 0
                 let yUpper = max(1, maxY * 1.15)
                 let yLower = -yUpper * 0.05
@@ -360,7 +522,11 @@ struct ProfileView: View {
                 }
                 .chartYAxisLabel(
                     progressSubtab == .activity
-                    ? (progressMetric == .workouts ? "Workouts" : "Score")
+                    ? (
+                        progressMetric == .workouts ? "Workouts" :
+                        progressMetric == .score ? "Score" :
+                        "kcal"
+                      )
                     : "Avg score"
                 )
                 .chartYScale(domain: yLower...yUpper)
@@ -374,7 +540,7 @@ struct ProfileView: View {
     
     private enum ProgressRange: CaseIterable { case week, month, year }
     
-    private enum ProgressMetric: CaseIterable { case workouts, score }
+    private enum ProgressMetric: CaseIterable { case workouts, score, calories }
     
     private struct ProgressPoint: Identifiable {
         let id = UUID()
@@ -578,6 +744,17 @@ struct ProfileView: View {
                             .gradientBG()
                     } label: {
                         Image(systemName: "trophy.fill")
+                            .font(.subheadline.weight(.bold))
+                            .padding(8)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    
+                    NavigationLink {
+                        GoalsView(userId: viewingUserId, viewedUsername: username)
+                            .gradientBG()
+                    } label: {
+                        Image(systemName: "target")
                             .font(.subheadline.weight(.bold))
                             .padding(8)
                             .background(.thinMaterial, in: Circle())
@@ -1553,6 +1730,21 @@ struct ProfileView: View {
     private func loadProgress() async {
         guard let uid = viewingUserId else { return }
         await MainActor.run { progressLoading = true; progressError = nil }
+        await MainActor.run {
+            self.caloriesTotal = 0
+            self.caloriesAvgPerWorkout = 0
+            self.caloriesBestLabel = "—"
+            self.caloriesBestValue = 0
+            self.caloriesStreakDays = 0
+            self.caloriesPerMinute = 0
+
+            self.scoreTotal = 0
+            self.scoreAvgPerWorkout = 0
+            self.scoreBestLabel = "—"
+            self.scoreBestValue = 0
+            self.scoreStreakDays = 0
+            self.scorePerMinute = 0
+        }
         defer { Task { await MainActor.run { progressLoading = false } } }
         var cal = Calendar.current
         cal.timeZone = .current
@@ -1578,6 +1770,7 @@ struct ProfileView: View {
         }
         var bucketsCount: [Date: Int] = [:]
         var bucketsScore: [Date: Double] = [:]
+        var bucketsCalories: [Date: Double] = [:]
         var labels: [Date: String] = [:]
         var cursor = start
         for _ in 0..<bucketCount {
@@ -1596,6 +1789,7 @@ struct ProfileView: View {
             }
             bucketsCount[key] = 0
             bucketsScore[key] = 0
+            bucketsCalories[key] = 0
             labels[key] = label
             cursor = cal.date(byAdding: step, value: 1, to: cursor) ?? cursor
         }
@@ -1616,13 +1810,20 @@ struct ProfileView: View {
         do {
             let res = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id,started_at,kind,duration_min")
+                .select("id,started_at,kind,duration_min,calories_kcal,state")
                 .eq("user_id", value: uid.uuidString)
                 .gte("started_at", value: iso.string(from: start))
                 .lt("started_at", value: iso.string(from: end))
                 .execute()
             
-            struct W: Decodable { let id: Int; let started_at: Date?; let kind: String; let duration_min: Int? }
+            struct W: Decodable {
+                let id: Int
+                let started_at: Date?
+                let kind: String
+                let duration_min: Int?
+                let calories_kcal: Decimal?
+                let state: String?
+            }
             let workouts = try JSONDecoder.supabase().decode([W].self, from: res.data)
             let ids = workouts.map { $0.id }
             var scoresByWorkout: [Int: Double] = [:]
@@ -1676,6 +1877,7 @@ struct ProfileView: View {
             
             for w in workouts {
                 guard let d = w.started_at else { continue }
+                if (w.state ?? "published") == "planned" { continue }
                 let key: Date
                 switch step {
                 case .day:
@@ -1688,13 +1890,93 @@ struct ProfileView: View {
                 guard bucketsCount[key] != nil else { continue }
                 bucketsCount[key]! += 1
                 bucketsScore[key]! += scoresByWorkout[w.id] ?? 0
+                let kcal = NSDecimalNumber(decimal: (w.calories_kcal ?? 0)).doubleValue
+                bucketsCalories[key]! += kcal
                 kindCount[w.kind, default: 0] += 1
                 totalMinutes += (durationMinByWorkout[w.id] ?? 0)
+            }
+            let totalKcal = bucketsCalories.values.reduce(0, +)
+            let totalWorkouts = bucketsCount.values.reduce(0, +)
+            let avgKcalPerWorkout = totalWorkouts > 0 ? (totalKcal / Double(totalWorkouts)) : 0
+
+            var bestLabel = "—"
+            var bestVal: Double = 0
+            if let best = bucketsCalories.max(by: { $0.value < $1.value }), best.value > 0 {
+                bestVal = best.value
+                bestLabel = labels[best.key] ?? "—"
+            }
+
+            var streak = 0
+            if step == .day {
+                let ordered = bucketsCalories.keys.sorted()
+                var current = 0
+                for k in ordered.reversed() {
+                    if (bucketsCalories[k] ?? 0) > 0 {
+                        current += 1
+                    } else {
+                        break
+                    }
+                }
+                streak = current
+            }
+
+            let kcalPerMin = totalMinutes > 0 ? (totalKcal / Double(totalMinutes)) : 0
+
+            await MainActor.run {
+                self.caloriesTotal = totalKcal
+                self.caloriesAvgPerWorkout = avgKcalPerWorkout
+                self.caloriesBestLabel = bestLabel
+                self.caloriesBestValue = bestVal
+                self.caloriesStreakDays = streak
+                self.caloriesPerMinute = kcalPerMin
+            }
+            
+            let totalScore = bucketsScore.values.reduce(0, +)
+            let avgScorePerWorkout = totalWorkouts > 0 ? (totalScore / Double(totalWorkouts)) : 0
+
+            var bestScoreLabel = "—"
+            var bestScoreVal: Double = 0
+            if let best = bucketsScore.max(by: { $0.value < $1.value }), best.value > 0 {
+                bestScoreVal = best.value
+                bestScoreLabel = labels[best.key] ?? "—"
+            }
+
+            var scoreStreak = 0
+            if step == .day {
+                let ordered = bucketsScore.keys.sorted()
+                var current = 0
+                for k in ordered.reversed() {
+                    if (bucketsScore[k] ?? 0) > 0 {
+                        current += 1
+                    } else {
+                        break
+                    }
+                }
+                scoreStreak = current
+            }
+
+            let scorePerMin = totalMinutes > 0 ? (totalScore / Double(totalMinutes)) : 0
+
+            await MainActor.run {
+                self.scoreTotal = totalScore
+                self.scoreAvgPerWorkout = avgScorePerWorkout
+                self.scoreBestLabel = bestScoreLabel
+                self.scoreBestValue = bestScoreVal
+                self.scoreStreakDays = scoreStreak
+                self.scorePerMinute = scorePerMin
             }
             if progressSubtab == .activity {
                 let ordered = bucketsCount.keys.sorted()
                 let points: [ProgressPoint] = ordered.map { k in
-                    let val = (progressMetric == .workouts) ? Double(bucketsCount[k] ?? 0) : (bucketsScore[k] ?? 0)
+                    let val: Double
+                    switch progressMetric {
+                    case .workouts:
+                        val = Double(bucketsCount[k] ?? 0)
+                    case .score:
+                        val = bucketsScore[k] ?? 0
+                    case .calories:
+                        val = bucketsCalories[k] ?? 0
+                    }
                     return ProgressPoint(date: k, label: labels[k] ?? "", value: val)
                 }
                 await MainActor.run { self.progressPoints = points }

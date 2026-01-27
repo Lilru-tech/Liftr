@@ -134,6 +134,8 @@ func prettySubtype(from code: String, fallbackCategory: String) -> String {
 struct AchievementsGridView: View {
     let userId: UUID?
     let viewedUsername: String
+    var externalReloadToken: UUID? = nil
+    
     enum LockFilter: String, CaseIterable, Identifiable {
         case all = "All", unlocked = "Unlocked", locked = "Locked"
         var id: String { rawValue }
@@ -178,20 +180,20 @@ struct AchievementsGridView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .top) {
+            Color.clear.frame(height: 8)
+        }
         .sheet(item: $selected) { row in
             AchievementDetailSheet(row: row)
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
         }
         .task { await load() }
-        .refreshable { await recomputeAndReload() }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    Task { await recomputeAndReload() }
-                } label: { Image(systemName: "arrow.clockwise") }
-            }
+        .onChange(of: externalReloadToken) { _, _ in
+            guard externalReloadToken != nil else { return }
+            Task { await recomputeAndReload() }
         }
+        .refreshable { await recomputeAndReload() }
         .onChange(of: lockFilter) { _, _ in }
         .onChange(of: category) { _, _ in }
     }

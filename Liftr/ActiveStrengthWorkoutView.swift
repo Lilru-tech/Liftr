@@ -56,7 +56,15 @@ struct ActiveStrengthWorkoutView: View {
     @State private var performedSetsByExercise: [Int: [PerformedSet]] = [:]
     @State private var showEditSheet = false
     @State private var editRepsText: String = ""
+    @State private var showFinishEarlyConfirm = false
     @State private var editWeightText: String = ""
+    @State private var dragOffsetY: CGFloat = 0
+    @State private var isTransitioningExercise: Bool = false
+    @State private var currentSetIndexByExercise: [Int: Int] = [:]
+    @State private var remainingRestByExercise: [Int: Int] = [:]
+    @State private var isRestingByExercise: [Int: Bool] = [:]
+    @State private var toastMessage: String? = nil
+    private let swipeThreshold: CGFloat = 110
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     private var orderedExercises: [ExerciseRow] {
@@ -103,8 +111,8 @@ struct ActiveStrengthWorkoutView: View {
                             Button("Close") { dismiss() }
                         }
                         .padding()
-                    } else if let ex = currentExercise {
-                        exerciseContent(ex)
+                    } else if currentExercise != nil {
+                        exercisePager()
                     } else {
                         VStack(spacing: 12) {
                             Text("No exercises found")
@@ -114,7 +122,6 @@ struct ActiveStrengthWorkoutView: View {
                         .padding()
                     }
                 }
-                .padding(16)
                 
                 if isSaving {
                     Color.black.opacity(0.4)
@@ -122,6 +129,21 @@ struct ActiveStrengthWorkoutView: View {
                     ProgressView("Saving workout…")
                         .padding(24)
                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                }
+                
+                if let msg = toastMessage {
+                    VStack {
+                        Spacer()
+                        Text(msg)
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay(Capsule().stroke(.white.opacity(0.12), lineWidth: 1))
+                            .padding(.bottom, 22)
+                    }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(2)
                 }
                 
                 if showCountdown {
@@ -178,250 +200,372 @@ struct ActiveStrengthWorkoutView: View {
             remainingRest -= 1
             if remainingRest <= 0 {
                 isResting = false
+                remainingRest = 0
+            }
+
+            if let ex = currentExercise {
+                isRestingByExercise[ex.id] = isResting
+                remainingRestByExercise[ex.id] = remainingRest
             }
         }
         .task { await load() }
     }
     
     @ViewBuilder
-    private func exerciseContent(_ ex: ExerciseRow) -> some View {
+    private func exerciseContent(_ ex: ExerciseRow, isActive: Bool) -> some View {
+        let sets = setsFor(ex)
+        let plannedSets = sets.count
+        let effectiveSetIndex = isActive ? currentSetIndex : 0
+        let extraSets = extraSetsByExercise[ex.id] ?? 0
+        let totalSets = plannedSets + extraSets
+        let currentSet = currentSetFor(ex, setIndex: effectiveSetIndex)
+        let allSetsDone = (totalSets > 0 && currentSet == nil)
+        let isExtraCurrentSet = (effectiveSetIndex + 1) > plannedSets
+        
+        VStack {
+            Spacer(minLength: 0)
+
+            VStack(spacing: 16) {
+                VStack(spacing: 8) {
+                    Text(ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise"))
+                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .multilineTextAlignment(.center)
+
+                    if let notes = ex.notes, !notes.isEmpty {
+                        Text(notes)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+
+                exerciseMainContent(
+                    ex,
+                    currentSet: currentSet,
+                    totalSets: totalSets,
+                    plannedSets: plannedSets,
+                    allSetsDone: allSetsDone,
+                    isExtraCurrentSet: isExtraCurrentSet,
+                    displaySetIndex: effectiveSetIndex
+                )
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(.white.opacity(isActive ? 0.18 : 0.10), lineWidth: 1)
+            )
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    private func currentSetFor(_ ex: ExerciseRow, setIndex: Int) -> SetRow? {
         let sets = setsFor(ex)
         let plannedSets = sets.count
         let extraSets = extraSetsByExercise[ex.id] ?? 0
         let totalSets = plannedSets + extraSets
-        let currentSet = currentSetFor(ex)
-        let allSetsDone = (totalSets > 0 && currentSet == nil)
-        let isExtraCurrentSet = (currentSetIndex + 1) > plannedSets
-        
-        VStack(spacing: 24) {
-            Spacer()
-            
-            if let previous = previousExercise {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Previous:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    
-                    Text(previous.custom_name?.isEmpty == false
-                         ? previous.custom_name!
-                         : (previous.exercise_name ?? "Exercise"))
-                        .font(.subheadline.weight(.semibold))
-                    
-                    let prevSets = setsFor(previous)
-                    if let firstPrev = prevSets.first {
-                        Text("\(firstPrev.reps ?? 0) reps • \(weightStr(firstPrev.weight_kg))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .blur(radius: 3)
-                .opacity(0.8)
-            }
-            
-            VStack(spacing: 8) {
-                Text(ex.custom_name?.isEmpty == false
-                     ? ex.custom_name!
-                     : (ex.exercise_name ?? "Exercise"))
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
-                    .multilineTextAlignment(.center)
-                
-                if let notes = ex.notes, !notes.isEmpty {
-                    Text(notes)
+
+        guard totalSets > 0, setIndex >= 0, setIndex < totalSets else { return nil }
+
+        if setIndex < plannedSets {
+            return sets[setIndex]
+        }
+
+        let sequentialNumber = setIndex + 1
+
+        if let last = sets.last {
+            return SetRow(
+                id: last.id * 1000 + sequentialNumber,
+                workout_exercise_id: last.workout_exercise_id,
+                set_number: sequentialNumber,
+                reps: last.reps,
+                weight_kg: last.weight_kg,
+                rpe: last.rpe,
+                rest_sec: last.rest_sec
+            )
+        }
+
+        return SetRow(
+            id: 9_000_000 + sequentialNumber,
+            workout_exercise_id: ex.id,
+            set_number: sequentialNumber,
+            reps: 10,
+            weight_kg: 0,
+            rpe: nil,
+            rest_sec: 60
+        )
+    }
+    
+    private enum PeekEdge {
+        case top
+        case bottom
+    }
+
+    @ViewBuilder
+    private func exercisePeekCard(_ ex: ExerciseRow, edge: PeekEdge) -> some View {
+        let title = ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise")
+
+        VStack(spacing: 10) {
+            if edge == .bottom { Spacer(minLength: 0) }
+
+            Text(title)
+                .font(.headline.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+
+            Text(edge == .top ? "Next exercise" : "Previous exercise")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            if edge == .top { Spacer(minLength: 0) }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(.white.opacity(0.10), lineWidth: 1)
+        )
+    }
+    
+    @ViewBuilder
+    private func exerciseMainContent(
+        _ ex: ExerciseRow,
+        currentSet: SetRow?,
+        totalSets: Int,
+        plannedSets: Int,
+        allSetsDone: Bool,
+        isExtraCurrentSet: Bool,
+        displaySetIndex: Int
+    ) -> some View {
+
+        if let s = currentSet {
+            VStack(spacing: 12) {
+                Text("Set \(displaySetIndex + 1) of \(totalSets)")
+                    .font(.headline)
+                    .foregroundStyle(isExtraCurrentSet ? .green : .primary)
+
+                Text("\(s.reps ?? 0) reps")
+                    .font(.title2.weight(.semibold))
+
+                Text(weightStr(s.weight_kg))
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+
+                if let rpe = s.rpe {
+                    Text("Target RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
                 }
             }
             .frame(maxWidth: .infinity)
-            
-            if let s = currentSet {
-                VStack(spacing: 12) {
-                    Text("Set \(currentSetIndex + 1) of \(totalSets)")
-                        .font(.headline)
-                        .foregroundStyle(isExtraCurrentSet ? .green : .primary)
-                    
-                    Text("\(s.reps ?? 0) reps")
-                        .font(.title2.weight(.semibold))
-                    
-                    Text(weightStr(s.weight_kg))
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                    
-                    if let rpe = s.rpe {
-                        Text("Target RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+            .padding(20)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+
+            Button {
+                editRepsText = "\(s.reps ?? 0)"
+                if let w = s.weight_kg {
+                    editWeightText = String(format: "%.1f", NSDecimalNumber(decimal: w).doubleValue)
+                } else {
+                    editWeightText = ""
                 }
-                .frame(maxWidth: .infinity)
-                .padding(20)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
-                
-                Button {
-                    editRepsText = "\(s.reps ?? 0)"
-                    if let w = s.weight_kg {
-                        editWeightText = String(
-                            format: "%.1f",
-                            NSDecimalNumber(decimal: w).doubleValue
-                        )
-                    } else {
-                        editWeightText = ""
-                    }
-                    showEditSheet = true
-                } label: {
-                    Text("Edit reps & weight")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 36)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Color.accentColor, lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-                
-            } else if allSetsDone {
-                VStack(spacing: 8) {
-                    Text("All sets completed ✅")
-                        .font(.headline)
-                    Text("Great job! Move on when ready.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(20)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
-            } else {
-                Text("No sets configured.")
+                showEditSheet = true
+            } label: {
+                Text("Edit reps & weight")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 36)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.accentColor, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+
+        } else if allSetsDone {
+            VStack(spacing: 8) {
+                Text("All sets completed ✅")
+                    .font(.headline)
+                Text("Great job! Move on when ready.")
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
-            
-            if let s = currentSet, (s.rest_sec ?? 0) > 0 {
-                VStack(spacing: 12) {
-                    if isResting {
-                        Text("Rest")
-                            .font(.headline)
-                        Text("\(remainingRest)s")
-                            .font(.system(size: 36, weight: .bold, design: .rounded))
-                        
-                        Button("Skip rest") {
-                            isResting = false
-                            remainingRest = 0
-                        }
-                        .buttonStyle(.bordered)
-                    } else {
-                        Button {
-                            completeCurrentSet()
-                            startRest(for: s)
-                        } label: {
-                            Text("Rest \(s.rest_sec ?? 0)s")
-                                .font(.headline)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .foregroundColor(.white)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .fill(Color.accentColor)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            }
-            
-            if allSetsDone {
-                VStack(spacing: 12) {
-                    Button {
+            .frame(maxWidth: .infinity)
+            .padding(20)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        } else {
+            Text("No sets configured yet. Add at least 1 set to start.")
+                .foregroundStyle(.secondary)
+        }
+        
+        let isActiveExercise = (currentExercise?.id == ex.id)
+        let lockRestActions = isResting && isActiveExercise && !allSetsDone
+
+        if let s = currentSet, (s.rest_sec ?? 0) > 0 {
+            VStack(spacing: 12) {
+                if isResting {
+                    Text("Rest")
+                        .font(.headline)
+                    Text("\(remainingRest)s")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+
+                    Button("Skip rest") {
+                        isResting = false
+                        remainingRest = 0
                         if let ex = currentExercise {
-                            addExtraSet(for: ex)
+                            isRestingByExercise[ex.id] = false
+                            remainingRestByExercise[ex.id] = 0
                         }
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    Button {
+                        completeCurrentSet()
+                        startRest(for: s)
                     } label: {
-                        Text("Add another set")
-                            .font(.subheadline.weight(.semibold))
+                        Text("Rest \(s.rest_sec ?? 0)s")
+                            .font(.headline)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 44)
+                            .frame(height: 48)
+                            .foregroundColor(.white)
                             .background(
                                 RoundedRectangle(cornerRadius: 14)
-                                    .stroke(Color.accentColor, lineWidth: 1)
+                                    .fill(Color.accentColor)
                             )
                     }
                     .buttonStyle(.plain)
-                    
-                    if nextExercise != nil {
-                        Button {
-                            goToNextExercise()
-                        } label: {
-                            Text("Next exercise")
-                                .font(.headline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 54)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 18)
-                                        .fill(Color.accentColor)
-                                )
-                                .foregroundColor(.white)
-                        }
-                        .buttonStyle(.plain)
-                    } else {
-                        Button {
-                            Task {
-                                await saveAndFinishWorkout()
-                            }
-                        } label: {
-                            HStack(spacing: 8) {
-                                if isSaving {
-                                    ProgressView()
-                                        .progressViewStyle(.circular)
-                                }
-                                Text(isSaving ? "Saving workout…" : "Finish workout")
-                                    .font(.headline.weight(.semibold))
-                            }
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        
+        if allSetsDone && isActiveExercise && isResting && remainingRest > 0 {
+            VStack(spacing: 12) {
+                Text("Rest")
+                    .font(.headline)
+                Text("\(remainingRest)s")
+                    .font(.system(size: 36, weight: .bold, design: .rounded))
+
+                Button("Skip rest") {
+                    isResting = false
+                    remainingRest = 0
+                    isRestingByExercise[ex.id] = false
+                    remainingRestByExercise[ex.id] = 0
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        
+        VStack(spacing: 10) {
+            Button {
+                ensureBaseSetExists(for: ex)
+                addExtraSet(for: ex)
+                withAnimation { showToast("Added 1 set") }
+            } label: {
+                Text("Add set")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.accentColor, lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(isSaving || lockRestActions)
+            .opacity((isSaving || lockRestActions) ? 0.45 : 1)
+
+            Button {
+                removeOneSet(for: ex)
+            } label: {
+                Text("Remove set")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Color.red.opacity(0.75), lineWidth: 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(isResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex))
+            .opacity((isResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex)) ? 0.45 : 1)
+        }
+        
+        if allSetsDone {
+            VStack(spacing: 12) {
+                if nextExercise != nil {
+                    Button {
+                        goToNextExercise()
+                    } label: {
+                        Text("Next exercise")
+                            .font(.headline.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .frame(height: 54)
                             .background(
                                 RoundedRectangle(cornerRadius: 18)
-                                    .fill(Color.green.gradient)
+                                    .fill(Color.accentColor)
                             )
                             .foregroundColor(.white)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        Task { await saveAndFinishWorkout() }
+                    } label: {
+                        HStack(spacing: 8) {
+                            if isSaving {
+                                ProgressView().progressViewStyle(.circular)
+                            }
+                            Text(isSaving ? "Saving workout…" : "Finish workout")
+                                .font(.headline.weight(.semibold))
                         }
-                        .buttonStyle(.plain)
-                        .disabled(isSaving)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 54)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(Color.green.gradient)
+                        )
+                        .foregroundColor(.white)
                     }
+                    .buttonStyle(.plain)
+                    .disabled(isSaving)
                 }
             }
-            
-            if let next = nextExercise {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Next:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(next.custom_name?.isEmpty == false
-                         ? next.custom_name!
-                         : (next.exercise_name ?? "Exercise"))
-                        .font(.subheadline.weight(.semibold))
-                    
-                    let nextSets = setsFor(next)
-                    if let firstSet = nextSets.first {
-                        Text("\(firstSet.reps ?? 0) reps • \(weightStr(firstSet.weight_kg))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .blur(radius: 3)
-                .opacity(0.8)
+        }
+        if nextExercise == nil && !allSetsDone {
+            Button {
+                showFinishEarlyConfirm = true
+            } label: {
+                Text("Finish workout")
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(Color.green.gradient)
+                    )
+                    .foregroundColor(.white)
             }
-            
-            Spacer()
+            .buttonStyle(.plain)
+            .disabled(isSaving)
+            .alert("Finish workout early?", isPresented: $showFinishEarlyConfirm) {
+                Button("Finish", role: .destructive) {
+                    Task { await saveAndFinishWorkout() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You haven't completed all planned sets. The workout will be saved with only the sets you actually performed.")
+            }
         }
     }
-        
+            
     private func setsFor(_ ex: ExerciseRow) -> [SetRow] {
         let configs = setsByExercise[ex.id] ?? []
         var expanded: [SetRow] = []
@@ -429,7 +573,7 @@ struct ActiveStrengthWorkoutView: View {
         let orderedConfigs = configs.sorted { $0.id < $1.id }
         
         for config in orderedConfigs {
-            let count = max(config.set_number, 1)
+            let count = max(config.set_number, 0)
             
             for _ in 0..<count {
                 let sequentialNumber = expanded.count + 1
@@ -452,45 +596,30 @@ struct ActiveStrengthWorkoutView: View {
     }
     
     private func currentSetFor(_ ex: ExerciseRow) -> SetRow? {
-        let sets = setsFor(ex)
-        let plannedSets = sets.count
-        let extraSets = extraSetsByExercise[ex.id] ?? 0
-        let totalSets = plannedSets + extraSets
-        
-        guard totalSets > 0,
-              currentSetIndex >= 0,
-              currentSetIndex < totalSets
-        else { return nil }
-        
-        if currentSetIndex < plannedSets {
-            return sets[currentSetIndex]
-        }
-        
-        guard let last = sets.last else { return nil }
-        let sequentialNumber = currentSetIndex + 1
-        
-        return SetRow(
-            id: last.id * 1000 + sequentialNumber,
-            workout_exercise_id: last.workout_exercise_id,
-            set_number: sequentialNumber,
-            reps: last.reps,
-            weight_kg: last.weight_kg,
-            rpe: last.rpe,
-            rest_sec: last.rest_sec
-        )
+        currentSetFor(ex, setIndex: currentSetIndex)
     }
     
     private func startRest(for set: SetRow) {
         let sec = set.rest_sec ?? 0
         guard sec > 0 else { return }
+
         remainingRest = sec
         isResting = true
+
+        if let ex = currentExercise {
+            isRestingByExercise[ex.id] = true
+            remainingRestByExercise[ex.id] = sec
+        }
     }
     
     private func completeCurrentSet() {
         guard let ex = currentExercise else { return }
-        let sets = setsFor(ex)
-        guard !sets.isEmpty else { return }
+        var sets = setsFor(ex)
+        if sets.isEmpty {
+            ensureBaseSetExists(for: ex)
+            sets = setsFor(ex)
+            if sets.isEmpty { return }
+        }
         
         if let s = currentSetFor(ex) {
             var list = performedSetsByExercise[ex.id] ?? []
@@ -514,34 +643,320 @@ struct ActiveStrengthWorkoutView: View {
             currentSetIndex = totalSets
         }
         
-        isResting = false
-        remainingRest = 0
+        currentSetIndexByExercise[ex.id] = currentSetIndex
+        isRestingByExercise[ex.id] = isResting
+        remainingRestByExercise[ex.id] = remainingRest
     }
     
     private func addExtraSet(for ex: ExerciseRow) {
         let key = ex.id
+        
         let currentExtra = extraSetsByExercise[key] ?? 0
-        extraSetsByExercise[key] = currentExtra + 1
-        
         let plannedSets = setsFor(ex).count
-        let newTotal = plannedSets + currentExtra + 1
+        let oldTotal = plannedSets + currentExtra
         
-        currentSetIndex = newTotal - 1
-        isResting = false
-        remainingRest = 0
+        extraSetsByExercise[key] = currentExtra + 1
+        let newTotal = oldTotal + 1
+        
+        let isActive = (currentExercise?.id == key)
+        let oldIndex = isActive ? currentSetIndex : (currentSetIndexByExercise[key] ?? 0)
+        let wasDone = (oldTotal > 0 && oldIndex >= oldTotal)
+        
+        if wasDone {
+            let newIndex = newTotal - 1
+            currentSetIndexByExercise[key] = newIndex
+            isRestingByExercise[key] = false
+            remainingRestByExercise[key] = 0
+            
+            if isActive {
+                currentSetIndex = newIndex
+                isResting = false
+                remainingRest = 0
+            }
+        } else {
+            currentSetIndexByExercise[key] = oldIndex
+
+            if isActive {
+                currentSetIndex = oldIndex
+            }
+        }
+    }
+    
+    private func ensureBaseSetExists(for ex: ExerciseRow) {
+        let key = ex.id
+        let planned = setsFor(ex).count
+        if planned > 0 { return }
+
+        let base = SetRow(
+            id: Int.random(in: 1_000_000...9_999_999),
+            workout_exercise_id: ex.id,
+            set_number: 1,
+            reps: 10,
+            weight_kg: 0,
+            rpe: nil,
+            rest_sec: 60
+        )
+        setsByExercise[key] = [base]
+    }
+    
+    private func canRemoveAnySet(for ex: ExerciseRow) -> Bool {
+        let key = ex.id
+        let planned = setsFor(ex).count
+        let extras = extraSetsByExercise[key] ?? 0
+        return (planned + extras) > 0
+    }
+
+    private func removeOneSet(for ex: ExerciseRow) {
+        let key = ex.id
+
+        let extras = extraSetsByExercise[key] ?? 0
+        if extras > 0 {
+            extraSetsByExercise[key] = extras - 1
+        } else {
+            var configs = setsByExercise[key] ?? []
+            guard !configs.isEmpty else {
+                showToast("No sets to remove")
+                return
+            }
+
+            if let idx = configs.indices.reversed().first(where: { configs[$0].set_number > 0 }) {
+                let old = configs[idx]
+                let newCount = max(old.set_number - 1, 0)
+                configs[idx] = SetRow(
+                    id: old.id,
+                    workout_exercise_id: old.workout_exercise_id,
+                    set_number: newCount,
+                    reps: old.reps,
+                    weight_kg: old.weight_kg,
+                    rpe: old.rpe,
+                    rest_sec: old.rest_sec
+                )
+                setsByExercise[key] = configs
+            } else {
+                showToast("No sets to remove")
+                return
+            }
+        }
+
+        let plannedNow = setsFor(ex).count
+        let extrasNow = extraSetsByExercise[key] ?? 0
+        let totalNow = plannedNow + extrasNow
+
+        if var performed = performedSetsByExercise[key], performed.count > totalNow {
+            performed = Array(performed.prefix(totalNow))
+            performedSetsByExercise[key] = performed
+            showToast("Removed 1 set (and adjusted completed sets)")
+        } else {
+            showToast("Removed 1 set")
+        }
+
+        let currentIdxForThisExercise = currentSetIndexByExercise[key] ?? 0
+        var newIdxForThisExercise = currentIdxForThisExercise
+
+        if newIdxForThisExercise > totalNow {
+            newIdxForThisExercise = totalNow
+        } else if totalNow > 0, newIdxForThisExercise == totalNow {
+            newIdxForThisExercise = totalNow - 1
+        } else if totalNow == 0 {
+            newIdxForThisExercise = 0
+        }
+
+        currentSetIndexByExercise[key] = newIdxForThisExercise
+
+        if currentExercise?.id == key {
+            currentSetIndex = newIdxForThisExercise
+        }
+
+        isRestingByExercise[key] = false
+        remainingRestByExercise[key] = 0
+
+        if currentExercise?.id == key {
+            isResting = false
+            remainingRest = 0
+        }
     }
     
     private func goToNextExercise() {
         let ordered = orderedExercises
         guard !ordered.isEmpty else { return }
-        
-        if currentExerciseIndex < ordered.count - 1 {
-            currentExerciseIndex += 1
+        guard currentExerciseIndex < ordered.count - 1 else { return }
+
+        persistStateForCurrentExercise()
+
+        currentExerciseIndex += 1
+
+        if let ex = currentExercise {
+            restoreStateForExercise(ex)
+        } else {
             currentSetIndex = 0
             isResting = false
             remainingRest = 0
+        }
+    }
+    
+    private func goToPreviousExercise() {
+        let ordered = orderedExercises
+        guard !ordered.isEmpty else { return }
+        guard currentExerciseIndex > 0 else { return }
+
+        persistStateForCurrentExercise()
+
+        currentExerciseIndex -= 1
+
+        if let ex = currentExercise {
+            restoreStateForExercise(ex)
         } else {
-            dismiss()
+            currentSetIndex = 0
+            isResting = false
+            remainingRest = 0
+        }
+    }
+
+    private func canSwipeBetweenExercises() -> Bool {
+        if showCountdown { return false }
+        if isSaving { return false }
+        if showEditSheet { return false }
+        if isTransitioningExercise { return false }
+
+        if isResting {
+            guard let ex = currentExercise else { return false }
+            let planned = setsFor(ex).count
+            let extras = extraSetsByExercise[ex.id] ?? 0
+            let total = planned + extras
+            let isDone = (total > 0 && currentSetFor(ex, setIndex: currentSetIndex) == nil)
+            if !isDone { return false }
+        }
+
+        return true
+    }
+    
+    private func canGoNextExercise() -> Bool {
+        currentExerciseIndex < orderedExercises.count - 1
+    }
+
+    private func canGoPreviousExercise() -> Bool {
+        currentExerciseIndex > 0
+    }
+    
+    private func persistStateForCurrentExercise() {
+        guard let ex = currentExercise else { return }
+        currentSetIndexByExercise[ex.id] = currentSetIndex
+        isRestingByExercise[ex.id] = isResting
+        remainingRestByExercise[ex.id] = remainingRest
+    }
+
+    private func restoreStateForExercise(_ ex: ExerciseRow) {
+        currentSetIndex = currentSetIndexByExercise[ex.id] ?? 0
+        isResting = isRestingByExercise[ex.id] ?? false
+        remainingRest = remainingRestByExercise[ex.id] ?? 0
+
+        if remainingRest <= 0 {
+            isResting = false
+            remainingRest = 0
+        }
+    }
+
+    private func exerciseTitle(_ ex: ExerciseRow?) -> String {
+        guard let ex else { return "" }
+        if let custom = ex.custom_name, !custom.isEmpty { return custom }
+        return ex.exercise_name ?? "Exercise"
+    }
+    
+    @ViewBuilder
+    private func exercisePager() -> some View {
+        GeometryReader { geo in
+            let h = geo.size.height
+            let cardHeight = h * 0.68
+            let overlap: CGFloat = 90
+            let verticalInset = max(0, (h - cardHeight) / 2 - overlap / 2)
+            let step = cardHeight - overlap
+            let localThreshold = max(70, step * 0.35)
+
+            ZStack {
+                if let prev = previousExercise {
+                    exerciseContent(prev, isActive: false)
+                        .frame(height: cardHeight)
+                        .offset(y: -step + dragOffsetY)
+                        .opacity(0.65)
+                        .blur(radius: 2)
+                        .scaleEffect(0.97)
+                        .allowsHitTesting(false)
+                }
+
+                if let cur = currentExercise {
+                    exerciseContent(cur, isActive: true)
+                        .frame(height: cardHeight)
+                        .offset(y: dragOffsetY)
+                        .allowsHitTesting(true)
+                }
+
+                if let next = nextExercise {
+                    exerciseContent(next, isActive: false)
+                        .frame(height: cardHeight)
+                        .offset(y: step + dragOffsetY)
+                        .opacity(0.65)
+                        .blur(radius: 2)
+                        .scaleEffect(0.97)
+                        .allowsHitTesting(false)
+                }
+            }
+            .padding(.vertical, verticalInset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                DragGesture()
+                    .onChanged { value in
+                        guard canSwipeBetweenExercises() else { return }
+                        let raw = value.translation.height
+                        dragOffsetY = max(-step, min(step, raw))
+                    }
+                    .onEnded { value in
+                        guard canSwipeBetweenExercises() else {
+                            dragOffsetY = 0
+                            return
+                        }
+
+                        let t = value.translation.height
+
+                        if t <= -localThreshold {
+                            if canGoNextExercise() {
+                                isTransitioningExercise = true
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                    dragOffsetY = -step
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                    goToNextExercise()
+                                    dragOffsetY = 0
+                                    isTransitioningExercise = false
+                                }
+                            } else {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                    dragOffsetY = 0
+                                }
+                            }
+                        } else if t >= localThreshold {
+                            if canGoPreviousExercise() {
+                                isTransitioningExercise = true
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                    dragOffsetY = step
+                                }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                    goToPreviousExercise()
+                                    dragOffsetY = 0
+                                    isTransitioningExercise = false
+                                }
+                            } else {
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                    dragOffsetY = 0
+                                }
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                dragOffsetY = 0
+                            }
+                        }
+                    }
+            )
         }
     }
     
@@ -560,8 +975,6 @@ struct ActiveStrengthWorkoutView: View {
         do {
             for ex in exList {
                 let performedSets = performedMap[ex.id] ?? []
-                guard !performedSets.isEmpty else { continue }
-                
                 var blocks: [(count: Int, template: PerformedSet)] = []
                 var currentTemplate: PerformedSet?
                 var currentCount = 0
@@ -711,8 +1124,10 @@ struct ActiveStrengthWorkoutView: View {
                 self.exercises = exRows
                 self.setsByExercise = byEx
                 self.error = nil
+
                 self.currentExerciseIndex = 0
                 self.currentSetIndex = 0
+
                 self.isResting = false
                 self.remainingRest = 0
             }
@@ -726,5 +1141,14 @@ struct ActiveStrengthWorkoutView: View {
     private func weightStr(_ w: Decimal?) -> String {
         guard let w else { return "0.0 kg" }
         return String(format: "%.1f kg", NSDecimalNumber(decimal: w).doubleValue)
+    }
+    
+    private func showToast(_ msg: String) {
+        toastMessage = msg
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if toastMessage == msg {
+                toastMessage = nil
+            }
+        }
     }
 }

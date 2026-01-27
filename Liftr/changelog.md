@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-01-27
+
+### Added
+- **Goals (Weekly + All-time)**
+  - Users can now create **weekly goals** (Workouts / Calories / Score).
+  - Goals include a **weekly view** to track progress in real time and an **all-time history** to review past goals.
+  - Added an all-time summary to visualize total goals, finished goals, average progress and best performance.
+
+- **Calories tracking**
+  - Workouts now store and display **calories burned** when a workout is completed.
+  - Added **Calories** to the **Profile → Progress** section.
+  - Added **Score summary** in **Profile → Progress** for a clearer overview of performance.
+
+- **Ranking: Calories**
+  - Added a new leaderboard metric based on **Calories**.
+
+### Changed
+- **Active Strength Workout UX**
+  - Users can now move between exercises while an active strength workout is running.
+  - Strength workouts can now be **finished even if not all planned sets are completed**.
+  - Rest timer is now visible after finishing an exercise.
+  - Users can **add/remove sets at any moment**, including during the workout flow.
+
+### Fixed
+- **Achievements deep-link from push notifications**
+  - Fixed a layout issue when opening **Achievements** from a push notification.
+  - Added clear UI indicators to dismiss/close the view.
+
+- **Strength workout creation blocked**
+  - Fixed a bug where users couldn’t add a strength workout unless the “finished hour” was provided.
+  - Strength workouts can now be created with correct validation and without forcing end-time input.
+
+[1.2.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.2.0
+
 ## [1.1.2] - 2026-01-22
 
 ### Added
