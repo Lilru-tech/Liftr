@@ -11,6 +11,16 @@ struct LeaderRow: Decodable, Identifiable {
     let workouts_cnt: Int
 }
 
+struct CaloriesLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_kcal: Decimal
+    let workouts_cnt: Int
+}
+
 struct LevelRankRow: Decodable, Identifiable {
     var id: UUID { user_id }
     let rank: Int
@@ -50,7 +60,10 @@ enum LBKind: String, CaseIterable, Identifiable {
 }
 
 enum LBMetric: String, CaseIterable, Identifiable {
-    case score = "Score", level = "Level", bestWorkout = "Top workouts"
+    case score = "Score"
+    case calories = "Calories"
+    case level = "Level"
+    case bestWorkout = "Top workouts"
     var id: String { rawValue }
 }
 
@@ -78,6 +91,7 @@ final class RankingVM: ObservableObject {
     @Published var rows: [LeaderRow] = []
     @Published var levelRows: [LevelRankRow] = []
     @Published var workoutRows: [WorkoutLeaderRow] = []
+    @Published var kcalRows: [CaloriesLeaderRow] = []
     @Published var loading = false
     @Published var error: String?
     @Published var scope: LBScope = .global
@@ -171,12 +185,45 @@ final class RankingVM: ObservableObject {
         }
     }
     
+    private func fetchCaloriesLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"]     = ajString(scope == .global ? "global" : "friends")
+            params["p_period"]    = ajString(mapPeriod(period))
+            params["p_kind"]      = ajString(mapKind(kind))
+            params["p_limit"]     = ajInt(100)
+            params["p_sex"]       = ajString(sexOpt?.rawValue)
+            params["p_age_band"]  = ajString(mapAge(age))
+
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_calories_leaderboard_v1", params: params)
+                .execute()
+
+            let decoded = try JSONDecoder.supabase().decode([CaloriesLeaderRow].self, from: res.data)
+            await MainActor.run {
+                self.kcalRows = decoded
+                self.rows = []
+                self.levelRows = []
+                self.workoutRows = []
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.kcalRows = []
+            }
+        }
+    }
+    
     private func fetch() async {
         loading = true; error = nil
         defer { loading = false }
         
         if metric == .level {
             await fetchLevelLeaderboard()
+            return
+        }
+        if metric == .calories {
+            await fetchCaloriesLeaderboard()
             return
         }
         if metric == .bestWorkout {
@@ -200,11 +247,13 @@ final class RankingVM: ObservableObject {
             
             let decoded = try JSONDecoder.supabase().decode([LeaderRow].self, from: res.data)
             self.rows = decoded
+            self.kcalRows = []
             self.levelRows = []
             self.workoutRows = []
         } catch {
             self.error = error.localizedDescription
             self.rows = []
+            self.kcalRows = []
         }
     }
 }
@@ -360,6 +409,46 @@ struct RankingView: View {
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
                 
+            } else if vm.metric == .calories {
+                List(vm.kcalRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            Text(kcalString(row.total_kcal))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             } else if vm.metric == .level {
                 List(vm.levelRows) { row in
                     Section {
@@ -455,6 +544,7 @@ struct RankingView: View {
                     .padding(.vertical, 24)
             } else if
                 (vm.metric == .score && vm.rows.isEmpty) ||
+                (vm.metric == .calories && vm.kcalRows.isEmpty) ||
                 (vm.metric == .level && vm.levelRows.isEmpty) ||
                 (vm.metric == .bestWorkout && vm.workoutRows.isEmpty)
             {
@@ -480,6 +570,11 @@ struct RankingView: View {
     private func scoreString(_ d: Decimal) -> String {
         let n = NSDecimalNumber(decimal: d).doubleValue
         return String(format: "%.0f", n)
+    }
+    
+    private func kcalString(_ d: Decimal) -> String {
+        let n = NSDecimalNumber(decimal: d).doubleValue
+        return "\(Int(n.rounded())) kcal"
     }
     
     private func periodLabel(_ p: LBPeriod) -> String {

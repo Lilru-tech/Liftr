@@ -12,6 +12,7 @@ final class AppState: ObservableObject {
         case followerProfile(userId: UUID)
         case workout(workoutId: Int, ownerId: UUID?)
         case achievements
+        case goals(userId: UUID)
     }
     
     @Published var notificationDestination: NotificationDestination = .none
@@ -126,6 +127,13 @@ final class AppState: ObservableObject {
             
         case "achievement_unlocked":
             notificationDestination = .achievements
+            
+        case "goal_completed", "goal_almost_done":
+            if let uid = self.userId {
+                notificationDestination = .goals(userId: uid)
+            } else {
+                notificationDestination = .none
+            }
             
         default:
             notificationDestination = .none

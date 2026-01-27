@@ -41,7 +41,7 @@ struct WorkoutCardBackground: View {
 
 func scorePill(score: Double, kind: String) -> some View {
     let t = workoutTint(for: kind)
-    return Text(String(format: "%.0f", score))
+    return Text("⭐️ " + String(format: "%.0f", score))
         .font(.subheadline.weight(.semibold))
         .padding(.vertical, 6)
         .padding(.horizontal, 10)

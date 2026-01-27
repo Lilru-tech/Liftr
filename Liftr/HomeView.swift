@@ -27,6 +27,7 @@ struct HomeView: View {
         let state: String
         let started_at: Date?
         let ended_at: Date?
+        let calories_kcal: Decimal?
         let sport_sessions: [SportSessionRow]?
         let cardio_sessions: [CardioSessionRow]?
         
@@ -80,6 +81,7 @@ struct HomeView: View {
         let username: String
         let avatarURL: String?
         let score: Double?
+        let caloriesKcal: Double?
         let likeCount: Int
         let isLiked: Bool
         let participantIds: [UUID]
@@ -95,6 +97,7 @@ struct HomeView: View {
             hasher.combine(username)
             hasher.combine(avatarURL ?? "")
             hasher.combine(score ?? -1)
+            hasher.combine(caloriesKcal ?? -1)
             hasher.combine(likeCount)
             hasher.combine(isLiked)
             hasher.combine(participantIds.count)
@@ -111,6 +114,7 @@ struct HomeView: View {
             lhs.username == rhs.username &&
             (lhs.avatarURL ?? "") == (rhs.avatarURL ?? "") &&
             (lhs.score ?? -1) == (rhs.score ?? -1) &&
+            (lhs.caloriesKcal ?? -1) == (rhs.caloriesKcal ?? -1) &&
             lhs.likeCount == rhs.likeCount &&
             lhs.isLiked == rhs.isLiked &&
             lhs.participantIds.count == rhs.participantIds.count &&
@@ -132,18 +136,130 @@ struct HomeView: View {
     @State private var todayCount = 0
     @State private var todayMinutes = 0
     @State private var todayPoints = 0
+    @State private var todayKcal = 0
     @State private var streakDays = 0
     @State private var weekWorkouts = 0
     @State private var weekPoints = 0
+    @State private var weekKcal = 0
     @State private var recentPRs: [PRRow] = []
     @State private var weeklyTop: [(user: ProfileRow, points: Int)] = []
     @State private var monthSummary: MonthSummary?
     @State private var strongestWeekPtsMTD = 0
+    @State private var strongestWeekKcalMTD = 0
     @State private var bestSportScore = 0
+    @State private var showGoals = false
     @State private var bestSportLabel = ""
     @State private var shareItem: ShareItem?
+    @AppStorage("homeCollapseData") private var collapseData = false
+    @AppStorage("homeCollapseModules") private var collapseModules = false
+    @AppStorage("homeCollapseToday") private var collapseToday = false
+    @AppStorage("homeCollapseStreak") private var collapseStreak = false
+    @AppStorage("homeCollapseInsights") private var collapseInsights = false
+    @AppStorage("homeCollapseGoals") private var collapseGoals = false
+    @AppStorage("homeCollapseMonthly") private var collapseMonthly = false
     
     private let highlightsInsertIndex = 5
+    
+    private func metricChip(_ text: String) -> some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.18)))
+    }
+    
+    private var hasAnyModule: Bool {
+        todayCount > 0
+        || weekWorkouts > 0
+        || (strongestWeekPtsMTD > 0 || bestSportScore > 0)
+    }
+    
+    private var collapsedModulesPill: some View {
+        Button {
+            withAnimation(.easeInOut) { setAllCollapsed(false) }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "chart.bar.fill")
+                    .foregroundStyle(.secondary)
+
+                Text("Data")
+                    .font(.subheadline.weight(.semibold))
+
+                Spacer()
+                
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var expandedModulesPanel: some View {
+        if hasAnyModule {
+            VStack(spacing: 10) {
+
+                if todayCount > 0 {
+                    TodaySummaryCard(
+                        count: todayCount,
+                        minutes: todayMinutes,
+                        points: todayPoints,
+                        kcal: todayKcal
+                    )
+                }
+
+                if weekWorkouts > 0 {
+                    StreakWeekCard(
+                        streak: streakDays,
+                        weekWorkouts: weekWorkouts,
+                        weekPoints: weekPoints,
+                        weekKcal: weekKcal
+                    )
+                }
+
+                if strongestWeekPtsMTD > 0 || bestSportScore > 0 {
+                    InsightsRow(
+                        strongestWeekPts: strongestWeekPtsMTD,
+                        strongestWeekKcal: strongestWeekKcalMTD,
+                        bestSportScore: bestSportScore,
+                        bestSportLabel: bestSportLabel
+                    )
+                }
+            }
+            .padding(.trailing, 44)
+            .overlay(alignment: .topTrailing) {
+                Button {
+                    withAnimation(.easeInOut) { setAllCollapsed(true) }
+                } label: {
+                    Image(systemName: "chevron.up")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(6)
+            }
+        } else {
+            EmptyView()
+        }
+    }
+    
+    private func setAllCollapsed(_ collapsed: Bool) {
+        collapseModules  = collapsed
+        collapseData     = collapsed
+        collapseToday    = collapsed
+        collapseStreak   = collapsed
+        collapseInsights = collapsed
+        collapseGoals    = collapsed
+        collapseMonthly  = collapsed
+    }
     
     var body: some View {
         VStack(spacing: 8) {
@@ -155,15 +271,18 @@ struct HomeView: View {
                 .padding(.horizontal)
                 
                 VStack(spacing: 6) {
-                    if todayCount > 0 {
-                        TodaySummaryCard(count: todayCount, minutes: todayMinutes, points: todayPoints)
+                    if hasAnyModule {
+                        CollapsibleCard(
+                            isCollapsed: collapseModules,
+                            onToggle: {
+                                withAnimation(.easeInOut) {
+                                    setAllCollapsed(!collapseModules)
+                                }
+                            },
+                            collapsed: { collapsedModulesPill },
+                            expanded: { expandedModulesPanel }
+                        )
                     }
-                    if weekWorkouts > 0 {
-                        StreakWeekCard(streak: streakDays, weekWorkouts: weekWorkouts, weekPoints: weekPoints)
-                    }
-                    InsightsRow(strongestWeekPts: strongestWeekPtsMTD,
-                                bestSportScore: bestSportScore,
-                                bestSportLabel: bestSportLabel)
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 2)
@@ -173,16 +292,95 @@ struct HomeView: View {
                         ProgressView().frame(maxWidth: .infinity)
                     }
                     
+                    if !collapseModules {
                     if let summary = monthSummary, summary.workouts > 0 {
-                        MonthlySummaryCard(
-                            summary: summary,
-                            onShare: { image in
-                                self.shareItem = ShareItem(image: image)
+                        if collapseMonthly {
+                            Button {
+                                withAnimation(.easeInOut) { collapseMonthly = false }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "calendar")
+                                        .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(DateFormatter().monthSymbols[(max(1, summary.month)-1) % 12]) \(summary.year) summary")
+                                            .font(.subheadline.weight(.semibold))
+                                        Text("\(summary.totalScore) pts")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(14)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
                             }
-                        )
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
+                            .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                        } else {
+                            MonthlySummaryCard(
+                                summary: summary,
+                                onShare: { image in
+                                    self.shareItem = ShareItem(image: image)
+                                }
+                            )
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowBackground(Color.clear)
+                        }
                     }
+                }
+                    
+                    CollapsibleCard(
+                        isCollapsed: collapseGoals,
+                        onToggle: {
+                            withAnimation(.easeInOut) {
+                                collapseGoals.toggle()
+                                if !collapseGoals {
+                                    collapseMonthly = true
+                                    collapseToday = true
+                                    collapseStreak = true
+                                    collapseInsights = true
+                                }
+                            }
+                        },
+                        collapsed: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "target")
+                                    .foregroundStyle(.secondary)
+                                Text("Weekly goals")
+                                    .font(.subheadline.weight(.semibold))
+                            }
+                            .padding(12)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+                        },
+                        expanded: {
+                            Button {
+                                showGoals = true
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "target")
+                                        .font(.headline.weight(.semibold))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Weekly goals")
+                                            .font(.subheadline.weight(.semibold))
+                                        Text("Track your objectives and stay consistent")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(12)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    )
+                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .listRowBackground(Color.clear)
                     
                     ForEach(feed.indices, id: \.self) { i in
                         let item = feed[i]
@@ -291,6 +489,7 @@ struct HomeView: View {
                         state: (ui["state"] as? String) ?? old.workout.state,
                         started_at: startedAt ?? old.workout.started_at,
                         ended_at: endedAt ?? old.workout.ended_at,
+                        calories_kcal: old.workout.calories_kcal,
                         sport_sessions: old.workout.sport_sessions,
                         cardio_sessions: old.workout.cardio_sessions
                     )
@@ -302,6 +501,7 @@ struct HomeView: View {
                             username: old.username,
                             avatarURL: old.avatarURL,
                             score: newScore ?? old.score,
+                            caloriesKcal: old.caloriesKcal,
                             likeCount: old.likeCount,
                             isLiked: old.isLiked,
                             participantIds: old.participantIds,
@@ -343,6 +543,10 @@ struct HomeView: View {
         .onChange(of: filter) { _, _ in Task { await reloadAll() } }
         .sheet(item: $shareItem) { item in
             ShareSheet(items: [item.image])
+        }
+        .navigationDestination(isPresented: $showGoals) {
+            GoalsView(userId: app.userId, viewedUsername: "You")
+                .gradientBG()
         }
     }
     
@@ -427,7 +631,7 @@ struct HomeView: View {
             let idsCSV = allIds.map { $0.uuidString }.joined(separator: ",")
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
+                .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
                 .or("user_id.eq.\(me.uuidString),and(user_id.in.(\(idsCSV)),state.neq.planned)")
             
             if filter != .all {
@@ -508,6 +712,7 @@ struct HomeView: View {
                     username: ownerProf?.username ?? (w.user_id == me ? "You" : "—"),
                     avatarURL: ownerProf?.avatar_url,
                     score: scoresDict[w.id],
+                    caloriesKcal: w.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue },
                     likeCount: likeCountByWorkout[w.id] ?? 0,
                     isLiked: likedByMe.contains(w.id),
                     participantIds: pIds,
@@ -540,7 +745,7 @@ struct HomeView: View {
         do {
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
+                .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
                 .eq("id", value: id)
                 .single()
                 .execute()
@@ -594,6 +799,7 @@ struct HomeView: View {
                 username: prof?.username ?? (w.user_id == me ? "You" : "—"),
                 avatarURL: prof?.avatar_url,
                 score: score,
+                caloriesKcal: w.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue },
                 likeCount: likeCount,
                 isLiked: isLiked,
                 participantIds: pIds,
@@ -657,7 +863,7 @@ struct HomeView: View {
             
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state")
+                .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal")
                 .eq("user_id", value: me.uuidString)
                 .gte("started_at", value: iso.string(from: start))
                 .lt("started_at", value: iso.string(from: end))
@@ -687,17 +893,23 @@ struct HomeView: View {
             
             var minutes = 0
             var points = 0
+            var kcalTotal = 0
             for w in rows {
                 if let s = w.started_at, let e = w.ended_at {
                     minutes += max(Int(e.timeIntervalSince(s))/60, 0)
                 }
                 if let sc = scoresDict[w.id] { points += Int(sc.rounded()) }
+
+                if let kcal = w.calories_kcal {
+                    kcalTotal += Int(NSDecimalNumber(decimal: kcal).doubleValue.rounded())
+                }
             }
             
             await MainActor.run {
                 self.todayCount = rows.count
                 self.todayMinutes = minutes
                 self.todayPoints = points
+                self.todayKcal = kcalTotal
             }
         } catch { }
     }
@@ -723,7 +935,7 @@ struct HomeView: View {
             let allIds = [me] + followees
             let allRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, started_at, ended_at, kind, title, state")
+                .select("id, user_id, started_at, ended_at, kind, title, state, calories_kcal")
                 .in("user_id", values: allIds.map { $0.uuidString })
                 .gte("started_at", value: iso.string(from: weekStart))
                 .lt("started_at", value: iso.string(from: now))
@@ -733,7 +945,7 @@ struct HomeView: View {
             
             let meRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, started_at, ended_at, kind, title, state")
+                .select("id, user_id, started_at, ended_at, kind, title, state, calories_kcal")
                 .eq("user_id", value: me.uuidString)
                 .gte("started_at", value: iso.string(from: weekStart))
                 .lt("started_at", value: iso.string(from: now))
@@ -761,7 +973,14 @@ struct HomeView: View {
             }
             
             var myWeekPts = 0
-            for w in rowsMe { myWeekPts += Int((scoresDict[w.id] ?? 0).rounded()) }
+            var myWeekKcal = 0
+
+            for w in rowsMe {
+                myWeekPts += Int((scoresDict[w.id] ?? 0).rounded())
+                if let kcal = w.calories_kcal {
+                    myWeekKcal += Int(NSDecimalNumber(decimal: kcal).doubleValue.rounded())
+                }
+            }
             
             var ptsByUser: [UUID: Int] = [:]
             for w in rowsAll { ptsByUser[w.user_id, default: 0] += Int((scoresDict[w.id] ?? 0).rounded()) }
@@ -776,9 +995,10 @@ struct HomeView: View {
             await MainActor.run {
                 self.weekWorkouts = rowsMe.count
                 self.weekPoints   = myWeekPts
+                self.weekKcal     = myWeekKcal
                 self.weeklyTop    = top
             }
-        } catch { /* ignore */ }
+        } catch { }
     }
     
     private func loadStreak() async {
@@ -849,12 +1069,16 @@ struct HomeView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         iso.timeZone = .current
         
-        struct W: Decodable { let id: Int; let started_at: Date? }
+        struct W: Decodable {
+            let id: Int
+            let started_at: Date?
+            let calories_kcal: Decimal?
+        }
         
         do {
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id,started_at")
+                .select("id,started_at,calories_kcal")
                 .eq("user_id", value: me.uuidString)
                 .gte("started_at", value: iso.string(from: monthStart))
                 .lt("started_at", value: iso.string(from: monthEnd))
@@ -904,7 +1128,8 @@ struct HomeView: View {
                 .gte("started_at", value: iso.string(from: prevStart))
                 .lt("started_at", value: iso.string(from: prevEnd))
                 .execute()
-            let prowIds = try JSONDecoder.supabase().decode([W].self, from: pwRes.data).map { $0.id }
+            struct WID: Decodable { let id: Int }
+            let prowIds = try JSONDecoder.supabase().decode([WID].self, from: pwRes.data).map { $0.id }
             
             var prevTotalScore = 0.0
             if !prowIds.isEmpty {
@@ -956,12 +1181,16 @@ struct HomeView: View {
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         iso.timeZone = .current
         
-        struct W: Decodable { let id: Int; let started_at: Date? }
+        struct W: Decodable {
+            let id: Int
+            let started_at: Date?
+            let calories_kcal: Decimal?
+        }
         
         do {
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id,started_at")
+                .select("id,started_at,calories_kcal")
                 .eq("user_id", value: me.uuidString)
                 .gte("started_at", value: iso.string(from: monthStart))
                 .lt("started_at", value: iso.string(from: monthEnd))
@@ -984,16 +1213,28 @@ struct HomeView: View {
                 }
             }
             
-            var byWeek: [String: Double] = [:]
+            var byWeekPts: [String: Double] = [:]
+            var byWeekKcal: [String: Double] = [:]
+
             for w in rows {
                 guard let d = w.started_at else { continue }
                 let comp = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: d)
                 let key = "\(comp.yearForWeekOfYear ?? 0)-W\(comp.weekOfYear ?? 0)"
-                byWeek[key, default: 0] += (scoreByWorkout[w.id] ?? 0)
+
+                byWeekPts[key, default: 0] += (scoreByWorkout[w.id] ?? 0)
+
+                if let kcal = w.calories_kcal {
+                    byWeekKcal[key, default: 0] += NSDecimalNumber(decimal: kcal).doubleValue
+                }
             }
-            
-            let best = Int(byWeek.values.max()?.rounded() ?? 0)
-            await MainActor.run { self.strongestWeekPtsMTD = best }
+
+            let bestPts  = Int(byWeekPts.values.max()?.rounded() ?? 0)
+            let bestKcal = Int(byWeekKcal.values.max()?.rounded() ?? 0)
+
+            await MainActor.run {
+                self.strongestWeekPtsMTD = bestPts
+                self.strongestWeekKcalMTD = bestKcal
+            }
         } catch { }
     }
     
@@ -1091,13 +1332,20 @@ struct HomeView: View {
 
 
 private struct TodaySummaryCard: View {
-    let count: Int; let minutes: Int; let points: Int
+    let count: Int
+    let minutes: Int
+    let points: Int
+    let kcal: Int
+    
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Today").font(.headline)
-                Text("\(count) workouts • \(minutes) min • \(points) pts")
-                    .font(.subheadline).foregroundStyle(.secondary)
+                Text(kcal > 0
+                     ? "\(count) workouts • \(minutes) min • \(points) pts • \(kcal) kcal"
+                     : "\(count) workouts • \(minutes) min • \(points) pts")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
             Spacer()
         }
@@ -1111,13 +1359,18 @@ private struct StreakWeekCard: View {
     let streak: Int
     let weekWorkouts: Int
     let weekPoints: Int
+    let weekKcal: Int
     var body: some View {
         HStack {
             if streak > 0 {
                 Label("\(streak)-day streak", systemImage: "flame.fill")
+            } else {
+                Label("Start streak", systemImage: "flame")
             }
             Spacer()
-            Text("\(weekWorkouts) this week • \(weekPoints) pts")
+            Text(weekKcal > 0
+                 ? "\(weekWorkouts) this week • \(weekPoints) pts • \(weekKcal) kcal"
+                 : "\(weekWorkouts) this week • \(weekPoints) pts")
         }
         .font(.subheadline.weight(.semibold))
         .padding(12)
@@ -1363,13 +1616,18 @@ private struct HighlightsCard: View {
 
 private struct InsightsRow: View {
     let strongestWeekPts: Int
+    let strongestWeekKcal: Int
     let bestSportScore: Int
     let bestSportLabel: String
     
     var body: some View {
         HStack(spacing: 8) {
             if strongestWeekPts > 0 {
-                InsightPill(text: "💪 Strongest week: \(strongestWeekPts) pts")
+                if strongestWeekKcal > 0 {
+                    InsightPill(text: "💪 Strongest week: \(strongestWeekPts) pts • \(strongestWeekKcal) kcal")
+                } else {
+                    InsightPill(text: "💪 Strongest week: \(strongestWeekPts) pts")
+                }
             }
             if bestSportScore > 0 {
                 Spacer(minLength: 8)
@@ -1499,20 +1757,12 @@ private struct HomeFeedCard: View {
                     
                     VStack(alignment: .trailing, spacing: 6) {
                         HStack(spacing: 8) {
+                            if let kcal = item.caloriesKcal, kcal > 0 {
+                                caloriesPill(kcal: kcal)
+                            }
                             if let sc = item.score {
                                 scorePill(score: sc, kind: item.workout.kind)
                             }
-                            
-                            HStack(spacing: 6) {
-                                Image(systemName: item.isLiked ? "heart.fill" : "heart")
-                                    .symbolRenderingMode(.palette)
-                                    .foregroundStyle(item.isLiked ? .red : .secondary)
-                                Text("\(item.likeCount)")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 10)
-                            .background(.ultraThinMaterial, in: Capsule())
                         }
                     }
                 }
@@ -1540,6 +1790,8 @@ private struct HomeFeedCard: View {
                     
                     Spacer()
                     
+                    likesPill()
+                    
                     if item.workout.state == "planned" {
                         HStack(spacing: 4) {
                             Image(systemName: "pencil")
@@ -1558,9 +1810,53 @@ private struct HomeFeedCard: View {
         }
     }
     
+    private func caloriesPill(kcal: Double) -> some View {
+        let value = Int(kcal.rounded())
+        return Text("\(value) 🔥")
+            .font(.subheadline.weight(.semibold))
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.18)))
+    }
+    
+    private func likesPill() -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: item.isLiked ? "heart.fill" : "heart")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(item.isLiked ? .red : .secondary)
+            Text("\(item.likeCount)")
+                .font(.subheadline.weight(.semibold))
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.18)))
+    }
+    
     private func relative(_ d: Date) -> String {
         let f = RelativeDateTimeFormatter(); f.unitsStyle = .short
         return f.localizedString(for: d, relativeTo: Date())
+    }
+}
+
+private struct CollapsibleCard<Expanded: View, Collapsed: View>: View {
+    let isCollapsed: Bool
+    let onToggle: () -> Void
+    let collapsed: () -> Collapsed
+    let expanded: () -> Expanded
+    
+    var body: some View {
+        Group {
+            if isCollapsed {
+                Button(action: onToggle) {
+                    collapsed()
+                }
+                .buttonStyle(.plain)
+            } else {
+                expanded()
+            }
+        }
     }
 }
 

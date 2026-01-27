@@ -33,6 +33,7 @@ struct WorkoutDetailView: View {
         let duration_min: Int?
         let perceived_intensity: String?
         let state: String
+        let calories_kcal: Decimal?
     }
     
     struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
@@ -49,6 +50,7 @@ struct WorkoutDetailView: View {
     @State private var profile: ProfileRow?
     @State private var totalScore: Double?
     @State private var loading = false
+    @State private var totalCalories: Double?
     @State private var error: String?
     @State private var reloadKey = UUID()
     private struct LikeRow: Decodable { let user_id: UUID }
@@ -116,7 +118,7 @@ struct WorkoutDetailView: View {
             await load()
             await loadParticipants()
             await loadLikes()
-            if likeCount > 0 { await loadLikers() }
+            await loadLikers()
             await loadCompareCandidates()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
@@ -272,8 +274,14 @@ struct WorkoutDetailView: View {
                             .lineLimit(2)
                     }
                     Spacer()
-                    if let sc = totalScore {
-                        scorePill(score: sc, kind: w.kind)
+
+                    HStack(spacing: 8) {
+                        if let kcal = totalCalories {
+                            caloriesPill(kcal: kcal)
+                        }
+                        if let sc = totalScore {
+                            scorePill(score: sc, kind: w.kind)
+                        }
                     }
                 }
                 
@@ -319,6 +327,16 @@ struct WorkoutDetailView: View {
         .padding(.horizontal, 8)
         .background(Capsule().fill(Color.yellow.opacity(0.22)))
         .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+    }
+    
+    private func caloriesPill(kcal: Double) -> some View {
+        let value = Int(kcal.rounded())
+        return Text("\(value) 🔥")
+            .font(.subheadline.weight(.semibold))
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(Capsule().stroke(.white.opacity(0.18)))
     }
     
     @ViewBuilder
@@ -489,10 +507,10 @@ struct WorkoutDetailView: View {
             }
         }
         
-        if canEdit || canDuplicate || compareReady {
+        if canEdit || canDuplicate || (compareReady && workout?.state != "planned") {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    if compareReady {
+                    if compareReady, workout?.state != "planned" {
                         if compareCandidates.count > 1 {
                             Button("Compare…") { showComparePicker = true }
                         } else if let only = (compareCandidates.first?.id ?? compareCandidateId) {
@@ -537,7 +555,7 @@ struct WorkoutDetailView: View {
         do {
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("*")
+                .select("id, user_id, kind, title, notes, started_at, ended_at, duration_min, perceived_intensity, state, calories_kcal")
                 .eq("id", value: workoutId)
                 .single()
                 .execute()
@@ -558,11 +576,12 @@ struct WorkoutDetailView: View {
                 .execute()
             let sRows = try JSONDecoder.supabase().decode([ScoreRow].self, from: sRes.data)
             let total = sRows.reduce(0.0) { $0 + NSDecimalNumber(decimal: $1.score).doubleValue }
-            
+
             await MainActor.run {
                 self.workout = w
                 self.profile = p
                 self.totalScore = sRows.isEmpty ? nil : total
+                self.totalCalories = w.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue }
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }

@@ -74,6 +74,7 @@ struct NotificationsListView: View {
     @State private var error: String?
     @State private var deletingAll = false
     @State private var showDeleteAllConfirm = false
+    @State private var achievementsRefreshID = UUID()
     
     var body: some View {
         Group {
@@ -102,7 +103,7 @@ struct NotificationsListView: View {
                     ForEach(notifications) { n in
                         NavigationLink {
                             destinationView(for: n)
-                                .task { await markAsRead(n) }   // 👈 ahora aquí
+                                .task { await markAsRead(n) }
                         } label: {
                             HStack(alignment: .top, spacing: 8) {
                                 if !n.is_read {
@@ -214,10 +215,18 @@ struct NotificationsListView: View {
 
         case "achievement_unlocked":
             if let uid = app.userId {
-                AchievementsGridView(userId: uid, viewedUsername: "")
+                AchievementsFromNotificationView(userId: uid, viewedUsername: "", showsCloseButton: false)
                     .gradientBG()
             } else {
                 Text("Achievements")
+            }
+            
+        case "goal_completed", "goal_almost_done":
+            if let uid = app.userId {
+                GoalsView(userId: uid, viewedUsername: "")
+                    .gradientBG()
+            } else {
+                Text("Goals")
             }
 
         default:
@@ -358,6 +367,8 @@ struct NotificationsListView: View {
         case "comment_reply":         return "Reply"
         case "added_as_participant":  return "Participant"
         case "achievement_unlocked":  return "Achievement"
+        case "goal_completed":        return "Goal"
+        case "goal_almost_done":      return "Goal"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

@@ -68,17 +68,7 @@ struct RootView: View {
                 app.selectedTab = .home
             case .achievements:
                 app.selectedTab = .profile
-            }
-        }
-        .onChange(of: app.notificationDestination) { _, dest in
-            switch dest {
-            case .none:
-                break
-            case .followerProfile:
-                app.selectedTab = .search
-            case .workout:
-                app.selectedTab = .home
-            case .achievements:
+            case .goals:
                 app.selectedTab = .profile
             }
         }
@@ -114,12 +104,20 @@ struct RootView: View {
                 
             case .achievements:
                 if let currentUserId = app.userId {
-                    AchievementsGridView(userId: currentUserId, viewedUsername: "")
-                        .gradientBG()
+                    AchievementsFromNotificationView(
+                        userId: currentUserId,
+                        viewedUsername: "",
+                        showsCloseButton: true
+                    )
+                    .gradientBG()
                 } else {
                     Text("Achievements")
                         .padding()
                 }
+                
+            case .goals(let userId):
+                GoalsView(userId: userId, viewedUsername: "")
+                    .gradientBG()
             }
         }
         .alert("You need to log in", isPresented: $showAuthAlert) {

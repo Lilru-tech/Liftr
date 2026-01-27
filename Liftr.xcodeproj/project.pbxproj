@@ -44,7 +44,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		CF1051A12F22299C00578FFE /* Exceptions for "Liftr" folder in "Liftr" target */ = {
+		CFB022292EE0629000E3E3D7 /* Exceptions for "Liftr" folder in "Liftr" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
@@ -57,7 +57,7 @@
 		CFBC42F12E9F8FA3002E1FCA /* Liftr */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				CF1051A12F22299C00578FFE /* Exceptions for "Liftr" folder in "Liftr" target */,
+				CFB022292EE0629000E3E3D7 /* Exceptions for "Liftr" folder in "Liftr" target */,
 			);
 			path = Liftr;
 			sourceTree = "<group>";
@@ -226,7 +226,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1610;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					CFBC42EE2E9F8FA3002E1FCA = {
 						CreatedOnToolsVersion = 16.1;
@@ -475,7 +475,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -507,7 +507,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1.2;
+				MARKETING_VERSION = 1.2.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
