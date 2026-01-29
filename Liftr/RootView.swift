@@ -70,6 +70,9 @@ struct RootView: View {
                 app.selectedTab = .profile
             case .goals:
                 app.selectedTab = .profile
+
+            case .competitionsHub, .competitionDetail, .competitionReviews:
+                app.selectedTab = .home
             }
         }
         .sheet(
@@ -118,6 +121,24 @@ struct RootView: View {
             case .goals(let userId):
                 GoalsView(userId: userId, viewedUsername: "")
                     .gradientBG()
+                
+            case .competitionsHub:
+                NavigationStack {
+                    CompetitionsHubView()
+                        .gradientBG()
+                }
+
+            case .competitionReviews:
+                NavigationStack {
+                    CompetitionReviewsView()
+                        .gradientBG()
+                }
+
+            case .competitionDetail(let competitionId):
+                NavigationStack {
+                    CompetitionsHubView()
+                        .gradientBG()
+                }
             }
         }
         .alert("You need to log in", isPresented: $showAuthAlert) {

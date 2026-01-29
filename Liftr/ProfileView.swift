@@ -116,6 +116,8 @@ struct ProfileView: View {
     @State private var error: String?
     @State private var banner: Banner?
     @State private var hasUnreadNotifications = false
+    @State private var hasUnreadCompetitions = false
+    @State private var pendingCompetitionsCount: Int = 0
     @State private var pickedItem: PhotosPickerItem?
     @State private var uploadingAvatar = false
     @State private var monthDate = Date()
@@ -169,6 +171,9 @@ struct ProfileView: View {
     private let premiumProductID = "com.liftr.premium.monthly"
     private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
     private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    private var hasAnyUnread: Bool {
+        hasUnreadNotifications || hasUnreadCompetitions
+    }
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
@@ -718,18 +723,47 @@ struct ProfileView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Spacer(minLength: 12)
             VStack(alignment: .trailing, spacing: 8) {
-                HStack(spacing: 8) {
-                    NavigationLink {
-                        NotificationsListView()
-                            .gradientBG()
+                HStack {
+                    Spacer(minLength: 0)
+                    Menu {
+                        NavigationLink {
+                            NotificationsListView()
+                                .gradientBG()
+                        } label: {
+                            Label("Notifications", systemImage: "bell.fill")
+                        }
+
+                        NavigationLink {
+                            RankingView()
+                                .navigationTitle("Level Ranking")
+                        } label: {
+                            Label("Ranking", systemImage: "trophy")
+                        }
+
+                        NavigationLink {
+                            GoalsView(userId: viewingUserId, viewedUsername: username)
+                                .gradientBG()
+                        } label: {
+                            Label("Goals", systemImage: "target")
+                        }
+
+                        if isOwnProfile {
+                            NavigationLink {
+                                CompetitionsHubView()
+                                    .gradientBG()
+                            } label: {
+                                Label("Competitions", systemImage: "figure.fencing")
+                            }
+                        }
+
                     } label: {
                         ZStack(alignment: .topTrailing) {
-                            Image(systemName: "bell.fill")
+                            Image(systemName: "ellipsis")
                                 .font(.subheadline.weight(.bold))
                                 .padding(8)
                                 .background(.thinMaterial, in: Circle())
-                            
-                            if hasUnreadNotifications {
+
+                            if hasAnyUnread {
                                 Circle()
                                     .fill(Color.red)
                                     .frame(width: 10, height: 10)
@@ -738,32 +772,28 @@ struct ProfileView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    
-                    NavigationLink {
-                        AchievementsGridView(userId: viewingUserId, viewedUsername: username)
-                            .gradientBG()
-                    } label: {
-                        Image(systemName: "trophy.fill")
-                            .font(.subheadline.weight(.bold))
-                            .padding(8)
-                            .background(.thinMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    
-                    NavigationLink {
-                        GoalsView(userId: viewingUserId, viewedUsername: username)
-                            .gradientBG()
-                    } label: {
-                        Image(systemName: "target")
-                            .font(.subheadline.weight(.bold))
-                            .padding(8)
-                            .background(.thinMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
                 }
                 
                 if !isOwnProfile {
-                    followButton
+                    VStack(alignment: .trailing, spacing: 8) {
+                        followButton
+
+                        NavigationLink {
+                            if let opponentId = viewingUserId {
+                                CreateCompetitionView(opponentId: opponentId)
+                                    .gradientBG()
+                            } else {
+                                Text("User not found")
+                                    .padding()
+                            }
+                        } label: {
+                            Label("Challenge", systemImage: "figure.fencing")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .accessibilityLabel("Challenge user")
+                    }
                 }
             }
         }
@@ -1403,7 +1433,10 @@ struct ProfileView: View {
                         }
                         
                         Divider().opacity(0.15)
-                        if editingProfile {
+                        Toggle("Show birth date", isOn: $hasBirthDate)
+                            .font(.subheadline.weight(.semibold))
+                        Divider().opacity(0.15)
+                        if editingProfile && hasBirthDate {
                             HStack {
                                 Text("Birth date")
                                 Spacer()
@@ -1510,11 +1543,6 @@ struct ProfileView: View {
     
     private func saveProfileMetrics() async {
         guard let uid = app.userId else { return }
-        struct ProfileMetricsUpdate: Encodable {
-            let height_cm: Int?
-            let weight_kg: Double?
-            let date_of_birth: String?
-        }
         do {
             let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
             let height = Int(hText).flatMap { $0 > 0 ? $0 : nil }
@@ -1525,16 +1553,34 @@ struct ProfileView: View {
             let weight = Double(wText).flatMap { $0 > 0 ? $0 : nil }
             
             let df = DateFormatter()
-            df.timeZone = .current
+            df.timeZone = TimeZone(secondsFromGMT: 0)
             df.dateFormat = "yyyy-MM-dd"
-            let birth = df.string(from: birthDate)
             
-            let update = ProfileMetricsUpdate(height_cm: height, weight_kg: weight, date_of_birth: birth)
-            guard update.height_cm != nil || update.weight_kg != nil || update.date_of_birth != nil else { return }
-            
+            var payload: [String: AnyEncodable] = [:]
+
+            if hText.isEmpty {
+                payload["height_cm"] = AnyEncodable(nilValue: ())
+            } else if let height, height > 0 {
+                payload["height_cm"] = AnyEncodable(height)
+            }
+
+            if wText.isEmpty {
+                payload["weight_kg"] = AnyEncodable(nilValue: ())
+            } else if let weight, weight > 0 {
+                payload["weight_kg"] = AnyEncodable(weight)
+            }
+
+            if hasBirthDate {
+                payload["date_of_birth"] = AnyEncodable(df.string(from: birthDate))
+            } else {
+                payload["date_of_birth"] = AnyEncodable(nilValue: ())
+            }
+
+            guard !payload.isEmpty else { return }
+
             _ = try await SupabaseManager.shared.client
                 .from("profiles")
-                .update(update)
+                .update(payload)
                 .eq("user_id", value: uid.uuidString)
                 .execute()
             await loadProfileHeader()
@@ -1612,7 +1658,7 @@ struct ProfileView: View {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
                 .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth")
-                .eq("user_id", value: uid)
+                .eq("user_id", value: uid.uuidString)
                 .single()
                 .execute()
             

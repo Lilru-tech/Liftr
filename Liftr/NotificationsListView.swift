@@ -229,6 +229,26 @@ struct NotificationsListView: View {
                 Text("Goals")
             }
 
+        case "competition_invite",
+             "competition_accepted",
+             "competition_declined",
+             "competition_cancelled",
+             "competition_expired",
+             "competition_result_win",
+             "competition_result_lose",
+             "competition_workout_accepted",
+             "competition_workout_rejected":
+            NavigationStack {
+                CompetitionsHubView()
+                    .gradientBG()
+            }
+
+        case "competition_workout_pending_review":
+            NavigationStack {
+                CompetitionReviewsView()
+                    .gradientBG()
+            }
+            
         default:
             VStack(spacing: 12) {
                 Text(n.title)
@@ -369,6 +389,16 @@ struct NotificationsListView: View {
         case "achievement_unlocked":  return "Achievement"
         case "goal_completed":        return "Goal"
         case "goal_almost_done":      return "Goal"
+        case "competition_invite":                return "Competition"
+        case "competition_accepted":              return "Competition"
+        case "competition_declined":              return "Competition"
+        case "competition_cancelled":             return "Competition"
+        case "competition_expired":               return "Competition"
+        case "competition_workout_pending_review":return "Workout review"
+        case "competition_workout_accepted":      return "Workout review"
+        case "competition_workout_rejected":      return "Workout review"
+        case "competition_result_win":            return "Result"
+        case "competition_result_lose":           return "Result"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

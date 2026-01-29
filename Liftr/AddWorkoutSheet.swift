@@ -1208,6 +1208,13 @@ struct AddWorkoutSheet: View {
             if let wid = newWorkoutId {
                 await addParticipants(to: wid)
             }
+            if let wid = newWorkoutId,
+               let activeCompetitionId = await CompetitionService.shared.fetchMyActiveCompetitionId() {
+                try? await CompetitionService.shared.submitWorkoutToCompetition(
+                    competitionId: activeCompetitionId,
+                    workoutId: Int(wid)
+                )
+            }
             await showSuccessAndGoHome(publishMode == .add ? "Workout published! 💪" : "Workout planned! 🗓️")
         } catch {
             self.error = error.localizedDescription

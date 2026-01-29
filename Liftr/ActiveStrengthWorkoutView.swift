@@ -380,6 +380,7 @@ struct ActiveStrengthWorkoutView: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
+                    .contentShape(Rectangle())
                     .background(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.accentColor, lineWidth: 1)
@@ -406,7 +407,7 @@ struct ActiveStrengthWorkoutView: View {
         let isActiveExercise = (currentExercise?.id == ex.id)
         let lockRestActions = isResting && isActiveExercise && !allSetsDone
 
-        if let s = currentSet, (s.rest_sec ?? 0) > 0 {
+        if isActiveExercise, let s = currentSet, (s.rest_sec ?? 0) > 0 {
             VStack(spacing: 12) {
                 if isResting {
                     Text("Rest")
@@ -472,6 +473,7 @@ struct ActiveStrengthWorkoutView: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
+                    .contentShape(Rectangle())
                     .background(
                         RoundedRectangle(cornerRadius: 14)
                             .stroke(Color.accentColor, lineWidth: 1)
@@ -488,6 +490,7 @@ struct ActiveStrengthWorkoutView: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
+                    .contentShape(Rectangle())
                     .background(
                         RoundedRectangle(cornerRadius: 14)
                             .stroke(Color.red.opacity(0.75), lineWidth: 1)
@@ -867,19 +870,22 @@ struct ActiveStrengthWorkoutView: View {
         GeometryReader { geo in
             let h = geo.size.height
             let cardHeight = h * 0.68
-            let overlap: CGFloat = 90
-            let verticalInset = max(0, (h - cardHeight) / 2 - overlap / 2)
-            let step = cardHeight - overlap
+            let peekHeight: CGFloat = 86
+            let peekGap: CGFloat = 14
+            let step = cardHeight * 0.86
             let localThreshold = max(70, step * 0.35)
+            let peekOffset = (cardHeight / 2) + (peekHeight / 2) + peekGap
+            let needed = cardHeight + 2 * (peekHeight + peekGap)
+            let verticalInset = max(0, (h - needed) / 2)
 
             ZStack {
                 if let prev = previousExercise {
-                    exerciseContent(prev, isActive: false)
-                        .frame(height: cardHeight)
-                        .offset(y: -step + dragOffsetY)
-                        .opacity(0.65)
-                        .blur(radius: 2)
-                        .scaleEffect(0.97)
+                    exercisePeekCard(prev, edge: .bottom)
+                        .frame(height: peekHeight)
+                        .offset(y: -peekOffset + dragOffsetY * 0.25)
+                        .opacity(0.55)
+                        .blur(radius: 6)
+                        .scaleEffect(0.96)
                         .allowsHitTesting(false)
                 }
 
@@ -891,12 +897,12 @@ struct ActiveStrengthWorkoutView: View {
                 }
 
                 if let next = nextExercise {
-                    exerciseContent(next, isActive: false)
-                        .frame(height: cardHeight)
-                        .offset(y: step + dragOffsetY)
-                        .opacity(0.65)
-                        .blur(radius: 2)
-                        .scaleEffect(0.97)
+                    exercisePeekCard(next, edge: .top)
+                        .frame(height: peekHeight)
+                        .offset(y: peekOffset + dragOffsetY * 0.25)
+                        .opacity(0.55)
+                        .blur(radius: 6)
+                        .scaleEffect(0.96)
                         .allowsHitTesting(false)
                 }
             }

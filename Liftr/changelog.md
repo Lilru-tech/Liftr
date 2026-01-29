@@ -4,6 +4,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-01-29
+
+### Added
+- **User Competitions (1v1)**
+  - Users can **invite other users** to a 1 vs 1 competition.
+  - Invitations create a competition in **pending** state with:
+    - Selected **goal type** and target value
+    - **Start date** (set on accept)
+    - **Invitation expiration** (e.g., 48h) → auto-moves to **expired** if not answered
+  - The sender can **cancel** an invitation any time before it’s accepted.
+  - Anti-spam safeguards:
+    - Limit on **maximum pending invitations** per user (e.g., 5)
+    - Users can **block** others from sending future competition invites
+  - Invited users can:
+    - **Accept** → competition becomes **active** immediately
+    - **Decline** → competition moves to **declined**
+  - Competition goals:
+    - Allowed setups:
+      - **Time limit only**
+      - **One performance goal only**: Calories / Score / Workouts
+      - **Time limit + one performance goal**
+    - Not allowed: **multiple performance goals** in the same competition (e.g., calories + score)
+    - Competition ends when:
+      - The **time limit** is reached, or
+      - The **performance goal** is reached
+    - If both users reach the performance goal **on the same day**, the result is a **draw**
+
+### Changed
+- **Profile quick actions**
+  - Hidden **Notifications**, **Goals**, and **Competitions** icons from the profile header and moved them into a **three-dots (⋯) menu**.
+
+- **Active Strength Workout UI**
+  - Improved focus by making non-current exercise cards **more blurred**.
+  - Rest timer is no longer visible on **other exercises**.
+  - Improved tap behavior so the **full button area** is interactive.
+
+### Fixed
+- **Search results styling**
+  - Fixed the **background color** for results in the search view.
+
+- **Calories calculation**
+  - Fixed an issue that caused calories to be slightly **overestimated**.
+
+[1.3.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.3.0
+
 ## [1.2.0] - 2026-01-27
 
 ### Added

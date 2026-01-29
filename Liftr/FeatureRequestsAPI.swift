@@ -105,5 +105,13 @@ struct AnyEncodable: Encodable {
     init<T: Encodable>(_ value: T) {
         _encode = value.encode
     }
+    
+    init(nilValue: ()) {
+        _encode = { encoder in
+            var container = encoder.singleValueContainer()
+            try container.encodeNil()
+        }
+    }
+    
     func encode(to encoder: Encoder) throws { try _encode(encoder) }
 }
