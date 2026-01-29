@@ -13,6 +13,9 @@ final class AppState: ObservableObject {
         case workout(workoutId: Int, ownerId: UUID?)
         case achievements
         case goals(userId: UUID)
+        case competitionsHub
+        case competitionDetail(competitionId: Int)
+        case competitionReviews
     }
     
     @Published var notificationDestination: NotificationDestination = .none
@@ -133,6 +136,36 @@ final class AppState: ObservableObject {
                 notificationDestination = .goals(userId: uid)
             } else {
                 notificationDestination = .none
+            }
+            
+        case "competition_invite",
+             "competition_accepted",
+             "competition_declined",
+             "competition_cancelled",
+             "competition_expired",
+             "competition_result_win",
+             "competition_result_lose":
+            if let compIdStr = data["competition_id"] as? String,
+               let compId = Int(compIdStr) {
+                notificationDestination = .competitionDetail(competitionId: compId)
+            } else if let compIdInt = data["competition_id"] as? Int {
+                notificationDestination = .competitionDetail(competitionId: compIdInt)
+            } else {
+                notificationDestination = .competitionsHub
+            }
+
+        case "competition_workout_pending_review":
+            notificationDestination = .competitionReviews
+
+        case "competition_workout_accepted",
+             "competition_workout_rejected":
+            if let compIdStr = data["competition_id"] as? String,
+               let compId = Int(compIdStr) {
+                notificationDestination = .competitionDetail(competitionId: compId)
+            } else if let compIdInt = data["competition_id"] as? Int {
+                notificationDestination = .competitionDetail(competitionId: compIdInt)
+            } else {
+                notificationDestination = .competitionsHub
             }
             
         default:
