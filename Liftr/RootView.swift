@@ -97,12 +97,12 @@ struct RootView: View {
                 if let ownerId {
                     WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
                         .gradientBG()
-                } else if let currentUserId = app.userId {
-                    WorkoutDetailView(workoutId: workoutId, ownerId: currentUserId)
-                        .gradientBG()
+                        .onAppear {
+                            print("🧪 [RootView.sheet] presenting WorkoutDetailView workoutId=\(workoutId) ownerId=\(ownerId)")
+                        }
                 } else {
-                    Text("Workout not found")
-                        .padding()
+                    WorkoutFromNotificationLoaderView(workoutId: workoutId)
+                        .gradientBG()
                 }
                 
             case .achievements:
@@ -134,7 +134,7 @@ struct RootView: View {
                         .gradientBG()
                 }
 
-            case .competitionDetail(let competitionId):
+            case .competitionDetail(_):
                 NavigationStack {
                     CompetitionsHubView()
                         .gradientBG()
@@ -146,6 +146,76 @@ struct RootView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Sign up or login to register your workouts.")
+        }
+    }
+}
+
+struct WorkoutFromNotificationLoaderView: View {
+    @EnvironmentObject var app: AppState
+    let workoutId: Int
+
+    @State private var ownerId: UUID?
+    @State private var isLoading = false
+    @State private var errorText: String?
+
+    var body: some View {
+        Group {
+            if let ownerId {
+                WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
+            } else if let errorText {
+                VStack(spacing: 12) {
+                    Text("Workout not found")
+                        .font(.headline)
+                    Text(errorText)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding()
+            } else {
+                VStack(spacing: 12) {
+                    ProgressView("Opening workout…")
+                }
+                .task { await resolve() }
+            }
+        }
+    }
+
+    @MainActor
+    private func resolve() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        print("🧪 [WorkoutLoader] resolving owner for workoutId=\(workoutId) currentUser=\(String(describing: app.userId))")
+
+        struct Row: Decodable { let user_id: UUID }
+
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("workouts")
+                .select("user_id")
+                .eq("id", value: workoutId)
+                .limit(1)
+                .execute()
+
+            if let raw = String(data: res.data, encoding: .utf8) {
+                print("🧪 [WorkoutLoader] raw:", raw)
+            }
+
+            let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+
+            guard let oid = rows.first?.user_id else {
+                errorText = "Workout \(workoutId) returned 0 rows (RLS or deleted)."
+                print("❌ [WorkoutLoader] no rows for workoutId=\(workoutId)")
+                return
+            }
+
+            print("✅ [WorkoutLoader] resolved ownerId=\(oid) workoutId=\(workoutId)")
+            ownerId = oid
+
+        } catch {
+            errorText = error.localizedDescription
+            print("❌ [WorkoutLoader] resolve error:", error)
         }
     }
 }

@@ -147,6 +147,11 @@ struct WorkoutDetailView: View {
         } message: {
             Text("This will permanently delete this workout and its sets.")
         }
+        .alert("No se pudo iniciar el entreno", isPresented: $showErrorAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(alertMessage.isEmpty ? "Error desconocido" : alertMessage)
+        }
         .sheet(isPresented: $showLikesSheet) { LikersSheet(likers: likers)
                 .onAppear { Task { await loadLikers() } }
                 .presentationDetents(Set([.medium, .large]))
@@ -276,8 +281,8 @@ struct WorkoutDetailView: View {
                     Spacer()
 
                     HStack(spacing: 8) {
-                        if let kcal = totalCalories {
-                            caloriesPill(kcal: kcal)
+                        if let kcal = totalCalories, kcal > 0 {
+                            caloriesPill(kcal: kcal, kind: w.kind)
                         }
                         if let sc = totalScore {
                             scorePill(score: sc, kind: w.kind)
@@ -328,17 +333,7 @@ struct WorkoutDetailView: View {
         .background(Capsule().fill(Color.yellow.opacity(0.22)))
         .overlay(Capsule().stroke(Color.white.opacity(0.12)))
     }
-    
-    private func caloriesPill(kcal: Double) -> some View {
-        let value = Int(kcal.rounded())
-        return Text("\(value) 🔥")
-            .font(.subheadline.weight(.semibold))
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(.white.opacity(0.18)))
-    }
-    
+        
     @ViewBuilder
     private func notesBlock(_ notes: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -411,15 +406,28 @@ struct WorkoutDetailView: View {
     
     private var startButtonBar: some View {
         Button {
-            switch workout?.kind.lowercased() {
-            case "strength":
-                showActiveStrength = true
-            case "cardio":
-                showActiveCardio = true
-            case "sport":
-                showActiveSport = true
-            default:
-                break
+            Task {
+                do {
+                    try await setWorkoutStartedNow()
+
+                    await MainActor.run {
+                        switch workout?.kind.lowercased() {
+                        case "strength":
+                            showActiveStrength = true
+                        case "cardio":
+                            showActiveCardio = true
+                        case "sport":
+                            showActiveSport = true
+                        default:
+                            break
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        alertMessage = error.localizedDescription
+                        showErrorAlert = true
+                    }
+                }
             }
         } label: {
             Text("Start")
@@ -805,6 +813,69 @@ struct WorkoutDetailView: View {
         }
     }
     
+    private struct WorkoutStartPatch: Encodable {
+        let started_at: Date
+        let ended_at: Date?
+
+        enum CodingKeys: String, CodingKey {
+            case started_at
+            case ended_at
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(started_at, forKey: .started_at)
+
+            if ended_at == nil {
+                try c.encodeNil(forKey: .ended_at)
+            } else {
+                try c.encode(ended_at, forKey: .ended_at)
+            }
+        }
+    }
+
+    private func setWorkoutStartedNow() async throws {
+        let now = Date()
+        let patch = WorkoutStartPatch(started_at: now, ended_at: nil)
+
+        let res = try await SupabaseManager.shared.client
+            .from("workouts")
+            .update(patch)
+            .eq("id", value: workoutId)
+            .select("id")
+            .execute()
+
+        let body = String(data: res.data, encoding: .utf8) ?? ""
+        let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == "[]" {
+            throw NSError(
+                domain: "StartWorkout",
+                code: 0,
+                userInfo: [NSLocalizedDescriptionKey: "No se actualizó ninguna fila (RLS/policy o workoutId inválido)."]
+            )
+        }
+
+        await MainActor.run {
+            if let w = self.workout {
+                self.workout = WorkoutDetailRow(
+                    id: w.id,
+                    user_id: w.user_id,
+                    kind: w.kind,
+                    title: w.title,
+                    notes: w.notes,
+                    started_at: now,
+                    ended_at: nil,
+                    duration_min: w.duration_min,
+                    perceived_intensity: w.perceived_intensity,
+                    state: w.state,
+                    calories_kcal: w.calories_kcal
+                )
+            }
+        }
+
+        NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
+    }
+    
     private func deleteWorkout() async {
         guard let me = app.userId else { return }
         if deleteBusy { return }
@@ -853,12 +924,24 @@ struct WorkoutDetailView: View {
     private func buildDuplicateDraft() async -> AddWorkoutDraft? {
         guard let base = workout else { return nil }
         
+        let me = app.userId
+
+        let dupStartedAt: Date = {
+            if let me, base.user_id == me { return Date() }
+            return base.started_at ?? Date()
+        }()
+
+        let dupEndedAt: Date? = {
+            if let me, base.user_id == me { return nil }
+            return base.ended_at
+        }()
+
         var draft = AddWorkoutDraft(
             kind: WorkoutKind(rawValue: base.kind) ?? .strength,
             title: base.title ?? "",
             note: base.notes ?? "",
-            startedAt: base.started_at ?? Date(),
-            endedAt: base.ended_at,
+            startedAt: dupStartedAt,
+            endedAt: dupEndedAt,
             perceived: WorkoutIntensity(rawValue: base.perceived_intensity ?? "moderate") ?? .moderate
         )
         
@@ -1868,6 +1951,20 @@ private struct SportDetailBlock: View {
         let max_hr: Int?
     }
     
+    private struct SkiStats: Decodable {
+        let session_id: Int
+        let total_distance_km: Decimal?
+        let runs_count: Int?
+        let max_speed_kmh: Decimal?
+        let avg_speed_kmh: Decimal?
+        let vertical_drop_m: Int?
+        let moving_time_sec: Int?
+        let paused_time_sec: Int?
+        let resort_name: String?
+        let snow_condition: String?
+        let weather: String?
+    }
+    
     @State private var row: SportRow?
     @State private var error: String?
     
@@ -1879,6 +1976,7 @@ private struct SportDetailBlock: View {
     @State private var hk: HockeyStats? = nil
     @State private var rg: RugbyStats? = nil
     @State private var hy: HyroxStats? = nil
+    @State private var sk: SkiStats? = nil
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1890,7 +1988,7 @@ private struct SportDetailBlock: View {
                 if let s = r.duration_sec {
                     info("Duration", durationString(Double(s)))
                 }
-                if let res = r.match_result, !res.isEmpty {
+                if r.sport != "ski", let res = r.match_result, !res.isEmpty {
                     info("Result", res.capitalized)
                 }
                 if sportUsesNumericScore(r.sport),
@@ -2069,6 +2167,26 @@ private struct SportDetailBlock: View {
                     if let v = s.avg_hr                 { info("Avg HR", "\(v) bpm") }
                     if let v = s.max_hr                 { info("Max HR", "\(v) bpm") }
                 }
+                if r.sport == "ski", let s = sk {
+                    Divider().padding(.vertical, 4)
+                    Text("Ski stats").font(.headline)
+                    if let d = s.total_distance_km {
+                        info("Total distance", String(format: "%.2f km", NSDecimalNumber(decimal: d).doubleValue))
+                    }
+                    if let v = s.runs_count { info("Runs", "\(v)") }
+                    if let v = s.max_speed_kmh {
+                        info("Max speed", String(format: "%.1f km/h", NSDecimalNumber(decimal: v).doubleValue))
+                    }
+                    if let v = s.avg_speed_kmh {
+                        info("Avg speed", String(format: "%.1f km/h", NSDecimalNumber(decimal: v).doubleValue))
+                    }
+                    if let v = s.vertical_drop_m { info("Vertical drop", "\(v) m") }
+                    if let t = s.moving_time_sec { info("Moving time", durationString(Double(t))) }
+                    if let t = s.paused_time_sec { info("Paused time", durationString(Double(t))) }
+                    if let v = s.resort_name, !v.isEmpty { info("Resort", v) }
+                    if let v = s.snow_condition, !v.isEmpty { info("Snow", v) }
+                    if let v = s.weather, !v.isEmpty { info("Weather", v) }
+                }
                 
             } else {
                 Text("No sport session linked")
@@ -2098,6 +2216,7 @@ private struct SportDetailBlock: View {
                 row = r
                 fb = nil; bb = nil; rk = nil; vb = nil
                 hb = nil; hk = nil; rg = nil; hy = nil
+                sk = nil
             }
             await loadStats(for: r)
         } catch {
@@ -2208,6 +2327,20 @@ private struct SportDetailBlock: View {
                 let s = try decoder.decode(VolleyballStats.self, from: q.data)
                 await MainActor.run { vb = s }
             } catch { await MainActor.run { vb = nil } }
+            
+        case "ski":
+            do {
+                let q = try await client
+                    .from("ski_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(SkiStats.self, from: q.data)
+                await MainActor.run { sk = s }
+            } catch {
+                await MainActor.run { sk = nil }
+            }
             
         default:
             break

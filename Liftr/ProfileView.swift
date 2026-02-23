@@ -36,6 +36,7 @@ private struct WorkoutRow: Decodable, Identifiable {
     let started_at: Date?
     let ended_at: Date?
     let state: String?
+    let calories_kcal: Decimal?
 }
 
 private struct WorkoutScoreRow: Decodable {
@@ -637,29 +638,7 @@ struct ProfileView: View {
                         .minimumScaleFactor(0.8)
                         .layoutPriority(1)
                         .foregroundStyle(.secondary)
-                    
-                    Spacer(minLength: 8)
-                    
-                    NavigationLink {
-                        RankingView()
-                            .navigationTitle("Level Ranking")
-                    } label: {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "trophy")
-                                Text("Ranking")
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            Image(systemName: "trophy")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Capsule().fill(Color.white.opacity(0.12)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
                 }
                 
                 GeometryReader { geo in
@@ -719,64 +698,10 @@ struct ProfileView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 12)
-            VStack(alignment: .trailing, spacing: 8) {
-                HStack {
-                    Spacer(minLength: 0)
-                    Menu {
-                        NavigationLink {
-                            NotificationsListView()
-                                .gradientBG()
-                        } label: {
-                            Label("Notifications", systemImage: "bell.fill")
-                        }
-
-                        NavigationLink {
-                            RankingView()
-                                .navigationTitle("Level Ranking")
-                        } label: {
-                            Label("Ranking", systemImage: "trophy")
-                        }
-
-                        NavigationLink {
-                            GoalsView(userId: viewingUserId, viewedUsername: username)
-                                .gradientBG()
-                        } label: {
-                            Label("Goals", systemImage: "target")
-                        }
-
-                        if isOwnProfile {
-                            NavigationLink {
-                                CompetitionsHubView()
-                                    .gradientBG()
-                            } label: {
-                                Label("Competitions", systemImage: "figure.fencing")
-                            }
-                        }
-
-                    } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "ellipsis")
-                                .font(.subheadline.weight(.bold))
-                                .padding(8)
-                                .background(.thinMaterial, in: Circle())
-
-                            if hasAnyUnread {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 10, height: 10)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-                
                 if !isOwnProfile {
-                    VStack(alignment: .trailing, spacing: 8) {
+                    HStack(spacing: 10) {
                         followButton
+                            .frame(maxWidth: .infinity)
 
                         NavigationLink {
                             if let opponentId = viewingUserId {
@@ -789,12 +714,73 @@ struct ProfileView: View {
                         } label: {
                             Label("Challenge", systemImage: "figure.fencing")
                                 .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .accessibilityLabel("Challenge user")
                     }
+                    .padding(.top, 8)
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+            VStack(alignment: .trailing, spacing: 8) {
+                Menu {
+                    NavigationLink {
+                        NotificationsListView()
+                            .gradientBG()
+                    } label: {
+                        Label("Notifications", systemImage: "bell.fill")
+                    }
+
+                    NavigationLink {
+                        RankingView()
+                            .navigationTitle("Level Ranking")
+                    } label: {
+                        Label("Ranking", systemImage: "trophy")
+                    }
+
+                    NavigationLink {
+                        AchievementsGridView(userId: viewingUserId, viewedUsername: username)
+                            .gradientBG()
+                            .navigationTitle("@\(username) · Achievements")
+                    } label: {
+                        Label("Achievements", systemImage: "rosette")
+                    }
+
+                    NavigationLink {
+                        GoalsView(userId: viewingUserId, viewedUsername: username)
+                            .gradientBG()
+                    } label: {
+                        Label("Goals", systemImage: "target")
+                    }
+
+                    if isOwnProfile {
+                        NavigationLink {
+                            CompetitionsHubView()
+                                .gradientBG()
+                        } label: {
+                            Label("Competitions", systemImage: "figure.fencing")
+                        }
+                    }
+
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "ellipsis")
+                            .font(.subheadline.weight(.bold))
+                            .padding(8)
+                            .background(.thinMaterial, in: Circle())
+
+                        if hasAnyUnread {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 10, height: 10)
+                                .offset(x: 4, y: -4)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(16)
@@ -1288,6 +1274,12 @@ struct ProfileView: View {
                             Text("Sunset").tag("sunset")
                             Text("Forest").tag("forest")
                             Text("Midnight").tag("midnight")
+                            Text("Lavender").tag("lavender")
+                            Text("Ocean").tag("ocean")
+                            Text("Rose").tag("rose")
+                            Text("Desert").tag("desert")
+                            Text("Berry").tag("berry")
+                            Text("Mono").tag("mono")
                         }
                         .pickerStyle(.menu)
                         .font(.footnote)
@@ -2153,6 +2145,8 @@ struct ProfileView: View {
                 } label: {
                     Text("Unfollow")
                         .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -2162,6 +2156,8 @@ struct ProfileView: View {
                 } label: {
                     Text("Follow")
                         .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -2484,6 +2480,7 @@ private struct DayWorkoutsList: View {
     @EnvironmentObject var app: AppState
     @State private var workouts: [WorkoutRow] = []
     @State private var scores: [Int: Double] = [:]
+    @State private var calories: [Int: Double] = [:]
     @State private var error: String?
     @State private var participated: [WorkoutRow] = []
     @State private var owners: [UUID: ProfileRow] = [:]
@@ -2564,9 +2561,15 @@ private struct DayWorkoutsList: View {
                                             
                                             Spacer()
                                             
-                                            if let sc = scores[w.id] {
-                                                scorePill(score: sc, kind: w.kind)
-                                                    .accessibilityLabel("Score \(scoreString(sc))")
+                                            VStack(alignment: .trailing, spacing: 6) {
+                                                if let sc = scores[w.id] {
+                                                    scorePill(score: sc, kind: w.kind)
+                                                        .accessibilityLabel("Score \(scoreString(sc))")
+                                                }
+                                                if let kcal = calories[w.id] {
+                                                    caloriesPill(kcal: kcal, kind: w.kind)
+                                                        .accessibilityLabel("Calories \(Int(kcal.rounded()))")
+                                                }
                                             }
                                         }
                                         .padding(14)
@@ -2662,6 +2665,7 @@ private struct DayWorkoutsList: View {
         .onChange(of: selectedDay) { _, _ in
             workouts = []
             scores = [:]
+            calories = [:]
             participated = []
         }
     }
@@ -2763,10 +2767,18 @@ private struct DayWorkoutsList: View {
                 }
             }
             
+            let allWorkouts = rowsOwn + rowsPart
+            var caloriesDict: [Int: Double] = [:]
+            for w in allWorkouts {
+                let v = NSDecimalNumber(decimal: (w.calories_kcal ?? 0)).doubleValue
+                if v > 0 { caloriesDict[w.id] = v }
+            }
+            
             await MainActor.run {
                 workouts = rowsOwn
                 participated = rowsPart
                 scores = scoresDict
+                calories = caloriesDict
                 owners = ownerDict
                 workoutParticipants = participantsByWorkout
             }

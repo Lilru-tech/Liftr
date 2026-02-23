@@ -4,6 +4,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-02-23
+
+### Added
+- **ActiveWorkout**
+  - Added **sound + haptics** when the rest timer ends.
+  - Users can now **edit the rest time** during an active workout.
+  - Added guidance copy in **AddWorkoutSheet** to better explain how Active Workouts work.
+
+- **Workouts**
+  - Added **Calories** to workout cards.
+
+- **Compare Workouts**
+  - Added an overall **workout performance indicator**, summarizing how the session performed across all available metrics.
+
+- **Personalization**
+  - Added **6 new background colors**.
+  - Added **Ski** as a supported sport.
+
+### Changed
+- **ActiveWorkout**
+  - Start and finish times are now set automatically:
+    - Tapping **Start** sets the workout **start time**.
+    - Tapping **Finish workout** sets the workout **end time**.
+
+- **Profile**
+  - Removed the **Ranking** quick action icon and moved access into the **⋯ menu**.
+  - Added the **Achievements** shortcut to the **⋯ menu**.
+
+- **Compare Workouts**
+  - Updated the comparison header to show the **workout date** instead of “Yours vs Yours”.
+
+- **Workout duplication**
+  - Duplicating **your own** workout now sets the date to **today** (instead of copying the original date).
+  - Duplicating **another user’s** workout keeps the **original date**, matching their session.
+
+### Fixed
+- **ActiveWorkout**
+  - Fixed the rest timer being **stopped/paused** when the user switched apps.
+  - Fixed long exercise names being **truncated**, ensuring the full exercise name can be read.
+  - Fixed an issue where sets added during an active workout had non-editable **reps / weight / rest time**.
+
+- **Profile**
+  - Fixed the **experience** value not being fully visible.
+
+- **Goals**
+  - Fixed an issue where users couldn’t see **goal history** if they didn’t have a currently ongoing goal.
+
+- **UI**
+  - Fixed **Score** and **Calories** pills being clipped in **HomeView** and **WorkoutDetailView**.
+
+- **Notifications**
+  - Fixed an issue where users saw **their own username** on a workout when opening it from the
+    “added as participant” notification.
+
+[1.4.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.4.0
+
 ## [1.3.0] - 2026-01-29
 
 ### Added
