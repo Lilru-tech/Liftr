@@ -1806,7 +1806,7 @@ private struct HomeFeedCard: View {
                     VStack(alignment: .trailing, spacing: 6) {
                         HStack(spacing: 8) {
                             if let kcal = item.caloriesKcal, kcal > 0 {
-                                caloriesPill(kcal: kcal)
+                                caloriesPill(kcal: kcal, kind: item.workout.kind)
                             }
                             if let sc = item.score {
                                 scorePill(score: sc, kind: item.workout.kind)
@@ -1857,17 +1857,7 @@ private struct HomeFeedCard: View {
             .padding(14)
         }
     }
-    
-    private func caloriesPill(kcal: Double) -> some View {
-        let value = Int(kcal.rounded())
-        return Text("\(value) 🔥")
-            .font(.subheadline.weight(.semibold))
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(.white.opacity(0.18)))
-    }
-    
+        
     private func likesPill() -> some View {
         HStack(spacing: 6) {
             Image(systemName: item.isLiked ? "heart.fill" : "heart")

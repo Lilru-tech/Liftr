@@ -25,9 +25,74 @@ struct CompareWorkoutsView: View {
     @State private var metrics: [ComparableMetric] = []
     @State private var workoutKind: String? = nil
     @State private var bothMine = false
+    @State private var leftLabel: String = "Workout A"
+    @State private var rightLabel: String = "Workout B"
+    @State private var leftUserName: String? = nil
+    @State private var rightUserName: String? = nil
     private static let leftColor  = Color(red: 0.82, green: 0.12, blue: 0.18)
     private static let rightColor = Color(red: 0.02, green: 0.55, blue: 0.32)
 
+    private func includeInOverall(metric: String, kind: String?) -> Bool {
+        let k = (kind ?? "").lowercased()
+        switch k {
+        case "strength":
+            return [
+                "total_volume_kg",
+                "exercises_count",
+                "sets_count",
+                "total_reps",
+                "max_weight_kg",
+                "max_set_volume_kg",
+                "hard_sets_count"
+            ].contains(metric)
+        case "cardio":
+            return ["distance_km", "duration_sec", "elevation_gain_m"].contains(metric)
+        case "sport":
+            return ["score_for", "score_against"].contains(metric)
+        default:
+            return false
+        }
+    }
+
+    private func direction(metric: String) -> Double {
+        switch metric {
+        case "avg_pace_sec_per_km",
+             "split_sec_per_500m",
+             "sec_per_km",
+             "sec_per_500m",
+             "score_against",
+             "hx_penalty_time_sec":
+            return -1.0
+        default:
+            return 1.0
+        }
+    }
+
+    private func clamp(_ x: Double, _ lo: Double, _ hi: Double) -> Double {
+        min(hi, max(lo, x))
+    }
+
+    private var overallPct: Double? {
+        guard !metrics.isEmpty else { return nil }
+        let included = metrics.compactMap { m -> Double? in
+            guard includeInOverall(metric: m.metric, kind: workoutKind) else { return nil }
+            guard let p = m.diffPct else { return nil }
+            let signed = p * direction(metric: m.metric)
+            return clamp(signed, -150, 150)
+        }
+        guard !included.isEmpty else { return nil }
+
+        // Mediana (robusto)
+        let sorted = included.sorted()
+        let mid = sorted.count / 2
+        if sorted.count % 2 == 1 { return sorted[mid] }
+        return (sorted[mid - 1] + sorted[mid]) / 2.0
+    }
+
+    private var overallCount: Int {
+        metrics.filter { includeInOverall(metric: $0.metric, kind: workoutKind) && $0.diffPct != nil }.count
+    }
+    
     var body: some View {
         VStack(spacing: 16) {
             HStack {
@@ -47,10 +112,20 @@ struct CompareWorkoutsView: View {
 
             if let k = workoutKind {
                 HStack(spacing: 6) {
-                    Text(bothMine ? "Yours" : "His/Her").foregroundStyle(CompareWorkoutsView.leftColor)
+                    Text(leftLabel)
+                        .foregroundStyle(CompareWorkoutsView.leftColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
                     Text("vs").foregroundStyle(.secondary)
-                    Text("Yours").foregroundStyle(CompareWorkoutsView.rightColor)
-                    Text("— \(k.capitalized)").foregroundStyle(.secondary)
+
+                    Text(rightLabel)
+                        .foregroundStyle(CompareWorkoutsView.rightColor)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text("— \(k.capitalized)")
+                        .foregroundStyle(.secondary)
                 }
                 .font(.subheadline)
             }
@@ -64,6 +139,11 @@ struct CompareWorkoutsView: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 12)
             } else {
+                if let o = overallPct {
+                    OverallSummaryCard(valuePct: o, count: overallCount)
+                        .padding(.bottom, 6)
+                }
+
                 List(metrics) { m in
                     ComparisonRow(m: m)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 14, trailing: 0))
@@ -340,6 +420,35 @@ struct CompareWorkoutsView: View {
             }
         }
     }
+    
+    private struct OverallSummaryCard: View {
+        let valuePct: Double
+        let count: Int
+
+        var body: some View {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Overall")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Based on \(count) metrics")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Text(String(format: "%+.1f%%", valuePct))
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.10)))
+        }
+    }
 
     private func load() async {
         await MainActor.run { loading = true; error = nil; metrics = [] }
@@ -348,22 +457,117 @@ struct CompareWorkoutsView: View {
         let client = SupabaseManager.shared.client
         let decoder = JSONDecoder.supabase()
 
-        struct WRow: Decodable { let id: Int; let kind: String; let title: String?; let user_id: UUID }
+        struct URow: Decodable {
+            let user_id: UUID
+            let username: String?
+        }
 
+        struct WRow: Decodable {
+            let id: Int
+            let kind: String
+            let title: String?
+            let user_id: UUID
+            let started_at: Date?
+        }
+        
         do {
-            let lRes = try await client.from("workouts").select("id, kind, title, user_id").eq("id", value: currentWorkoutId).single().execute()
-            let rRes = try await client.from("workouts").select("id, kind, title, user_id").eq("id", value: myOtherWorkoutId).single().execute()
+            let lRes = try await client
+                .from("workouts")
+                .select("id, kind, title, user_id, started_at")
+                .eq("id", value: currentWorkoutId)
+                .single()
+                .execute()
+
+            let rRes = try await client
+                .from("workouts")
+                .select("id, kind, title, user_id, started_at")
+                .eq("id", value: myOtherWorkoutId)
+                .single()
+                .execute()
             let L = try decoder.decode(WRow.self, from: lRes.data)
             let R = try decoder.decode(WRow.self, from: rRes.data)
+            
+            @Sendable func fetchUserName(_ id: UUID) async -> String? {
+                do {
+                    let res = try await client
+                        .from("profiles")
+                        .select("user_id, username")
+                        .eq("user_id", value: id)
+                        .single()
+                        .execute()
+
+                    if let raw = String(data: res.data, encoding: .utf8) {
+                        print("fetchUserName raw JSON:", raw)
+                    }
+
+                    let u: URow = try decoder.decode(URow.self, from: res.data)
+                    let name = (u.username ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return name.isEmpty ? nil : name
+                } catch {
+                    print("fetchUserName(\(id)) error:", error)
+                    return nil
+                }
+            }
+            
+            func makeLabel(_ w: WRow, fallback: String, nameOverride: String?, forceUserName: Bool) -> String {
+                if forceUserName {
+                    let n = (nameOverride ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return n.isEmpty ? fallback : n
+                }
+
+                if let n = nameOverride?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
+                    return n
+                }
+
+                let t = (w.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { return t }
+
+                if let d = w.started_at {
+                    let f = DateFormatter()
+                    f.dateStyle = .medium
+                    f.timeStyle = .none
+                    return f.string(from: d)
+                }
+
+                return fallback
+            }
 
             guard L.kind.lowercased() == R.kind.lowercased() else {
                 await MainActor.run { error = "Workouts are different types (\(L.kind) vs \(R.kind))."; }
                 return
             }
+            
+            var aName: String? = nil
+            var bName: String? = nil
+
+            if L.user_id != R.user_id {
+                async let ln = fetchUserName(L.user_id)
+                async let rn = fetchUserName(R.user_id)
+                (aName, bName) = await (ln, rn)
+            }
 
             await MainActor.run {
                 workoutKind = L.kind
                 bothMine = (L.user_id == R.user_id)
+
+                leftUserName = aName
+                rightUserName = bName
+
+                let showNames = (L.user_id != R.user_id)
+
+                leftLabel = makeLabel(
+                    L,
+                    fallback: showNames ? "User" : "Workout A",
+                    nameOverride: showNames ? aName : nil,
+                    forceUserName: showNames
+                )
+
+                rightLabel = makeLabel(
+                    R,
+                    fallback: showNames ? "User" : "Workout B",
+                    nameOverride: showNames ? bName : nil,
+                    forceUserName: showNames
+                )
             }
 
             switch L.kind.lowercased() {

@@ -67,22 +67,20 @@ struct GoalsView: View {
     
     var body: some View {
         VStack(spacing: 12) {
-            if goals.isEmpty {
-                header
-            } else {
-                VStack(spacing: 8) {
-                    Picker("", selection: $summaryScope) {
-                        Text("Week").tag(SummaryScope.week)
-                        Text(allTimeStats == nil ? "All time…" : "All time").tag(SummaryScope.allTime)
-                    }
-                    .onChange(of: summaryScope) { _, _ in
-                        Task { await load() }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
+            header
 
-                    summaryCard
+            VStack(spacing: 8) {
+                Picker("", selection: $summaryScope) {
+                    Text("Week").tag(SummaryScope.week)
+                    Text(allTimeStats == nil ? "All time…" : "All time").tag(SummaryScope.allTime)
                 }
+                .onChange(of: summaryScope) { _, _ in
+                    Task { await load() }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+
+                summaryCard
             }
 
             if loading {
@@ -93,10 +91,17 @@ struct GoalsView: View {
                 Spacer()
 
                 VStack(spacing: 8) {
-                    Text(isOwnProfile ? "No goals yet" : "No goals to show")
-                        .font(.headline)
-                    Text(isOwnProfile ? "Add your first one." : "This user hasn't created goals for this week.")
-                        .foregroundStyle(.secondary)
+                    if summaryScope == .week {
+                        Text(isOwnProfile ? "No goals yet" : "No goals to show")
+                            .font(.headline)
+                        Text(isOwnProfile ? "Add your first one." : "This user hasn't created goals for this week.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(isOwnProfile ? "No goals yet" : "No goals to show")
+                            .font(.headline)
+                        Text(isOwnProfile ? "No goals in your history yet." : "This user has no goals history yet.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
@@ -418,7 +423,6 @@ struct GoalsView: View {
             } else {
                 rows = try await GoalsManager.fetchGoalsAllTime(for: uid)
             }
-            await MainActor.run { goals = rows }
             await MainActor.run { goals = rows }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }

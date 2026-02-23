@@ -1,5 +1,7 @@
 import SwiftUI
 import Supabase
+import AVFoundation
+import AudioToolbox
 
 struct ActiveStrengthWorkoutView: View {
     let workoutId: Int
@@ -40,8 +42,19 @@ struct ActiveStrengthWorkoutView: View {
         let rest_sec: Int?
     }
     
-    @Environment(\.dismiss) private var dismiss
+    private struct WorkoutEndPatch: Encodable {
+        let ended_at: Date
+    }
     
+    private struct WorkoutSanitizePatch: Encodable {
+        let ended_at: Date?
+    }
+    
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+
+    @State private var restEndDate: Date? = nil
+    @State private var restEndDateByExercise: [Int: Date] = [:]
     @State private var exercises: [ExerciseRow] = []
     @State private var setsByExercise: [Int: [SetRow]] = [:]
     @State private var loading = false
@@ -52,18 +65,22 @@ struct ActiveStrengthWorkoutView: View {
     @State private var currentSetIndex: Int = 0
     @State private var isResting = false
     @State private var remainingRest: Int = 0
-    @State private var extraSetsByExercise: [Int: Int] = [:]
     @State private var performedSetsByExercise: [Int: [PerformedSet]] = [:]
     @State private var showEditSheet = false
     @State private var editRepsText: String = ""
     @State private var showFinishEarlyConfirm = false
     @State private var editWeightText: String = ""
+    @State private var editRestText: String = ""
     @State private var dragOffsetY: CGFloat = 0
     @State private var isTransitioningExercise: Bool = false
     @State private var currentSetIndexByExercise: [Int: Int] = [:]
     @State private var remainingRestByExercise: [Int: Int] = [:]
     @State private var isRestingByExercise: [Int: Bool] = [:]
     @State private var toastMessage: String? = nil
+    @State private var restAudioPlayer: AVAudioPlayer? = nil
+    @State private var didFireRestFinishedFeedback: Bool = false
+    @State private var beepWorkItem: DispatchWorkItem? = nil
+    @State private var isBeeping: Bool = false
     private let swipeThreshold: CGFloat = 110
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -167,7 +184,7 @@ struct ActiveStrengthWorkoutView: View {
         }
         .sheet(isPresented: $showEditSheet) {
             VStack(spacing: 20) {
-                Text("Edit reps & weight")
+                Text("Edit reps, weight & rest")
                     .font(.title3.weight(.semibold))
                 
                 TextField("Reps", text: $editRepsText)
@@ -176,6 +193,10 @@ struct ActiveStrengthWorkoutView: View {
                 
                 TextField("Weight (kg)", text: $editWeightText)
                     .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                
+                TextField("Rest (sec)", text: $editRestText)
+                    .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
                 
                 HStack {
@@ -196,31 +217,60 @@ struct ActiveStrengthWorkoutView: View {
             .presentationDetents([.medium])
         }
         .onReceive(restTimer) { _ in
-            guard isResting, remainingRest > 0 else { return }
-            remainingRest -= 1
+            guard isResting else { return }
+            guard let end = restEndDate else {
+                isResting = false
+                remainingRest = 0
+                if let ex = currentExercise {
+                    isRestingByExercise[ex.id] = false
+                    remainingRestByExercise[ex.id] = 0
+                    restEndDateByExercise[ex.id] = nil
+                }
+                return
+            }
+
+            let newRemaining = max(0, Int(ceil(end.timeIntervalSinceNow)))
+            if newRemaining != remainingRest {
+                remainingRest = newRemaining
+            }
+
             if remainingRest <= 0 {
                 isResting = false
                 remainingRest = 0
+                restEndDate = nil
+                if !didFireRestFinishedFeedback {
+                    didFireRestFinishedFeedback = true
+                    restFinishedFeedback()
+                }
             }
 
             if let ex = currentExercise {
                 isRestingByExercise[ex.id] = isResting
                 remainingRestByExercise[ex.id] = remainingRest
+                if let end = restEndDate {
+                    restEndDateByExercise[ex.id] = end
+                }
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            syncRestCountdownFromEndDate()
+        }
         .task { await load() }
+        .onDisappear {
+            Task { await sanitizeEndDateIfNeededOnClose() }
+        }
     }
     
     @ViewBuilder
     private func exerciseContent(_ ex: ExerciseRow, isActive: Bool) -> some View {
         let sets = setsFor(ex)
-        let plannedSets = sets.count
+        let totalSets = sets.count
+        let plannedSets = totalSets
         let effectiveSetIndex = isActive ? currentSetIndex : 0
-        let extraSets = extraSetsByExercise[ex.id] ?? 0
-        let totalSets = plannedSets + extraSets
         let currentSet = currentSetFor(ex, setIndex: effectiveSetIndex)
         let allSetsDone = (totalSets > 0 && currentSet == nil)
-        let isExtraCurrentSet = (effectiveSetIndex + 1) > plannedSets
+        let isExtraCurrentSet = false
         
         VStack {
             Spacer(minLength: 0)
@@ -228,8 +278,12 @@ struct ActiveStrengthWorkoutView: View {
             VStack(spacing: 16) {
                 VStack(spacing: 8) {
                     Text(ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise"))
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
                         .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.80)
+                        .allowsTightening(true)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     if let notes = ex.notes, !notes.isEmpty {
                         Text(notes)
@@ -265,39 +319,8 @@ struct ActiveStrengthWorkoutView: View {
     
     private func currentSetFor(_ ex: ExerciseRow, setIndex: Int) -> SetRow? {
         let sets = setsFor(ex)
-        let plannedSets = sets.count
-        let extraSets = extraSetsByExercise[ex.id] ?? 0
-        let totalSets = plannedSets + extraSets
-
-        guard totalSets > 0, setIndex >= 0, setIndex < totalSets else { return nil }
-
-        if setIndex < plannedSets {
-            return sets[setIndex]
-        }
-
-        let sequentialNumber = setIndex + 1
-
-        if let last = sets.last {
-            return SetRow(
-                id: last.id * 1000 + sequentialNumber,
-                workout_exercise_id: last.workout_exercise_id,
-                set_number: sequentialNumber,
-                reps: last.reps,
-                weight_kg: last.weight_kg,
-                rpe: last.rpe,
-                rest_sec: last.rest_sec
-            )
-        }
-
-        return SetRow(
-            id: 9_000_000 + sequentialNumber,
-            workout_exercise_id: ex.id,
-            set_number: sequentialNumber,
-            reps: 10,
-            weight_kg: 0,
-            rpe: nil,
-            rest_sec: 60
-        )
+        guard !sets.isEmpty, setIndex >= 0, setIndex < sets.count else { return nil }
+        return sets[setIndex]
     }
     
     private enum PeekEdge {
@@ -374,9 +397,10 @@ struct ActiveStrengthWorkoutView: View {
                 } else {
                     editWeightText = ""
                 }
+                editRestText = "\(s.rest_sec ?? 0)"
                 showEditSheet = true
             } label: {
-                Text("Edit reps & weight")
+                Text("Edit reps, weight & rest")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
@@ -418,9 +442,12 @@ struct ActiveStrengthWorkoutView: View {
                     Button("Skip rest") {
                         isResting = false
                         remainingRest = 0
+                        restEndDate = nil
+                        didFireRestFinishedFeedback = false
                         if let ex = currentExercise {
                             isRestingByExercise[ex.id] = false
                             remainingRestByExercise[ex.id] = 0
+                            restEndDateByExercise[ex.id] = nil
                         }
                     }
                     .buttonStyle(.bordered)
@@ -455,8 +482,11 @@ struct ActiveStrengthWorkoutView: View {
                 Button("Skip rest") {
                     isResting = false
                     remainingRest = 0
+                    restEndDate = nil
+                    didFireRestFinishedFeedback = false
                     isRestingByExercise[ex.id] = false
                     remainingRestByExercise[ex.id] = 0
+                    restEndDateByExercise[ex.id] = nil
                 }
                 .buttonStyle(.bordered)
             }
@@ -466,7 +496,7 @@ struct ActiveStrengthWorkoutView: View {
         VStack(spacing: 10) {
             Button {
                 ensureBaseSetExists(for: ex)
-                addExtraSet(for: ex)
+                addOneSetToConfigs(for: ex)
                 withAnimation { showToast("Added 1 set") }
             } label: {
                 Text("Add set")
@@ -606,12 +636,91 @@ struct ActiveStrengthWorkoutView: View {
         let sec = set.rest_sec ?? 0
         guard sec > 0 else { return }
 
+        let end = Date().addingTimeInterval(TimeInterval(sec))
+        restEndDate = end
+
         remainingRest = sec
         isResting = true
+        didFireRestFinishedFeedback = false
 
         if let ex = currentExercise {
             isRestingByExercise[ex.id] = true
             remainingRestByExercise[ex.id] = sec
+            restEndDateByExercise[ex.id] = end
+        }
+    }
+    
+    private func syncRestCountdownFromEndDate() {
+        guard isResting else { return }
+        guard let end = restEndDate else { return }
+
+        let newRemaining = max(0, Int(ceil(end.timeIntervalSinceNow)))
+        remainingRest = newRemaining
+
+        if remainingRest <= 0 {
+            isResting = false
+            remainingRest = 0
+            restEndDate = nil
+            if !didFireRestFinishedFeedback {
+                didFireRestFinishedFeedback = true
+                restFinishedFeedback()
+            }
+            if let ex = currentExercise {
+                isRestingByExercise[ex.id] = false
+                remainingRestByExercise[ex.id] = 0
+                restEndDateByExercise[ex.id] = nil
+            }
+        } else {
+            if let ex = currentExercise {
+                isRestingByExercise[ex.id] = true
+                remainingRestByExercise[ex.id] = remainingRest
+                restEndDateByExercise[ex.id] = end
+            }
+        }
+    }
+    
+    private func restFinishedFeedback() {
+        beepWorkItem?.cancel()
+        isBeeping = true
+
+        let haptic = UINotificationFeedbackGenerator()
+        haptic.prepare()
+
+        let soundID: SystemSoundID = 1103
+        let repeats = 6
+        let interval: TimeInterval = 0.32
+
+        let work = DispatchWorkItem { [soundID] in
+            for i in 0..<repeats {
+                DispatchQueue.main.asyncAfter(deadline: .now() + (interval * Double(i))) {
+                    guard !beepWorkItem!.isCancelled else { return }
+                    haptic.notificationOccurred(.success)
+                    AudioServicesPlaySystemSound(soundID)
+                }
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + (interval * Double(repeats))) {
+                self.isBeeping = false
+            }
+        }
+
+        beepWorkItem = work
+        DispatchQueue.main.async(execute: work)
+    }
+
+    private func playCustomRestSound() {
+        guard let url = Bundle.main.url(forResource: "rest_end", withExtension: "mp3") else { return }
+
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, options: [.duckOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.volume = 1.0
+            player.prepareToPlay()
+            player.play()
+            restAudioPlayer = player
+        } catch {
         }
     }
     
@@ -636,9 +745,7 @@ struct ActiveStrengthWorkoutView: View {
             performedSetsByExercise[ex.id] = list
         }
         
-        let plannedSets = sets.count
-        let extraSets = extraSetsByExercise[ex.id] ?? 0
-        let totalSets = plannedSets + extraSets
+        let totalSets = sets.count
         
         if currentSetIndex < totalSets - 1 {
             currentSetIndex += 1
@@ -651,38 +758,36 @@ struct ActiveStrengthWorkoutView: View {
         remainingRestByExercise[ex.id] = remainingRest
     }
     
-    private func addExtraSet(for ex: ExerciseRow) {
+    private func addOneSetToConfigs(for ex: ExerciseRow) {
         let key = ex.id
-        
-        let currentExtra = extraSetsByExercise[key] ?? 0
-        let plannedSets = setsFor(ex).count
-        let oldTotal = plannedSets + currentExtra
-        
-        extraSetsByExercise[key] = currentExtra + 1
-        let newTotal = oldTotal + 1
-        
-        let isActive = (currentExercise?.id == key)
-        let oldIndex = isActive ? currentSetIndex : (currentSetIndexByExercise[key] ?? 0)
-        let wasDone = (oldTotal > 0 && oldIndex >= oldTotal)
-        
-        if wasDone {
-            let newIndex = newTotal - 1
-            currentSetIndexByExercise[key] = newIndex
-            isRestingByExercise[key] = false
-            remainingRestByExercise[key] = 0
-            
-            if isActive {
-                currentSetIndex = newIndex
-                isResting = false
-                remainingRest = 0
-            }
-        } else {
-            currentSetIndexByExercise[key] = oldIndex
+        var configs = setsByExercise[key] ?? []
 
-            if isActive {
-                currentSetIndex = oldIndex
-            }
+        if configs.isEmpty {
+            ensureBaseSetExists(for: ex)
+            configs = setsByExercise[key] ?? []
+            if configs.isEmpty { return }
         }
+
+        let lastIdx = configs.count - 1
+        let last = configs[lastIdx]
+
+        configs[lastIdx] = SetRow(
+            id: last.id,
+            workout_exercise_id: last.workout_exercise_id,
+            set_number: max(0, last.set_number) + 1,
+            reps: last.reps,
+            weight_kg: last.weight_kg,
+            rpe: last.rpe,
+            rest_sec: last.rest_sec
+        )
+
+        setsByExercise[key] = configs
+
+        let total = setsFor(ex).count
+        if currentExercise?.id == key, currentSetIndex >= total {
+            currentSetIndex = max(0, total - 1)
+        }
+        currentSetIndexByExercise[key] = (currentExercise?.id == key) ? currentSetIndex : (currentSetIndexByExercise[key] ?? 0)
     }
     
     private func ensureBaseSetExists(for ex: ExerciseRow) {
@@ -703,47 +808,41 @@ struct ActiveStrengthWorkoutView: View {
     }
     
     private func canRemoveAnySet(for ex: ExerciseRow) -> Bool {
-        let key = ex.id
-        let planned = setsFor(ex).count
-        let extras = extraSetsByExercise[key] ?? 0
-        return (planned + extras) > 0
+        _ = ex.id
+        let total = setsFor(ex).count
+        return total > 0
     }
 
     private func removeOneSet(for ex: ExerciseRow) {
         let key = ex.id
 
-        let extras = extraSetsByExercise[key] ?? 0
-        if extras > 0 {
-            extraSetsByExercise[key] = extras - 1
-        } else {
-            var configs = setsByExercise[key] ?? []
-            guard !configs.isEmpty else {
-                showToast("No sets to remove")
-                return
-            }
+        var configs = setsByExercise[key] ?? []
+        guard !configs.isEmpty else {
+            showToast("No sets to remove")
+            return
+        }
+        
+        let lastIdx = configs.count - 1
+        let last = configs[lastIdx]
+        let newCount = max(0, last.set_number - 1)
 
-            if let idx = configs.indices.reversed().first(where: { configs[$0].set_number > 0 }) {
-                let old = configs[idx]
-                let newCount = max(old.set_number - 1, 0)
-                configs[idx] = SetRow(
-                    id: old.id,
-                    workout_exercise_id: old.workout_exercise_id,
-                    set_number: newCount,
-                    reps: old.reps,
-                    weight_kg: old.weight_kg,
-                    rpe: old.rpe,
-                    rest_sec: old.rest_sec
-                )
-                setsByExercise[key] = configs
-            } else {
-                showToast("No sets to remove")
-                return
-            }
+        configs[lastIdx] = SetRow(
+            id: last.id,
+            workout_exercise_id: last.workout_exercise_id,
+            set_number: newCount,
+            reps: last.reps,
+            weight_kg: last.weight_kg,
+            rpe: last.rpe,
+            rest_sec: last.rest_sec
+        )
+
+        if configs[lastIdx].set_number == 0 {
+            configs.remove(at: lastIdx)
         }
 
-        let plannedNow = setsFor(ex).count
-        let extrasNow = extraSetsByExercise[key] ?? 0
-        let totalNow = plannedNow + extrasNow
+        setsByExercise[key] = configs
+
+        let totalNow = setsFor(ex).count
 
         if var performed = performedSetsByExercise[key], performed.count > totalNow {
             performed = Array(performed.prefix(totalNow))
@@ -776,6 +875,9 @@ struct ActiveStrengthWorkoutView: View {
         if currentExercise?.id == key {
             isResting = false
             remainingRest = 0
+            restEndDate = nil
+            restEndDateByExercise[key] = nil
+            didFireRestFinishedFeedback = false
         }
     }
     
@@ -823,9 +925,7 @@ struct ActiveStrengthWorkoutView: View {
 
         if isResting {
             guard let ex = currentExercise else { return false }
-            let planned = setsFor(ex).count
-            let extras = extraSetsByExercise[ex.id] ?? 0
-            let total = planned + extras
+            let total = setsFor(ex).count
             let isDone = (total > 0 && currentSetFor(ex, setIndex: currentSetIndex) == nil)
             if !isDone { return false }
         }
@@ -846,16 +946,30 @@ struct ActiveStrengthWorkoutView: View {
         currentSetIndexByExercise[ex.id] = currentSetIndex
         isRestingByExercise[ex.id] = isResting
         remainingRestByExercise[ex.id] = remainingRest
+        if let end = restEndDate {
+            restEndDateByExercise[ex.id] = end
+        } else {
+            restEndDateByExercise[ex.id] = nil
+        }
     }
 
     private func restoreStateForExercise(_ ex: ExerciseRow) {
         currentSetIndex = currentSetIndexByExercise[ex.id] ?? 0
         isResting = isRestingByExercise[ex.id] ?? false
-        remainingRest = remainingRestByExercise[ex.id] ?? 0
+
+        restEndDate = restEndDateByExercise[ex.id]
+
+        if isResting, let end = restEndDate {
+            remainingRest = max(0, Int(ceil(end.timeIntervalSinceNow)))
+        } else {
+            remainingRest = remainingRestByExercise[ex.id] ?? 0
+        }
 
         if remainingRest <= 0 {
             isResting = false
             remainingRest = 0
+            restEndDate = nil
+            restEndDateByExercise[ex.id] = nil
         }
     }
 
@@ -1029,6 +1143,14 @@ struct ActiveStrengthWorkoutView: View {
                 }
             }
             
+            _ = try await client
+                .from("workouts")
+                .update(WorkoutEndPatch(ended_at: Date()))
+                .eq("id", value: workoutId)
+                .execute()
+
+            NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
+            
             await MainActor.run {
                 self.isSaving = false
                 dismiss()
@@ -1039,6 +1161,55 @@ struct ActiveStrengthWorkoutView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func sanitizeEndDateIfNeededOnClose() async {
+        let saving = await MainActor.run { isSaving }
+        if saving { return }
+
+        do {
+            struct WorkoutDates: Decodable {
+                let started_at: Date?
+                let ended_at: Date?
+            }
+
+            let res = try await SupabaseManager.shared.client
+                .from("workouts")
+                .select("started_at, ended_at")
+                .eq("id", value: workoutId)
+                .limit(1)
+                .execute()
+
+            let arr = try JSONDecoder.supabase().decode([WorkoutDates].self, from: res.data)
+            guard let w = arr.first else { return }
+
+            guard let start = w.started_at else { return }
+
+            if let end = w.ended_at, end < start {
+                _ = try await SupabaseManager.shared.client
+                    .from("workouts")
+                    .update(WorkoutSanitizePatch(ended_at: nil))
+                    .eq("id", value: workoutId)
+                    .execute()
+
+                NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
+            }
+        } catch {
+        }
+    }
+    
+    private func configIndexForSetIndex(_ ex: ExerciseRow, setIndex: Int) -> Int? {
+        let configs = (setsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
+        var cursor = 0
+        for (i, c) in configs.enumerated() {
+            let blockCount = max(0, c.set_number)
+            let next = cursor + blockCount
+            if setIndex >= cursor && setIndex < next {
+                return i
+            }
+            cursor = next
+        }
+        return nil
     }
             
     private func applyEditsToCurrentExercise() {
@@ -1057,10 +1228,16 @@ struct ActiveStrengthWorkoutView: View {
             newWeightDecimal = Decimal(string: trimmedWeight)
         }
         
-        var configs = setsByExercise[ex.id] ?? []
-        guard !configs.isEmpty else { return }
+        let trimmedRest = editRestText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newRestSecRaw = Int(trimmedRest)
+        let newRestSec = (newRestSecRaw != nil) ? max(0, newRestSecRaw!) : nil
         
-        let old = configs[0]
+        var configs = (setsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
+        guard !configs.isEmpty else { return }
+
+        let idx = configIndexForSetIndex(ex, setIndex: currentSetIndex) ?? 0
+        let old = configs[idx]
+
         let updated = SetRow(
             id: old.id,
             workout_exercise_id: old.workout_exercise_id,
@@ -1068,10 +1245,10 @@ struct ActiveStrengthWorkoutView: View {
             reps: newReps ?? old.reps,
             weight_kg: newWeightDecimal ?? old.weight_kg,
             rpe: old.rpe,
-            rest_sec: old.rest_sec
+            rest_sec: newRestSec ?? old.rest_sec
         )
-        
-        configs[0] = updated
+
+        configs[idx] = updated
         setsByExercise[ex.id] = configs
     }
     

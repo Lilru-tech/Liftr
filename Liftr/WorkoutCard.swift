@@ -40,11 +40,45 @@ struct WorkoutCardBackground: View {
 }
 
 func scorePill(score: Double, kind: String) -> some View {
+    let value = Int(score.rounded())
     let t = workoutTint(for: kind)
-    return Text("⭐️ " + String(format: "%.0f", score))
+
+    return Text("⭐️ \(value)")
         .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+        .fixedSize(horizontal: true, vertical: false)
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
-        .background(Capsule().fill(t.opacity(0.15)))
-        .overlay(Capsule().stroke(Color.white.opacity(0.18)))
+        .background(
+            ZStack {
+                Capsule().fill(Color(.systemBackground).opacity(0.88))
+                Capsule().fill(t.opacity(0.14))
+            }
+        )
+        .overlay(Capsule().stroke(.white.opacity(0.18)))
+        .shadow(color: .black.opacity(0.14), radius: 2, x: 0, y: 1)
+}
+
+func caloriesPill(kcal: Double, kind: String) -> some View {
+    let value = Int(kcal.rounded())
+    let t = workoutTint(for: kind)
+
+    return Text("\(value) 🔥")
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(.primary)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(
+            ZStack {
+                Capsule().fill(Color(.systemBackground).opacity(0.88))
+                Capsule().fill(t.opacity(0.12))
+            }
+        )
+        .overlay(Capsule().stroke(.white.opacity(0.18)))
+        .shadow(color: .black.opacity(0.14), radius: 2, x: 0, y: 1)
 }

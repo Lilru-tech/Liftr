@@ -75,6 +75,8 @@ struct NotificationsListView: View {
     @State private var deletingAll = false
     @State private var showDeleteAllConfirm = false
     @State private var achievementsRefreshID = UUID()
+    @State private var resolvedOwnerId: UUID?
+    @State private var resolvingOwner = false
     
     var body: some View {
         Group {
@@ -202,11 +204,47 @@ struct NotificationsListView: View {
 
                 if let ownerIdStr = n.data?["owner_id"]?.stringValue,
                    let ownerId = UUID(uuidString: ownerIdStr) {
+
                     WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
-                } else if let fallbackOwner = app.userId {
-                    WorkoutDetailView(workoutId: workoutId, ownerId: fallbackOwner)
+
+                } else if let resolvedOwnerId {
+
+                    WorkoutDetailView(workoutId: workoutId, ownerId: resolvedOwnerId)
+
                 } else {
-                    Text("Workout not found")
+                    VStack(spacing: 12) {
+                        if resolvingOwner {
+                            ProgressView("Opening workout…")
+                        } else {
+                            Text("Opening workout…")
+                        }
+                    }
+                    .task {
+                        guard !resolvingOwner else { return }
+                        resolvingOwner = true
+                        defer { resolvingOwner = false }
+
+                        struct Row: Decodable { let user_id: UUID }
+
+                        do {
+                            let res = try await SupabaseManager.shared.client
+                                .from("workouts")
+                                .select("user_id")
+                                .eq("id", value: workoutId)
+                                .limit(1)
+                                .execute()
+
+                            if let raw = String(data: res.data, encoding: .utf8) {
+                                print("🧪 [Notifications] resolve owner raw:", raw)
+                            }
+
+                            let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+                            resolvedOwnerId = rows.first?.user_id
+
+                        } catch {
+                            print("❌ [Notifications] resolve owner error:", error)
+                        }
+                    }
                 }
 
             } else {

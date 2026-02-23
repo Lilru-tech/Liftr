@@ -15,7 +15,7 @@ enum WorkoutIntensity: String, CaseIterable, Identifiable {
 }
 
 enum SportType: String, CaseIterable, Identifiable {
-    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby, hyrox
+    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby, hyrox, ski
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -31,6 +31,7 @@ enum SportType: String, CaseIterable, Identifiable {
         case .hockey:        return "Hockey"
         case .rugby:         return "Rugby"
         case .hyrox:         return "Hyrox"
+        case .ski:          return "Ski"
         }
     }
 }
@@ -180,6 +181,7 @@ struct AddWorkoutSheet: View {
     @State private var durationLabelMin: Int? = nil
     @State private var didApplyDraft = false
     @State private var isApplyingDraft = false
+    @State private var showHelp = false
     
     var body: some View {
         NavigationStack {
@@ -271,7 +273,23 @@ struct AddWorkoutSheet: View {
                             }
                         }
                     } header: {
-                        Text("GENERAL").foregroundStyle(.secondary)
+                        HStack {
+                            Text("GENERAL")
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button {
+                                showHelp = true
+                            } label: {
+                                Image(systemName: "info.circle")
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.primary)
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 2)
+                            .accessibilityLabel("How to start strength workout")
+                        }
                     }
                     .listRowBackground(Color.clear)
                     
@@ -332,7 +350,7 @@ struct AddWorkoutSheet: View {
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
                 .listRowBackground(Color.clear)
-                .listSectionSpacing(-10)
+                .listSectionSpacing(8)
                 .sheet(item: $pickerHandle) { handle in
                     if let idx = items.firstIndex(where: { $0.id == handle.id }) {
                         ExercisePickerSheet(
@@ -361,6 +379,11 @@ struct AddWorkoutSheet: View {
                             .presentationDetents([.large])
                             .presentationBackground(.clear)
                     }
+                }
+                .sheet(isPresented: $showHelp) {
+                    WorkoutHelpSheet()
+                        .presentationDetents([.medium, .large])
+                        .presentationBackground(.clear)
                 }
             }
         }
@@ -723,6 +746,10 @@ struct AddWorkoutSheet: View {
                         } else if sportUsesSetText(new) {
                             sport.scoreFor = ""; sport.scoreAgainst = ""
                         }
+
+                        if new == .ski {
+                            sport.matchResult = .unfinished
+                        }
                     }
                 }
                 
@@ -762,13 +789,15 @@ struct AddWorkoutSheet: View {
                 }
                 Divider()
                 
-                Divider()
+                if sport.sport != .ski {
+                    Divider()
 
-                FieldRowPlain {
-                    Picker("", selection: $sport.matchResult) {
-                        ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
+                    FieldRowPlain {
+                        Picker("", selection: $sport.matchResult) {
+                            ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.menu)
                     }
-                    .pickerStyle(.menu)
                 }
                 
                 sportSpecificFields()
@@ -1089,6 +1118,57 @@ struct AddWorkoutSheet: View {
                     TextField("Max HR", text: $sport.hyMaxHR).keyboardType(.numberPad)
                 }
             }
+            
+        case .ski:
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Total distance (km)", text: $sport.skiTotalDistanceKm)
+                        .keyboardType(.decimalPad)
+                    TextField("Runs", text: $sport.skiRunsCount)
+                        .keyboardType(.numberPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Max speed (km/h)", text: $sport.skiMaxSpeedKmh)
+                        .keyboardType(.decimalPad)
+                    TextField("Avg speed (km/h)", text: $sport.skiAvgSpeedKmh)
+                        .keyboardType(.decimalPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Vertical drop (m)", text: $sport.skiVerticalDropM)
+                        .keyboardType(.numberPad)
+                    TextField("Moving time (sec)", text: $sport.skiMovingTimeSec)
+                        .keyboardType(.numberPad)
+                    TextField("Paused time (sec)", text: $sport.skiPausedTimeSec)
+                        .keyboardType(.numberPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                TextField("Resort name", text: $sport.skiResortName)
+                    .textFieldStyle(.plain)
+            }
+
+            Divider()
+            FieldRowPlain {
+                TextField("Snow condition", text: $sport.skiSnowCondition)
+                    .textFieldStyle(.plain)
+            }
+
+            Divider()
+            FieldRowPlain {
+                TextField("Weather", text: $sport.skiWeather)
+                    .textFieldStyle(.plain)
+            }
         }
     }
     
@@ -1176,29 +1256,33 @@ struct AddWorkoutSheet: View {
                 let scoreFor      = sportUsesNumericScore(sport.sport) ? parseInt(sport.scoreFor) : nil
                 let scoreAgainst  = sportUsesNumericScore(sport.sport) ? parseInt(sport.scoreAgainst) : nil
                 let matchScoreTxt = sportUsesSetText(sport.sport) ? sport.matchScoreText.trimmedOrNil : nil
-                let payload = RPCSportParams(
-                    p_user_id: userId,
-                    p_sport: sport.sport.rawValue,
-                    p_title: title.isEmpty ? nil : title,
-                    p_started_at: iso.string(from: startedAt),
-                    p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
-                    p_notes: note.isEmpty ? nil : note,
-                    p_duration_min: durationMin,
-                    p_duration_sec: nil,
-                    p_score_for: scoreFor,
-                    p_score_against: scoreAgainst,
-                    p_match_result: sport.matchResult.rawValue,
-                    p_match_score_text: matchScoreTxt,
-                    p_location: sport.location.trimmedOrNil,
-                    p_session_notes: sport.sessionNotes.trimmedOrNil,
-                    p_perceived_intensity: perceived.rawValue,
-                    p_state: publishMode.stateParam
-                )
-                
+                var pDict: [String: AnyJSON] = [:]
+                pDict["p_user_id"] = try .init(userId.uuidString)
+                pDict["p_sport"] = try .init(sport.sport.rawValue)
+                if let t = title.trimmedOrNil { pDict["p_title"] = try .init(t) }
+                pDict["p_started_at"] = try .init(iso.string(from: startedAt))
+                if endedAtEnabled { pDict["p_ended_at"] = try .init(iso.string(from: endedAt)) }
+                if let n = note.trimmedOrNil { pDict["p_notes"] = try .init(n) }
+                if let dm = durationMin { pDict["p_duration_min"] = try .init(dm) }
+                if let sf = scoreFor { pDict["p_score_for"] = try .init(sf) }
+                if let sa = scoreAgainst { pDict["p_score_against"] = try .init(sa) }
+
+                if sport.sport != .ski {
+                    pDict["p_match_result"] = try .init(sport.matchResult.rawValue)
+                }
+
+                if let ms = matchScoreTxt { pDict["p_match_score_text"] = try .init(ms) }
+                if let loc = sport.location.trimmedOrNil { pDict["p_location"] = try .init(loc) }
+                if let sn = sport.sessionNotes.trimmedOrNil { pDict["p_session_notes"] = try .init(sn) }
+
+                pDict["p_perceived_intensity"] = try .init(perceived.rawValue)
+                pDict["p_state"] = try .init(publishMode.stateParam)
+
+                let pJSON = try AnyJSON(pDict)
                 let statsJSON = try buildSportStatsJSON(from: sport)
-                
+
                 let res = try await client
-                    .rpc("create_sport_workout_v2", params: RPCSportV2Wrapper(p: payload, p_stats: statsJSON))
+                    .rpc("create_sport_workout_v2", params: RPCSportV2Wrapper(p: pJSON, p_stats: statsJSON))
                     .execute()
                 
                 if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
@@ -1410,6 +1494,20 @@ struct AddWorkoutSheet: View {
             if let v = parseInt(f.hyPenaltyTimeSec)  { out["penalty_time_sec"]  = try .init(v) }
             if let v = parseInt(f.hyAvgHR)           { out["avg_hr"]            = try .init(v) }
             if let v = parseInt(f.hyMaxHR)           { out["max_hr"]            = try .init(v) }
+            return try AnyJSON(out)
+            
+        case .ski:
+            var out: [String: AnyJSON] = [:]
+            if let v = parseDouble(f.skiTotalDistanceKm) { out["total_distance_km"] = try .init(v) }
+            if let v = parseDouble(f.skiMaxSpeedKmh)     { out["max_speed_kmh"]     = try .init(v) }
+            if let v = parseDouble(f.skiAvgSpeedKmh)     { out["avg_speed_kmh"]     = try .init(v) }
+            if let v = parseInt(f.skiRunsCount)     { out["runs_count"]      = try .init(v) }
+            if let v = parseInt(f.skiVerticalDropM){ out["vertical_drop_m"] = try .init(v) }
+            if let v = parseInt(f.skiMovingTimeSec){ out["moving_time_sec"] = try .init(v) }
+            if let v = parseInt(f.skiPausedTimeSec){ out["paused_time_sec"] = try .init(v) }
+            if let s = strOrNil(f.skiResortName)    { out["resort_name"]    = try .init(s) }
+            if let s = strOrNil(f.skiSnowCondition){ out["snow_condition"] = try .init(s) }
+            if let s = strOrNil(f.skiWeather)      { out["weather"]        = try .init(s) }
             return try AnyJSON(out)
         }
     }
@@ -1792,6 +1890,16 @@ struct SportForm {
     var hyPenaltyTimeSec: String = ""
     var hyAvgHR: String = ""
     var hyMaxHR: String = ""
+    var skiTotalDistanceKm: String = ""
+    var skiRunsCount: String = ""
+    var skiMaxSpeedKmh: String = ""
+    var skiAvgSpeedKmh: String = ""
+    var skiVerticalDropM: String = ""
+    var skiMovingTimeSec: String = ""
+    var skiPausedTimeSec: String = ""
+    var skiResortName: String = ""
+    var skiSnowCondition: String = ""
+    var skiWeather: String = ""
 }
 
 struct RPCStrengthParams: Encodable {
@@ -1946,8 +2054,8 @@ struct RPCSportWrapper: Encodable {
 }
 
 struct RPCSportV2Wrapper: Encodable {
-    let p: RPCSportParams
-    let p_stats: AnyJSON
+    let p: AnyJSON
+    let p_stats: AnyJSON?
 }
 
 private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {

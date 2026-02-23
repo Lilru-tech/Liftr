@@ -173,6 +173,16 @@ struct EditWorkoutMetaSheet: View {
     @State private var hyRankCategory = ""
     @State private var hyAvgHR = ""
     @State private var hyMaxHR = ""
+    @State private var skiTotalDistanceKm = ""
+    @State private var skiRunsCount = ""
+    @State private var skiMaxSpeedKmh = ""
+    @State private var skiAvgSpeedKmh = ""
+    @State private var skiVerticalDropM = ""
+    @State private var skiMovingTimeSec = ""
+    @State private var skiPausedTimeSec = ""
+    @State private var skiResortName = ""
+    @State private var skiSnowCondition = ""
+    @State private var skiWeather = ""
     @State private var showParticipantsPicker = false
     @State private var initialParticipants = Set<UUID>()
     @State private var didEditCardioDuration = false
@@ -537,6 +547,9 @@ struct EditWorkoutMetaSheet: View {
                 .onChange(of: s_sport) { _, new in
                     if sportUsesNumericScore(new) { s_matchScoreText = "" }
                     if sportUsesSetText(new) { s_scoreFor = ""; s_scoreAgainst = "" }
+                    if new == .ski {
+                        s_matchResult = .unfinished
+                    }
                 }
                 
                 Divider().padding(.vertical, 6)
@@ -564,13 +577,15 @@ struct EditWorkoutMetaSheet: View {
                     }
                 }
                 
-                Divider().padding(.vertical, 6)
-                
-                FieldRowPlain("Match result") {
-                    Picker("", selection: $s_matchResult) {
-                        ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
+                if s_sport != .ski {
+                    Divider().padding(.vertical, 6)
+
+                    FieldRowPlain("Match result") {
+                        Picker("", selection: $s_matchResult) {
+                            ForEach(MatchResult.allCases) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.menu)
                     }
-                    .pickerStyle(.menu)
                 }
                 
                 Divider().padding(.vertical, 6)
@@ -1038,6 +1053,53 @@ struct EditWorkoutMetaSheet: View {
                         hyOfficialTimeSec = ""; hyPenaltyTimeSec = ""; hyNoReps = ""
                         hyRankOverall = ""; hyRankCategory = ""
                         hyAvgHR = ""; hyMaxHR = ""
+                    }
+                    
+                case .ski:
+                    do {
+                        let q = try await client
+                            .from("ski_session_stats")
+                            .select("*")
+                            .eq("session_id", value: r.id)
+                            .single()
+                            .execute()
+
+                        struct SKI: Decodable {
+                            let total_distance_km: Decimal?
+                            let runs_count: Int?
+                            let max_speed_kmh: Decimal?
+                            let avg_speed_kmh: Decimal?
+                            let vertical_drop_m: Int?
+                            let moving_time_sec: Int?
+                            let paused_time_sec: Int?
+                            let resort_name: String?
+                            let snow_condition: String?
+                            let weather: String?
+                        }
+
+                        let s = try decoder.decode(SKI.self, from: q.data)
+
+                        skiTotalDistanceKm = s.total_distance_km.map { "\($0)" } ?? ""
+                        skiRunsCount       = s.runs_count.map(String.init) ?? ""
+                        skiMaxSpeedKmh     = s.max_speed_kmh.map { "\($0)" } ?? ""
+                        skiAvgSpeedKmh     = s.avg_speed_kmh.map { "\($0)" } ?? ""
+                        skiVerticalDropM   = s.vertical_drop_m.map(String.init) ?? ""
+                        skiMovingTimeSec   = s.moving_time_sec.map(String.init) ?? ""
+                        skiPausedTimeSec   = s.paused_time_sec.map(String.init) ?? ""
+                        skiResortName      = s.resort_name ?? ""
+                        skiSnowCondition   = s.snow_condition ?? ""
+                        skiWeather         = s.weather ?? ""
+                    } catch {
+                        skiTotalDistanceKm = ""
+                        skiRunsCount = ""
+                        skiMaxSpeedKmh = ""
+                        skiAvgSpeedKmh = ""
+                        skiVerticalDropM = ""
+                        skiMovingTimeSec = ""
+                        skiPausedTimeSec = ""
+                        skiResortName = ""
+                        skiSnowCondition = ""
+                        skiWeather = ""
                     }
                     
                 case .basketball:
@@ -1878,6 +1940,41 @@ struct EditWorkoutMetaSheet: View {
                     }
                 }
             
+        case .ski:
+            Divider()
+            FieldRowPlain {
+                TextField("Resort", text: $skiResortName)
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Distance (km)", text: $skiTotalDistanceKm).keyboardType(.decimalPad)
+                    TextField("Runs", text: $skiRunsCount).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Max speed (km/h)", text: $skiMaxSpeedKmh).keyboardType(.decimalPad)
+                    TextField("Avg speed (km/h)", text: $skiAvgSpeedKmh).keyboardType(.decimalPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Vertical drop (m)", text: $skiVerticalDropM).keyboardType(.numberPad)
+                    TextField("Moving time (sec)", text: $skiMovingTimeSec).keyboardType(.numberPad)
+                    TextField("Paused time (sec)", text: $skiPausedTimeSec).keyboardType(.numberPad)
+                }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Snow", text: $skiSnowCondition)
+                    TextField("Weather", text: $skiWeather)
+                }
+            }
+            
         case .basketball:
             Divider()
             FieldRowPlain {
@@ -2141,6 +2238,26 @@ struct EditWorkoutMetaSheet: View {
             if let v = parseInt(hyRankCategory)    { out["rank_category"]     = .i(v) }
             if let v = parseInt(hyAvgHR)           { out["avg_hr"]            = .i(v) }
             if let v = parseInt(hyMaxHR)           { out["max_hr"]            = .i(v) }
+            return out
+            
+        case .ski:
+            var out: [String: JV] = [:]
+            if let v = parseDouble(skiTotalDistanceKm) { out["total_distance_km"] = .d(v) }
+            if let v = parseInt(skiRunsCount)          { out["runs_count"] = .i(v) }
+            if let v = parseDouble(skiMaxSpeedKmh)     { out["max_speed_kmh"] = .d(v) }
+            if let v = parseDouble(skiAvgSpeedKmh)     { out["avg_speed_kmh"] = .d(v) }
+            if let v = parseInt(skiVerticalDropM)      { out["vertical_drop_m"] = .i(v) }
+            if let v = parseInt(skiMovingTimeSec)      { out["moving_time_sec"] = .i(v) }
+            if let v = parseInt(skiPausedTimeSec)      { out["paused_time_sec"] = .i(v) }
+            if !skiResortName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out["resort_name"] = .s(skiResortName)
+            }
+            if !skiSnowCondition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out["snow_condition"] = .s(skiSnowCondition)
+            }
+            if !skiWeather.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out["weather"] = .s(skiWeather)
+            }
             return out
         }
     }
