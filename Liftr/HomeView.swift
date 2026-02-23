@@ -148,6 +148,7 @@ struct HomeView: View {
     @State private var strongestWeekKcalMTD = 0
     @State private var bestSportScore = 0
     @State private var showGoals = false
+    @State private var showCompetitions = false
     @State private var bestSportLabel = ""
     @State private var shareItem: ShareItem?
     @AppStorage("homeCollapseData") private var collapseData = false
@@ -329,56 +330,14 @@ struct HomeView: View {
                     }
                 }
                     
-                    CollapsibleCard(
-                        isCollapsed: collapseGoals,
-                        onToggle: {
-                            withAnimation(.easeInOut) {
-                                collapseGoals.toggle()
-                                if !collapseGoals {
-                                    collapseMonthly = true
-                                    collapseToday = true
-                                    collapseStreak = true
-                                    collapseInsights = true
-                                }
-                            }
-                        },
-                        collapsed: {
-                            HStack(spacing: 10) {
-                                Image(systemName: "target")
-                                    .foregroundStyle(.secondary)
-                                Text("Weekly goals")
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .padding(12)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-                        },
-                        expanded: {
-                            Button {
-                                showGoals = true
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "target")
-                                        .font(.headline.weight(.semibold))
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Weekly goals")
-                                            .font(.subheadline.weight(.semibold))
-                                        Text("Track your objectives and stay consistent")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                }
-                                .padding(12)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    )
+                    HStack(spacing: 10) {
+
+                        weeklyGoalsModule
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        competitionsModule
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .listRowBackground(Color.clear)
                     
@@ -546,6 +505,10 @@ struct HomeView: View {
         }
         .navigationDestination(isPresented: $showGoals) {
             GoalsView(userId: app.userId, viewedUsername: "You")
+                .gradientBG()
+        }
+        .navigationDestination(isPresented: $showCompetitions) {
+            CompetitionsHubView()
                 .gradientBG()
         }
     }
@@ -1328,6 +1291,91 @@ struct HomeView: View {
         let start = cal.date(from: comps)!
         return (start, now)
     }
+    
+    private var weeklyGoalsModule: some View {
+        CollapsibleCard(
+            isCollapsed: collapseGoals,
+            onToggle: {
+                withAnimation(.easeInOut) {
+                    collapseGoals.toggle()
+                    if !collapseGoals {
+                        collapseMonthly = true
+                        collapseToday = true
+                        collapseStreak = true
+                        collapseInsights = true
+                    }
+                }
+            },
+            collapsed: {
+                HStack(spacing: 8) {
+                    Image(systemName: "target")
+                        .foregroundStyle(.secondary)
+                    Text("Weekly goals")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 0)
+                }
+                .padding(12)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+            },
+            expanded: {
+                Button {
+                    showGoals = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "target")
+                            .font(.headline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Weekly goals")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Track your objectives")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+                }
+                .buttonStyle(.plain)
+            }
+        )
+    }
+    
+    private var competitionsModule: some View {
+        Button {
+            showCompetitions = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "trophy")
+                    .font(.headline.weight(.semibold))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Competitions")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Active & pending")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 
@@ -1758,7 +1806,7 @@ private struct HomeFeedCard: View {
                     VStack(alignment: .trailing, spacing: 6) {
                         HStack(spacing: 8) {
                             if let kcal = item.caloriesKcal, kcal > 0 {
-                                caloriesPill(kcal: kcal)
+                                caloriesPill(kcal: kcal, kind: item.workout.kind)
                             }
                             if let sc = item.score {
                                 scorePill(score: sc, kind: item.workout.kind)
@@ -1809,17 +1857,7 @@ private struct HomeFeedCard: View {
             .padding(14)
         }
     }
-    
-    private func caloriesPill(kcal: Double) -> some View {
-        let value = Int(kcal.rounded())
-        return Text("\(value) 🔥")
-            .font(.subheadline.weight(.semibold))
-            .padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(Capsule().stroke(.white.opacity(0.18)))
-    }
-    
+        
     private func likesPill() -> some View {
         HStack(spacing: 6) {
             Image(systemName: item.isLiked ? "heart.fill" : "heart")

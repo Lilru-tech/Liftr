@@ -36,6 +36,7 @@ private struct WorkoutRow: Decodable, Identifiable {
     let started_at: Date?
     let ended_at: Date?
     let state: String?
+    let calories_kcal: Decimal?
 }
 
 private struct WorkoutScoreRow: Decodable {
@@ -116,6 +117,8 @@ struct ProfileView: View {
     @State private var error: String?
     @State private var banner: Banner?
     @State private var hasUnreadNotifications = false
+    @State private var hasUnreadCompetitions = false
+    @State private var pendingCompetitionsCount: Int = 0
     @State private var pickedItem: PhotosPickerItem?
     @State private var uploadingAvatar = false
     @State private var monthDate = Date()
@@ -169,6 +172,9 @@ struct ProfileView: View {
     private let premiumProductID = "com.liftr.premium.monthly"
     private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
     private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
+    private var hasAnyUnread: Bool {
+        hasUnreadNotifications || hasUnreadCompetitions
+    }
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
@@ -632,29 +638,7 @@ struct ProfileView: View {
                         .minimumScaleFactor(0.8)
                         .layoutPriority(1)
                         .foregroundStyle(.secondary)
-                    
-                    Spacer(minLength: 8)
-                    
-                    NavigationLink {
-                        RankingView()
-                            .navigationTitle("Level Ranking")
-                    } label: {
-                        ViewThatFits(in: .horizontal) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "trophy")
-                                Text("Ranking")
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                            }
-                            Image(systemName: "trophy")
-                        }
-                        .font(.caption.weight(.semibold))
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Capsule().fill(Color.white.opacity(0.12)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
+                    Spacer(minLength: 0)
                 }
                 
                 GeometryReader { geo in
@@ -714,57 +698,89 @@ struct ProfileView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
+                if !isOwnProfile {
+                    HStack(spacing: 10) {
+                        followButton
+                            .frame(maxWidth: .infinity)
+
+                        NavigationLink {
+                            if let opponentId = viewingUserId {
+                                CreateCompetitionView(opponentId: opponentId)
+                                    .gradientBG()
+                            } else {
+                                Text("User not found")
+                                    .padding()
+                            }
+                        } label: {
+                            Label("Challenge", systemImage: "figure.fencing")
+                                .font(.caption.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .accessibilityLabel("Challenge user")
+                    }
+                    .padding(.top, 8)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Spacer(minLength: 12)
+            .layoutPriority(1)
             VStack(alignment: .trailing, spacing: 8) {
-                HStack(spacing: 8) {
+                Menu {
                     NavigationLink {
                         NotificationsListView()
                             .gradientBG()
                     } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "bell.fill")
-                                .font(.subheadline.weight(.bold))
-                                .padding(8)
-                                .background(.thinMaterial, in: Circle())
-                            
-                            if hasUnreadNotifications {
-                                Circle()
-                                    .fill(Color.red)
-                                    .frame(width: 10, height: 10)
-                                    .offset(x: 4, y: -4)
-                            }
-                        }
+                        Label("Notifications", systemImage: "bell.fill")
                     }
-                    .buttonStyle(.plain)
-                    
+
+                    NavigationLink {
+                        RankingView()
+                            .navigationTitle("Level Ranking")
+                    } label: {
+                        Label("Ranking", systemImage: "trophy")
+                    }
+
                     NavigationLink {
                         AchievementsGridView(userId: viewingUserId, viewedUsername: username)
                             .gradientBG()
+                            .navigationTitle("@\(username) · Achievements")
                     } label: {
-                        Image(systemName: "trophy.fill")
-                            .font(.subheadline.weight(.bold))
-                            .padding(8)
-                            .background(.thinMaterial, in: Circle())
+                        Label("Achievements", systemImage: "rosette")
                     }
-                    .buttonStyle(.plain)
-                    
+
                     NavigationLink {
                         GoalsView(userId: viewingUserId, viewedUsername: username)
                             .gradientBG()
                     } label: {
-                        Image(systemName: "target")
+                        Label("Goals", systemImage: "target")
+                    }
+
+                    if isOwnProfile {
+                        NavigationLink {
+                            CompetitionsHubView()
+                                .gradientBG()
+                        } label: {
+                            Label("Competitions", systemImage: "figure.fencing")
+                        }
+                    }
+
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "ellipsis")
                             .font(.subheadline.weight(.bold))
                             .padding(8)
                             .background(.thinMaterial, in: Circle())
+
+                        if hasAnyUnread {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 10, height: 10)
+                                .offset(x: 4, y: -4)
+                        }
                     }
-                    .buttonStyle(.plain)
                 }
-                
-                if !isOwnProfile {
-                    followButton
-                }
+                .buttonStyle(.plain)
             }
         }
         .padding(16)
@@ -1258,6 +1274,12 @@ struct ProfileView: View {
                             Text("Sunset").tag("sunset")
                             Text("Forest").tag("forest")
                             Text("Midnight").tag("midnight")
+                            Text("Lavender").tag("lavender")
+                            Text("Ocean").tag("ocean")
+                            Text("Rose").tag("rose")
+                            Text("Desert").tag("desert")
+                            Text("Berry").tag("berry")
+                            Text("Mono").tag("mono")
                         }
                         .pickerStyle(.menu)
                         .font(.footnote)
@@ -1403,7 +1425,10 @@ struct ProfileView: View {
                         }
                         
                         Divider().opacity(0.15)
-                        if editingProfile {
+                        Toggle("Show birth date", isOn: $hasBirthDate)
+                            .font(.subheadline.weight(.semibold))
+                        Divider().opacity(0.15)
+                        if editingProfile && hasBirthDate {
                             HStack {
                                 Text("Birth date")
                                 Spacer()
@@ -1510,11 +1535,6 @@ struct ProfileView: View {
     
     private func saveProfileMetrics() async {
         guard let uid = app.userId else { return }
-        struct ProfileMetricsUpdate: Encodable {
-            let height_cm: Int?
-            let weight_kg: Double?
-            let date_of_birth: String?
-        }
         do {
             let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
             let height = Int(hText).flatMap { $0 > 0 ? $0 : nil }
@@ -1525,16 +1545,34 @@ struct ProfileView: View {
             let weight = Double(wText).flatMap { $0 > 0 ? $0 : nil }
             
             let df = DateFormatter()
-            df.timeZone = .current
+            df.timeZone = TimeZone(secondsFromGMT: 0)
             df.dateFormat = "yyyy-MM-dd"
-            let birth = df.string(from: birthDate)
             
-            let update = ProfileMetricsUpdate(height_cm: height, weight_kg: weight, date_of_birth: birth)
-            guard update.height_cm != nil || update.weight_kg != nil || update.date_of_birth != nil else { return }
-            
+            var payload: [String: AnyEncodable] = [:]
+
+            if hText.isEmpty {
+                payload["height_cm"] = AnyEncodable(nilValue: ())
+            } else if let height, height > 0 {
+                payload["height_cm"] = AnyEncodable(height)
+            }
+
+            if wText.isEmpty {
+                payload["weight_kg"] = AnyEncodable(nilValue: ())
+            } else if let weight, weight > 0 {
+                payload["weight_kg"] = AnyEncodable(weight)
+            }
+
+            if hasBirthDate {
+                payload["date_of_birth"] = AnyEncodable(df.string(from: birthDate))
+            } else {
+                payload["date_of_birth"] = AnyEncodable(nilValue: ())
+            }
+
+            guard !payload.isEmpty else { return }
+
             _ = try await SupabaseManager.shared.client
                 .from("profiles")
-                .update(update)
+                .update(payload)
                 .eq("user_id", value: uid.uuidString)
                 .execute()
             await loadProfileHeader()
@@ -1612,7 +1650,7 @@ struct ProfileView: View {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
                 .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth")
-                .eq("user_id", value: uid)
+                .eq("user_id", value: uid.uuidString)
                 .single()
                 .execute()
             
@@ -2107,6 +2145,8 @@ struct ProfileView: View {
                 } label: {
                     Text("Unfollow")
                         .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -2116,6 +2156,8 @@ struct ProfileView: View {
                 } label: {
                     Text("Follow")
                         .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
@@ -2438,6 +2480,7 @@ private struct DayWorkoutsList: View {
     @EnvironmentObject var app: AppState
     @State private var workouts: [WorkoutRow] = []
     @State private var scores: [Int: Double] = [:]
+    @State private var calories: [Int: Double] = [:]
     @State private var error: String?
     @State private var participated: [WorkoutRow] = []
     @State private var owners: [UUID: ProfileRow] = [:]
@@ -2518,9 +2561,15 @@ private struct DayWorkoutsList: View {
                                             
                                             Spacer()
                                             
-                                            if let sc = scores[w.id] {
-                                                scorePill(score: sc, kind: w.kind)
-                                                    .accessibilityLabel("Score \(scoreString(sc))")
+                                            VStack(alignment: .trailing, spacing: 6) {
+                                                if let sc = scores[w.id] {
+                                                    scorePill(score: sc, kind: w.kind)
+                                                        .accessibilityLabel("Score \(scoreString(sc))")
+                                                }
+                                                if let kcal = calories[w.id] {
+                                                    caloriesPill(kcal: kcal, kind: w.kind)
+                                                        .accessibilityLabel("Calories \(Int(kcal.rounded()))")
+                                                }
                                             }
                                         }
                                         .padding(14)
@@ -2616,6 +2665,7 @@ private struct DayWorkoutsList: View {
         .onChange(of: selectedDay) { _, _ in
             workouts = []
             scores = [:]
+            calories = [:]
             participated = []
         }
     }
@@ -2717,10 +2767,18 @@ private struct DayWorkoutsList: View {
                 }
             }
             
+            let allWorkouts = rowsOwn + rowsPart
+            var caloriesDict: [Int: Double] = [:]
+            for w in allWorkouts {
+                let v = NSDecimalNumber(decimal: (w.calories_kcal ?? 0)).doubleValue
+                if v > 0 { caloriesDict[w.id] = v }
+            }
+            
             await MainActor.run {
                 workouts = rowsOwn
                 participated = rowsPart
                 scores = scoresDict
+                calories = caloriesDict
                 owners = ownerDict
                 workoutParticipants = participantsByWorkout
             }

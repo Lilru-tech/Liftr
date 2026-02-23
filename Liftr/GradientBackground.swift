@@ -15,6 +15,19 @@ struct GradientBackground<Content: View>: View {
             return [Color.green.opacity(0.55), Color.teal.opacity(0.55)]
         case "midnight":
             return [Color.black.opacity(0.9), Color.blue.opacity(0.7)]
+        case "lavender":
+            return [Color.purple.opacity(0.45), Color.blue.opacity(0.45)]
+        case "ocean":
+            return [Color.cyan.opacity(0.55), Color.blue.opacity(0.55)]
+        case "rose":
+            return [Color.pink.opacity(0.55), Color.purple.opacity(0.45)]
+        case "desert":
+            return [Color.yellow.opacity(0.45), Color.orange.opacity(0.40)]
+        case "berry":
+            return [Color.red.opacity(0.45), Color.indigo.opacity(0.55)]
+        case "mono":
+            return [Color.gray.opacity(0.55), Color.black.opacity(0.55)]
+
         default:
             return [Color.mint.opacity(0.6), Color.blue.opacity(0.5)]
         }

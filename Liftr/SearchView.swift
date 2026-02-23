@@ -31,7 +31,10 @@ struct SearchView: View {
 
             List {
                 Section {
-                    if loading { ProgressView().frame(maxWidth: .infinity) }
+                    if loading {
+                        ProgressView().frame(maxWidth: .infinity)
+                            .listRowBackground(Color.clear)
+                    }
                     ForEach(results, id: \.user_id) { row in
                         NavigationLink {
                             ProfileView(userId: row.user_id)
@@ -44,14 +47,18 @@ struct SearchView: View {
                                 Text("@\(row.username)")
                             }
                         }
+                        .listRowBackground(Color.clear)
                     }
                     if !loading && results.isEmpty && !query.isEmpty {
-                        Text("No users found").foregroundStyle(.secondary)
+                        Text("No users found")
+                            .foregroundStyle(.secondary)
+                            .listRowBackground(Color.clear)
                     }
                 }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .listRowSeparator(.hidden)
             
             if !isPremium {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")

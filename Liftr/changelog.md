@@ -4,6 +4,107 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-02-23
+
+### Added
+- **ActiveWorkout**
+  - Added **sound + haptics** when the rest timer ends.
+  - Users can now **edit the rest time** during an active workout.
+  - Added guidance copy in **AddWorkoutSheet** to better explain how Active Workouts work.
+
+- **Workouts**
+  - Added **Calories** to workout cards.
+
+- **Compare Workouts**
+  - Added an overall **workout performance indicator**, summarizing how the session performed across all available metrics.
+
+- **Personalization**
+  - Added **6 new background colors**.
+  - Added **Ski** as a supported sport.
+
+### Changed
+- **ActiveWorkout**
+  - Start and finish times are now set automatically:
+    - Tapping **Start** sets the workout **start time**.
+    - Tapping **Finish workout** sets the workout **end time**.
+
+- **Profile**
+  - Removed the **Ranking** quick action icon and moved access into the **⋯ menu**.
+  - Added the **Achievements** shortcut to the **⋯ menu**.
+
+- **Compare Workouts**
+  - Updated the comparison header to show the **workout date** instead of “Yours vs Yours”.
+
+- **Workout duplication**
+  - Duplicating **your own** workout now sets the date to **today** (instead of copying the original date).
+  - Duplicating **another user’s** workout keeps the **original date**, matching their session.
+
+### Fixed
+- **ActiveWorkout**
+  - Fixed the rest timer being **stopped/paused** when the user switched apps.
+  - Fixed long exercise names being **truncated**, ensuring the full exercise name can be read.
+  - Fixed an issue where sets added during an active workout had non-editable **reps / weight / rest time**.
+
+- **Profile**
+  - Fixed the **experience** value not being fully visible.
+
+- **Goals**
+  - Fixed an issue where users couldn’t see **goal history** if they didn’t have a currently ongoing goal.
+
+- **UI**
+  - Fixed **Score** and **Calories** pills being clipped in **HomeView** and **WorkoutDetailView**.
+
+- **Notifications**
+  - Fixed an issue where users saw **their own username** on a workout when opening it from the
+    “added as participant” notification.
+
+[1.4.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.4.0
+
+## [1.3.0] - 2026-01-29
+
+### Added
+- **User Competitions (1v1)**
+  - Users can **invite other users** to a 1 vs 1 competition.
+  - Invitations create a competition in **pending** state with:
+    - Selected **goal type** and target value
+    - **Start date** (set on accept)
+    - **Invitation expiration** (e.g., 48h) → auto-moves to **expired** if not answered
+  - The sender can **cancel** an invitation any time before it’s accepted.
+  - Anti-spam safeguards:
+    - Limit on **maximum pending invitations** per user (e.g., 5)
+    - Users can **block** others from sending future competition invites
+  - Invited users can:
+    - **Accept** → competition becomes **active** immediately
+    - **Decline** → competition moves to **declined**
+  - Competition goals:
+    - Allowed setups:
+      - **Time limit only**
+      - **One performance goal only**: Calories / Score / Workouts
+      - **Time limit + one performance goal**
+    - Not allowed: **multiple performance goals** in the same competition (e.g., calories + score)
+    - Competition ends when:
+      - The **time limit** is reached, or
+      - The **performance goal** is reached
+    - If both users reach the performance goal **on the same day**, the result is a **draw**
+
+### Changed
+- **Profile quick actions**
+  - Hidden **Notifications**, **Goals**, and **Competitions** icons from the profile header and moved them into a **three-dots (⋯) menu**.
+
+- **Active Strength Workout UI**
+  - Improved focus by making non-current exercise cards **more blurred**.
+  - Rest timer is no longer visible on **other exercises**.
+  - Improved tap behavior so the **full button area** is interactive.
+
+### Fixed
+- **Search results styling**
+  - Fixed the **background color** for results in the search view.
+
+- **Calories calculation**
+  - Fixed an issue that caused calories to be slightly **overestimated**.
+
+[1.3.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.3.0
+
 ## [1.2.0] - 2026-01-27
 
 ### Added

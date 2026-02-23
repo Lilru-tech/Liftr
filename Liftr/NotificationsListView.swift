@@ -75,6 +75,8 @@ struct NotificationsListView: View {
     @State private var deletingAll = false
     @State private var showDeleteAllConfirm = false
     @State private var achievementsRefreshID = UUID()
+    @State private var resolvedOwnerId: UUID?
+    @State private var resolvingOwner = false
     
     var body: some View {
         Group {
@@ -202,11 +204,47 @@ struct NotificationsListView: View {
 
                 if let ownerIdStr = n.data?["owner_id"]?.stringValue,
                    let ownerId = UUID(uuidString: ownerIdStr) {
+
                     WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
-                } else if let fallbackOwner = app.userId {
-                    WorkoutDetailView(workoutId: workoutId, ownerId: fallbackOwner)
+
+                } else if let resolvedOwnerId {
+
+                    WorkoutDetailView(workoutId: workoutId, ownerId: resolvedOwnerId)
+
                 } else {
-                    Text("Workout not found")
+                    VStack(spacing: 12) {
+                        if resolvingOwner {
+                            ProgressView("Opening workout…")
+                        } else {
+                            Text("Opening workout…")
+                        }
+                    }
+                    .task {
+                        guard !resolvingOwner else { return }
+                        resolvingOwner = true
+                        defer { resolvingOwner = false }
+
+                        struct Row: Decodable { let user_id: UUID }
+
+                        do {
+                            let res = try await SupabaseManager.shared.client
+                                .from("workouts")
+                                .select("user_id")
+                                .eq("id", value: workoutId)
+                                .limit(1)
+                                .execute()
+
+                            if let raw = String(data: res.data, encoding: .utf8) {
+                                print("🧪 [Notifications] resolve owner raw:", raw)
+                            }
+
+                            let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+                            resolvedOwnerId = rows.first?.user_id
+
+                        } catch {
+                            print("❌ [Notifications] resolve owner error:", error)
+                        }
+                    }
                 }
 
             } else {
@@ -229,6 +267,26 @@ struct NotificationsListView: View {
                 Text("Goals")
             }
 
+        case "competition_invite",
+             "competition_accepted",
+             "competition_declined",
+             "competition_cancelled",
+             "competition_expired",
+             "competition_result_win",
+             "competition_result_lose",
+             "competition_workout_accepted",
+             "competition_workout_rejected":
+            NavigationStack {
+                CompetitionsHubView()
+                    .gradientBG()
+            }
+
+        case "competition_workout_pending_review":
+            NavigationStack {
+                CompetitionReviewsView()
+                    .gradientBG()
+            }
+            
         default:
             VStack(spacing: 12) {
                 Text(n.title)
@@ -369,6 +427,16 @@ struct NotificationsListView: View {
         case "achievement_unlocked":  return "Achievement"
         case "goal_completed":        return "Goal"
         case "goal_almost_done":      return "Goal"
+        case "competition_invite":                return "Competition"
+        case "competition_accepted":              return "Competition"
+        case "competition_declined":              return "Competition"
+        case "competition_cancelled":             return "Competition"
+        case "competition_expired":               return "Competition"
+        case "competition_workout_pending_review":return "Workout review"
+        case "competition_workout_accepted":      return "Workout review"
+        case "competition_workout_rejected":      return "Workout review"
+        case "competition_result_win":            return "Result"
+        case "competition_result_lose":           return "Result"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

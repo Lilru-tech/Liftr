@@ -790,6 +790,47 @@ struct ActiveSportWorkoutView: View {
             } catch {
                 print("Error loading hyrox stats: \(error)")
             }
+            
+        case .ski:
+            struct SKRow: Decodable {
+                let total_distance_km: Double?
+                let runs_count: Int?
+                let max_speed_kmh: Double?
+                let avg_speed_kmh: Double?
+                let vertical_drop_m: Int?
+                let moving_time_sec: Int?
+                let paused_time_sec: Int?
+                let resort_name: String?
+                let snow_condition: String?
+                let weather: String?
+            }
+
+            do {
+                let res = try await client
+                    .from("ski_session_stats")
+                    .select("total_distance_km, runs_count, max_speed_kmh, avg_speed_kmh, vertical_drop_m, moving_time_sec, paused_time_sec, resort_name, snow_condition, weather")
+                    .eq("session_id", value: sessionId)
+                    .single()
+                    .execute()
+
+                let row = try JSONDecoder.supabase().decode(SKRow.self, from: res.data)
+
+                await MainActor.run {
+                    if let v = row.total_distance_km { self.sportForm.skiTotalDistanceKm = String(v) }
+                    if let v = row.runs_count        { self.sportForm.skiRunsCount       = String(v) }
+                    if let v = row.max_speed_kmh     { self.sportForm.skiMaxSpeedKmh     = String(v) }
+                    if let v = row.avg_speed_kmh     { self.sportForm.skiAvgSpeedKmh     = String(v) }
+                    if let v = row.vertical_drop_m   { self.sportForm.skiVerticalDropM   = String(v) }
+                    if let v = row.moving_time_sec   { self.sportForm.skiMovingTimeSec   = String(v) }
+                    if let v = row.paused_time_sec   { self.sportForm.skiPausedTimeSec   = String(v) }
+
+                    self.sportForm.skiResortName    = row.resort_name ?? ""
+                    self.sportForm.skiSnowCondition = row.snow_condition ?? ""
+                    self.sportForm.skiWeather       = row.weather ?? ""
+                }
+            } catch {
+                print("Error loading ski stats: \(error)")
+            }
         }
     }
     
@@ -1076,6 +1117,45 @@ struct ActiveSportWorkoutView: View {
             
             _ = try await client
                 .from("hyrox_session_stats")
+                .update(payload)
+                .eq("session_id", value: sessionId)
+                .execute()
+            
+        case .ski:
+            struct Payload: Encodable {
+                let total_distance_km: Double?
+                let runs_count: Int?
+                let max_speed_kmh: Double?
+                let avg_speed_kmh: Double?
+                let vertical_drop_m: Int?
+                let moving_time_sec: Int?
+                let paused_time_sec: Int?
+                let resort_name: String?
+                let snow_condition: String?
+                let weather: String?
+            }
+
+            func parseDoubleField(_ text: String) -> Double? {
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                return Double(trimmed.replacingOccurrences(of: ",", with: "."))
+            }
+
+            let payload = Payload(
+                total_distance_km: parseDoubleField(sportForm.skiTotalDistanceKm),
+                runs_count: parseIntField(sportForm.skiRunsCount),
+                max_speed_kmh: parseDoubleField(sportForm.skiMaxSpeedKmh),
+                avg_speed_kmh: parseDoubleField(sportForm.skiAvgSpeedKmh),
+                vertical_drop_m: parseIntField(sportForm.skiVerticalDropM),
+                moving_time_sec: parseIntField(sportForm.skiMovingTimeSec),
+                paused_time_sec: parseIntField(sportForm.skiPausedTimeSec),
+                resort_name: sportForm.skiResortName.trimmedOrNil,
+                snow_condition: sportForm.skiSnowCondition.trimmedOrNil,
+                weather: sportForm.skiWeather.trimmedOrNil
+            )
+
+            _ = try await client
+                .from("ski_session_stats")
                 .update(payload)
                 .eq("session_id", value: sessionId)
                 .execute()
@@ -1465,6 +1545,57 @@ struct SportStatsFields: View {
                     TextField("Max HR", text: $sportForm.hyMaxHR)
                         .keyboardType(.numberPad)
                 }
+            }
+            
+        case .ski:
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Total distance (km)", text: $sportForm.skiTotalDistanceKm)
+                        .keyboardType(.decimalPad)
+                    TextField("Runs", text: $sportForm.skiRunsCount)
+                        .keyboardType(.numberPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Max speed (km/h)", text: $sportForm.skiMaxSpeedKmh)
+                        .keyboardType(.decimalPad)
+                    TextField("Avg speed (km/h)", text: $sportForm.skiAvgSpeedKmh)
+                        .keyboardType(.decimalPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Vertical drop (m)", text: $sportForm.skiVerticalDropM)
+                        .keyboardType(.numberPad)
+                    TextField("Moving time (sec)", text: $sportForm.skiMovingTimeSec)
+                        .keyboardType(.numberPad)
+                    TextField("Paused time (sec)", text: $sportForm.skiPausedTimeSec)
+                        .keyboardType(.numberPad)
+                }
+            }
+
+            Divider()
+            FieldRowPlain {
+                TextField("Resort name", text: $sportForm.skiResortName)
+                    .textFieldStyle(.plain)
+            }
+
+            Divider()
+            FieldRowPlain {
+                TextField("Snow condition", text: $sportForm.skiSnowCondition)
+                    .textFieldStyle(.plain)
+            }
+
+            Divider()
+            FieldRowPlain {
+                TextField("Weather", text: $sportForm.skiWeather)
+                    .textFieldStyle(.plain)
             }
         }
     }

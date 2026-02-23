@@ -13,6 +13,9 @@ final class AppState: ObservableObject {
         case workout(workoutId: Int, ownerId: UUID?)
         case achievements
         case goals(userId: UUID)
+        case competitionsHub
+        case competitionDetail(competitionId: Int)
+        case competitionReviews
     }
     
     @Published var notificationDestination: NotificationDestination = .none
@@ -107,21 +110,47 @@ final class AppState: ObservableObject {
         case "workout_like",
              "workout_comment",
              "comment_reply",
-             "comment_like",
-             "added_as_participant":
+             "comment_like":
             print("📩 [AppState] routing to workout")
             if let workoutIdStr = data["workout_id"] as? String,
                let workoutId = Int(workoutIdStr) {
-                
+
                 let ownerId: UUID?
                 if let ownerIdStr = data["owner_id"] as? String {
                     ownerId = UUID(uuidString: ownerIdStr)
                 } else {
                     ownerId = nil
                 }
+
                 notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+
             } else {
                 print("⚠️ [AppState] workout_id missing/invalid in data:", data)
+                notificationDestination = .none
+            }
+            
+        case "added_as_participant":
+            print("📩 [AppState] routing to workout (participant)")
+
+            let workoutId: Int?
+            if let s = data["workout_id"] as? String {
+                workoutId = Int(s)
+            } else if let i = data["workout_id"] as? Int {
+                workoutId = i
+            } else {
+                workoutId = nil
+            }
+
+            if let workoutId {
+                let participantId = self.userId
+                Task { @MainActor in
+                    print("🧪 [Push] resolving owner for workoutId=\(workoutId) participantId=\(String(describing: participantId))")
+                    let owner = await resolveWorkoutOwnerId(workoutId: workoutId)
+                    print("🧪 [Push] resolved ownerId=\(String(describing: owner)) for workoutId=\(workoutId)")
+                    self.notificationDestination = .workout(workoutId: workoutId, ownerId: owner)
+                }
+            } else {
+                print("⚠️ [AppState] workout_id missing/invalid:", data)
                 notificationDestination = .none
             }
             
@@ -135,8 +164,61 @@ final class AppState: ObservableObject {
                 notificationDestination = .none
             }
             
+        case "competition_invite",
+             "competition_accepted",
+             "competition_declined",
+             "competition_cancelled",
+             "competition_expired",
+             "competition_result_win",
+             "competition_result_lose":
+            if let compIdStr = data["competition_id"] as? String,
+               let compId = Int(compIdStr) {
+                notificationDestination = .competitionDetail(competitionId: compId)
+            } else if let compIdInt = data["competition_id"] as? Int {
+                notificationDestination = .competitionDetail(competitionId: compIdInt)
+            } else {
+                notificationDestination = .competitionsHub
+            }
+
+        case "competition_workout_pending_review":
+            notificationDestination = .competitionReviews
+
+        case "competition_workout_accepted",
+             "competition_workout_rejected":
+            if let compIdStr = data["competition_id"] as? String,
+               let compId = Int(compIdStr) {
+                notificationDestination = .competitionDetail(competitionId: compId)
+            } else if let compIdInt = data["competition_id"] as? Int {
+                notificationDestination = .competitionDetail(competitionId: compIdInt)
+            } else {
+                notificationDestination = .competitionsHub
+            }
+            
         default:
             notificationDestination = .none
+        }
+    }
+    
+    private func resolveWorkoutOwnerId(workoutId: Int) async -> UUID? {
+        struct Row: Decodable { let user_id: UUID }
+
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("workouts")
+                .select("user_id")
+                .eq("id", value: workoutId)
+                .limit(1)
+                .execute()
+
+            if let raw = String(data: res.data, encoding: .utf8) {
+                print("🧪 [Push] resolveWorkoutOwnerId raw:", raw)
+            }
+
+            let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+            return rows.first?.user_id
+        } catch {
+            print("❌ [Push] resolveWorkoutOwnerId error:", error)
+            return nil
         }
     }
     
