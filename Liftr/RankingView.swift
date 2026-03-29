@@ -501,7 +501,8 @@ struct RankingView: View {
                             
                             VStack(alignment: .leading, spacing: 2) {
                                 NavigationLink {
-                                    ProfileView(userId: row.user_id).gradientBG()
+                                    WorkoutDetailView(workoutId: Int(row.workout_id), ownerId: row.user_id)
+                                        .gradientBG()
                                 } label: {
                                     Text(row.username ?? "user")
                                         .font(.subheadline.weight(.semibold))
