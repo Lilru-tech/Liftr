@@ -2,13 +2,20 @@ import SwiftUI
 import Supabase
 
 private enum JV: Encodable {
-    case s(String), i(Int), d(Double)
+    case s(String)
+    case i(Int)
+    case d(Double)
+    case o(JStats)
+    case a([JStats])
+
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         switch self {
         case .s(let v): try c.encode(v)
         case .i(let n): try c.encode(n)
         case .d(let x): try c.encode(x)
+        case .o(let obj): try c.encode(obj)
+        case .a(let arr): try c.encode(arr)
         }
     }
 }
@@ -43,6 +50,54 @@ private struct IntOrString: Decodable {
             value = nil
         }
     }
+}
+
+private enum EditHyroxExerciseCode: String, CaseIterable, Identifiable {
+    case run
+    case skierg
+    case burpee_broad_jump
+    case sled_push
+    case sled_pull
+    case row
+    case farmer_carry
+    case sandbag_lunges
+    case wall_ball
+    case atlas_carry
+    case box_jump_over
+    case dead_ball_over_trunk
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .run: return "Run"
+        case .skierg: return "SkiErg"
+        case .burpee_broad_jump: return "Burpee Broad Jump"
+        case .sled_push: return "Sled Push"
+        case .sled_pull: return "Sled Pull"
+        case .row: return "Row"
+        case .farmer_carry: return "Farmer Carry"
+        case .sandbag_lunges: return "Sandbag Lunges"
+        case .wall_ball: return "Wall Ball"
+        case .atlas_carry: return "Atlas Carry"
+        case .box_jump_over: return "Box Jump Over"
+        case .dead_ball_over_trunk: return "Dead Ball Over Trunk"
+        }
+    }
+}
+
+private struct EditHyroxExercise: Identifiable {
+    let id = UUID()
+    var dbId: Int64?
+    var exerciseCode: EditHyroxExerciseCode = .run
+    var exerciseOrder: Int = 1
+    var distanceM: String = ""
+    var reps: String = ""
+    var weightKg: String = ""
+    var durationSec: String = ""
+    var heightCm: String = ""
+    var implementCount: String = ""
+    var notes: String = ""
 }
 
 struct EditWorkoutMetaSheet: View {
@@ -173,6 +228,7 @@ struct EditWorkoutMetaSheet: View {
     @State private var hyRankCategory = ""
     @State private var hyAvgHR = ""
     @State private var hyMaxHR = ""
+    @State private var hyExercises: [EditHyroxExercise] = []
     @State private var skiTotalDistanceKm = ""
     @State private var skiRunsCount = ""
     @State private var skiMaxSpeedKmh = ""
@@ -1038,9 +1094,9 @@ struct EditWorkoutMetaSheet: View {
                             let max_hr: Int?
                         }
                         let s = try decoder.decode(HY.self, from: q.data)
-                        hyDivision       = s.division ?? ""
-                        hyCategory       = s.category ?? ""
-                        hyAgeGroup       = s.age_group ?? ""
+                        hyDivision        = s.division ?? ""
+                        hyCategory        = s.category ?? ""
+                        hyAgeGroup        = s.age_group ?? ""
                         hyOfficialTimeSec = s.official_time_sec.map(String.init) ?? ""
                         hyPenaltyTimeSec  = s.penalty_time_sec.map(String.init) ?? ""
                         hyNoReps          = s.no_reps.map(String.init) ?? ""
@@ -1048,11 +1104,50 @@ struct EditWorkoutMetaSheet: View {
                         hyRankCategory    = s.rank_category.map(String.init) ?? ""
                         hyAvgHR           = s.avg_hr.map(String.init) ?? ""
                         hyMaxHR           = s.max_hr.map(String.init) ?? ""
+
+                        struct HYEX: Decodable {
+                            let id: Int64
+                            let exercise_code: String
+                            let exercise_order: Int
+                            let distance_m: Int?
+                            let reps: Int?
+                            let weight_kg: Decimal?
+                            let duration_sec: Int?
+                            let height_cm: Int?
+                            let implement_count: Int?
+                            let notes: String?
+                        }
+
+                        let exRes = try await client
+                            .from("hyrox_session_exercises")
+                            .select("*")
+                            .eq("session_id", value: r.id)
+                            .order("exercise_order", ascending: true)
+                            .execute()
+
+                        let exRows = try decoder.decode([HYEX].self, from: exRes.data)
+
+                        hyExercises = exRows.compactMap { row in
+                            guard let code = EditHyroxExerciseCode(rawValue: row.exercise_code) else { return nil }
+                            return EditHyroxExercise(
+                                dbId: row.id,
+                                exerciseCode: code,
+                                exerciseOrder: row.exercise_order,
+                                distanceM: row.distance_m.map(String.init) ?? "",
+                                reps: row.reps.map(String.init) ?? "",
+                                weightKg: row.weight_kg.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? "",
+                                durationSec: row.duration_sec.map(String.init) ?? "",
+                                heightCm: row.height_cm.map(String.init) ?? "",
+                                implementCount: row.implement_count.map(String.init) ?? "",
+                                notes: row.notes ?? ""
+                            )
+                        }
                     } catch {
                         hyDivision = ""; hyCategory = ""; hyAgeGroup = ""
                         hyOfficialTimeSec = ""; hyPenaltyTimeSec = ""; hyNoReps = ""
                         hyRankOverall = ""; hyRankCategory = ""
                         hyAvgHR = ""; hyMaxHR = ""
+                        hyExercises = []
                     }
                     
                 case .ski:
@@ -1908,37 +2003,111 @@ struct EditWorkoutMetaSheet: View {
                     TextField("Turnovers won", text: $rgTurnoversWon).keyboardType(.numberPad)
                 }
 
-            case .hyrox:
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("Division", text: $hyDivision)
-                        TextField("Category", text: $hyCategory)
-                        TextField("Age group", text: $hyAgeGroup)
-                    }
+        case .hyrox:
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Division", text: $hyDivision)
+                    TextField("Category", text: $hyCategory)
+                    TextField("Age group", text: $hyAgeGroup)
                 }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("Official time (sec)", text: $hyOfficialTimeSec).keyboardType(.numberPad)
-                        TextField("Penalty time (sec)", text: $hyPenaltyTimeSec).keyboardType(.numberPad)
-                    }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Official time (sec)", text: $hyOfficialTimeSec).keyboardType(.numberPad)
+                    TextField("Penalty time (sec)", text: $hyPenaltyTimeSec).keyboardType(.numberPad)
                 }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("No reps", text: $hyNoReps).keyboardType(.numberPad)
-                        TextField("Rank overall", text: $hyRankOverall).keyboardType(.numberPad)
-                        TextField("Rank category", text: $hyRankCategory).keyboardType(.numberPad)
-                    }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("No reps", text: $hyNoReps).keyboardType(.numberPad)
+                    TextField("Rank overall", text: $hyRankOverall).keyboardType(.numberPad)
+                    TextField("Rank category", text: $hyRankCategory).keyboardType(.numberPad)
                 }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("Avg HR", text: $hyAvgHR).keyboardType(.numberPad)
-                        TextField("Max HR", text: $hyMaxHR).keyboardType(.numberPad)
-                    }
+            }
+            Divider()
+            FieldRowPlain {
+                HStack {
+                    TextField("Avg HR", text: $hyAvgHR).keyboardType(.numberPad)
+                    TextField("Max HR", text: $hyMaxHR).keyboardType(.numberPad)
                 }
+            }
+
+            Divider().padding(.vertical, 6)
+
+            Text("Exercises")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            ForEach(hyExercises.indices, id: \.self) { i in
+                Divider().padding(.vertical, 6)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Picker("", selection: $hyExercises[i].exerciseCode) {
+                            ForEach(EditHyroxExerciseCode.allCases) { ex in
+                                Text(ex.label).tag(ex)
+                            }
+                        }
+                        .pickerStyle(.menu)
+
+                        Spacer()
+
+                        Button(role: .destructive) {
+                            hyExercises.remove(at: i)
+                            for idx in hyExercises.indices {
+                                hyExercises[idx].exerciseOrder = idx + 1
+                            }
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
+                    HStack {
+                        TextField("Order", text: $hyExercises[i].exerciseOrder.asStringBinding)
+                            .keyboardType(.numberPad)
+                        TextField("Distance (m)", text: $hyExercises[i].distanceM)
+                            .keyboardType(.numberPad)
+                        TextField("Reps", text: $hyExercises[i].reps)
+                            .keyboardType(.numberPad)
+                    }
+
+                    HStack {
+                        TextField("Weight (kg)", text: $hyExercises[i].weightKg)
+                            .keyboardType(.decimalPad)
+                        TextField("Duration (sec)", text: $hyExercises[i].durationSec)
+                            .keyboardType(.numberPad)
+                    }
+
+                    HStack {
+                        TextField("Height (cm)", text: $hyExercises[i].heightCm)
+                            .keyboardType(.numberPad)
+                        TextField("Implements", text: $hyExercises[i].implementCount)
+                            .keyboardType(.numberPad)
+                    }
+
+                    TextField("Notes", text: $hyExercises[i].notes)
+                        .textFieldStyle(.plain)
+                }
+            }
+
+            Divider().padding(.vertical, 6)
+
+            Button {
+                hyExercises.append(
+                    EditHyroxExercise(
+                        exerciseCode: .run,
+                        exerciseOrder: hyExercises.count + 1
+                    )
+                )
+            } label: {
+                Label("Add exercise", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
             
         case .ski:
             Divider()
@@ -2238,6 +2407,25 @@ struct EditWorkoutMetaSheet: View {
             if let v = parseInt(hyRankCategory)    { out["rank_category"]     = .i(v) }
             if let v = parseInt(hyAvgHR)           { out["avg_hr"]            = .i(v) }
             if let v = parseInt(hyMaxHR)           { out["max_hr"]            = .i(v) }
+
+            let exerciseObjects: [JStats] = hyExercises.map { ex in
+                var values: [String: JV] = [
+                    "exercise_code": .s(ex.exerciseCode.rawValue),
+                    "exercise_order": .i(ex.exerciseOrder)
+                ]
+
+                if let v = parseInt(ex.distanceM) { values["distance_m"] = .i(v) }
+                if let v = parseInt(ex.reps) { values["reps"] = .i(v) }
+                if let v = parseDouble(ex.weightKg) { values["weight_kg"] = .d(v) }
+                if let v = parseInt(ex.durationSec) { values["duration_sec"] = .i(v) }
+                if let v = parseInt(ex.heightCm) { values["height_cm"] = .i(v) }
+                if let v = parseInt(ex.implementCount) { values["implement_count"] = .i(v) }
+                if let v = ex.notes.trimmedOrNil { values["notes"] = .s(v) }
+
+                return JStats(values: values)
+            }
+
+            out["exercises"] = .a(exerciseObjects)
             return out
             
         case .ski:
@@ -2260,6 +2448,17 @@ struct EditWorkoutMetaSheet: View {
             }
             return out
         }
+    }
+}
+
+private extension Binding where Value == Int {
+    var asStringBinding: Binding<String> {
+        Binding<String>(
+            get: { String(self.wrappedValue) },
+            set: { newValue in
+                self.wrappedValue = Int(newValue.trimmingCharacters(in: .whitespacesAndNewlines)) ?? self.wrappedValue
+            }
+        )
     }
 }
 

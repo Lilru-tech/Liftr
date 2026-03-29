@@ -5,6 +5,7 @@ struct ActiveCardioWorkoutView: View {
     let workoutId: Int
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var app: AppState
+    @AppStorage("isPremium") private var isPremium = false
     @State private var showCountdown = true
     @State private var isRunning = false
     @State private var elapsedSec: Int = 0
@@ -164,6 +165,13 @@ struct ActiveCardioWorkoutView: View {
                     }
                     
                     Spacer()
+                    
+                    if !isPremium {
+                        BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                            .frame(height: 50)
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                    }
                 }
                 .padding(16)
                 

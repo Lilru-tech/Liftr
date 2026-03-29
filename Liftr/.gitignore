@@ -39,3 +39,6 @@ fastlane/test_output
 *.p8
 *.mobileprovision
 *.cer
+
+# VSCode
+.vscode/

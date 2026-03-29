@@ -52,6 +52,7 @@ struct ActiveStrengthWorkoutView: View {
     
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("isPremium") private var isPremium = false
 
     @State private var restEndDate: Date? = nil
     @State private var restEndDateByExercise: [Int: Date] = [:]
@@ -173,6 +174,14 @@ struct ActiveStrengthWorkoutView: View {
                     .background(.ultraThinMaterial)
                     .transition(.opacity.combined(with: .scale))
                     .zIndex(1)
+                }
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if !isPremium {
+                    BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                        .frame(height: 50)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)

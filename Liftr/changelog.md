@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-03-28
+
+### Added
+- **Compare Workouts**
+  - Added visual color cues to make comparison clearer:
+    - **You** are now shown in **green**
+    - The **other user** is shown in **red**
+  - Added the **workout owner/user** to the comparison view for better context.
+
+### Changed
+- **Hyrox**
+  - Updated the **Hyrox workout flow** to support **specific planned exercises** and improved how they are displayed across the app.
+
+### Fixed
+- **RankingView**
+  - Fixed an issue where tapping a workout in **RankingView** could incorrectly open the **user profile** instead of the workout.
+
+- **Ski workouts**
+  - Fixed **score** and **calories** calculation for ski workouts.
+  - Fixed an issue where duplicating a **ski workout** did not recover all workout data correctly.
+
+[1.5.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.5.0
+
 ## [1.4.0] - 2026-02-23
 
 ### Added
