@@ -50,40 +50,6 @@ enum MatchResult: String, CaseIterable, Identifiable {
     }
 }
 
-enum HyroxExerciseCode: String, CaseIterable, Identifiable {
-    case run
-    case skierg
-    case burpeeBroadJump = "burpee_broad_jump"
-    case sledPush = "sled_push"
-    case sledPull = "sled_pull"
-    case row
-    case farmerCarry = "farmer_carry"
-    case sandbagLunges = "sandbag_lunges"
-    case wallBall = "wall_ball"
-    case atlasCarry = "atlas_carry"
-    case boxJumpOver = "box_jump_over"
-    case deadBallOverTrunk = "dead_ball_over_trunk"
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .run: return "Run"
-        case .skierg: return "SkiErg"
-        case .burpeeBroadJump: return "Burpee Broad Jump"
-        case .sledPush: return "Sled Push"
-        case .sledPull: return "Sled Pull"
-        case .row: return "Row"
-        case .farmerCarry: return "Farmer Carry"
-        case .sandbagLunges: return "Sandbag Lunges"
-        case .wallBall: return "Wall Ball"
-        case .atlasCarry: return "Atlas Carry"
-        case .boxJumpOver: return "Box Jump Over"
-        case .deadBallOverTrunk: return "Dead Ball Over Trunk"
-        }
-    }
-}
-
 enum PublishMode: String, CaseIterable, Identifiable {
     case add, plan
     var id: String { rawValue }
@@ -216,7 +182,8 @@ struct AddWorkoutSheet: View {
     @State private var didApplyDraft = false
     @State private var isApplyingDraft = false
     @State private var showHelp = false
-    
+    @State private var hyroxStatsExpanded = false
+
     var body: some View {
         NavigationStack {
             GradientBackground {
@@ -870,6 +837,30 @@ struct AddWorkoutSheet: View {
             return true
         }
     }
+
+    private func hyroxExercisePickerBinding(index: Int) -> Binding<String> {
+        Binding(
+            get: { HyroxExerciseFormatting.pickerTag(for: sport.hyExercises[index].exerciseCode) },
+            set: { newTag in
+                let prev = sport.hyExercises[index].exerciseCode
+                if newTag != HyroxExerciseFormatting.customExerciseCode {
+                    sport.hyExercises[index].exerciseCode = newTag
+                    sport.hyExercises[index].customDisplayName = ""
+                    return
+                }
+                if HyroxExerciseCode(rawValue: prev) != nil {
+                    sport.hyExercises[index].exerciseCode = HyroxExerciseFormatting.customExerciseCode
+                    sport.hyExercises[index].customDisplayName = ""
+                } else if prev != HyroxExerciseFormatting.customExerciseCode {
+                    sport.hyExercises[index].exerciseCode = HyroxExerciseFormatting.customExerciseCode
+                    let existing = sport.hyExercises[index].customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if existing.isEmpty {
+                        sport.hyExercises[index].customDisplayName = HyroxExerciseFormatting.label(code: prev, displayName: nil)
+                    }
+                }
+            }
+        )
+    }
     
     @ViewBuilder
     private func sportSpecificFields() -> some View {
@@ -1120,61 +1111,54 @@ struct AddWorkoutSheet: View {
 
         case .hyrox:
             Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Division (Open/Pro…)", text: $sport.hyDivision)
+            DisclosureGroup(isExpanded: $hyroxStatsExpanded) {
+                FieldRowPlain {
+                    HStack {
+                        TextField("Division (Open/Pro…)", text: $sport.hyDivision)
+                            .textFieldStyle(.plain)
+                        TextField("Category (Men/Women…)", text: $sport.hyCategory)
+                            .textFieldStyle(.plain)
+                    }
+                }
+                Divider()
+                FieldRowPlain {
+                    TextField("Age group (e.g. 30–34)", text: $sport.hyAgeGroup)
                         .textFieldStyle(.plain)
-                    TextField("Category (Men/Women…)", text: $sport.hyCategory)
-                        .textFieldStyle(.plain)
                 }
-            }
-            Divider()
-            FieldRowPlain {
-                TextField("Age group (e.g. 30–34)", text: $sport.hyAgeGroup)
-                    .textFieldStyle(.plain)
-            }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Official time (sec)", text: $sport.hyOfficialTimeSec).keyboardType(.numberPad)
-                    TextField("Penalty time (sec)", text: $sport.hyPenaltyTimeSec).keyboardType(.numberPad)
+                Divider()
+                FieldRowPlain {
+                    HStack {
+                        TextField("Official time (sec)", text: $sport.hyOfficialTimeSec).keyboardType(.numberPad)
+                        TextField("Penalty time (sec)", text: $sport.hyPenaltyTimeSec).keyboardType(.numberPad)
+                    }
                 }
-            }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("No reps", text: $sport.hyNoReps).keyboardType(.numberPad)
-                    TextField("Rank overall", text: $sport.hyRankOverall).keyboardType(.numberPad)
-                    TextField("Rank category", text: $sport.hyRankCategory).keyboardType(.numberPad)
+                Divider()
+                FieldRowPlain {
+                    HStack {
+                        TextField("No reps", text: $sport.hyNoReps).keyboardType(.numberPad)
+                        TextField("Rank overall", text: $sport.hyRankOverall).keyboardType(.numberPad)
+                        TextField("Rank category", text: $sport.hyRankCategory).keyboardType(.numberPad)
+                    }
                 }
-            }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Avg HR", text: $sport.hyAvgHR).keyboardType(.numberPad)
-                    TextField("Max HR", text: $sport.hyMaxHR).keyboardType(.numberPad)
+                Divider()
+                FieldRowPlain {
+                    HStack {
+                        TextField("Avg HR", text: $sport.hyAvgHR).keyboardType(.numberPad)
+                        TextField("Max HR", text: $sport.hyMaxHR).keyboardType(.numberPad)
+                    }
                 }
+            } label: {
+                Text("Stats (optional)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
 
             Divider()
 
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("Exercises")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Button {
-                        sport.hyExercises.append(
-                            HyroxExerciseForm(
-                                exerciseCode: .run,
-                                exerciseOrder: sport.hyExercises.count + 1
-                            )
-                        )
-                    } label: {
-                        Label("Add exercise", systemImage: "plus.circle")
-                    }
-                    .buttonStyle(.borderless)
-                }
+                Text("Exercises")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 if sport.hyExercises.isEmpty {
                     Text("No Hyrox exercises added")
@@ -1204,12 +1188,18 @@ struct AddWorkoutSheet: View {
                             }
                         }
 
-                        Picker("", selection: $sport.hyExercises[i].exerciseCode) {
+                        Picker("", selection: hyroxExercisePickerBinding(index: i)) {
                             ForEach(HyroxExerciseCode.allCases) { ex in
-                                Text(ex.label).tag(ex)
+                                Text(ex.label).tag(ex.rawValue)
                             }
+                            Text("Other").tag(HyroxExerciseFormatting.customExerciseCode)
                         }
                         .pickerStyle(.menu)
+
+                        if HyroxExerciseCode(rawValue: sport.hyExercises[i].exerciseCode) == nil {
+                            TextField("Exercise name", text: $sport.hyExercises[i].customDisplayName)
+                                .textFieldStyle(.roundedBorder)
+                        }
 
                         HStack {
                             TextField("Distance (m)", text: $sport.hyExercises[i].distanceM)
@@ -1236,6 +1226,20 @@ struct AddWorkoutSheet: View {
                             .textFieldStyle(.roundedBorder)
                     }
                 }
+
+                Divider().padding(.vertical, 6)
+                Button {
+                    sport.hyExercises.append(
+                        HyroxExerciseForm(
+                            exerciseCode: HyroxExerciseCode.run.rawValue,
+                            exerciseOrder: sport.hyExercises.count + 1
+                        )
+                    )
+                } label: {
+                    Label("Add exercise", systemImage: "plus")
+                }
+                .buttonStyle(.borderless)
+                .padding(.top, 2)
             }
             
         case .ski:
@@ -1616,7 +1620,14 @@ struct AddWorkoutSheet: View {
 
             let exercises: [AnyJSON] = try f.hyExercises.enumerated().map { index, ex in
                 var item: [String: AnyJSON] = [:]
-                item["exercise_code"] = try .init(ex.exerciseCode.rawValue)
+                let persisted = HyroxExerciseFormatting.persistedPayload(
+                    exerciseCode: ex.exerciseCode,
+                    customDisplayName: ex.customDisplayName
+                )
+                item["exercise_code"] = try .init(persisted.code)
+                if let d = persisted.displayName {
+                    item["exercise_display_name"] = try .init(d)
+                }
                 item["exercise_order"] = try .init(index + 1)
 
                 if let v = parseInt(ex.distanceM)      { item["distance_m"] = try .init(v) }
@@ -1934,7 +1945,8 @@ struct CardioForm {
 
 struct HyroxExerciseForm: Identifiable, Hashable {
     let id = UUID()
-    var exerciseCode: HyroxExerciseCode = .run
+    var exerciseCode: String = HyroxExerciseCode.run.rawValue
+    var customDisplayName: String = ""
     var exerciseOrder: Int = 1
     var distanceM: String = ""
     var reps: String = ""

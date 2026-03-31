@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] - 2026-03-31
+
+### Added
+- **Hyrox — custom exercises**
+  - You can pick **Other** and enter a **custom exercise name** instead of only choosing from the predefined station list.
+  - Optional **`exercise_display_name`** is stored for those entries (with **`exercise_code`** set to **`custom`**); known presets stay unchanged.
+  - Shared formatting helper (**`HyroxExerciseFormatting`**) centralizes labels and how values are loaded/saved.
+  - Workouts that already contain **unknown or legacy** `exercise_code` values are **no longer dropped** when editing or duplicating.
+
+### Changed
+- **Hyrox — add / edit workout**
+  - **Add exercise** is placed at the **bottom** of the exercise list (same idea as **Strength**), so new blocks appear above the button.
+  - Optional **Hyrox session stats** (division, category, age group, official time, ranks, HR, etc.) are grouped under a collapsible **Stats (optional)** section; in **edit**, it **expands automatically** if any of those fields already has data.
+
+### Notes (database / scoring)
+- **Supabase**: add nullable column **`exercise_display_name`** on **`hyrox_session_exercises`** if not present; extend the **`hyrox_session_exercises_code_check`** constraint to include **`custom`** so inserts succeed.
+- **Scoring**: update **`score_hyrox_v1`** so **`custom`** (and any non-listed code, if desired) contributes via a **generic points** mix from distance / time / reps / weight, instead of adding **0** in the `ELSE` branch.
+
+[1.5.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.5.1
+
 ## [1.5.0] - 2026-03-28
 
 ### Added
