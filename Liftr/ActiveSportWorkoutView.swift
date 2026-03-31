@@ -47,23 +47,10 @@ struct ActiveSportWorkoutView: View {
         let height_cm: Int?
         let implement_count: Int?
         let notes: String?
-        
+        let exercise_display_name: String?
+
         var displayName: String {
-            switch exercise_code {
-            case "run": return "Run"
-            case "skierg": return "SkiErg"
-            case "burpee_broad_jump": return "Burpee Broad Jump"
-            case "sled_push": return "Sled Push"
-            case "sled_pull": return "Sled Pull"
-            case "row": return "Row"
-            case "farmer_carry": return "Farmer Carry"
-            case "sandbag_lunges": return "Sandbag Lunges"
-            case "wall_ball": return "Wall Ball"
-            case "atlas_carry": return "Atlas Carry"
-            case "box_jump_over": return "Box Jump Over"
-            case "dead_ball_over_trunk": return "Dead Ball Over Trunk"
-            default: return exercise_code.replacingOccurrences(of: "_", with: " ").capitalized
-            }
+            HyroxExerciseFormatting.label(code: exercise_code, displayName: exercise_display_name)
         }
     }
     
@@ -1358,6 +1345,7 @@ struct ActiveSportWorkoutView: View {
                 let height_cm: Int?
                 let implement_count: Int?
                 let notes: String?
+                let exercise_display_name: String?
             }
 
             let exercisePayloads: [HyroxExerciseInsertPayload] = hyroxExercises.map { ex in
@@ -1371,7 +1359,8 @@ struct ActiveSportWorkoutView: View {
                     duration_sec: ex.duration_sec,
                     height_cm: ex.height_cm,
                     implement_count: ex.implement_count,
-                    notes: ex.notes
+                    notes: ex.notes,
+                    exercise_display_name: ex.exercise_display_name
                 )
             }
 

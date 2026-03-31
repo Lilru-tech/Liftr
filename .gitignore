@@ -60,3 +60,6 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# VS Code / Cursor (local editor settings; keep shared files like .vscode/*.md tracked)
+.vscode/settings.json
