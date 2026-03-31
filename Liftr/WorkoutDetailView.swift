@@ -1358,13 +1358,89 @@ struct WorkoutDetailView: View {
                     sf2.hyDivision        = full.hy_division ?? ""
                     sf2.hyCategory        = full.hy_category ?? ""
                     sf2.hyAgeGroup        = full.hy_age_group ?? ""
-                    sf2.hyOfficialTimeSec = (full.hy_official_time_sec ?? 0).description
-                    sf2.hyRankOverall     = (full.hy_rank_overall ?? 0).description
-                    sf2.hyRankCategory    = (full.hy_rank_category ?? 0).description
-                    sf2.hyNoReps          = (full.hy_no_reps ?? 0).description
-                    sf2.hyPenaltyTimeSec  = (full.hy_penalty_time_sec ?? 0).description
-                    sf2.hyAvgHR           = (full.hy_avg_hr ?? 0).description
-                    sf2.hyMaxHR           = (full.hy_max_hr ?? 0).description
+                    sf2.hyOfficialTimeSec = full.hy_official_time_sec.map(String.init) ?? ""
+                    sf2.hyRankOverall     = full.hy_rank_overall.map(String.init) ?? ""
+                    sf2.hyRankCategory    = full.hy_rank_category.map(String.init) ?? ""
+                    sf2.hyNoReps          = full.hy_no_reps.map(String.init) ?? ""
+                    sf2.hyPenaltyTimeSec  = full.hy_penalty_time_sec.map(String.init) ?? ""
+                    sf2.hyAvgHR           = full.hy_avg_hr.map(String.init) ?? ""
+                    sf2.hyMaxHR           = full.hy_max_hr.map(String.init) ?? ""
+
+                    do {
+                        let hyExRes = try await SupabaseManager.shared.client
+                            .from("hyrox_session_exercises")
+                            .select("*")
+                            .eq("session_id", value: full.session_id)
+                            .order("exercise_order", ascending: true)
+                            .execute()
+
+                        struct HyExRow: Decodable {
+                            let exercise_code: String
+                            let exercise_order: Int
+                            let distance_m: Int?
+                            let reps: Int?
+                            let weight_kg: Decimal?
+                            let duration_sec: Int?
+                            let height_cm: Int?
+                            let implement_count: Int?
+                            let notes: String?
+                        }
+
+                        let hyRows = try decoder.decode([HyExRow].self, from: hyExRes.data)
+
+                        sf2.hyExercises = hyRows.compactMap { row in
+                            guard let code = HyroxExerciseCode(rawValue: row.exercise_code) else { return nil }
+                            return HyroxExerciseForm(
+                                exerciseCode: code,
+                                exerciseOrder: row.exercise_order,
+                                distanceM: row.distance_m.map(String.init) ?? "",
+                                reps: row.reps.map(String.init) ?? "",
+                                weightKg: row.weight_kg.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? "",
+                                durationSec: row.duration_sec.map(String.init) ?? "",
+                                heightCm: row.height_cm.map(String.init) ?? "",
+                                implementCount: row.implement_count.map(String.init) ?? "",
+                                notes: row.notes ?? ""
+                            )
+                        }
+                    } catch {
+                        sf2.hyExercises = []
+                    }
+                }
+                
+                if full.sport == "ski" {
+                    do {
+                        let skiRes = try await SupabaseManager.shared.client
+                            .from("ski_session_stats")
+                            .select("*")
+                            .eq("session_id", value: full.session_id)
+                            .single()
+                            .execute()
+                        struct SkiRow: Decodable {
+                            let total_distance_km: Decimal?
+                            let runs_count: Int?
+                            let max_speed_kmh: Decimal?
+                            let avg_speed_kmh: Decimal?
+                            let vertical_drop_m: Int?
+                            let moving_time_sec: Int?
+                            let paused_time_sec: Int?
+                            let resort_name: String?
+                            let snow_condition: String?
+                            let weather: String?
+                        }
+                        let skiRow = try decoder.decode(SkiRow.self, from: skiRes.data)
+                        sf2.skiTotalDistanceKm = skiRow.total_distance_km.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? ""
+                        sf2.skiRunsCount = skiRow.runs_count.map(String.init) ?? ""
+                        sf2.skiMaxSpeedKmh = skiRow.max_speed_kmh.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? ""
+                        sf2.skiAvgSpeedKmh = skiRow.avg_speed_kmh.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? ""
+                        sf2.skiVerticalDropM = skiRow.vertical_drop_m.map(String.init) ?? ""
+                        sf2.skiMovingTimeSec = skiRow.moving_time_sec.map(String.init) ?? ""
+                        sf2.skiPausedTimeSec = skiRow.paused_time_sec.map(String.init) ?? ""
+                        sf2.skiResortName = skiRow.resort_name ?? ""
+                        sf2.skiSnowCondition = skiRow.snow_condition ?? ""
+                        sf2.skiWeather = skiRow.weather ?? ""
+                    } catch {
+                        print("[DUP][SPORT] Ski stats load failed: \(error)")
+                    }
                 }
                 
                 draft.sport = sf2
@@ -1420,6 +1496,7 @@ struct WorkoutDetailView: View {
         let sport: String?
         let activity: String?
         let started_at: Date
+        let owner_username: String?
         var id: Int { candidate_id }
 
         var displayTitle: String {
@@ -1428,6 +1505,18 @@ struct WorkoutDetailView: View {
             if kind == "cardio" { return (activity ?? "Cardio").replacingOccurrences(of: "_", with: " ").capitalized }
             return "Workout"
         }
+        
+        func withOwnerUsername(_ name: String?) -> CompareCandidate {
+            CompareCandidate(
+                candidate_id: candidate_id,
+                title: title,
+                kind: kind,
+                sport: sport,
+                activity: activity,
+                started_at: started_at,
+                owner_username: name ?? owner_username
+            )
+        }
     }
     
     private struct CanCompareParams: Encodable {
@@ -1435,6 +1524,43 @@ struct WorkoutDetailView: View {
         let p_workout: Int
     }
 
+    private func enrichCompareCandidatesWithOwnerUsernames(_ rows: [CompareCandidate]) async -> [CompareCandidate] {
+        guard !rows.isEmpty else { return rows }
+        let ids = rows.map(\.candidate_id)
+        let decoder = JSONDecoder.supabase()
+        do {
+            let wRes = try await SupabaseManager.shared.client
+                .from("workouts")
+                .select("id, user_id")
+                .in("id", values: ids)
+                .execute()
+            struct WO: Decodable { let id: Int; let user_id: UUID }
+            let owners = try decoder.decode([WO].self, from: wRes.data)
+            let idToUser = Dictionary(uniqueKeysWithValues: owners.map { ($0.id, $0.user_id) })
+            let uids = Array(Set(owners.map(\.user_id)))
+            guard !uids.isEmpty else { return rows }
+            let pRes = try await SupabaseManager.shared.client
+                .from("profiles")
+                .select("user_id, username")
+                .in("user_id", values: uids.map(\.uuidString))
+                .execute()
+            struct PR: Decodable { let user_id: UUID; let username: String? }
+            let profs = try decoder.decode([PR].self, from: pRes.data)
+            let uidToName: [UUID: String] = Dictionary(
+                uniqueKeysWithValues: profs.compactMap { p in
+                    guard let u = p.username, !u.isEmpty else { return nil }
+                    return (p.user_id, u)
+                }
+            )
+            return rows.map { r in
+                guard let uid = idToUser[r.candidate_id], let un = uidToName[uid] else { return r }
+                return r.withOwnerUsername(un)
+            }
+        } catch {
+            return rows
+        }
+    }
+    
     private func loadCompareCandidates() async {
         guard let me = app.userId else {
             await MainActor.run {
@@ -1454,7 +1580,8 @@ struct WorkoutDetailView: View {
                 .rpc("list_comparable_workouts_v1",
                      params: Params(p_viewer: me, p_workout: workoutId, p_limit: 50))
                 .execute()
-            let rows = try JSONDecoder.supabase().decode([CompareCandidate].self, from: res.data)
+            var rows = try JSONDecoder.supabase().decode([CompareCandidate].self, from: res.data)
+            rows = await enrichCompareCandidatesWithOwnerUsernames(rows)
             await MainActor.run {
                 compareCandidates = rows
                 compareCandidateId = rows.first?.id
@@ -1951,6 +2078,20 @@ private struct SportDetailBlock: View {
         let max_hr: Int?
     }
     
+    private struct HyroxExerciseStats: Decodable, Identifiable {
+        let id: Int64
+        let session_id: Int
+        let exercise_code: String
+        let exercise_order: Int
+        let distance_m: Int?
+        let reps: Int?
+        let weight_kg: Decimal?
+        let duration_sec: Int?
+        let height_cm: Int?
+        let implement_count: Int?
+        let notes: String?
+    }
+    
     private struct SkiStats: Decodable {
         let session_id: Int
         let total_distance_km: Decimal?
@@ -1976,6 +2117,7 @@ private struct SportDetailBlock: View {
     @State private var hk: HockeyStats? = nil
     @State private var rg: RugbyStats? = nil
     @State private var hy: HyroxStats? = nil
+    @State private var hyExercises: [HyroxExerciseStats] = []
     @State private var sk: SkiStats? = nil
     
     var body: some View {
@@ -2166,6 +2308,42 @@ private struct SportDetailBlock: View {
                     if let t = s.penalty_time_sec       { info("Penalty time", durationString(Double(t))) }
                     if let v = s.avg_hr                 { info("Avg HR", "\(v) bpm") }
                     if let v = s.max_hr                 { info("Max HR", "\(v) bpm") }
+
+                    if !hyExercises.isEmpty {
+                        Divider().padding(.vertical, 4)
+                        Text("Hyrox exercises").font(.headline)
+
+                        ForEach(hyExercises) { ex in
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("\(ex.exercise_order). \(hyroxExerciseLabel(ex.exercise_code))")
+                                    .font(.subheadline.weight(.semibold))
+
+                                if let v = ex.distance_m {
+                                    info("Distance", "\(v) m")
+                                }
+                                if let v = ex.reps {
+                                    info("Reps", "\(v)")
+                                }
+                                if let v = ex.weight_kg {
+                                    info("Weight", String(format: "%.1f kg", NSDecimalNumber(decimal: v).doubleValue))
+                                }
+                                if let v = ex.duration_sec {
+                                    info("Duration", durationString(Double(v)))
+                                }
+                                if let v = ex.height_cm {
+                                    info("Height", "\(v) cm")
+                                }
+                                if let v = ex.implement_count {
+                                    info("Implements", "\(v)")
+                                }
+                                if let v = ex.notes, !v.isEmpty {
+                                    info("Notes", v)
+                                }
+                            }
+                            .padding(10)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
                 }
                 if r.sport == "ski", let s = sk {
                     Divider().padding(.vertical, 4)
@@ -2216,6 +2394,7 @@ private struct SportDetailBlock: View {
                 row = r
                 fb = nil; bb = nil; rk = nil; vb = nil
                 hb = nil; hk = nil; rg = nil; hy = nil
+                hyExercises = []
                 sk = nil
             }
             await loadStats(for: r)
@@ -2289,8 +2468,25 @@ private struct SportDetailBlock: View {
                     .single()
                     .execute()
                 let s = try decoder.decode(HyroxStats.self, from: q.data)
-                await MainActor.run { hy = s }
-            } catch { await MainActor.run { hy = nil } }
+
+                let exQ = try await client
+                    .from("hyrox_session_exercises")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .order("exercise_order", ascending: true)
+                    .execute()
+                let ex = try decoder.decode([HyroxExerciseStats].self, from: exQ.data)
+
+                await MainActor.run {
+                    hy = s
+                    hyExercises = ex
+                }
+            } catch {
+                await MainActor.run {
+                    hy = nil
+                    hyExercises = []
+                }
+            }
             
         case "basketball":
             do {
@@ -2356,6 +2552,25 @@ private struct SportDetailBlock: View {
         }
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+    
+    private func hyroxExerciseLabel(_ code: String) -> String {
+        switch code {
+        case "run": return "Run"
+        case "skierg": return "SkiErg"
+        case "burpee_broad_jump": return "Burpee Broad Jump"
+        case "sled_push": return "Sled Push"
+        case "sled_pull": return "Sled Pull"
+        case "row": return "Row"
+        case "farmer_carry": return "Farmer Carry"
+        case "sandbag_lunges": return "Sandbag Lunges"
+        case "wall_ball": return "Wall Ball"
+        case "atlas_carry": return "Atlas Carry"
+        case "box_jump_over": return "Box Jump Over"
+        case "dead_ball_over_trunk": return "Dead Ball Over Trunk"
+        default:
+            return code.replacingOccurrences(of: "_", with: " ").capitalized
+        }
     }
     
     private func durationString(_ secondsDouble: Double) -> String {
@@ -2455,9 +2670,14 @@ private struct CompareCandidatePicker: View {
                         Text(c.displayTitle)
                             .font(.headline)
                             .lineLimit(1)
+                        if let u = c.owner_username, !u.isEmpty {
+                            Text("@\(u)")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
                         Text(c.started_at.formatted(date: .abbreviated, time: .shortened))
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.tertiary)
                     }
                 }
                 .listRowBackground(Color.clear)

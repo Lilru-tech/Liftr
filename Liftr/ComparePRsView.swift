@@ -85,7 +85,15 @@ struct ComparePRsView: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text("Comparing PRs").font(.headline)
-                    Text("You vs @\(otherUsername)").foregroundStyle(.secondary)
+                    HStack(spacing: 0) {
+                        Text("You")
+                            .foregroundStyle(.green)
+                        Text(" vs ")
+                            .foregroundStyle(.secondary)
+                        Text("@\(otherUsername)")
+                            .foregroundStyle(.red)
+                    }
+                    .font(.subheadline)
                 }
                 Spacer()
                 scoreSummary

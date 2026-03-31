@@ -5,6 +5,7 @@ struct ActiveSportWorkoutView: View {
     let workoutId: Int
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var app: AppState
+    @AppStorage("isPremium") private var isPremium = false
     @State private var showCountdown = true
     @State private var isRunning = false
     @State private var elapsedSec: Int = 0
@@ -18,6 +19,8 @@ struct ActiveSportWorkoutView: View {
     @State private var sportForm = SportForm()
     @State private var error: String?
     @State private var detailsTab: DetailsTab = .summary
+    @State private var hyroxExercises: [ActiveHyroxExercise] = []
+    @State private var currentHyroxExerciseIndex: Int = 0
     
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -31,6 +34,37 @@ struct ActiveSportWorkoutView: View {
         let match_score_text: String?
         let location: String?
         let notes: String?
+    }
+    
+    private struct ActiveHyroxExercise: Identifiable, Decodable {
+        let id: Int
+        let exercise_code: String
+        let exercise_order: Int
+        let distance_m: Int?
+        let reps: Int?
+        let weight_kg: Decimal?
+        let duration_sec: Int?
+        let height_cm: Int?
+        let implement_count: Int?
+        let notes: String?
+        
+        var displayName: String {
+            switch exercise_code {
+            case "run": return "Run"
+            case "skierg": return "SkiErg"
+            case "burpee_broad_jump": return "Burpee Broad Jump"
+            case "sled_push": return "Sled Push"
+            case "sled_pull": return "Sled Pull"
+            case "row": return "Row"
+            case "farmer_carry": return "Farmer Carry"
+            case "sandbag_lunges": return "Sandbag Lunges"
+            case "wall_ball": return "Wall Ball"
+            case "atlas_carry": return "Atlas Carry"
+            case "box_jump_over": return "Box Jump Over"
+            case "dead_ball_over_trunk": return "Dead Ball Over Trunk"
+            default: return exercise_code.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+        }
     }
     
     private enum TimerMode {
@@ -50,6 +84,30 @@ struct ActiveSportWorkoutView: View {
             case .stats:   return "Stats"
             }
         }
+    }
+    
+    private var orderedHyroxExercises: [ActiveHyroxExercise] {
+        hyroxExercises.sorted { $0.exercise_order < $1.exercise_order }
+    }
+
+    private var currentHyroxExercise: ActiveHyroxExercise? {
+        guard !orderedHyroxExercises.isEmpty,
+              currentHyroxExerciseIndex >= 0,
+              currentHyroxExerciseIndex < orderedHyroxExercises.count
+        else { return nil }
+        return orderedHyroxExercises[currentHyroxExerciseIndex]
+    }
+
+    private var nextHyroxExercise: ActiveHyroxExercise? {
+        let nextIndex = currentHyroxExerciseIndex + 1
+        guard nextIndex < orderedHyroxExercises.count else { return nil }
+        return orderedHyroxExercises[nextIndex]
+    }
+
+    private var previousHyroxExercise: ActiveHyroxExercise? {
+        let prevIndex = currentHyroxExerciseIndex - 1
+        guard prevIndex >= 0 else { return nil }
+        return orderedHyroxExercises[prevIndex]
     }
     
     var body: some View {
@@ -106,16 +164,28 @@ struct ActiveSportWorkoutView: View {
                     .padding(24)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
                     .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.15)))
-                    statsOrSummarySection
+
+                    if sportType == .hyrox {
+                        hyroxExercisePagerSection
+                    } else {
+                        statsOrSummarySection
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
-                .padding(.bottom, 140)
+                .padding(.bottom, isPremium ? 140 : 200)
             }
                 VStack {
                     Spacer()
                     if !showCountdown {
-                        bottomControls
+                        VStack(spacing: 8) {
+                            bottomControls
+                            if !isPremium {
+                                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                                    .frame(height: 50)
+                                    .padding(.horizontal)
+                            }
+                        }
                     }
                 }
                 .padding(.bottom, 8)
@@ -323,6 +393,143 @@ struct ActiveSportWorkoutView: View {
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
+    }
+
+    private var hyroxExercisePagerSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Planned exercises")
+                .font(.headline)
+
+            if let ex = currentHyroxExercise {
+                VStack(spacing: 14) {
+                    Text(ex.displayName)
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+
+                    Text("Exercise \(currentHyroxExerciseIndex + 1) of \(orderedHyroxExercises.count)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    VStack(spacing: 10) {
+                        if let distance = ex.distance_m {
+                            hyroxExerciseMainValue(title: "Distance", value: "\(distance) m")
+                        }
+                        if let reps = ex.reps {
+                            hyroxExerciseMainValue(title: "Reps", value: "\(reps)")
+                        }
+                        if let weight = ex.weight_kg {
+                            hyroxExerciseMainValue(
+                                title: "Weight",
+                                value: String(format: "%.1f kg", NSDecimalNumber(decimal: weight).doubleValue)
+                            )
+                        }
+                        if let duration = ex.duration_sec {
+                            hyroxExerciseMainValue(title: "Duration", value: formatTime(duration))
+                        }
+                        if let height = ex.height_cm {
+                            hyroxExerciseMainValue(title: "Height", value: "\(height) cm")
+                        }
+                        if let implements = ex.implement_count {
+                            hyroxExerciseMainValue(title: "Implements", value: "\(implements)")
+                        }
+                        if let notes = ex.notes, !notes.isEmpty {
+                            hyroxExerciseMainValue(title: "Notes", value: notes)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(20)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
+
+                    HStack(spacing: 12) {
+                        Button {
+                            if currentHyroxExerciseIndex > 0 {
+                                currentHyroxExerciseIndex -= 1
+                            }
+                        } label: {
+                            Text("Previous")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Color.accentColor, lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(previousHyroxExercise == nil)
+                        .opacity(previousHyroxExercise == nil ? 0.45 : 1)
+
+                        Button {
+                            if currentHyroxExerciseIndex < orderedHyroxExercises.count - 1 {
+                                currentHyroxExerciseIndex += 1
+                            }
+                        } label: {
+                            Text("Next")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .fill(Color.accentColor)
+                                )
+                                .foregroundColor(.white)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(nextHyroxExercise == nil)
+                        .opacity(nextHyroxExercise == nil ? 0.45 : 1)
+                    }
+                }
+            } else {
+                Text("No exercises planned")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12)))
+    }
+    
+    @ViewBuilder
+    private func sportCardField(_ title: String, text: Binding<String>, keyboard: UIKeyboardType = .default) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            TextField(title, text: text)
+                .keyboardType(keyboard)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    @ViewBuilder
+    private func hyroxExerciseValueRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+        .font(.subheadline)
+    }
+    
+    @ViewBuilder
+    private func hyroxExerciseMainValue(title: String, value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .multilineTextAlignment(.center)
+
+            Text(title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
     }
     
     private func loadSport() async {
@@ -787,6 +994,19 @@ struct ActiveSportWorkoutView: View {
                     if let v = row.avg_hr            { self.sportForm.hyAvgHR           = String(v) }
                     if let v = row.max_hr            { self.sportForm.hyMaxHR           = String(v) }
                 }
+                let exRes = try await client
+                    .from("hyrox_session_exercises")
+                    .select("id, exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, notes")
+                    .eq("session_id", value: sessionId)
+                    .order("exercise_order", ascending: true)
+                    .execute()
+
+                let exRows = try JSONDecoder.supabase().decode([ActiveHyroxExercise].self, from: exRes.data)
+
+                await MainActor.run {
+                    self.hyroxExercises = exRows
+                    self.currentHyroxExerciseIndex = 0
+                }
             } catch {
                 print("Error loading hyrox stats: \(error)")
             }
@@ -1120,6 +1340,47 @@ struct ActiveSportWorkoutView: View {
                 .update(payload)
                 .eq("session_id", value: sessionId)
                 .execute()
+            
+            _ = try await client
+                .from("hyrox_session_exercises")
+                .delete()
+                .eq("session_id", value: sessionId)
+                .execute()
+
+            struct HyroxExerciseInsertPayload: Encodable {
+                let session_id: Int
+                let exercise_code: String
+                let exercise_order: Int
+                let distance_m: Int?
+                let reps: Int?
+                let weight_kg: Decimal?
+                let duration_sec: Int?
+                let height_cm: Int?
+                let implement_count: Int?
+                let notes: String?
+            }
+
+            let exercisePayloads: [HyroxExerciseInsertPayload] = hyroxExercises.map { ex in
+                HyroxExerciseInsertPayload(
+                    session_id: sessionId,
+                    exercise_code: ex.exercise_code,
+                    exercise_order: ex.exercise_order,
+                    distance_m: ex.distance_m,
+                    reps: ex.reps,
+                    weight_kg: ex.weight_kg,
+                    duration_sec: ex.duration_sec,
+                    height_cm: ex.height_cm,
+                    implement_count: ex.implement_count,
+                    notes: ex.notes
+                )
+            }
+
+            if !exercisePayloads.isEmpty {
+                _ = try await client
+                    .from("hyrox_session_exercises")
+                    .insert(exercisePayloads)
+                    .execute()
+            }
             
         case .ski:
             struct Payload: Encodable {
