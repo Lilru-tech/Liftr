@@ -7,16 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [1.5.1] - 2026-03-31
 
 ### Added
-- **Hyrox — custom exercises**
-  - You can pick **Other** and enter a **custom exercise name** instead of only choosing from the predefined station list.
-  - Optional **`exercise_display_name`** is stored for those entries (with **`exercise_code`** set to **`custom`**); known presets stay unchanged.
-  - Shared formatting helper (**`HyroxExerciseFormatting`**) centralizes labels and how values are loaded/saved.
-  - Workouts that already contain **unknown or legacy** `exercise_code` values are **no longer dropped** when editing or duplicating.
+- **Hyrox**
+  - **Custom exercises**: choose **Other** and enter your own name; workouts with unknown or legacy exercise codes are **no longer dropped** when you edit or duplicate.
 
 ### Changed
-- **Hyrox — add / edit workout**
-  - **Add exercise** is placed at the **bottom** of the exercise list (same idea as **Strength**), so new blocks appear above the button.
-  - Optional **Hyrox session stats** (division, category, age group, official time, ranks, HR, etc.) are grouped under a collapsible **Stats (optional)** section; in **edit**, it **expands automatically** if any of those fields already has data.
+- **Hyrox**
+  - **Add exercise** sits at the **bottom** of the list (like **Strength**); optional session stats live under **Stats (optional)** (auto-expanded in edit when something is filled in).
+
+- **Compare workouts**
+  - **Dates** in the header (with wrapping for long titles); **%** badges colored by which session comes out ahead; **Overall** uses all meaningful metrics and matches what you see; rows where **both sides are zero** are hidden.
+
+- **Profile**
+  - **Calendar**: selected day is **highlighted**.
+  - **Header**: larger photo, bio and actions **beside** the avatar (not full width below), with **spacing tweaks** and the photo **vertically centered** when the bio is tall.
 
 ### Notes (database / scoring)
 - **Supabase**: add nullable column **`exercise_display_name`** on **`hyrox_session_exercises`** if not present; extend the **`hyrox_session_exercises_code_check`** constraint to include **`custom`** so inserts succeed.

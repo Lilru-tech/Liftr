@@ -170,6 +170,7 @@ struct ProfileView: View {
     @State private var isPurchasingPremium = false
     @State private var premiumError: String?
     private let premiumProductID = "com.liftr.premium.monthly"
+    private let profileHeaderAvatarSize: CGFloat = 96
     private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
     private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     private var hasAnyUnread: Bool {
@@ -562,99 +563,102 @@ struct ProfileView: View {
     }
     
     private var headerCard: some View {
-        HStack(alignment: .top, spacing: 16) {
-            if isOwnProfile {
-                PhotosPicker(selection: $pickedItem, matching: .images) {
-                    ZStack {
-                        AvatarView(urlString: avatarURL)
-                            .frame(width: 64, height: 64)
-                            .overlay(
-                                Group { if uploadingAvatar { ProgressView().scaleEffect(0.8) } },
-                                alignment: .bottomTrailing
-                            )
-                    }
-                }
-                .onChange(of: pickedItem) { _, newItem in
-                    Task { await handlePickedItem(newItem) }
-                }
-            } else {
-                AvatarView(urlString: avatarURL)
-                    .frame(width: 64, height: 64)
-                    .contentShape(Rectangle())
-                    .onTapGesture { if avatarURL != nil { showAvatarPreview = true } }
-                    .accessibilityHint("Tap to preview")
-            }
-            
-            VStack(alignment: .leading, spacing: 6) {
-                Text("@\(username.isEmpty ? "user" : username)")
-                    .font(.title3).fontWeight(.semibold)
-                HStack(spacing: 8) {
-                    NavigationLink {
-                        if let uid = viewingUserId {
-                            FollowersListView(userId: uid, mode: .followers).gradientBG()
+        HStack(alignment: .top, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                if isOwnProfile {
+                    PhotosPicker(selection: $pickedItem, matching: .images) {
+                        ZStack {
+                            AvatarView(urlString: avatarURL)
+                                .frame(width: profileHeaderAvatarSize, height: profileHeaderAvatarSize)
+                                .overlay(
+                                    Group { if uploadingAvatar { ProgressView().scaleEffect(0.8) } },
+                                    alignment: .bottomTrailing
+                                )
                         }
-                    } label: {
-                        Label("\(counts?.followers ?? 0)", systemImage: "person.2.fill")
-                            .labelStyle(.titleAndIcon)
-                            .font(.caption.weight(.semibold))
+                    }
+                    .onChange(of: pickedItem) { _, newItem in
+                        Task { await handlePickedItem(newItem) }
+                    }
+                } else {
+                    AvatarView(urlString: avatarURL)
+                        .frame(width: profileHeaderAvatarSize, height: profileHeaderAvatarSize)
+                        .contentShape(Rectangle())
+                        .onTapGesture { if avatarURL != nil { showAvatarPreview = true } }
+                        .accessibilityHint("Tap to preview")
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("@\(username.isEmpty ? "user" : username)")
+                        .font(.title3).fontWeight(.semibold)
+                    HStack(spacing: 8) {
+                        NavigationLink {
+                            if let uid = viewingUserId {
+                                FollowersListView(userId: uid, mode: .followers).gradientBG()
+                            }
+                        } label: {
+                            Label("\(counts?.followers ?? 0)", systemImage: "person.2.fill")
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption.weight(.semibold))
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 8)
+                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                                .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
+
+                        NavigationLink {
+                            if let uid = viewingUserId {
+                                FollowersListView(userId: uid, mode: .following).gradientBG()
+                            }
+                        } label: {
+                            Label("\(counts?.following ?? 0)", systemImage: "arrowshape.turn.up.right.fill")
+                                .labelStyle(.titleAndIcon)
+                                .font(.caption.weight(.semibold))
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 8)
+                                .background(Capsule().fill(Color.white.opacity(0.12)))
+                                .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .foregroundStyle(.secondary)
+
+                    HStack(spacing: 8) {
+                        Text("LV \(myLevel)")
+                            .font(.caption.weight(.black))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .layoutPriority(2)
                             .padding(.vertical, 4)
                             .padding(.horizontal, 8)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
-                            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                    }
-                    .buttonStyle(.plain)
-                    
-                    NavigationLink {
-                        if let uid = viewingUserId {
-                            FollowersListView(userId: uid, mode: .following).gradientBG()
-                        }
-                    } label: {
-                        Label("\(counts?.following ?? 0)", systemImage: "arrowshape.turn.up.right.fill")
-                            .labelStyle(.titleAndIcon)
+                            .background(Capsule().fill(Color.yellow.opacity(0.25)))
+                            .overlay(Capsule().stroke(Color.white.opacity(0.18)))
+
+                        Text("\(formatXP(myXP)) XP")
                             .font(.caption.weight(.semibold))
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .background(Capsule().fill(Color.white.opacity(0.12)))
-                            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                            .layoutPriority(1)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
                     }
-                    .buttonStyle(.plain)
-                }
-                .foregroundStyle(.secondary)
-                
-                HStack(spacing: 8) {
-                    Text("LV \(myLevel)")
-                        .font(.caption.weight(.black))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .layoutPriority(2)
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Capsule().fill(Color.yellow.opacity(0.25)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.18)))
-                    
-                    Text("\(formatXP(myXP)) XP")
-                        .font(.caption.weight(.semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .layoutPriority(1)
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 0)
-                }
-                
-                GeometryReader { geo in
-                    let total = max(1, Double(self.nextLevelXP))
-                    let ratio = Double(self.myXP) / total
-                    let prog = min(1.0, max(0.0, ratio))
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.12))
-                        Capsule().fill(Color.green.opacity(0.35))
-                            .frame(width: geo.size.width * prog)
-                            .animation(.easeInOut(duration: 0.35), value: prog)
+
+                    GeometryReader { geo in
+                        let total = max(1, Double(self.nextLevelXP))
+                        let ratio = Double(self.myXP) / total
+                        let prog = min(1.0, max(0.0, ratio))
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(Color.white.opacity(0.12))
+                            Capsule().fill(Color.green.opacity(0.35))
+                                .frame(width: geo.size.width * prog)
+                                .animation(.easeInOut(duration: 0.35), value: prog)
+                        }
                     }
+                    .frame(height: 6)
+                    .clipped()
                 }
-                .frame(height: 6)
-                .clipped()
-                
+
                 if let bio, !bio.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(bio)
@@ -662,16 +666,17 @@ struct ProfileView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(bioExpanded ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .multilineTextAlignment(.leading)
                             .animation(.easeInOut, value: bioExpanded)
-                        
+
                         HStack(spacing: 14) {
                             Button(bioExpanded ? "Show less" : "Read more") {
                                 bioExpanded.toggle()
                             }
                             .font(.caption)
                             .buttonStyle(.plain)
-                            
+
                             if isOwnProfile {
                                 Button {
                                     showEditProfile = true
@@ -686,18 +691,17 @@ struct ProfileView: View {
                         }
                         .foregroundStyle(.secondary)
                     }
-                } else {
-                    if isOwnProfile {
-                        Button {
-                            showEditProfile = true
-                        } label: {
-                            Label("Add bio", systemImage: "pencil")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
+                } else if isOwnProfile {
+                    Button {
+                        showEditProfile = true
+                    } label: {
+                        Label("Add bio", systemImage: "pencil")
+                            .font(.caption)
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
+
                 if !isOwnProfile {
                     HStack(spacing: 10) {
                         followButton
@@ -720,70 +724,71 @@ struct ProfileView: View {
                         .controlSize(.small)
                         .accessibilityLabel("Challenge user")
                     }
-                    .padding(.top, 8)
                 }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(1)
-            VStack(alignment: .trailing, spacing: 8) {
-                Menu {
-                    NavigationLink {
-                        NotificationsListView()
-                            .gradientBG()
-                    } label: {
-                        Label("Notifications", systemImage: "bell.fill")
-                    }
 
-                    NavigationLink {
-                        RankingView()
-                            .navigationTitle("Level Ranking")
-                    } label: {
-                        Label("Ranking", systemImage: "trophy")
-                    }
-
-                    NavigationLink {
-                        AchievementsGridView(userId: viewingUserId, viewedUsername: username)
-                            .gradientBG()
-                            .navigationTitle("@\(username) · Achievements")
-                    } label: {
-                        Label("Achievements", systemImage: "rosette")
-                    }
-
-                    NavigationLink {
-                        GoalsView(userId: viewingUserId, viewedUsername: username)
-                            .gradientBG()
-                    } label: {
-                        Label("Goals", systemImage: "target")
-                    }
-
-                    if isOwnProfile {
-                        NavigationLink {
-                            CompetitionsHubView()
-                                .gradientBG()
-                        } label: {
-                            Label("Competitions", systemImage: "figure.fencing")
-                        }
-                    }
-
+            Menu {
+                NavigationLink {
+                    NotificationsListView()
+                        .gradientBG()
                 } label: {
-                    ZStack(alignment: .topTrailing) {
-                        Image(systemName: "ellipsis")
-                            .font(.subheadline.weight(.bold))
-                            .padding(8)
-                            .background(.thinMaterial, in: Circle())
+                    Label("Notifications", systemImage: "bell.fill")
+                }
 
-                        if hasAnyUnread {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 10, height: 10)
-                                .offset(x: 4, y: -4)
-                        }
+                NavigationLink {
+                    RankingView()
+                        .navigationTitle("Level Ranking")
+                } label: {
+                    Label("Ranking", systemImage: "trophy")
+                }
+
+                NavigationLink {
+                    AchievementsGridView(userId: viewingUserId, viewedUsername: username)
+                        .gradientBG()
+                        .navigationTitle("@\(username) · Achievements")
+                } label: {
+                    Label("Achievements", systemImage: "rosette")
+                }
+
+                NavigationLink {
+                    GoalsView(userId: viewingUserId, viewedUsername: username)
+                        .gradientBG()
+                } label: {
+                    Label("Goals", systemImage: "target")
+                }
+
+                if isOwnProfile {
+                    NavigationLink {
+                        CompetitionsHubView()
+                            .gradientBG()
+                    } label: {
+                        Label("Competitions", systemImage: "figure.fencing")
                     }
                 }
-                .buttonStyle(.plain)
+
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "ellipsis")
+                        .font(.subheadline.weight(.bold))
+                        .padding(8)
+                        .background(.thinMaterial, in: Circle())
+
+                    if hasAnyUnread {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 10, height: 10)
+                            .offset(x: 4, y: -4)
+                    }
+                }
             }
+            .buttonStyle(.plain)
         }
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.top, 20)
+        .padding(.bottom, 16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -820,7 +825,8 @@ struct ProfileView: View {
                 }
                 ForEach(monthDays.indices, id: \.self) { idx in
                     let day = monthDays[idx]
-                    
+                    let daySelected = calendarDayIsSelected(day)
+
                     Button {
                         if let day { selectedDay = day }
                     } label: {
@@ -850,14 +856,22 @@ struct ProfileView: View {
                                     }
                                     return Color.clear
                                 }())
-                            
+
                             if let day {
-                                Text("\(Calendar.current.component(.day, from: day))").font(.footnote)
+                                Text("\(Calendar.current.component(.day, from: day))")
+                                    .font(.footnote.weight(daySelected ? .semibold : .regular))
                             } else {
                                 Text("")
                             }
                         }
                         .frame(height: 36)
+                        .overlay {
+                            if daySelected {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .strokeBorder(Color.white.opacity(0.92), lineWidth: 2.5)
+                                    .shadow(color: Color.white.opacity(0.5), radius: 5, x: 0, y: 0)
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
                     .disabled(day == nil)
@@ -2106,6 +2120,11 @@ struct ProfileView: View {
     
     private func monthTitle(for date: Date) -> String {
         let f = DateFormatter(); f.dateFormat = "LLLL yyyy"; return f.string(from: date).capitalized
+    }
+
+    private func calendarDayIsSelected(_ day: Date?) -> Bool {
+        guard let day, let sel = selectedDay else { return false }
+        return Calendar.current.isDate(day, inSameDayAs: sel)
     }
     private let WEEK_START = 2
     

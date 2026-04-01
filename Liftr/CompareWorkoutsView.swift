@@ -17,6 +17,10 @@ struct CompareWorkoutsView: View {
             let pct = (left_value - right_value) / right_value * 100.0
             return abs(pct) < 0.05 ? 0.0 : pct
         }
+
+        var hasNonZeroValues: Bool {
+            abs(left_value) > 1e-9 || abs(right_value) > 1e-9
+        }
     }
 
     @Environment(\.dismiss) private var dismiss
@@ -29,69 +33,52 @@ struct CompareWorkoutsView: View {
     @State private var rightLabel: String = "Workout B"
     @State private var leftUserName: String? = nil
     @State private var rightUserName: String? = nil
-    private static let leftColor  = Color(red: 0.82, green: 0.12, blue: 0.18)
-    private static let rightColor = Color(red: 0.02, green: 0.55, blue: 0.32)
+    private static let leftColor  = Color(red: 0.02, green: 0.55, blue: 0.32)
+    private static let rightColor = Color(red: 0.82, green: 0.12, blue: 0.18)
 
-    private func includeInOverall(metric: String, kind: String?) -> Bool {
-        let k = (kind ?? "").lowercased()
-        switch k {
-        case "strength":
-            return [
-                "total_volume_kg",
-                "exercises_count",
-                "sets_count",
-                "total_reps",
-                "max_weight_kg",
-                "max_set_volume_kg",
-                "hard_sets_count"
-            ].contains(metric)
-        case "cardio":
-            return ["distance_km", "duration_sec", "elevation_gain_m"].contains(metric)
-        case "sport":
-            return ["score_for", "score_against"].contains(metric)
-        default:
-            return false
-        }
-    }
-
-    private func direction(metric: String) -> Double {
+    private static func metricDirection(_ metric: String) -> Double {
         switch metric {
         case "avg_pace_sec_per_km",
              "split_sec_per_500m",
              "sec_per_km",
              "sec_per_500m",
              "score_against",
-             "hx_penalty_time_sec":
+             "hx_penalty_time_sec",
+             "hx_official_time_sec",
+             "hx_rank_overall",
+             "hx_rank_category",
+             "hx_no_reps":
             return -1.0
         default:
             return 1.0
         }
     }
 
+    private static func winnerForegroundStyle(forSignedPct signed: Double) -> Color {
+        if abs(signed) < 0.05 { return .secondary }
+        return signed > 0 ? leftColor : rightColor
+    }
+
     private func clamp(_ x: Double, _ lo: Double, _ hi: Double) -> Double {
         min(hi, max(lo, x))
     }
 
+    private var displayMetrics: [ComparableMetric] {
+        metrics.filter(\.hasNonZeroValues)
+    }
+
     private var overallPct: Double? {
-        guard !metrics.isEmpty else { return nil }
-        let included = metrics.compactMap { m -> Double? in
-            guard includeInOverall(metric: m.metric, kind: workoutKind) else { return nil }
+        guard !displayMetrics.isEmpty else { return nil }
+        let included = displayMetrics.compactMap { m -> Double? in
             guard let p = m.diffPct else { return nil }
-            let signed = p * direction(metric: m.metric)
+            let signed = p * Self.metricDirection(m.metric)
             return clamp(signed, -150, 150)
         }
         guard !included.isEmpty else { return nil }
-
-        // Mediana (robusto)
-        let sorted = included.sorted()
-        let mid = sorted.count / 2
-        if sorted.count % 2 == 1 { return sorted[mid] }
-        return (sorted[mid - 1] + sorted[mid]) / 2.0
+        return included.reduce(0, +) / Double(included.count)
     }
 
-    private var overallCount: Int {
-        metrics.filter { includeInOverall(metric: $0.metric, kind: workoutKind) && $0.diffPct != nil }.count
-    }
+    private var overallCount: Int { displayMetrics.count }
     
     var body: some View {
         VStack(spacing: 16) {
@@ -111,23 +98,29 @@ struct CompareWorkoutsView: View {
                 .font(.title3.weight(.semibold))
 
             if let k = workoutKind {
-                HStack(spacing: 6) {
+                VStack(spacing: 6) {
                     Text(leftLabel)
                         .foregroundStyle(CompareWorkoutsView.leftColor)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .fixedSize(horizontal: false, vertical: true)
 
-                    Text("vs").foregroundStyle(.secondary)
+                    Text("vs")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
 
                     Text(rightLabel)
                         .foregroundStyle(CompareWorkoutsView.rightColor)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Text("— \(k.capitalized)")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 .font(.subheadline)
+                .padding(.horizontal, 4)
             }
 
             if loading {
@@ -138,13 +131,18 @@ struct CompareWorkoutsView: View {
                 Text("Nothing to compare for these workouts. Please add more data to your workout")
                     .foregroundStyle(.secondary)
                     .padding(.top, 12)
+            } else if displayMetrics.isEmpty {
+                Text("No metrics to compare (all values are zero for both workouts).")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 12)
             } else {
                 if let o = overallPct {
                     OverallSummaryCard(valuePct: o, count: overallCount)
                         .padding(.bottom, 6)
                 }
 
-                List(metrics) { m in
+                List(displayMetrics) { m in
                     ComparisonRow(m: m)
                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 14, trailing: 0))
                         .listRowBackground(Color.clear)
@@ -171,18 +169,32 @@ struct CompareWorkoutsView: View {
     private struct ComparisonRow: View {
         let m: CompareWorkoutsView.ComparableMetric
 
+        private var pctBadge: (raw: Double, signed: Double)? {
+            guard let p = m.diffPct else { return nil }
+            let signed = p * CompareWorkoutsView.metricDirection(m.metric)
+            return (p, signed)
+        }
+
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(Self.prettyMetric(m.metric))
                         .font(.subheadline.weight(.semibold))
                     Spacer()
-                    if let pct = m.diffPct {
-                        Text(pctString(pct))
+                    if let b = pctBadge {
+                        Text(pctString(b.raw))
                             .font(.caption.weight(.semibold))
+                            .foregroundStyle(CompareWorkoutsView.winnerForegroundStyle(forSignedPct: b.signed))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(.ultraThinMaterial, in: Capsule())
+                            .background {
+                                ZStack {
+                                    Capsule().fill(.ultraThinMaterial)
+                                    if abs(b.signed) >= 0.05 {
+                                        Capsule().fill(CompareWorkoutsView.winnerForegroundStyle(forSignedPct: b.signed).opacity(0.22))
+                                    }
+                                }
+                            }
                     }
                 }
 
@@ -439,9 +451,17 @@ struct CompareWorkoutsView: View {
 
                 Text(String(format: "%+.1f%%", valuePct))
                     .font(.caption.weight(.semibold))
+                    .foregroundStyle(CompareWorkoutsView.winnerForegroundStyle(forSignedPct: valuePct))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(.ultraThinMaterial, in: Capsule())
+                    .background {
+                        ZStack {
+                            Capsule().fill(.ultraThinMaterial)
+                            if abs(valuePct) >= 0.05 {
+                                Capsule().fill(CompareWorkoutsView.winnerForegroundStyle(forSignedPct: valuePct).opacity(0.22))
+                            }
+                        }
+                    }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 12)
@@ -522,14 +542,21 @@ struct CompareWorkoutsView: View {
                 let t = (w.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !t.isEmpty { return t }
 
-                if let d = w.started_at {
-                    let f = DateFormatter()
-                    f.dateStyle = .medium
-                    f.timeStyle = .none
-                    return f.string(from: d)
-                }
-
                 return fallback
+            }
+
+            /// Suffix like " (15/03/2026)" so identical titles stay distinguishable (red vs green).
+            /// Same calendar day for both: includes time (HH:mm).
+            func compareDateSuffix(_ date: Date?, other: Date?) -> String {
+                guard let date = date else { return "" }
+                let f = DateFormatter()
+                f.locale = Locale.current
+                if let other = other, Calendar.current.isDate(date, inSameDayAs: other) {
+                    f.dateFormat = "dd/MM/yyyy HH:mm"
+                } else {
+                    f.dateFormat = "dd/MM/yyyy"
+                }
+                return " (\(f.string(from: date)))"
             }
 
             guard L.kind.lowercased() == R.kind.lowercased() else {
@@ -555,19 +582,20 @@ struct CompareWorkoutsView: View {
 
                 let showNames = (L.user_id != R.user_id)
 
-                leftLabel = makeLabel(
+                let leftBase = makeLabel(
                     L,
                     fallback: showNames ? "User" : "Workout A",
                     nameOverride: showNames ? aName : nil,
                     forceUserName: showNames
                 )
-
-                rightLabel = makeLabel(
+                let rightBase = makeLabel(
                     R,
                     fallback: showNames ? "User" : "Workout B",
                     nameOverride: showNames ? bName : nil,
                     forceUserName: showNames
                 )
+                leftLabel = leftBase + compareDateSuffix(L.started_at, other: R.started_at)
+                rightLabel = rightBase + compareDateSuffix(R.started_at, other: L.started_at)
             }
 
             switch L.kind.lowercased() {
