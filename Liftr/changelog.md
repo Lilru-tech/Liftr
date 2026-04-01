@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] - 2026-03-31
+
+### Added
+- **Hyrox**
+  - **Custom exercises**: choose **Other** and enter your own name; workouts with unknown or legacy exercise codes are **no longer dropped** when you edit or duplicate.
+
+### Changed
+- **Hyrox**
+  - **Add exercise** sits at the **bottom** of the list (like **Strength**); optional session stats live under **Stats (optional)** (auto-expanded in edit when something is filled in).
+
+- **Compare workouts**
+  - **Dates** in the header (with wrapping for long titles); **%** badges colored by which session comes out ahead; **Overall** uses all meaningful metrics and matches what you see; rows where **both sides are zero** are hidden.
+
+- **Profile**
+  - **Calendar**: selected day is **highlighted**.
+  - **Header**: larger photo, bio and actions **beside** the avatar (not full width below), with **spacing tweaks** and the photo **vertically centered** when the bio is tall.
+
+### Notes (database / scoring)
+- **Supabase**: add nullable column **`exercise_display_name`** on **`hyrox_session_exercises`** if not present; extend the **`hyrox_session_exercises_code_check`** constraint to include **`custom`** so inserts succeed.
+- **Scoring**: update **`score_hyrox_v1`** so **`custom`** (and any non-listed code, if desired) contributes via a **generic points** mix from distance / time / reps / weight, instead of adding **0** in the `ELSE` branch.
+
+[1.5.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.5.1
+
 ## [1.5.0] - 2026-03-28
 
 ### Added

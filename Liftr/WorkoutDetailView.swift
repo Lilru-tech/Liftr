@@ -1384,14 +1384,19 @@ struct WorkoutDetailView: View {
                             let height_cm: Int?
                             let implement_count: Int?
                             let notes: String?
+                            let exercise_display_name: String?
                         }
 
                         let hyRows = try decoder.decode([HyExRow].self, from: hyExRes.data)
 
-                        sf2.hyExercises = hyRows.compactMap { row in
-                            guard let code = HyroxExerciseCode(rawValue: row.exercise_code) else { return nil }
+                        sf2.hyExercises = hyRows.map { row in
+                            let fields = HyroxExerciseFormatting.formFields(
+                                exerciseCode: row.exercise_code,
+                                exerciseDisplayName: row.exercise_display_name
+                            )
                             return HyroxExerciseForm(
-                                exerciseCode: code,
+                                exerciseCode: fields.code,
+                                customDisplayName: fields.customDisplayName,
                                 exerciseOrder: row.exercise_order,
                                 distanceM: row.distance_m.map(String.init) ?? "",
                                 reps: row.reps.map(String.init) ?? "",
@@ -2090,6 +2095,7 @@ private struct SportDetailBlock: View {
         let height_cm: Int?
         let implement_count: Int?
         let notes: String?
+        let exercise_display_name: String?
     }
     
     private struct SkiStats: Decodable {
@@ -2315,7 +2321,7 @@ private struct SportDetailBlock: View {
 
                         ForEach(hyExercises) { ex in
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("\(ex.exercise_order). \(hyroxExerciseLabel(ex.exercise_code))")
+                                Text("\(ex.exercise_order). \(HyroxExerciseFormatting.label(code: ex.exercise_code, displayName: ex.exercise_display_name))")
                                     .font(.subheadline.weight(.semibold))
 
                                 if let v = ex.distance_m {
@@ -2552,25 +2558,6 @@ private struct SportDetailBlock: View {
         }
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-    }
-    
-    private func hyroxExerciseLabel(_ code: String) -> String {
-        switch code {
-        case "run": return "Run"
-        case "skierg": return "SkiErg"
-        case "burpee_broad_jump": return "Burpee Broad Jump"
-        case "sled_push": return "Sled Push"
-        case "sled_pull": return "Sled Pull"
-        case "row": return "Row"
-        case "farmer_carry": return "Farmer Carry"
-        case "sandbag_lunges": return "Sandbag Lunges"
-        case "wall_ball": return "Wall Ball"
-        case "atlas_carry": return "Atlas Carry"
-        case "box_jump_over": return "Box Jump Over"
-        case "dead_ball_over_trunk": return "Dead Ball Over Trunk"
-        default:
-            return code.replacingOccurrences(of: "_", with: " ").capitalized
-        }
     }
     
     private func durationString(_ secondsDouble: Double) -> String {
