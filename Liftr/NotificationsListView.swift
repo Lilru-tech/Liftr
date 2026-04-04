@@ -317,6 +317,7 @@ struct NotificationsListView: View {
             await MainActor.run {
                 self.notifications = []
             }
+            await app.refreshUnreadNotificationsCount()
         } catch {
             await MainActor.run {
                 self.error = error.localizedDescription
@@ -344,6 +345,7 @@ struct NotificationsListView: View {
 
             let rows = try JSONDecoder.supabase().decode([NotificationRow].self, from: res.data)
             await MainActor.run { self.notifications = rows }
+            await app.refreshUnreadNotificationsCount()
 
         } catch {
             if let decodingError = error as? DecodingError {
@@ -391,6 +393,7 @@ struct NotificationsListView: View {
                     self.notifications[idx].is_read = true
                 }
             }
+            await app.refreshUnreadNotificationsCount()
         } catch {
             print("[Notifications] markAsRead error:", error.localizedDescription)
         }
@@ -409,6 +412,7 @@ struct NotificationsListView: View {
             await MainActor.run {
                 self.notifications.removeAll { $0.id == n.id }
             }
+            await app.refreshUnreadNotificationsCount()
         } catch {
             await MainActor.run {
                 self.error = error.localizedDescription
