@@ -545,8 +545,6 @@ struct CompareWorkoutsView: View {
                 return fallback
             }
 
-            /// Suffix like " (15/03/2026)" so identical titles stay distinguishable (red vs green).
-            /// Same calendar day for both: includes time (HH:mm).
             func compareDateSuffix(_ date: Date?, other: Date?) -> String {
                 guard let date = date else { return "" }
                 let f = DateFormatter()
