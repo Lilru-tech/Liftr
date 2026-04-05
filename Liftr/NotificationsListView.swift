@@ -287,6 +287,12 @@ struct NotificationsListView: View {
                     .gradientBG()
             }
             
+        case "workout_kind_inactive":
+            InactiveWorkoutNudgeDestinationView(
+                workoutKindRaw: n.data?["workout_kind"]?.stringValue
+            )
+            .environmentObject(app)
+            
         default:
             VStack(spacing: 12) {
                 Text(n.title)
@@ -441,6 +447,7 @@ struct NotificationsListView: View {
         case "competition_workout_rejected":      return "Workout review"
         case "competition_result_win":            return "Result"
         case "competition_result_lose":           return "Result"
+        case "workout_kind_inactive":             return "Reminder"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
@@ -449,5 +456,36 @@ struct NotificationsListView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: d, relativeTo: Date())
+    }
+}
+
+private struct InactiveWorkoutNudgeDestinationView: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
+    
+    let workoutKindRaw: String?
+    
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            Text("Opening add workout…")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .task {
+            let kind: WorkoutKind = {
+                switch workoutKindRaw?.lowercased() {
+                case "cardio": return .cardio
+                case "sport": return .sport
+                case "strength": return .strength
+                default: return .strength
+                }
+            }()
+            await MainActor.run {
+                app.openAdd(with: AddWorkoutDraft(kind: kind))
+                dismiss()
+            }
+        }
     }
 }

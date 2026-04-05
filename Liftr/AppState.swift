@@ -351,8 +351,27 @@ final class AppState: ObservableObject {
                 notificationDestination = .competitionsHub
             }
             
+        case "workout_kind_inactive":
+            notificationDestination = .none
+            let kind = Self.workoutKind(fromInactiveNudgeData: data)
+            openAdd(with: AddWorkoutDraft(kind: kind))
+            
         default:
             notificationDestination = .none
+        }
+    }
+    
+    private static func workoutKind(fromInactiveNudgeData data: [String: Any]) -> WorkoutKind {
+        let raw: String? = {
+            if let s = data["workout_kind"] as? String { return s }
+            if let n = data["workout_kind"] as? NSNumber { return n.stringValue }
+            return nil
+        }()
+        switch raw?.lowercased() {
+        case "cardio": return .cardio
+        case "sport": return .sport
+        case "strength": return .strength
+        default: return .strength
         }
     }
     
