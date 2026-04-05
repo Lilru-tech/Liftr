@@ -30,7 +30,19 @@ struct RootView: View {
             
             NavigationStack { ProfileGate().gradientBG() }
                 .tag(Tab.profile)
-                .tabItem { Label("", systemImage: "person.crop.circle") }
+                .tabItem {
+                    if let tabImg = app.tabBarProfileAvatar {
+                        Image(uiImage: tabImg)
+                            .renderingMode(.original)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 26, height: 26)
+                            .clipShape(Circle())
+                    } else {
+                        Label("", systemImage: "person.crop.circle")
+                    }
+                }
+                .badge(app.unreadNotificationsCount)
         }
         .onAppear {
             if let pending = app.pendingNotification {

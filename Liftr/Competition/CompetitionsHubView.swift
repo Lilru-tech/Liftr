@@ -93,7 +93,7 @@ struct CompetitionsHubView: View {
             var l: Int = 0
             var d: Int = 0
             var total: Int { w + l + d }
-            var score: Double { total > 0 ? (Double(w) + 0.5 * Double(d)) / Double(total) : 0 } // win=1, draw=0.5
+            var score: Double { total > 0 ? (Double(w) + 0.5 * Double(d)) / Double(total) : 0 }
         }
 
         var rivalAgg: [UUID: RivalAgg] = [:]

@@ -156,7 +156,6 @@ struct HomeView: View {
     @AppStorage("homeCollapseToday") private var collapseToday = false
     @AppStorage("homeCollapseStreak") private var collapseStreak = false
     @AppStorage("homeCollapseInsights") private var collapseInsights = false
-    @AppStorage("homeCollapseGoals") private var collapseGoals = false
     @AppStorage("homeCollapseMonthly") private var collapseMonthly = false
     
     private let highlightsInsertIndex = 5
@@ -258,7 +257,6 @@ struct HomeView: View {
         collapseToday    = collapsed
         collapseStreak   = collapsed
         collapseInsights = collapsed
-        collapseGoals    = collapsed
         collapseMonthly  = collapsed
     }
     
@@ -343,18 +341,20 @@ struct HomeView: View {
                     
                     ForEach(feed.indices, id: \.self) { i in
                         let item = feed[i]
-                        if i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at) {
-                            Text(dateLabel(item.workout.started_at))
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 16).padding(.top, 6)
-                                .listRowBackground(Color.clear)
-                        }
+                        let firstOfDay = i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at)
                         
-                        HomeFeedCard(item: item)
+                        HomeFeedCard(
+                            item: item,
+                            dayGroupLabel: firstOfDay ? dateLabelCompact(item.workout.started_at) : nil
+                        )
                             .contentShape(Rectangle())
                             .onTapGesture { selectedItem = item }
-                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                            .listRowInsets(EdgeInsets(
+                                top: firstOfDay ? (i == 0 ? 6 : 4) : 6,
+                                leading: 16,
+                                bottom: 6,
+                                trailing: 16
+                            ))
                             .listRowBackground(Color.clear)
                             .onAppear {
                                 if i == feed.count - 1 {
@@ -1271,6 +1271,22 @@ struct HomeView: View {
         return f.string(from: d)
     }
     
+    private func dateLabelCompact(_ d: Date?) -> String {
+        guard let d else { return "—" }
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return "Today" }
+        if cal.isDateInYesterday(d) { return "Yesterday" }
+        let f = DateFormatter()
+        f.locale = .current
+        f.timeStyle = .none
+        if cal.isDate(d, equalTo: Date(), toGranularity: .year) {
+            f.setLocalizedDateFormatFromTemplate("dMMM")
+        } else {
+            f.dateStyle = .medium
+        }
+        return f.string(from: d)
+    }
+    
     private func computeStreak(from dates: [Date]) -> Int {
         let cal = Calendar.current
         let days = Set(dates.map { cal.startOfDay(for: $0) })
@@ -1293,35 +1309,22 @@ struct HomeView: View {
     }
     
     private var weeklyGoalsModule: some View {
-        CollapsibleCard(
-            isCollapsed: collapseGoals,
-            onToggle: {
-                withAnimation(.easeInOut) {
-                    collapseGoals.toggle()
-                    if !collapseGoals {
-                        collapseMonthly = true
-                        collapseToday = true
-                        collapseStreak = true
-                        collapseInsights = true
+        Button {
+            showGoals = true
+        } label: {
+            Group {
+                if collapseModules {
+                    HStack(spacing: 8) {
+                        Image(systemName: "target")
+                            .foregroundStyle(.secondary)
+                        Text("Weekly goals")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
-                }
-            },
-            collapsed: {
-                HStack(spacing: 8) {
-                    Image(systemName: "target")
-                        .foregroundStyle(.secondary)
-                    Text("Weekly goals")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer(minLength: 0)
-                }
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-            },
-            expanded: {
-                Button {
-                    showGoals = true
-                } label: {
+                } else {
                     HStack(spacing: 10) {
                         Image(systemName: "target")
                             .font(.headline.weight(.semibold))
@@ -1338,37 +1341,49 @@ struct HomeView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                     }
-                    .padding(12)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
                 }
-                .buttonStyle(.plain)
             }
-        )
+            .padding(12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+        }
+        .buttonStyle(.plain)
     }
     
     private var competitionsModule: some View {
         Button {
             showCompetitions = true
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "trophy")
-                    .font(.headline.weight(.semibold))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Competitions")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Active & pending")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            Group {
+                if collapseModules {
+                    HStack(spacing: 8) {
+                        Image(systemName: "trophy")
+                            .foregroundStyle(.secondary)
+                        Text("Competitions")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: "trophy")
+                            .font(.headline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Competitions")
+                                .font(.subheadline.weight(.semibold))
+                            Text("Active & pending")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-
-                Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
             }
             .padding(12)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -1745,12 +1760,18 @@ private struct HomeFeedCard: View {
         }
     }
     let item: HomeView.FeedItem
+    var dayGroupLabel: String? = nil
     
     var body: some View {
         ZStack {
             WorkoutCardBackground(kind: item.workout.kind)
             
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: dayGroupLabel == nil ? 8 : 4) {
+                if let g = dayGroupLabel {
+                    Text(g)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
                 HStack(alignment: .top, spacing: 12) {
                     ZStack(alignment: .bottomTrailing) {
                         AvatarView(urlString: item.avatarURL)

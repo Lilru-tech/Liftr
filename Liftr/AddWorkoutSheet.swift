@@ -183,6 +183,8 @@ struct AddWorkoutSheet: View {
     @State private var isApplyingDraft = false
     @State private var showHelp = false
     @State private var hyroxStatsExpanded = false
+    @State private var showWorkoutRecommend = false
+    @State private var recommendKind: WorkoutKind = .strength
 
     var body: some View {
         NavigationStack {
@@ -386,6 +388,21 @@ struct AddWorkoutSheet: View {
                         .presentationDetents([.medium, .large])
                         .presentationBackground(.clear)
                 }
+                .navigationDestination(isPresented: $showWorkoutRecommend) {
+                    WorkoutRecommendationFlowView(
+                        workoutKind: recommendKind,
+                        catalog: catalog,
+                        exerciseLanguage: exerciseLanguage,
+                        onApply: { payload in
+                            switch payload {
+                            case .strength(let rows): applyStrengthRecommendation(rows)
+                            case .cardio(let r): applyCardioRecommendation(r)
+                            case .sport(let r): applySportRecommendation(r)
+                            }
+                        }
+                    )
+                    .environmentObject(app)
+                }
             }
         }
         .task {
@@ -465,6 +482,17 @@ struct AddWorkoutSheet: View {
     private var strengthSection: some View {
         Section {
             SectionCard {
+                Button {
+                    recommendKind = .strength
+                    showWorkoutRecommend = true
+                } label: {
+                    Label("Suggest next session", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderless)
+                .disabled(loadingCatalog)
+                
+                Divider().padding(.vertical, 6)
+                
                 ForEach(items.indices, id: \.self) { i in
                     if i != items.startIndex { Divider().padding(.vertical, 6) }
                     
@@ -601,6 +629,16 @@ struct AddWorkoutSheet: View {
     private var cardioSection: some View {
         Section {
             SectionCard {
+                Button {
+                    recommendKind = .cardio
+                    showWorkoutRecommend = true
+                } label: {
+                    Label("Suggest next session", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderless)
+                
+                Divider().padding(.vertical, 6)
+                
                 FieldRowPlain("Activity") {
                     Picker("", selection: $cardio.activity) {
                         ForEach(CardioActivityType.allCases) { a in
@@ -730,6 +768,16 @@ struct AddWorkoutSheet: View {
     private var sportSection: some View {
         Section {
             SectionCard {
+                Button {
+                    recommendKind = .sport
+                    showWorkoutRecommend = true
+                } label: {
+                    Label("Suggest next session", systemImage: "sparkles")
+                }
+                .buttonStyle(.borderless)
+                
+                Divider().padding(.vertical, 6)
+                
                 FieldRowPlain {
                     Picker("", selection: $sport.sport) {
                         ForEach(SportType.allCases) { s in
@@ -1670,6 +1718,110 @@ struct AddWorkoutSheet: View {
         if let style = f.swimStyle.trimmedOrNil { out["swim_style"] = try .init(style) }
         if f.splitSecPer500m.trimmedOrNil != nil, let v = Int(f.splitSecPer500m) { out["split_sec_per_500m"] = try .init(v) }
         return try AnyJSON(out)
+    }
+    
+    private func applyStrengthRecommendation(_ rec: [StrengthRecommendationExercise]) {
+        items = rec.enumerated().map { idx, ex in
+            var e = EditableExercise()
+            e.exerciseId = ex.exerciseId
+            e.exerciseName = ex.displayName
+            e.orderIndex = idx + 1
+            e.notes = ""
+            e.sets = collapsedEditableSetsFromRecommendation(ex.sets)
+            return e
+        }
+    }
+    
+    private func collapsedEditableSetsFromRecommendation(_ sets: [StrengthRecommendationSet]) -> [EditableSet] {
+        let sorted = sets.sorted { $0.setNumber < $1.setNumber }
+        guard !sorted.isEmpty else { return [EditableSet(setNumber: 1)] }
+        var blocks: [(count: Int, template: StrengthRecommendationSet)] = []
+        for s in sorted {
+            if let li = blocks.indices.last,
+               blocks[li].template.reps == s.reps,
+               abs(blocks[li].template.weightKg - s.weightKg) < 0.02,
+               optionalDoubleEqual(blocks[li].template.rpe, s.rpe),
+               blocks[li].template.restSec == s.restSec {
+                blocks[li].count += 1
+            } else {
+                blocks.append((1, s))
+            }
+        }
+        return blocks.map { b in
+            EditableSet(
+                setNumber: b.count,
+                reps: b.template.reps,
+                weightKg: stringFromRecommendationKg(b.template.weightKg),
+                rpe: b.template.rpe.map { stringFromRecommendationRpe($0) } ?? "",
+                restSec: b.template.restSec,
+                notes: ""
+            )
+        }
+    }
+    
+    private func optionalDoubleEqual(_ a: Double?, _ b: Double?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (x?, y?): return abs(x - y) < 0.02
+        default: return false
+        }
+    }
+    
+    private func stringFromRecommendationKg(_ x: Double) -> String {
+        if x == floor(x) { return String(Int(x)) }
+        return String(format: "%.1f", x)
+    }
+    
+    private func stringFromRecommendationRpe(_ x: Double) -> String {
+        if x == floor(x) { return String(Int(x)) }
+        return String(format: "%.1f", x)
+    }
+    
+    private func applyCardioRecommendation(_ r: CardioRecommendation) {
+        cardio.activity = r.activity
+        let sec = r.durationSec
+        cardio.durH = String(sec / 3600)
+        cardio.durM = String((sec % 3600) / 60)
+        cardio.durS = String(sec % 60)
+        didEditCardioDuration = true
+        cardio.distanceKm = r.distanceKm.map { String(format: "%.2f", $0) } ?? ""
+        cardio.elevationGainM = r.elevationGainM.map(String.init) ?? ""
+        cardio.avgHR = r.avgHr.map(String.init) ?? ""
+        cardio.maxHR = r.maxHr.map(String.init) ?? ""
+        cardio.inclinePercent = r.inclinePercent.map { String(format: "%.1f", $0) } ?? ""
+        cardio.cadenceRpm = r.cadenceRpm.map(String.init) ?? ""
+        cardio.wattsAvg = r.wattsAvg.map(String.init) ?? ""
+        cardio.splitSecPer500m = r.splitSecPer500m.map(String.init) ?? ""
+        cardio.swimLaps = r.swimLaps.map(String.init) ?? ""
+        cardio.poolLengthM = r.poolLengthM.map(String.init) ?? ""
+        cardio.swimStyle = r.swimStyle ?? ""
+        updateAutoPaceIfNeeded()
+    }
+    
+    private func applySportRecommendation(_ r: SportRecommendation) {
+        switch r {
+        case .durationOnly(let durationMin, _):
+            sport.durationMin = String(durationMin)
+            didEditSportDuration = true
+        case .hyrox(let durationMin, let exercises, _):
+            sport.sport = .hyrox
+            sport.durationMin = String(durationMin)
+            didEditSportDuration = true
+            sport.hyExercises = exercises.map { ex in
+                HyroxExerciseForm(
+                    exerciseCode: ex.exerciseCode,
+                    customDisplayName: ex.customDisplayName,
+                    exerciseOrder: ex.exerciseOrder,
+                    distanceM: ex.distanceM.map(String.init) ?? "",
+                    reps: ex.reps.map(String.init) ?? "",
+                    weightKg: ex.weightKg.map { $0 == floor($0) ? String(Int($0)) : String(format: "%.1f", $0) } ?? "",
+                    durationSec: ex.durationSec.map(String.init) ?? "",
+                    heightCm: ex.heightCm.map(String.init) ?? "",
+                    implementCount: ex.implementCount.map(String.init) ?? "",
+                    notes: ex.notes ?? ""
+                )
+            }
+        }
     }
     
     private func exerciseSelected(_ ex: EditableExercise) -> Bool {
