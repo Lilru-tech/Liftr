@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.6.0] - 2026-04-05
+
+### Added
+- **Suggest next session**
+  - Flow to **build a suggested workout** from your **last 10 logged sessions** of that type, with optional **full app catalog** (exercises or activities you may not have used yet).
+  - **Strength**: picks exercises and sets from your history (loads, RPE-aware tweaks); **Apply** fills the add form with **rest between sets** and **grouped sets** when reps and weight match.
+  - **Cardio**: duration plus **type-specific metrics** (distance, HR, incline, cadence, swim fields, etc.); if a catalog activity has no history, values are **estimated from your other recent cardio** in the same window.
+  - **Sport**: **duration-only** nudges for most sports (you choose the sport in the form); **Hyrox** gets a **station list** from your Hyrox history or a **gentle starter template**.
+- **Notifications**
+  - **Inactive workout reminders** for **strength, cardio, and sport** when you have **enough history** of that type but haven’t logged one in a while. Delivered like other pushes; tapping opens **Add workout** with the **matching type** preselected.
+- **Profile & tab bar**
+  - **Profile photo** on the **Profile** tab item.
+  - **Unread notifications** badge on the **Profile** tab.
+  - **Unread count** next to **Notifications** inside the profile **⋯** menu.
+
+### Changed
+- **Home**
+  - **Workout cards** layout adjusted to **cut unused vertical space** and read more cleanly.
+
+### Fixed
+- **Home — quick pills**
+  - **Weekly goals**: tap now goes **directly to Goals** (correct destination).
+  - **Competition**: **removes the extra subtitle** so the pill matches the intended compact style.
+
+### Notes (database / ops)
+- **Supabase**: inactivity nudges use function **`enqueue_workout_inactivity_nudges()`** plus **`pg_cron`** (see `docs/inactive_workout_nudges.sql`). Rows use `type = workout_kind_inactive` and `data.workout_kind`; the existing **send-notifications** pipeline sends FCM.
+
+[1.6.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.6.0
+
 ## [1.5.1] - 2026-03-31
 
 ### Added

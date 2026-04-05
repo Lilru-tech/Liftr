@@ -116,7 +116,6 @@ struct ProfileView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var banner: Banner?
-    @State private var hasUnreadNotifications = false
     @State private var hasUnreadCompetitions = false
     @State private var pendingCompetitionsCount: Int = 0
     @State private var pickedItem: PhotosPickerItem?
@@ -174,7 +173,14 @@ struct ProfileView: View {
     private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
     private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     private var hasAnyUnread: Bool {
-        hasUnreadNotifications || hasUnreadCompetitions
+        (isOwnProfile && app.unreadNotificationsCount > 0) || hasUnreadCompetitions
+    }
+    
+    private var notificationsMenuTitle: String {
+        let n = app.unreadNotificationsCount
+        guard n > 0 else { return "Notifications" }
+        let suffix = n > 99 ? "99+" : "\(n)"
+        return "Notifications (\(suffix))"
     }
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
@@ -735,7 +741,7 @@ struct ProfileView: View {
                     NotificationsListView()
                         .gradientBG()
                 } label: {
-                    Label("Notifications", systemImage: "bell.fill")
+                    Label(notificationsMenuTitle, systemImage: "bell.fill")
                 }
 
                 NavigationLink {
@@ -1625,35 +1631,8 @@ struct ProfileView: View {
     }
     
     private func loadUnreadNotifications() async {
-        if !isOwnProfile {
-            await MainActor.run { hasUnreadNotifications = false }
-            return
-        }
-        guard let uid = app.userId else {
-            await MainActor.run { hasUnreadNotifications = false }
-            return
-        }
-        
-        struct NId: Decodable { let id: Int }
-        
-        do {
-            let res = try await SupabaseManager.shared.client
-                .from("notifications")
-                .select("id")
-                .eq("user_id", value: uid.uuidString)
-                .eq("is_read", value: false)
-                .limit(1)
-                .execute()
-            
-            let rows = try JSONDecoder.supabase().decode([NId].self, from: res.data)
-            await MainActor.run {
-                self.hasUnreadNotifications = !rows.isEmpty
-            }
-        } catch {
-            await MainActor.run {
-                self.hasUnreadNotifications = false
-            }
-        }
+        guard isOwnProfile else { return }
+        await app.refreshUnreadNotificationsCount()
     }
     
     private func loadProfileHeader() async {
@@ -1672,6 +1651,9 @@ struct ProfileView: View {
             username = profile.username
             avatarURL = profile.avatar_url
             bio = profile.bio
+            if isOwnProfile {
+                await app.syncTabBarProfileAvatar(urlString: profile.avatar_url)
+            }
             
             if let session = try? await SupabaseManager.shared.client.auth.session {
                 self.email = session.user.email
@@ -2110,6 +2092,7 @@ struct ProfileView: View {
             await MainActor.run {
                 self.avatarURL = publicURL.absoluteString
             }
+            await app.syncTabBarProfileAvatar(urlString: publicURL.absoluteString)
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
             print("[Avatar][ERROR]", error.localizedDescription)
