@@ -3,6 +3,8 @@ import Foundation
 enum RecommendationDataSource: String, CaseIterable, Identifiable {
     case recentHistory
     case fullCatalog
+    case hyrox
+    case hyroxRace
     
     var id: String { rawValue }
     
@@ -10,6 +12,8 @@ enum RecommendationDataSource: String, CaseIterable, Identifiable {
         switch self {
         case .recentHistory: return "My last 10 workouts"
         case .fullCatalog: return "Full app catalog"
+        case .hyrox: return "Hyrox — mixed"
+        case .hyroxRace: return "Hyrox — race format"
         }
     }
     
@@ -19,6 +23,10 @@ enum RecommendationDataSource: String, CaseIterable, Identifiable {
             return "Only exercises or activities you have already logged in your recent training."
         case .fullCatalog:
             return "Include any exercise or activity from the app, not only what you have used before."
+        case .hyrox:
+            return "Picks stations you’ve trained less in your recent Hyrox sessions and suggests typical distances, loads, and reps for each."
+        case .hyroxRace:
+            return "Like race day: easy run, then each official station in order, repeated. Run length, how many stations, and loads adapt to you."
         }
     }
 }

@@ -58,11 +58,26 @@ struct WorkoutRecommendationFlowView: View {
         }
     }
     
+    private var dataSourcesForKind: [RecommendationDataSource] {
+        switch workoutKind {
+        case .sport:
+            return RecommendationDataSource.allCases
+        case .strength, .cardio:
+            return RecommendationDataSource.allCases.filter { $0 != .hyrox && $0 != .hyroxRace }
+        }
+    }
+    
     private var questionsView: some View {
         Form {
             Section {
                 SectionCard {
-                    Text("Uses your last 10 logged workouts of this type. Strength: weights from your latest sets with RPE (±2.5 kg). When RPE was easy we may add a set or a few reps if volume isn’t already high; when it was very hard we may trim reps or a set—otherwise we lean on weight changes.")
+                    Group {
+                        Text("Uses your last 10 logged workouts of this type. Strength: weights from your latest sets with RPE (±2.5 kg). When RPE was easy we may add a set or a few reps if volume isn’t already high; when it was very hard we may trim reps or a set—otherwise we lean on weight changes.")
+                        if workoutKind == .sport {
+                            Text("For sport: Hyrox — mixed varies stations from your logs; Hyrox — race format follows competition order and standard distances. Otherwise we suggest session length and sport from your history or the catalog.")
+                                .padding(.top, 6)
+                        }
+                    }
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -72,7 +87,7 @@ struct WorkoutRecommendationFlowView: View {
             
             Section {
                 SectionCard {
-                    ForEach(Array(RecommendationDataSource.allCases.enumerated()), id: \.element.id) { idx, src in
+                    ForEach(Array(dataSourcesForKind.enumerated()), id: \.element.id) { idx, src in
                         if idx > 0 {
                             Divider().padding(.vertical, 6)
                         }
@@ -489,7 +504,8 @@ struct WorkoutRecommendationFlowView: View {
     private func hyroxExerciseSummary(_ ex: HyroxExerciseRecommendation) -> some View {
         let name = HyroxExerciseFormatting.label(
             code: ex.exerciseCode,
-            displayName: ex.customDisplayName.isEmpty ? nil : ex.customDisplayName
+            displayName: ex.customDisplayName.isEmpty ? nil : ex.customDisplayName,
+            notes: ex.notes
         )
         VStack(alignment: .leading, spacing: 6) {
             Text("\(ex.exerciseOrder). \(name)")

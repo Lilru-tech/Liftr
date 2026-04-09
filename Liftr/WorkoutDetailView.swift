@@ -2321,7 +2321,12 @@ private struct SportDetailBlock: View {
 
                         ForEach(hyExercises) { ex in
                             VStack(alignment: .leading, spacing: 8) {
-                                Text("\(ex.exercise_order). \(HyroxExerciseFormatting.label(code: ex.exercise_code, displayName: ex.exercise_display_name))")
+                                let exerciseTitle = HyroxExerciseFormatting.label(
+                                    code: ex.exercise_code,
+                                    displayName: ex.exercise_display_name,
+                                    notes: ex.notes
+                                )
+                                Text("\(ex.exercise_order). \(exerciseTitle)")
                                     .font(.subheadline.weight(.semibold))
 
                                 if let v = ex.distance_m {
@@ -2343,7 +2348,10 @@ private struct SportDetailBlock: View {
                                     info("Implements", "\(v)")
                                 }
                                 if let v = ex.notes, !v.isEmpty {
-                                    info("Notes", v)
+                                    let trimmedNote = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if trimmedNote != exerciseTitle.trimmingCharacters(in: .whitespacesAndNewlines) {
+                                        info("Notes", v)
+                                    }
                                 }
                             }
                             .padding(10)

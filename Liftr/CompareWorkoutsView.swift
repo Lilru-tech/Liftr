@@ -1,6 +1,15 @@
 import SwiftUI
 import Supabase
 
+fileprivate func compareStrengthSetMultiplicities(sortedSetNumbers: [Int]) -> [Int] {
+    let r = sortedSetNumbers.count
+    guard r > 0 else { return [] }
+    if sortedSetNumbers == Array(1...r) {
+        return Array(repeating: 1, count: r)
+    }
+    return sortedSetNumbers.map { max($0, 1) }
+}
+
 struct CompareWorkoutsView: View {
     let currentWorkoutId: Int
     let myOtherWorkoutId: Int
@@ -1004,6 +1013,9 @@ struct CompareWorkoutsView: View {
         }
         struct WE: Decodable { let id: Int }
         struct SetRow: Decodable {
+            let id: Int
+            let workout_exercise_id: Int
+            let set_number: Int
             let reps: Int?
             let weight_kg: Decimal?
             let rpe: Decimal?
@@ -1043,55 +1055,69 @@ struct CompareWorkoutsView: View {
 
             let setsRes = try await client
                 .from("exercise_sets")
-                .select("reps, weight_kg, rpe")
+                .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe")
                 .in("workout_exercise_id", values: exIds)
                 .execute()
             let sets = try decoder.decode([SetRow].self, from: setsRes.data)
+
+            var setsByExercise: [Int: [SetRow]] = [:]
+            for s in sets {
+                setsByExercise[s.workout_exercise_id, default: []].append(s)
+            }
 
             var totalReps = 0
             var totalVolumeKg = 0.0
             var maxWeightKg: Double? = nil
             var maxSetVolumeKg: Double? = nil
-            var rpeSum = 0.0
-            var rpeCount = 0
+            var rpeWeightedSum = 0.0
+            var rpeWeightTotal = 0.0
             var hardSets = 0
+            var setsCount = 0
 
-            for s in sets {
-                let reps = max(s.reps ?? 0, 0)
-                let w = s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue } ?? 0
-                totalReps += reps
+            for (_, var rows) in setsByExercise {
+                rows.sort { $0.id < $1.id }
+                let nums = rows.map(\.set_number)
+                let mults = compareStrengthSetMultiplicities(sortedSetNumbers: nums)
+                for (s, mult) in zip(rows, mults) {
+                    setsCount += mult
 
-                let setVol = Double(reps) * w
-                totalVolumeKg += setVol
+                    let reps = max(s.reps ?? 0, 0)
+                    let w = s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue } ?? 0
+                    totalReps += reps * mult
 
-                if w > 0 {
-                    if let current = maxWeightKg {
-                        if w > current { maxWeightKg = w }
-                    } else {
-                        maxWeightKg = w
+                    let setVol = Double(reps) * w
+                    totalVolumeKg += setVol * Double(mult)
+
+                    if w > 0 {
+                        if let current = maxWeightKg {
+                            if w > current { maxWeightKg = w }
+                        } else {
+                            maxWeightKg = w
+                        }
                     }
-                }
-                if setVol > 0 {
-                    if let current = maxSetVolumeKg {
-                        if setVol > current { maxSetVolumeKg = setVol }
-                    } else {
-                        maxSetVolumeKg = setVol
+                    if setVol > 0 {
+                        if let current = maxSetVolumeKg {
+                            if setVol > current { maxSetVolumeKg = setVol }
+                        } else {
+                            maxSetVolumeKg = setVol
+                        }
                     }
-                }
 
-                if let rpeDec = s.rpe {
-                    let r = NSDecimalNumber(decimal: rpeDec).doubleValue
-                    rpeSum += r
-                    rpeCount += 1
-                    if r >= 8.0 { hardSets += 1 }
+                    if let rpeDec = s.rpe {
+                        let r = NSDecimalNumber(decimal: rpeDec).doubleValue
+                        let m = Double(mult)
+                        rpeWeightedSum += r * m
+                        rpeWeightTotal += m
+                        if r >= 8.0 { hardSets += mult }
+                    }
                 }
             }
 
-            let avgRpe = rpeCount > 0 ? (rpeSum / Double(rpeCount)) : nil
+            let avgRpe = rpeWeightTotal > 0 ? (rpeWeightedSum / rpeWeightTotal) : nil
 
             return StrengthStats(
                 exercisesCount: exIds.count,
-                setsCount: sets.count,
+                setsCount: setsCount,
                 totalReps: totalReps,
                 totalVolumeKg: totalVolumeKg,
                 maxWeightKg: maxWeightKg,

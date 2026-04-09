@@ -1343,6 +1343,42 @@ struct AddWorkoutSheet: View {
         }
     }
     
+    private func patchHyroxExerciseDisplayNames(
+        client: SupabaseClient,
+        workoutId: Int,
+        exercises: [HyroxExerciseForm]
+    ) async throws {
+        let rows: [HyroxExerciseFormatting.HyroxExerciseRowInput] = exercises.enumerated().map { idx, ex in
+            HyroxExerciseFormatting.HyroxExerciseRowInput(
+                exerciseOrder: idx + 1,
+                exerciseCode: ex.exerciseCode,
+                customDisplayName: ex.customDisplayName,
+                notes: ex.notes
+            )
+        }
+        let updates = HyroxExerciseFormatting.hyroxDisplayNameColumnUpdates(rows: rows)
+        guard !updates.isEmpty else { return }
+
+        let sessionRes = try await client
+            .from("sport_sessions")
+            .select("id")
+            .eq("workout_id", value: workoutId)
+            .single()
+            .execute()
+        struct SessionRow: Decodable { let id: Int }
+        let sessionId = try JSONDecoder().decode(SessionRow.self, from: sessionRes.data).id
+
+        struct Patch: Encodable { let exercise_display_name: String }
+        for u in updates {
+            _ = try await client
+                .from("hyrox_session_exercises")
+                .update(Patch(exercise_display_name: u.displayName))
+                .eq("session_id", value: sessionId)
+                .eq("exercise_order", value: u.exerciseOrder)
+                .execute()
+        }
+    }
+
     private func recomputeDurationLabel() {
         guard endedAtEnabled else { durationLabelMin = nil; return }
         let secs = Int(endedAt.timeIntervalSince(startedAt))
@@ -1458,6 +1494,13 @@ struct AddWorkoutSheet: View {
                 
                 if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
                     newWorkoutId = Int64(created)
+                }
+                if sport.sport == .hyrox, let wid = newWorkoutId {
+                    try await patchHyroxExerciseDisplayNames(
+                        client: client,
+                        workoutId: Int(wid),
+                        exercises: sport.hyExercises
+                    )
                 }
             }
             if let wid = newWorkoutId {
@@ -1670,7 +1713,8 @@ struct AddWorkoutSheet: View {
                 var item: [String: AnyJSON] = [:]
                 let persisted = HyroxExerciseFormatting.persistedPayload(
                     exerciseCode: ex.exerciseCode,
-                    customDisplayName: ex.customDisplayName
+                    customDisplayName: ex.customDisplayName,
+                    notes: ex.notes
                 )
                 item["exercise_code"] = try .init(persisted.code)
                 if let d = persisted.displayName {
