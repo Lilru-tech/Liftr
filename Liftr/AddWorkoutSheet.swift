@@ -1438,7 +1438,9 @@ struct AddWorkoutSheet: View {
                     p_elevation_gain_m: cardio.activity.showsElevation ? parseInt(cardio.elevationGainM) : nil,
                     p_perceived_intensity: perceived.rawValue,
                     p_state: publishMode.stateParam,
-                    p_stats: statsJSON
+                    p_stats: statsJSON,
+                    p_healthkit_uuid: nil,
+                    p_route_geojson: nil
                 )
 
                 let res = try await client
@@ -2384,6 +2386,8 @@ struct RPCCardioV2Params: Encodable {
     let p_perceived_intensity: String?
     let p_state: String
     let p_stats: AnyJSON
+    let p_healthkit_uuid: String?
+    let p_route_geojson: String?
 }
 struct RPCCardioV2Wrapper: Encodable {
     let p: RPCCardioV2Params

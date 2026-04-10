@@ -1344,6 +1344,34 @@ struct ProfileView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
             }
+            if HealthKitCardioImportService.shared.isHealthDataAvailable {
+                Section("Apple Health") {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(.white.opacity(0.18))
+                            )
+
+                        NavigationLink {
+                            AppleHealthImportView()
+                                .gradientBG()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "heart.fill")
+                                Text("Import cardio workouts")
+                                    .font(.body.weight(.semibold))
+                                Spacer()
+                            }
+                            .padding(12)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowBackground(Color.clear)
+                }
+            }
             Section("Appearance") {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)

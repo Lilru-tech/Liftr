@@ -4,6 +4,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.7.0] - 2026-04-10
+
+### Added
+- **Apple Health (cardio import)**
+  - Import **cardio** workouts from the **Health** app (e.g. Apple Watch): **run, walk, hike, bike, swim, row**.
+  - **Skips duplicates** using the HealthKit workout UUID; imports **GPS route** and **heart rate** when Apple exposes them.
+  - **Indoor walk or run** is stored as **Treadmill** when the sample is marked **indoor**; **incline** is copied into session stats when metadata includes it (often not provided by Apple).
+  - Entry point: **Profile → Settings → Import cardio workouts** (requires HealthKit read access).
+
+- **Live cardio & GPS**
+  - **GPS tracking** while you record a cardio session; the **route** is saved and shown on the **workout detail** map.
+
+- **Goals**
+  - **Goal detail** screen: see **which workouts** count toward the goal and a **summary** of progress / related metrics.
+
+- **Hyrox**
+  - **Session suggestions**: choose a **mixed** suggestion or a **race-oriented** one.
+  - **Custom exercises** show the **display name you typed** instead of appearing only as a generic **custom** label.
+
+### Changed
+- **Home**
+  - **Data** pill styling **brought back in line** with the rest of the app.
+  - **Jump to top** control when you have scrolled down the feed, so you can return to the top quickly.
+
+### Fixed
+- **Compare workouts**
+  - **Total sets** (and grouping) now match **sequential vs superset-style** blocks correctly.
+
+- **Profile**
+  - **PR** pills use the **same colors** as in the rest of the app.
+
+### Notes (database / ops)
+- **Supabase**: cardio imports and live routes rely on **`workouts.healthkit_uuid`**, **`cardio_sessions.route_geojson`**, and RPC **`create_cardio_workout_v2`** extensions (see `docs/workouts_healthkit_cardio_route_rpc.sql`, `docs/cardio_sessions_route_geojson.sql`). Apply migrations before shipping.
+
+[1.7.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.7.0
+
 ## [1.6.0] - 2026-04-05
 
 ### Added
