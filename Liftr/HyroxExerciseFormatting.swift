@@ -183,7 +183,6 @@ enum HyroxExerciseFormatting {
         return .proMen
     }
 
-    /// Hyrox singles race order (station only — prefer `officialRaceHyroxWithRuns` for full flow).
     private static func officialRaceStationSequence(tier: HyroxWeightTier) -> [HyroxExerciseRecommendation] {
         let w = tier
         var o = 1

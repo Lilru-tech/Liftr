@@ -1,5 +1,7 @@
 import SwiftUI
 import Supabase
+import MapKit
+import CoreLocation
 
 struct WorkoutDetailView: View {
     @EnvironmentObject var app: AppState
@@ -1817,6 +1819,68 @@ private struct StrengthDetailBlock: View {
     }
 }
 
+private enum CardioRouteGeoJSONParser {
+    private struct LineStringBody: Decodable {
+        let type: String
+        let coordinates: [[Double]]
+    }
+
+    static func coordinates(from json: String?) -> [CLLocationCoordinate2D] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        guard let obj = try? JSONDecoder().decode(LineStringBody.self, from: data),
+              obj.type.lowercased() == "linestring",
+              obj.coordinates.count >= 2
+        else { return [] }
+        return obj.coordinates.compactMap { pair in
+            guard pair.count >= 2 else { return nil }
+            let lon = pair[0]
+            let lat = pair[1]
+            guard (-90...90).contains(lat), (-180...180).contains(lon) else { return nil }
+            return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+        }
+    }
+}
+
+private struct CardioRouteMapMini: View {
+    let coordinates: [CLLocationCoordinate2D]
+    @State private var position: MapCameraPosition = .automatic
+
+    var body: some View {
+        Map(position: $position) {
+            MapPolyline(coordinates: coordinates)
+                .stroke(.blue.opacity(0.88), lineWidth: 4)
+        }
+        .mapStyle(.standard(elevation: .flat))
+        .frame(height: 220)
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .onAppear { fitCamera() }
+        .onChange(of: coordinates.count) { _, _ in fitCamera() }
+    }
+
+    private func fitCamera() {
+        guard coordinates.count >= 2 else { return }
+        var minLat = coordinates[0].latitude
+        var maxLat = minLat
+        var minLon = coordinates[0].longitude
+        var maxLon = minLon
+        for c in coordinates {
+            minLat = min(minLat, c.latitude)
+            maxLat = max(maxLat, c.latitude)
+            minLon = min(minLon, c.longitude)
+            maxLon = max(maxLon, c.longitude)
+        }
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+        let span = MKCoordinateSpan(
+            latitudeDelta: max(0.004, (maxLat - minLat) * 1.4),
+            longitudeDelta: max(0.004, (maxLon - minLon) * 1.4)
+        )
+        position = .region(MKCoordinateRegion(center: center, span: span))
+    }
+}
+
 private struct CardioDetailBlock: View {
     let workoutId: Int
     let reloadKey: UUID
@@ -1832,6 +1896,7 @@ private struct CardioDetailBlock: View {
         let avg_pace_sec_per_km: Int?
         let elevation_gain_m: Int?
         let notes: String?
+        let route_geojson: String?
     }
     
     @State private var row: CardioRow?
@@ -1847,6 +1912,10 @@ private struct CardioDetailBlock: View {
     }
     @State private var extras: CardioExtras?
     
+    private var routeCoordinates: [CLLocationCoordinate2D] {
+        CardioRouteGeoJSONParser.coordinates(from: row?.route_geojson)
+    }
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Cardio").font(.headline)
@@ -1859,6 +1928,12 @@ private struct CardioDetailBlock: View {
                 if let ah = r.avg_hr { info("Avg HR", "\(ah) bpm") }
                 if let mh = r.max_hr { info("Max HR", "\(mh) bpm") }
                 if let elev = r.elevation_gain_m { info("Elevation gain", "\(elev) m") }
+                if routeCoordinates.count >= 2 {
+                    Text("Route")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.top, 2)
+                    CardioRouteMapMini(coordinates: routeCoordinates)
+                }
                 if let n = r.notes, !n.isEmpty { info("Notes", n) }
                 if showsCadence(for: r.activity_code), let cad = extras?.cadence_rpm {
                     info("Cadence", "\(cad) \((r.activity_code ?? "") == "rowerg" ? "spm" : "rpm")")

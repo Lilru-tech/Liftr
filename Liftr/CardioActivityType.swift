@@ -35,4 +35,11 @@ enum CardioActivityType: String, CaseIterable, Identifiable {
     var showsWatts: Bool { [.indoor_cycling, .rowerg, .bike, .mtb].contains(self) }
     var showsSplit500m: Bool { self == .rowerg }
     var showsSwimFields: Bool { self == .swim_pool }
+
+    var prefersGPSTracking: Bool {
+        switch self {
+        case .run, .walk, .hike, .bike, .e_bike, .mtb, .swim_open_water: true
+        case .treadmill, .indoor_cycling, .rowerg, .swim_pool: false
+        }
+    }
 }
