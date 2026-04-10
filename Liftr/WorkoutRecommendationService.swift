@@ -25,8 +25,13 @@ private struct HyroxExRow: Decodable {
     let duration_sec: Int?
     let height_cm: Int?
     let implement_count: Int?
-    let notes: String?
     let exercise_display_name: String?
+}
+
+private struct SportRecSession {
+    let id: Int
+    let sport: String
+    let durationMin: Int
 }
 
 enum WorkoutRecommendationService {
@@ -327,7 +332,7 @@ enum WorkoutRecommendationService {
         let historyIds = Set(flat.map(\.exerciseId))
         let pool: [Exercise] = {
             switch source {
-            case .recentHistory: return catalog.filter { historyIds.contains($0.id) }
+            case .recentHistory, .hyrox, .hyroxRace: return catalog.filter { historyIds.contains($0.id) }
             case .fullCatalog: return catalog
             }
         }()
@@ -406,7 +411,7 @@ enum WorkoutRecommendationService {
         let historyIds = Set(flat.map(\.exerciseId))
         let pool: [Exercise] = {
             switch source {
-            case .recentHistory: return catalog.filter { historyIds.contains($0.id) }
+            case .recentHistory, .hyrox, .hyroxRace: return catalog.filter { historyIds.contains($0.id) }
             case .fullCatalog: return catalog
             }
         }()
@@ -722,7 +727,7 @@ enum WorkoutRecommendationService {
         
         let candidateCodes: [String] = {
             switch source {
-            case .recentHistory:
+            case .recentHistory, .hyrox, .hyroxRace:
                 return Array(Set(sessions.map(\.code)))
             case .fullCatalog:
                 return CardioActivityType.allCases.map(\.rawValue)
@@ -795,7 +800,7 @@ enum WorkoutRecommendationService {
             ? scalarPool.compactMap { statsBySession[$0.id]?.swim_style }.first { !$0.isEmpty }
             : nil
         
-        var rationale = "Among \(source == .recentHistory ? "activities you logged" : "all app activities"), this one was least frequent in your last \(lookbackCount) cardio workouts."
+        var rationale = "Among \(source == .fullCatalog ? "all app activities" : "activities you logged"), this one was least frequent in your last \(lookbackCount) cardio workouts."
         if usedCrossActivityFallback {
             rationale += " Values are estimated from your other cardio in this window, since you haven’t logged this activity yet."
         }
@@ -839,6 +844,25 @@ enum WorkoutRecommendationService {
                     rationale: "You don’t have sport workouts in your history yet. Here’s a session length you can use with any sport—adjust as you like."
                 )
             }
+            if source == .hyrox {
+                return .hyrox(
+                    durationMin: 60,
+                    exercises: hyroxColdStartExercises(),
+                    rationale: "You don’t have sport workouts in your history yet. Here’s a short Hyrox block: easy run, then station, repeated—adjust distances and loads as you like."
+                )
+            }
+            if source == .hyroxRace {
+                let ex = HyroxExerciseFormatting.officialRaceHyroxWithRuns(
+                    tier: .openMen,
+                    runDistanceM: 1_000,
+                    stationCount: 5
+                )
+                return .hyrox(
+                    durationMin: 60,
+                    exercises: ex,
+                    rationale: "No sport history yet. Moderate race-style block (5 stations + runs). Add stations in the form when you’re ready for more volume."
+                )
+            }
             throw WorkoutRecommendationError.noWorkoutsInWindow
         }
         let ids = wRows.map { String($0.id) }
@@ -855,16 +879,11 @@ enum WorkoutRecommendationService {
             .in("workout_id", values: ids)
             .execute()
         let rows = try decoder.decode([SS].self, from: res.data)
-        struct SportSessionLite {
-            let id: Int
-            let sport: String
-            let durationMin: Int
-        }
-        var sessions: [SportSessionLite] = []
+        var sessions: [SportRecSession] = []
         for ss in rows {
             guard let sp = ss.sport, !sp.isEmpty else { continue }
             let dm = max(1, ss.duration_sec.map { $0 / 60 } ?? 60)
-            sessions.append(SportSessionLite(id: ss.id, sport: sp.lowercased(), durationMin: dm))
+            sessions.append(SportRecSession(id: ss.id, sport: sp.lowercased(), durationMin: dm))
         }
         if sessions.isEmpty {
             if source == .fullCatalog {
@@ -873,7 +892,41 @@ enum WorkoutRecommendationService {
                     rationale: "No sport details in those sessions yet. Suggested duration only—pick any sport in the form."
                 )
             }
+            if source == .hyrox {
+                return .hyrox(
+                    durationMin: 60,
+                    exercises: hyroxColdStartExercises(),
+                    rationale: "No sport details in those sessions yet. Short Hyrox starter you can edit."
+                )
+            }
+            if source == .hyroxRace {
+                let ex = HyroxExerciseFormatting.officialRaceHyroxWithRuns(
+                    tier: .openMen,
+                    runDistanceM: 1_000,
+                    stationCount: 5
+                )
+                return .hyrox(
+                    durationMin: 60,
+                    exercises: ex,
+                    rationale: "No sport details in those sessions. Moderate race-style block (5 stations + runs, Open men loads)."
+                )
+            }
             throw WorkoutRecommendationError.loadFailed("No sport session rows.")
+        }
+        
+        if source == .hyrox {
+            return try await hyroxSportRecommendation(
+                sessions: sessions,
+                client: client,
+                decoder: decoder
+            )
+        }
+        if source == .hyroxRace {
+            return try await hyroxRaceFormatRecommendation(
+                sessions: sessions,
+                client: client,
+                decoder: decoder
+            )
         }
         
         var counts: [String: Int] = [:]
@@ -885,6 +938,8 @@ enum WorkoutRecommendationService {
                 return Array(Set(sessions.map(\.sport)))
             case .fullCatalog:
                 return SportType.allCases.map(\.rawValue)
+            case .hyrox, .hyroxRace:
+                return []
             }
         }()
         
@@ -912,7 +967,7 @@ enum WorkoutRecommendationService {
             do {
                 let exRes = try await client
                     .from("hyrox_session_exercises")
-                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, notes, exercise_display_name")
+                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name")
                     .in("session_id", values: hyroxSessionIds)
                     .execute()
                 exRows = try decoder.decode([HyroxExRow].self, from: exRes.data)
@@ -926,9 +981,173 @@ enum WorkoutRecommendationService {
         if exRows.isEmpty {
             rationale += " No Hyrox stations in your history yet—here’s a starter template you can edit."
         } else {
-            rationale += " Stations lean on ones you’ve logged less often; metrics are typical values from your Hyrox sessions."
+            rationale += " Stations lean on ones you’ve logged less often, using typical numbers from your Hyrox sessions."
         }
         return .hyrox(durationMin: medianMin, exercises: exercises, rationale: rationale)
+    }
+    
+    private static func hyroxSportRecommendation(
+        sessions: [SportRecSession],
+        client: SupabaseClient,
+        decoder: JSONDecoder
+    ) async throws -> SportRecommendation {
+        let hyroxSessions = sessions.filter { $0.sport == SportType.hyrox.rawValue }
+        let allMins = sessions.map(\.durationMin)
+        let hyroxMins = hyroxSessions.map(\.durationMin)
+        let medianMin = medianSportMinutes(hyroxMins.isEmpty ? allMins : hyroxMins)
+        
+        let hyroxSessionIds = hyroxSessions.map(\.id)
+        var exRows: [HyroxExRow] = []
+        if !hyroxSessionIds.isEmpty {
+            do {
+                let exRes = try await client
+                    .from("hyrox_session_exercises")
+                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name")
+                    .in("session_id", values: hyroxSessionIds)
+                    .execute()
+                exRows = try decoder.decode([HyroxExRow].self, from: exRes.data)
+            } catch {
+                exRows = []
+            }
+        }
+        
+        let exercises = buildHyroxExerciseRecommendations(from: exRows)
+        let rationale: String = {
+            if hyroxSessions.isEmpty {
+                return "No Hyrox in your last \(lookbackCount) sport sessions—duration reflects your other sports. Here’s a short race-style starter (runs + stations) you can edit."
+            }
+            if exRows.isEmpty {
+                return "Hyrox duration from your recent Hyrox sessions; station list is a starter template until you log station details."
+            }
+            return "Hyrox session built from stations you’ve used less often lately, using typical distances and loads from your logs."
+        }()
+        return .hyrox(durationMin: medianMin, exercises: exercises, rationale: rationale)
+    }
+    
+    private static func hyroxRaceFormatRecommendation(
+        sessions: [SportRecSession],
+        client: SupabaseClient,
+        decoder: JSONDecoder
+    ) async throws -> SportRecommendation {
+        let hyroxSessions = sessions.filter { $0.sport == SportType.hyrox.rawValue }
+        let allMins = sessions.map(\.durationMin)
+        let hyroxMins = hyroxSessions.map(\.durationMin)
+        let rawDurationMedian = medianSportMinutes(hyroxMins.isEmpty ? allMins : hyroxMins)
+        
+        let hyroxSessionIds = hyroxSessions.map(\.id)
+        var exRows: [HyroxExRow] = []
+        if !hyroxSessionIds.isEmpty {
+            do {
+                let exRes = try await client
+                    .from("hyrox_session_exercises")
+                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name")
+                    .in("session_id", values: hyroxSessionIds)
+                    .execute()
+                exRows = try decoder.decode([HyroxExRow].self, from: exRes.data)
+            } catch {
+                exRows = []
+            }
+        }
+        
+        let tier = inferHyroxWeightTier(from: exRows)
+        let runM = medianHyroxRunDistanceM(from: exRows)
+        let inferringDurationFromOtherSports = hyroxMins.isEmpty && !allMins.isEmpty
+        let fromDuration = raceFormatStationCount(forSessionMinutes: rawDurationMedian)
+        let experienceCap = raceFormatHyroxExperienceCap(
+            hyroxSessionsInWindow: hyroxSessions.count,
+            inferringDurationFromOtherSports: inferringDurationFromOtherSports
+        )
+        let stationCount = min(fromDuration, experienceCap)
+        let exercises = HyroxExerciseFormatting.officialRaceHyroxWithRuns(
+            tier: tier,
+            runDistanceM: runM,
+            stationCount: stationCount
+        )
+        let durationSuggested = max(
+            min(rawDurationMedian, stationCount * 15),
+            stationCount * 9,
+            35
+        )
+        
+        let tierLabel: String = {
+            switch tier {
+            case .openWomen: return "Open women–style loads"
+            case .openMen: return "Open men–style loads"
+            case .proMen: return "Pro men–style loads"
+            }
+        }()
+        
+        let rationale: String = {
+            let runHint = "Each station is preceded by an easy run (\(runM) m—taken from your logs when we can, else 1 km)."
+            var countHint = "\(stationCount) official stations in race order"
+            if stationCount < 8 {
+                countHint += " (we keep volume conservative—add stations in the form for a full race)."
+            } else {
+                countHint += "."
+            }
+            if stationCount == experienceCap, experienceCap < fromDuration {
+                countHint += " Fewer blocks because you don’t log many Hyrox sessions in this window yet."
+            }
+            if inferringDurationFromOtherSports, stationCount < fromDuration {
+                countHint += " Session length came from other sports, so we didn’t scale all the way to a full Hyrox race."
+            }
+            if hyroxSessions.isEmpty {
+                return "Race-style session: run, station, run, station… \(countHint) \(tierLabel). \(runHint)"
+            }
+            if exRows.isEmpty {
+                return "Race-style flow with runs between stations. \(countHint) \(tierLabel)—verify sled, sandbag, and wall ball weights."
+            }
+            return "Race-style flow: \(countHint) \(tierLabel). \(runHint)"
+        }()
+        
+        return .hyrox(durationMin: durationSuggested, exercises: exercises, rationale: rationale)
+    }
+    
+    private static func medianHyroxRunDistanceM(from rows: [HyroxExRow]) -> Int {
+        let runs = rows.filter { $0.exercise_code.lowercased() == HyroxExerciseCode.run.rawValue }
+        let dists = runs.compactMap(\.distance_m).filter { $0 >= 100 }
+        guard let m = medianIntOpt(dists), m >= 400 else { return 1_000 }
+        return min(m, 5_000)
+    }
+    
+    private static func raceFormatStationCount(forSessionMinutes medianMin: Int) -> Int {
+        switch medianMin {
+        case ..<32: return 3
+        case 32..<48: return 4
+        case 48..<62: return 5
+        case 62..<80: return 6
+        case 80..<100: return 7
+        default: return 8
+        }
+    }
+    
+    private static func raceFormatHyroxExperienceCap(
+        hyroxSessionsInWindow: Int,
+        inferringDurationFromOtherSports: Bool
+    ) -> Int {
+        if inferringDurationFromOtherSports {
+            return min(6, max(4, 3 + hyroxSessionsInWindow))
+        }
+        switch hyroxSessionsInWindow {
+        case 0: return 4
+        case 1: return 4
+        case 2: return 5
+        case 3: return 6
+        case 4: return 7
+        default: return 8
+        }
+    }
+    
+    private static func inferHyroxWeightTier(from rows: [HyroxExRow]) -> HyroxWeightTier {
+        func medianWeight(code: String) -> Double? {
+            let g = rows.filter { $0.exercise_code.lowercased() == code.lowercased() }
+            return medianDoubleOpt(g.compactMap { $0.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue } })
+        }
+        return HyroxExerciseFormatting.inferHyroxWeightTier(
+            sandbagMedian: medianWeight(code: HyroxExerciseCode.sandbagLunges.rawValue),
+            wallBallMedian: medianWeight(code: HyroxExerciseCode.wallBall.rawValue),
+            sledPushMedian: medianWeight(code: HyroxExerciseCode.sledPush.rawValue)
+        )
     }
     
     private static func buildHyroxExerciseRecommendations(from rows: [HyroxExRow]) -> [HyroxExerciseRecommendation] {
@@ -962,62 +1181,18 @@ enum WorkoutRecommendationService {
                 durationSec: medianIntOpt(group.compactMap(\.duration_sec)),
                 heightCm: medianIntOpt(group.compactMap(\.height_cm)),
                 implementCount: medianIntOpt(group.compactMap(\.implement_count)),
-                notes: group.compactMap(\.notes).first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                notes: nil
             )
         }
+        .map { HyroxExerciseFormatting.sanitizeHyroxExerciseRecommendation($0) }
     }
     
     private static func hyroxColdStartExercises() -> [HyroxExerciseRecommendation] {
-        [
-            HyroxExerciseRecommendation(
-                exerciseCode: HyroxExerciseCode.run.rawValue,
-                customDisplayName: "",
-                exerciseOrder: 1,
-                distanceM: 1_000,
-                reps: nil,
-                weightKg: nil,
-                durationSec: nil,
-                heightCm: nil,
-                implementCount: nil,
-                notes: nil
-            ),
-            HyroxExerciseRecommendation(
-                exerciseCode: HyroxExerciseCode.skierg.rawValue,
-                customDisplayName: "",
-                exerciseOrder: 2,
-                distanceM: 1_000,
-                reps: nil,
-                weightKg: nil,
-                durationSec: nil,
-                heightCm: nil,
-                implementCount: nil,
-                notes: nil
-            ),
-            HyroxExerciseRecommendation(
-                exerciseCode: HyroxExerciseCode.row.rawValue,
-                customDisplayName: "",
-                exerciseOrder: 3,
-                distanceM: 500,
-                reps: nil,
-                weightKg: nil,
-                durationSec: nil,
-                heightCm: nil,
-                implementCount: nil,
-                notes: nil
-            ),
-            HyroxExerciseRecommendation(
-                exerciseCode: HyroxExerciseCode.sledPush.rawValue,
-                customDisplayName: "",
-                exerciseOrder: 4,
-                distanceM: 50,
-                reps: nil,
-                weightKg: nil,
-                durationSec: nil,
-                heightCm: nil,
-                implementCount: nil,
-                notes: nil
-            )
-        ]
+        HyroxExerciseFormatting.officialRaceHyroxWithRuns(
+            tier: .openMen,
+            runDistanceM: 1_000,
+            stationCount: 4
+        )
     }
     
     private static func medianSportMinutes(_ arr: [Int]) -> Int {

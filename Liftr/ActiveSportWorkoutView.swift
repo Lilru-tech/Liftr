@@ -50,7 +50,7 @@ struct ActiveSportWorkoutView: View {
         let exercise_display_name: String?
 
         var displayName: String {
-            HyroxExerciseFormatting.label(code: exercise_code, displayName: exercise_display_name)
+            HyroxExerciseFormatting.label(code: exercise_code, displayName: exercise_display_name, notes: notes)
         }
     }
     

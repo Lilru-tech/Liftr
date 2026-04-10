@@ -120,6 +120,27 @@ struct HomeView: View {
             lhs.participantIds.count == rhs.participantIds.count &&
             lhs.coUserAvatarURLs.prefix(3) == rhs.coUserAvatarURLs.prefix(3)
         }
+
+        var feedCardItem: WorkoutFeedCardItem {
+            WorkoutFeedCardItem(
+                workoutId: id,
+                userId: workout.user_id,
+                kind: workout.kind,
+                title: workout.title,
+                state: workout.state,
+                startedAt: workout.started_at,
+                endedAt: workout.ended_at,
+                caloriesKcal: caloriesKcal,
+                score: score,
+                sport: workout.sport,
+                cardioActivity: workout.cardioActivity,
+                username: username,
+                avatarURL: avatarURL,
+                likeCount: likeCount,
+                isLiked: isLiked,
+                coUserAvatarURLs: coUserAvatarURLs
+            )
+        }
     }
     
     @State private var feed: [FeedItem] = []
@@ -158,7 +179,10 @@ struct HomeView: View {
     @AppStorage("homeCollapseInsights") private var collapseInsights = false
     @AppStorage("homeCollapseMonthly") private var collapseMonthly = false
     
+    @State private var showScrollToTopButton = false
+    
     private let highlightsInsertIndex = 5
+    private let scrollToTopThreshold: CGFloat = 120
     
     private func metricChip(_ text: String) -> some View {
         Text(text)
@@ -269,24 +293,34 @@ struct HomeView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
                 
-                VStack(spacing: 6) {
+                ScrollViewReader { scrollProxy in
+                    List {
                     if hasAnyModule {
-                        CollapsibleCard(
-                            isCollapsed: collapseModules,
-                            onToggle: {
-                                withAnimation(.easeInOut) {
-                                    setAllCollapsed(!collapseModules)
-                                }
-                            },
-                            collapsed: { collapsedModulesPill },
-                            expanded: { expandedModulesPanel }
-                        )
+                        VStack(spacing: 6) {
+                            CollapsibleCard(
+                                isCollapsed: collapseModules,
+                                onToggle: {
+                                    withAnimation(.easeInOut) {
+                                        setAllCollapsed(!collapseModules)
+                                    }
+                                },
+                                collapsed: { collapsedModulesPill },
+                                expanded: { expandedModulesPanel }
+                            )
+                        }
+                        .id("homeScrollTop")
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                    } else {
+                        Color.clear
+                            .frame(height: 1)
+                            .accessibilityHidden(true)
+                            .id("homeScrollTop")
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
                     }
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 2)
-                
-                List {
+                    
                     if initialLoading && feed.isEmpty {
                         ProgressView().frame(maxWidth: .infinity)
                     }
@@ -343,8 +377,8 @@ struct HomeView: View {
                         let item = feed[i]
                         let firstOfDay = i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at)
                         
-                        HomeFeedCard(
-                            item: item,
+                        WorkoutFeedCard(
+                            item: item.feedCardItem,
                             dayGroupLabel: firstOfDay ? dateLabelCompact(item.workout.started_at) : nil
                         )
                             .contentShape(Rectangle())
@@ -382,10 +416,38 @@ struct HomeView: View {
                         HStack { Spacer(); ProgressView(); Spacer() }
                             .listRowBackground(Color.clear)
                     }
+                    }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .refreshable { await reloadAll() }
+                    .onScrollGeometryChange(for: Bool.self, of: { geo in
+                        geo.contentOffset.y > scrollToTopThreshold
+                    }, action: { _, show in
+                        showScrollToTopButton = show
+                    })
+                    .overlay(alignment: .bottomTrailing) {
+                        if showScrollToTopButton {
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.35)) {
+                                    scrollProxy.scrollTo("homeScrollTop", anchor: .top)
+                                }
+                            } label: {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.primary)
+                                    .frame(width: 44, height: 44)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .overlay(Circle().stroke(.white.opacity(0.2), lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Ir arriba")
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 12)
+                            .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .animation(.easeInOut(duration: 0.2), value: showScrollToTopButton)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .refreshable { await reloadAll() }
             }
             if !isPremium {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
@@ -1709,193 +1771,6 @@ private struct InsightsRow: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().stroke(.white.opacity(0.18)))
         }
-    }
-}
-
-
-private struct HomeFeedCard: View {
-    private func sportIcon(for sport: String?) -> String {
-        switch sport {
-        case "padel", "tennis", "squash", "badminton", "table_tennis":
-            return "🎾"
-        case "football":
-            return "⚽️"
-        case "basketball":
-            return "🏀"
-        case "volleyball":
-            return "🏐"
-        case "running":
-            return "🏃‍♂️"
-        case "cycling":
-            return "🚴‍♂️"
-        case "rugby":
-            return "🏉"
-        case "hockey", "field_hockey":
-            return "🏑"
-        case "ice_hockey":
-            return "🏒"
-        case "handball":
-            return "🤾‍♂️"
-        case "hyrox":
-            return "🔥"
-        default:
-            return ""
-        }
-    }
-    
-    private func cardioIcon(for activity: String?) -> String {
-        switch (activity ?? "").lowercased() {
-        case "run", "outdoor_run", "trail_run": return "🏃‍♂️"
-        case "treadmill":                       return "🏃‍♀️"
-        case "walk", "hike":                    return "🚶‍♂️"
-        case "cycling", "road_cycling":         return "🚴‍♂️"
-        case "indoor_cycling", "spinning":      return "🚲"
-        case "rowerg", "rowing":                return "🚣‍♂️"
-        case "ski_erg":                         return "⛷️"
-        case "elliptical":                      return "🌀"
-        case "stairs", "stairmaster":           return "🪜"
-        case "swim_pool":                       return "🏊‍♂️"
-        case "swim_open_water":                 return "🌊"
-        default:                                return "❤️‍🔥"
-        }
-    }
-    let item: HomeView.FeedItem
-    var dayGroupLabel: String? = nil
-    
-    var body: some View {
-        ZStack {
-            WorkoutCardBackground(kind: item.workout.kind)
-            
-            VStack(alignment: .leading, spacing: dayGroupLabel == nil ? 8 : 4) {
-                if let g = dayGroupLabel {
-                    Text(g)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    ZStack(alignment: .bottomTrailing) {
-                        AvatarView(urlString: item.avatarURL)
-                            .frame(width: 42, height: 42)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                        
-                        if !item.coUserAvatarURLs.isEmpty {
-                            HStack(spacing: -8) {
-                                ForEach(Array(item.coUserAvatarURLs.prefix(3)), id: \.self) { url in
-                                    AvatarView(urlString: url)
-                                        .frame(width: 18, height: 18)
-                                        .clipShape(Circle())
-                                        .overlay(Circle().stroke(Color(.systemBackground), lineWidth: 2))
-                                }
-                                if item.coUserAvatarURLs.count > 3 {
-                                    Text("+\(item.coUserAvatarURLs.count - 3)")
-                                        .font(.caption2.weight(.bold))
-                                        .padding(.horizontal, 6).padding(.vertical, 2)
-                                        .background(Capsule().fill(Color(.systemBackground)))
-                                        .overlay(Capsule().stroke(Color.black.opacity(0.1)))
-                                }
-                            }
-                            .offset(x: 2, y: 2)
-                        }
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text(item.username)
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        
-                        if item.workout.state == "planned" {
-                            Text(item.workout.title ?? item.workout.kind.capitalized)
-                                .font(.body)
-                                .italic()
-                                .lineLimit(1)
-                        } else {
-                            Text(item.workout.title ?? item.workout.kind.capitalized)
-                                .font(.body)
-                                .lineLimit(1)
-                        }
-                        
-                        if let d = item.workout.started_at {
-                            Text(relative(d))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    VStack(alignment: .trailing, spacing: 6) {
-                        HStack(spacing: 8) {
-                            if let kcal = item.caloriesKcal, kcal > 0 {
-                                caloriesPill(kcal: kcal, kind: item.workout.kind)
-                            }
-                            if let sc = item.score {
-                                scorePill(score: sc, kind: item.workout.kind)
-                            }
-                        }
-                    }
-                }
-                HStack {
-                    HStack(spacing: 4) {
-                        Text(item.workout.kind.capitalized)
-                        switch item.workout.kind {
-                        case "sport":
-                            if let sport = item.workout.sport {
-                                Text(sportIcon(for: sport))
-                            }
-                        case "cardio":
-                            Text(cardioIcon(for: item.workout.cardioActivity))
-                        case "strength":
-                            Text("🏋️‍♂️")
-                        default:
-                            EmptyView()
-                        }
-                    }
-                    .font(.caption2.weight(.semibold))
-                    .padding(.vertical, 3)
-                    .padding(.horizontal, 6)
-                    .background(Capsule().fill(workoutTint(for: item.workout.kind).opacity(0.18)))
-                    .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                    
-                    Spacer()
-                    
-                    likesPill()
-                    
-                    if item.workout.state == "planned" {
-                        HStack(spacing: 4) {
-                            Image(systemName: "pencil")
-                            Text("Draft")
-                        }
-                        .font(.caption2.weight(.semibold))
-                        .padding(.vertical, 3)
-                        .padding(.horizontal, 6)
-                        .background(Capsule().fill(Color.yellow.opacity(0.22)))
-                        .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                    }
-                }
-            }
-            .opacity(item.workout.state == "planned" ? 0.72 : 1.0)
-            .padding(14)
-        }
-    }
-        
-    private func likesPill() -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: item.isLiked ? "heart.fill" : "heart")
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(item.isLiked ? .red : .secondary)
-            Text("\(item.likeCount)")
-                .font(.subheadline.weight(.semibold))
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.18)))
-    }
-    
-    private func relative(_ d: Date) -> String {
-        let f = RelativeDateTimeFormatter(); f.unitsStyle = .short
-        return f.localizedString(for: d, relativeTo: Date())
     }
 }
 
