@@ -345,6 +345,27 @@ struct GoalsView: View {
     }
     
     private func goalCard(_ g: GoalRowUI) -> some View {
+        NavigationLink {
+            GoalContributionsView(goal: g)
+        } label: {
+            goalCardContent(g)
+        }
+        .buttonStyle(.plain)
+        .navigationLinkIndicatorVisibility(.hidden)
+        .overlay(alignment: .bottomTrailing) {
+            if isOwnProfile && !g.isCompleted && !isFinished(g) {
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .padding(8)
+            }
+        }
+    }
+
+    private func goalCardContent(_ g: GoalRowUI) -> some View {
         ZStack {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -359,12 +380,16 @@ struct GoalsView: View {
                     Spacer()
 
                     progressSummaryView(for: g)
+
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
 
                 ProgressView(value: g.progress)
                     .progressViewStyle(.linear)
                     .tint(progressColor(for: g.progressRatio, isCompleted: g.isCompleted))
-                
+
                 HStack(spacing: 10) {
                     HStack(spacing: 6) {
                         if g.isCompleted {
@@ -387,25 +412,17 @@ struct GoalsView: View {
                     .background(
                         Capsule().fill(
                             g.isCompleted
-                            ? Color.gray.opacity(0.16)
-                            : ( (isFinished(g) ? Color.gray.opacity(0.16) : Color.green.opacity(0.20)) )
+                                ? Color.gray.opacity(0.16)
+                                : ((isFinished(g) ? Color.gray.opacity(0.16) : Color.green.opacity(0.20)))
                         )
                     )
                     .overlay(Capsule().stroke(.white.opacity(0.12)))
 
                     Spacer()
-                    
-                    if isOwnProfile && !g.isCompleted && !isFinished(g) {
-                        Button {
-                            Task { await refresh() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .buttonStyle(.bordered)
-                    }
                 }
             }
             .padding(12)
+            .padding(.trailing, isOwnProfile && !g.isCompleted && !isFinished(g) ? 40 : 0)
             .opacity(g.isCompleted ? 0.78 : 1.0)
         }
     }

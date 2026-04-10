@@ -206,4 +206,91 @@ enum GoalsManager {
         }
         return GoalStats(total_goals: 0, finished_goals: 0, finished_percent: 0, avg_progress_percent: 0, best_progress_percent: 0)
     }
+
+    static func fetchWorkoutsContributingToGoal(_ goal: GoalRowUI) async throws -> [WorkoutFeedCardItem] {
+        let client = SupabaseManager.shared.client
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        iso.timeZone = .current
+
+        let weekEnd = Calendar.current.date(byAdding: .day, value: 7, to: goal.weekStart) ?? goal.weekStart
+
+        let res = try await client
+            .from("workouts")
+            .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
+            .eq("user_id", value: goal.userId.uuidString)
+            .gte("started_at", value: iso.string(from: goal.weekStart))
+            .lt("started_at", value: iso.string(from: weekEnd))
+            .order("started_at", ascending: false)
+            .execute()
+
+        struct SportMini: Decodable { let sport: String }
+        struct CardioMini: Decodable { let activity_code: String? }
+        struct W: Decodable {
+            let id: Int
+            let user_id: UUID
+            let kind: String
+            let title: String?
+            let started_at: Date?
+            let ended_at: Date?
+            let state: String
+            let calories_kcal: Decimal?
+            let sport_sessions: [SportMini]?
+            let cardio_sessions: [CardioMini]?
+        }
+
+        let workouts = try JSONDecoder.supabase().decode([W].self, from: res.data)
+
+        let ids = workouts.map { String($0.id) }
+        var scores: [Int: Double] = [:]
+        if !ids.isEmpty {
+            let sRes = try await client
+                .from("workout_scores")
+                .select("workout_id, score")
+                .in("workout_id", values: ids)
+                .execute()
+            struct S: Decodable { let workout_id: Int; let score: Decimal }
+            let sRows = try JSONDecoder.supabase().decode([S].self, from: sRes.data)
+            for r in sRows {
+                scores[r.workout_id, default: 0] += NSDecimalNumber(decimal: r.score).doubleValue
+            }
+        }
+
+        struct Prof: Decodable {
+            let username: String
+            let avatar_url: String?
+        }
+        let pRes = try await client
+            .from("profiles")
+            .select("username, avatar_url")
+            .eq("user_id", value: goal.userId.uuidString)
+            .limit(1)
+            .execute()
+        let profRows = try JSONDecoder.supabase().decode([Prof].self, from: pRes.data)
+        let username = profRows.first?.username ?? "User"
+        let avatarURL = profRows.first?.avatar_url
+
+        return workouts.map { w in
+            let kcal = w.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue }
+            let scoreVal = scores[w.id]
+            return WorkoutFeedCardItem(
+                workoutId: w.id,
+                userId: w.user_id,
+                kind: w.kind,
+                title: w.title,
+                state: w.state,
+                startedAt: w.started_at,
+                endedAt: w.ended_at,
+                caloriesKcal: kcal,
+                score: scoreVal,
+                sport: w.sport_sessions?.first?.sport,
+                cardioActivity: w.cardio_sessions?.first?.activity_code,
+                username: username,
+                avatarURL: avatarURL,
+                likeCount: 0,
+                isLiked: false,
+                coUserAvatarURLs: []
+            )
+        }
+    }
 }

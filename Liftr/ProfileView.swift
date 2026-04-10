@@ -156,6 +156,8 @@ struct ProfileView: View {
     @State private var progressSubtab: ProgressSubtab = .activity
     @State private var kindDistribution: [KindSlice] = []
     @State private var totalDurationMin: Int = 0
+    @State private var consistencyActiveBuckets: Int = 0
+    @State private var consistencyBucketTotal: Int = 0
     @State private var email: String? = nil
     @State private var editingProfile = false
     @State private var heightCm: String = ""
@@ -182,6 +184,8 @@ struct ProfileView: View {
         let suffix = n > 99 ? "99+" : "\(n)"
         return "Notifications (\(suffix))"
     }
+    
+    private var consistencyPeriodUnitLabel: String { "days" }
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
@@ -328,6 +332,11 @@ struct ProfileView: View {
                                 )
                                 .foregroundStyle(by: .value("Kind", s.kind.capitalized))
                             }
+                            .chartForegroundStyleScale([
+                                "Strength": Color.blue,
+                                "Cardio": Color.green,
+                                "Sport": Color.orange
+                            ])
                             .frame(height: 220)
                             .padding(.horizontal)
                             .chartLegend(.visible)
@@ -352,10 +361,7 @@ struct ProfileView: View {
                             }
                         }
                         
-                        Text("Total duration: \(formatMinutes(totalDurationMin))")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
+                        consistencyBreakdownCard
                     }
                 }
                 
@@ -550,6 +556,64 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
     
+    private var consistencyBreakdownCard: some View {
+        let ordered = kindDistribution.sorted { kindSortIndex($0.kind) < kindSortIndex($1.kind) }
+        let workoutTotal = ordered.reduce(0) { $0 + $1.count }
+        return VStack(alignment: .leading, spacing: 12) {
+            if consistencyBucketTotal > 0 {
+                Text("\(consistencyActiveBuckets) of \(consistencyBucketTotal) \(consistencyPeriodUnitLabel) with workouts")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            
+            ForEach(ordered) { s in
+                let pctWorkouts = workoutTotal > 0 ? Double(s.count) / Double(workoutTotal) : 0
+                let pctTime = totalDurationMin > 0 ? Double(s.durationMin) / Double(totalDurationMin) : 0
+                HStack(alignment: .center, spacing: 10) {
+                    Circle()
+                        .fill(consistencyKindColor(s.kind))
+                        .frame(width: 8, height: 8)
+                    Text(s.kind.capitalized)
+                        .font(.subheadline.weight(.medium))
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("\(s.count) workouts · \(formatProgressPercent(pctWorkouts))")
+                            .font(.footnote.weight(.medium).monospacedDigit())
+                        if totalDurationMin > 0 {
+                            Text("\(formatMinutes(s.durationMin)) · \(formatProgressPercent(pctTime)) of time")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
+            
+            Divider().opacity(0.35)
+            
+            HStack(alignment: .firstTextBaseline) {
+                Text("Total")
+                    .font(.footnote.weight(.semibold))
+                Spacer()
+                Text("\(workoutTotal) workouts · \(formatMinutes(totalDurationMin))")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(.ultraThinMaterial)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(.white.opacity(0.18), lineWidth: 0.8)
+        }
+        .padding(.horizontal)
+    }
+    
     
     private enum ProgressRange: CaseIterable { case week, month, year }
     
@@ -563,9 +627,10 @@ struct ProfileView: View {
     }
     
     private struct KindSlice: Identifiable {
-        let id = UUID()
         let kind: String
         let count: Int
+        let durationMin: Int
+        var id: String { kind }
     }
     
     private var headerCard: some View {
@@ -998,8 +1063,11 @@ struct ProfileView: View {
                             }
                             .padding(.vertical, 10)
                             .padding(.horizontal, 12)
-                            .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 12))
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.12)))
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(.white.opacity(0.18))
+                            )
                             .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                             .listRowBackground(Color.clear)
                         }
@@ -1275,6 +1343,34 @@ struct ProfileView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
+            }
+            if HealthKitCardioImportService.shared.isHealthDataAvailable {
+                Section("Apple Health") {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(.white.opacity(0.18))
+                            )
+
+                        NavigationLink {
+                            AppleHealthImportView()
+                                .gradientBG()
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "heart.fill")
+                                Text("Import cardio workouts")
+                                    .font(.body.weight(.semibold))
+                                Spacer()
+                            }
+                            .padding(12)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowBackground(Color.clear)
+                }
             }
             Section("Appearance") {
                 ZStack {
@@ -1907,6 +2003,7 @@ struct ProfileView: View {
                 }
             }
             var kindCount: [String: Int] = [:]
+            var kindMinutes: [String: Int] = [:]
             var totalMinutes = 0
             
             for w in workouts {
@@ -1927,7 +2024,9 @@ struct ProfileView: View {
                 let kcal = NSDecimalNumber(decimal: (w.calories_kcal ?? 0)).doubleValue
                 bucketsCalories[key]! += kcal
                 kindCount[w.kind, default: 0] += 1
-                totalMinutes += (durationMinByWorkout[w.id] ?? 0)
+                let wMins = durationMinByWorkout[w.id] ?? 0
+                kindMinutes[w.kind, default: 0] += wMins
+                totalMinutes += wMins
             }
             let totalKcal = bucketsCalories.values.reduce(0, +)
             let totalWorkouts = bucketsCount.values.reduce(0, +)
@@ -2026,11 +2125,34 @@ struct ProfileView: View {
             }
             if progressSubtab == .consistency {
                 let slices = ["strength","cardio","sport"]
-                    .map { KindSlice(kind: $0, count: kindCount[$0] ?? 0) }
+                    .map { KindSlice(kind: $0, count: kindCount[$0] ?? 0, durationMin: kindMinutes[$0] ?? 0) }
                     .filter { $0.count > 0 }
+                let activeBuckets: Int
+                let consistencyTotalDays: Int
+                switch progressRange {
+                case .week, .month:
+                    activeBuckets = bucketsCount.values.filter { $0 > 0 }.count
+                    consistencyTotalDays = bucketCount
+                case .year:
+                    let windowStart = cal.startOfDay(for: start)
+                    let windowEnd = cal.startOfDay(for: end)
+                    consistencyTotalDays = max(0, cal.dateComponents([.day], from: windowStart, to: windowEnd).day ?? 0)
+                    var daysWithWorkout = Set<Date>()
+                    for w in workouts {
+                        guard let d = w.started_at else { continue }
+                        if (w.state ?? "published") == "planned" { continue }
+                        let day = cal.startOfDay(for: d)
+                        if day >= windowStart && day < windowEnd {
+                            daysWithWorkout.insert(day)
+                        }
+                    }
+                    activeBuckets = daysWithWorkout.count
+                }
                 await MainActor.run {
                     self.kindDistribution = slices
                     self.totalDurationMin = totalMinutes
+                    self.consistencyActiveBuckets = activeBuckets
+                    self.consistencyBucketTotal = consistencyTotalDays
                     self.progressPoints = []
                 }
             }
@@ -2867,6 +2989,24 @@ private extension Date {
 }
 
 extension ProfileView {
+    private func kindSortIndex(_ kind: String) -> Int {
+        switch kind.lowercased() {
+        case "strength": return 0
+        case "cardio": return 1
+        case "sport": return 2
+        default: return 99
+        }
+    }
+    
+    private func consistencyKindColor(_ kind: String) -> Color {
+        switch kind.lowercased() {
+        case "strength": return .blue
+        case "cardio": return .green
+        case "sport": return .orange
+        default: return .gray
+        }
+    }
+    
     private func backgroundFor(kind: String) -> AnyShapeStyle {
         switch kind.lowercased() {
         case "strength": return AnyShapeStyle(Color.green.opacity(0.10).gradient)
@@ -2951,6 +3091,15 @@ private func formatMinutes(_ minutes: Int) -> String {
     let r = m % 60
     if h > 0 { return "\(h)h \(r)m" }
     return "\(r)m"
+}
+
+private func formatProgressPercent(_ fraction: Double) -> String {
+    guard fraction.isFinite, fraction >= 0 else { return "—" }
+    let p = fraction * 100
+    if p >= 10 || abs(p - round(p)) < 0.05 {
+        return String(format: "%.0f%%", p)
+    }
+    return String(format: "%.1f%%", p)
 }
 
 private func formatXP(_ xp: Int64) -> String {

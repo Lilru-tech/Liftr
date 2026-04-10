@@ -1489,6 +1489,14 @@ struct EditWorkoutMetaSheet: View {
                          )
                     )
                     .execute()
+
+                if s_sport == .hyrox {
+                    try await patchHyroxDisplayNamesForEditedWorkout(
+                        client: SupabaseManager.shared.client,
+                        workoutId: workoutId,
+                        hyExercises: hyExercises
+                    )
+                }
                 
             case "strength":
                 for ex in s_items {
@@ -2424,7 +2432,8 @@ struct EditWorkoutMetaSheet: View {
             let exerciseObjects: [JStats] = hyExercises.map { ex in
                 let persisted = HyroxExerciseFormatting.persistedPayload(
                     exerciseCode: ex.exerciseCode,
-                    customDisplayName: ex.customDisplayName
+                    customDisplayName: ex.customDisplayName,
+                    notes: ex.notes
                 )
                 var values: [String: JV] = [
                     "exercise_code": .s(persisted.code),
@@ -2637,5 +2646,41 @@ private struct ParticipantsPickerSheet: View {
             }
         } catch {
         }
+    }
+}
+
+fileprivate func patchHyroxDisplayNamesForEditedWorkout(
+    client: SupabaseClient,
+    workoutId: Int,
+    hyExercises: [EditHyroxExercise]
+) async throws {
+    let rows: [HyroxExerciseFormatting.HyroxExerciseRowInput] = hyExercises.map {
+        HyroxExerciseFormatting.HyroxExerciseRowInput(
+            exerciseOrder: $0.exerciseOrder,
+            exerciseCode: $0.exerciseCode,
+            customDisplayName: $0.customDisplayName,
+            notes: $0.notes
+        )
+    }
+    let updates = HyroxExerciseFormatting.hyroxDisplayNameColumnUpdates(rows: rows)
+    guard !updates.isEmpty else { return }
+
+    let sessionRes = try await client
+        .from("sport_sessions")
+        .select("id")
+        .eq("workout_id", value: workoutId)
+        .single()
+        .execute()
+    struct SessionRow: Decodable { let id: Int }
+    let sessionId = try JSONDecoder().decode(SessionRow.self, from: sessionRes.data).id
+
+    struct Patch: Encodable { let exercise_display_name: String }
+    for u in updates {
+        _ = try await client
+            .from("hyrox_session_exercises")
+            .update(Patch(exercise_display_name: u.displayName))
+            .eq("session_id", value: sessionId)
+            .eq("exercise_order", value: u.exerciseOrder)
+            .execute()
     }
 }
