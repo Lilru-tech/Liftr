@@ -715,6 +715,17 @@ struct AddWorkoutSheet: View {
                     }
                 }
 
+                if cardio.activity.showsKmPaceSplits {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Per-km pace (optional)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("e.g. 5:30, 5:25, 5:20", text: $cardio.kmSplitsPaceText)
+                            .font(.subheadline)
+                    }
+                }
+
                 if cardio.activity.showsIncline {
                     Divider()
                     FieldRowPlain {
@@ -1763,6 +1774,12 @@ struct AddWorkoutSheet: View {
         if f.poolLengthM.trimmedOrNil != nil, let v = Int(f.poolLengthM) { out["pool_length_m"] = try .init(v) }
         if let style = f.swimStyle.trimmedOrNil { out["swim_style"] = try .init(style) }
         if f.splitSecPer500m.trimmedOrNil != nil, let v = Int(f.splitSecPer500m) { out["split_sec_per_500m"] = try .init(v) }
+        if f.activity.showsKmPaceSplits {
+            let splits = CardioKmPaceSplits.parseFieldText(f.kmSplitsPaceText)
+            if !splits.isEmpty {
+                out[CardioKmPaceSplits.jsonKey] = try AnyJSON(splits.map { try AnyJSON($0) })
+            }
+        }
         return try AnyJSON(out)
     }
     
@@ -1841,6 +1858,7 @@ struct AddWorkoutSheet: View {
         cardio.swimLaps = r.swimLaps.map(String.init) ?? ""
         cardio.poolLengthM = r.poolLengthM.map(String.init) ?? ""
         cardio.swimStyle = r.swimStyle ?? ""
+        cardio.kmSplitsPaceText = ""
         updateAutoPaceIfNeeded()
     }
     
@@ -2139,6 +2157,7 @@ struct CardioForm {
     var poolLengthM: String = ""
     var swimStyle: String = ""
     var splitSecPer500m: String = ""
+    var kmSplitsPaceText: String = ""
 }
 
 struct HyroxExerciseForm: Identifiable, Hashable {
