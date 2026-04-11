@@ -63,3 +63,8 @@ fastlane/test_output
 
 # VS Code / Cursor (local editor settings; keep shared files like .vscode/*.md tracked)
 .vscode/settings.json
+
+# Supabase / ops: SQL y notas de migración (esquema, RLS, RPCs).
+# Útil en repo PRIVADO. Si el remoto es PÚBLICO y no quieres exponer el diseño de BD,
+# deja esta regla activa. Si ya estaban en el índice: git rm -r --cached Liftr/docs
+Liftr/docs/

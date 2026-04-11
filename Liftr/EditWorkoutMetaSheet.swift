@@ -7,6 +7,7 @@ private enum JV: Encodable {
     case d(Double)
     case o(JStats)
     case a([JStats])
+    case ia([Int])
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
@@ -16,6 +17,7 @@ private enum JV: Encodable {
         case .d(let x): try c.encode(x)
         case .o(let obj): try c.encode(obj)
         case .a(let arr): try c.encode(arr)
+        case .ia(let arr): try c.encode(arr)
         }
     }
 }
@@ -103,6 +105,7 @@ struct EditWorkoutMetaSheet: View {
     @State private var c_wattsAvg = ""
     @State private var c_inclinePct = ""
     @State private var c_split500m = ""
+    @State private var c_kmSplitsPaceText = ""
     @State private var c_swimLaps = ""
     @State private var c_poolLengthM = ""
     @State private var c_swimStyle = ""
@@ -526,6 +529,17 @@ struct EditWorkoutMetaSheet: View {
                             .keyboardType(.numberPad)
                     }
                 }
+
+                if showsKmPaceSplits(for: c_modality) {
+                    Divider().padding(.vertical, 6)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Per-km pace (optional)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("e.g. 5:30, 5:25, 5:20", text: $c_kmSplitsPaceText)
+                            .font(.subheadline)
+                    }
+                }
                 
                 if showsCadence(for: c_modality) {
                     Divider().padding(.vertical, 6)
@@ -825,6 +839,7 @@ struct EditWorkoutMetaSheet: View {
                             let pool_length_m: Int?
                             let swim_style: String?
                             let split_sec_per_500m: Int?
+                            let km_split_pace_sec: [Int]?
                         }
                         let stats: Body?
                     }
@@ -838,9 +853,15 @@ struct EditWorkoutMetaSheet: View {
                     c_poolLengthM   = stats.stats?.pool_length_m.map(String.init) ?? ""
                     c_swimStyle     = stats.stats?.swim_style ?? ""
                     c_split500m     = stats.stats?.split_sec_per_500m.map(String.init) ?? ""
+                    if let km = stats.stats?.km_split_pace_sec, !km.isEmpty {
+                        c_kmSplitsPaceText = CardioKmPaceSplits.formatFieldText(secondsPerKm: km)
+                    } else {
+                        c_kmSplitsPaceText = ""
+                    }
                 } catch {
                     c_cadenceRpm = ""; c_wattsAvg = ""; c_inclinePct = ""
                     c_swimLaps = ""; c_poolLengthM = ""; c_swimStyle = ""; c_split500m = ""
+                    c_kmSplitsPaceText = ""
                 }
                 
             case "sport":
@@ -1775,7 +1796,7 @@ struct EditWorkoutMetaSheet: View {
         let norm = normalizedModality(raw)
         let mapped = mapToCardioType(raw)
         print("[CARDIO][\(stage)] raw='\(raw)' norm='\(norm)' mapped=\(mapped.rawValue)")
-        print("[CARDIO][\(stage)] flags: cadence=\(showsCadence(for: raw)) watts=\(showsWatts(for: raw)) incline=\(showsIncline(for: raw)) split500=\(showsSplit500m(for: raw)) swimFields=\(showsSwimFields(for: raw))")
+        print("[CARDIO][\(stage)] flags: cadence=\(showsCadence(for: raw)) watts=\(showsWatts(for: raw)) incline=\(showsIncline(for: raw)) split500=\(showsSplit500m(for: raw)) kmSplits=\(showsKmPaceSplits(for: raw)) swimFields=\(showsSwimFields(for: raw))")
     }
     private func showsCadence(for modality: String) -> Bool {
         currentCardioType()?.showsCadenceRpm == true
@@ -1788,6 +1809,9 @@ struct EditWorkoutMetaSheet: View {
     }
     private func showsSplit500m(for modality: String) -> Bool {
         currentCardioType()?.showsSplit500m == true
+    }
+    private func showsKmPaceSplits(for modality: String) -> Bool {
+        currentCardioType()?.showsKmPaceSplits == true
     }
     private func showsSwimFields(for modality: String) -> Bool {
         currentCardioType()?.showsSwimFields == true
@@ -2293,6 +2317,12 @@ struct EditWorkoutMetaSheet: View {
             if let v = parseInt(c_poolLengthM)   { out["pool_length_m"]  = .i(v) }
             if !c_swimStyle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 out["swim_style"] = .s(c_swimStyle)
+            }
+        }
+        if showsKmPaceSplits(for: modality) {
+            let splits = CardioKmPaceSplits.parseFieldText(c_kmSplitsPaceText)
+            if !splits.isEmpty {
+                out[CardioKmPaceSplits.jsonKey] = .ia(splits)
             }
         }
         return out

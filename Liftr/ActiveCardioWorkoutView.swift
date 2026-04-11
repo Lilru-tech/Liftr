@@ -554,36 +554,30 @@ struct ActiveCardioWorkoutView: View {
         return laps
     }
 
-    private func splitsNotesLineForSave(
+    private static func kmPaceSplitSecondsPerKm(
         usesGPS: Bool,
         distanceFieldUserEdited: Bool,
         manualKm: Double,
         gpsKm: Double,
         elapsedSec T: Int,
         gpsCumulative: [Int]
-    ) -> String? {
-        guard usesGPS else { return nil }
+    ) -> [Int] {
+        guard usesGPS else { return [] }
 
         let tolerance = 0.04
         let treatAsGpsDistance = !distanceFieldUserEdited || abs(manualKm - gpsKm) <= tolerance
 
         if treatAsGpsDistance {
-            guard !gpsCumulative.isEmpty else { return nil }
-            let laps = Self.lapDeltas(from: gpsCumulative)
-            guard !laps.isEmpty else { return nil }
-            return Self.gpsKmSplitsLinePrefix + " " + laps.map { formatMinSec($0) }.joined(separator: " · ")
+            guard !gpsCumulative.isEmpty else { return [] }
+            let laps = lapDeltas(from: gpsCumulative)
+            return laps.isEmpty ? [] : laps
         }
 
         let n = Int(floor(manualKm))
-        if n < 1 {
-            guard T > 0, manualKm >= 0.01 else { return nil }
-            let sec = Int(round(Double(T) / manualKm))
-            return "\(Self.gpsAvgPaceLinePrefix) \(formatMinSec(sec)) (\(String(format: "%.2f", manualKm)) km)"
-        }
+        if n < 1 { return [] }
 
-        let laps = Self.lapsForManualDistance(fullKmCount: n, elapsedSec: T, gpsCumulative: gpsCumulative)
-        guard !laps.isEmpty else { return nil }
-        return Self.gpsKmSplitsLinePrefix + " " + laps.map { formatMinSec($0) }.joined(separator: " · ")
+        let laps = lapsForManualDistance(fullKmCount: n, elapsedSec: T, gpsCumulative: gpsCumulative)
+        return laps.isEmpty ? [] : laps
     }
 
     private func mergeWorkoutNotes(existing: String?, gpsLine: String?) -> String? {
@@ -763,7 +757,7 @@ struct ActiveCardioWorkoutView: View {
                     .execute()
             }
 
-            let splitsLine = splitsNotesLineForSave(
+            let kmSplits = Self.kmPaceSplitSecondsPerKm(
                 usesGPS: snap.usesGPSTracking,
                 distanceFieldUserEdited: snap.distanceFieldUserEdited,
                 manualKm: manualKm,
@@ -771,6 +765,34 @@ struct ActiveCardioWorkoutView: View {
                 elapsedSec: snap.elapsedSec,
                 gpsCumulative: snap.splitEndElapsedSec
             )
+
+            let sessionId = await MainActor.run { cardio?.id }
+            if let sid = sessionId {
+                var existingStatsData: Data?
+                do {
+                    let statsRes = try await SupabaseManager.shared.client
+                        .from("cardio_session_stats")
+                        .select("stats")
+                        .eq("session_id", value: sid)
+                        .single()
+                        .execute()
+                    existingStatsData = statsRes.data
+                } catch {
+                    existingStatsData = nil
+                }
+                let mergedStats = try CardioKmPaceSplits.mergedStatsForUpsert(
+                    existingRowData: existingStatsData,
+                    kmSplitsPaceSec: kmSplits
+                )
+                struct CardioStatsUpsert: Encodable {
+                    let session_id: Int
+                    let stats: AnyJSON
+                }
+                _ = try await SupabaseManager.shared.client
+                    .from("cardio_session_stats")
+                    .upsert(CardioStatsUpsert(session_id: sid, stats: mergedStats))
+                    .execute()
+            }
 
             struct NotesSelect: Decodable { let notes: String? }
             let notesRes = try await SupabaseManager.shared.client
@@ -780,7 +802,7 @@ struct ActiveCardioWorkoutView: View {
                 .single()
                 .execute()
             let notesRow = try JSONDecoder.supabase().decode(NotesSelect.self, from: notesRes.data)
-            let mergedNotes = mergeWorkoutNotes(existing: notesRow.notes, gpsLine: splitsLine)
+            let mergedNotes = mergeWorkoutNotes(existing: notesRow.notes, gpsLine: nil)
             let endTime = Date()
 
             _ = try await SupabaseManager.shared.client
