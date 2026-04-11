@@ -11,10 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Import **cardio** workouts from the **Health** app (e.g. Apple Watch): **run, walk, hike, bike, swim, row**.
   - **Skips duplicates** using the HealthKit workout UUID; imports **GPS route** and **heart rate** when Apple exposes them.
   - **Indoor walk or run** is stored as **Treadmill** when the sample is marked **indoor**; **incline** is copied into session stats when metadata includes it (often not provided by Apple).
+  - When a **route** is present, **per-km pace splits** are derived from GPS samples (timestamps along the polyline) and stored in **`km_split_pace_sec`** (approximates Apple Fitness–style splits; indoor / no route → no splits).
   - Entry point: **Profile → Settings → Import cardio workouts** (requires HealthKit read access).
 
 - **Live cardio & GPS**
   - **GPS tracking** while you record a cardio session; the **route** is saved and shown on the **workout detail** map.
+  - Finishing a **GPS cardio** writes **per-kilometre pace splits** into **`cardio_session_stats.stats`** (`km_split_pace_sec`, seconds per full km) instead of appending split lines to **workout notes**.
+
+- **Cardio — per-km pace (optional)**
+  - Optional **per-km splits** when adding or editing cardio (comma-separated `m:ss` values, e.g. `5:30, 5:25, 5:20`), persisted in **`cardio_session_stats.stats`** alongside other cardio extras.
+  - **Duplicate workout** copies splits into the draft when present.
+  - **Workout detail**: **Per-km pace** uses a **disclosure** when there are **multiple** splits (collapsed by default: first km + “+N more”); **single** split stays a compact row. Expanded view lists each km on its own line.
 
 - **Goals**
   - **Goal detail** screen: see **which workouts** count toward the goal and a **summary** of progress / related metrics.
@@ -23,12 +30,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - **Session suggestions**: choose a **mixed** suggestion or a **race-oriented** one.
   - **Custom exercises** show the **display name you typed** instead of appearing only as a generic **custom** label.
 
+- **Search**
+  - **Users** and **Workouts** tabs: find **published** workouts by **title** or **notes**; user search unchanged (by username).
+  - **Trending (24h)**: most-searched terms in the **last 24 hours** (app-wide), as tappable pills.
+  - **Recent**: your **last searches** (per scope), horizontal pills with a distinct style; **clear all** from the trash control.
+  - Searches are **logged** when you run them (min. length rules on the server) so trending and recents stay useful.
+
 ### Changed
 - **Home**
   - **Data** pill styling **brought back in line** with the rest of the app.
   - **Jump to top** control when you have scrolled down the feed, so you can return to the top quickly.
 
 ### Fixed
+- **Home**
+  - When you **don’t yet have Data / summary modules**, the feed **no longer leaves an empty row** where the **Data** pill would be — **Weekly goals** and **Competitions** sit **directly under** the **All / Strength / …** filter.
+
 - **Compare workouts**
   - **Total sets** (and grouping) now match **sequential vs superset-style** blocks correctly.
 
@@ -37,6 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Notes (database / ops)
 - **Supabase**: cardio imports and live routes rely on **`workouts.healthkit_uuid`**, **`cardio_sessions.route_geojson`**, and RPC **`create_cardio_workout_v2`** extensions (see `docs/workouts_healthkit_cardio_route_rpc.sql`, `docs/cardio_sessions_route_geojson.sql`). Apply migrations before shipping.
+- **Cardio splits**: optional array key **`km_split_pace_sec`** in **`cardio_session_stats.stats`** (JSON); no extra columns. See `docs/cardio_session_stats_km_splits.md`.
+- **Search trending & recents**: append-only **`search_query_events`**, per-user **`user_search_recent`**, and RPCs **`record_search`**, **`trending_search_queries_24h`**, **`user_search_recent_list`**, **`clear_user_search_recent`** (see `docs/search_queries_trending_recent.sql`). Apply in Supabase before shipping.
 
 [1.7.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.7.0
 

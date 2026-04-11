@@ -1066,6 +1066,7 @@ struct WorkoutDetailView: View {
                             let pool_length_m: Int?
                             let swim_style: String?
                             let split_sec_per_500m: Int?
+                            let km_split_pace_sec: [Int]?
                         }
                         let stats: StatsBody?
                     }
@@ -1080,6 +1081,9 @@ struct WorkoutDetailView: View {
                         if let v = s.pool_length_m       { cf.poolLengthM       = String(v) }
                         if let v = s.swim_style, !v.isEmpty { cf.swimStyle     = v }
                         if let v = s.split_sec_per_500m  { cf.splitSecPer500m   = String(v) }
+                        if let km = s.km_split_pace_sec, !km.isEmpty {
+                            cf.kmSplitsPaceText = CardioKmPaceSplits.formatFieldText(secondsPerKm: km)
+                        }
                     }
                 } catch {
                 }
@@ -1909,9 +1913,11 @@ private struct CardioDetailBlock: View {
         let pool_length_m: Int?
         let swim_style: String?
         let split_sec_per_500m: Int?
+        let km_split_pace_sec: [Int]?
     }
     @State private var extras: CardioExtras?
-    
+    @State private var kmPaceSplitsExpanded = false
+
     private var routeCoordinates: [CLLocationCoordinate2D] {
         CardioRouteGeoJSONParser.coordinates(from: row?.route_geojson)
     }
@@ -1925,6 +1931,9 @@ private struct CardioDetailBlock: View {
                 if let d = r.distance_km { info("Distance", String(format: "%.2f km", NSDecimalNumber(decimal: d).doubleValue)) }
                 if let s = r.duration_sec { info("Duration", durationString(Double(s))) }
                 if let p = r.avg_pace_sec_per_km { info("Avg pace", paceString(Double(p))) }
+                if let splits = extras?.km_split_pace_sec, !splits.isEmpty {
+                    perKmPaceSection(splits: splits)
+                }
                 if let ah = r.avg_hr { info("Avg HR", "\(ah) bpm") }
                 if let mh = r.max_hr { info("Max HR", "\(mh) bpm") }
                 if let elev = r.elevation_gain_m { info("Elevation gain", "\(elev) m") }
@@ -1961,6 +1970,7 @@ private struct CardioDetailBlock: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
         .task { await load() }
         .onChange(of: reloadKey) { _, _ in
+            kmPaceSplitsExpanded = false
             Task { await load() }
         }
     }
@@ -1974,7 +1984,10 @@ private struct CardioDetailBlock: View {
                 .single()
                 .execute()
             let r = try JSONDecoder.supabase().decode(CardioRow.self, from: res.data)
-            await MainActor.run { row = r }
+            await MainActor.run {
+                row = r
+                kmPaceSplitsExpanded = false
+            }
             do {
                 let statsRes = try await SupabaseManager.shared.client
                     .from("cardio_session_stats")
@@ -2003,7 +2016,54 @@ private struct CardioDetailBlock: View {
         .padding(10)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
-    
+
+    @ViewBuilder
+    private func perKmPaceSection(splits: [Int]) -> some View {
+        if splits.count == 1 {
+            info("Per-km pace", "Km 1: \(paceString(Double(splits[0])))")
+        } else {
+            DisclosureGroup(isExpanded: $kmPaceSplitsExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(splits.enumerated()), id: \.offset) { idx, sec in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Km \(idx + 1)")
+                                .font(.subheadline.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Spacer(minLength: 12)
+                            Text(paceString(Double(sec)))
+                                .font(.subheadline.monospacedDigit())
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 4)
+            } label: {
+                HStack(alignment: .center) {
+                    Text("Per-km pace")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 12)
+                    if kmPaceSplitsExpanded {
+                        Text("\(splits.count) km")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("Km 1: \(paceString(Double(splits[0])))")
+                                .font(.subheadline)
+                                .monospacedDigit()
+                            Text("+\(splits.count - 1) more")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(10)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
     private func activityLabel(_ r: CardioRow) -> String {
         let code = (r.activity_code ?? r.modality ?? "cardio")
         return code.replacingOccurrences(of: "_", with: " ").capitalized

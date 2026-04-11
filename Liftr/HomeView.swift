@@ -311,14 +311,6 @@ struct HomeView: View {
                         .id("homeScrollTop")
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
-                    } else {
-                        Color.clear
-                            .frame(height: 1)
-                            .accessibilityHidden(true)
-                            .id("homeScrollTop")
-                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
                     }
                     
                     if initialLoading && feed.isEmpty {
@@ -370,7 +362,8 @@ struct HomeView: View {
                         competitionsModule
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
+                    .id(hasAnyModule ? "homeGoalsRow" : "homeScrollTop")
+                    .listRowInsets(EdgeInsets(top: hasAnyModule ? 6 : 8, leading: 16, bottom: 6, trailing: 16))
                     .listRowBackground(Color.clear)
                     
                     ForEach(feed.indices, id: \.self) { i in

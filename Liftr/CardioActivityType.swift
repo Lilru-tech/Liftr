@@ -36,6 +36,13 @@ enum CardioActivityType: String, CaseIterable, Identifiable {
     var showsSplit500m: Bool { self == .rowerg }
     var showsSwimFields: Bool { self == .swim_pool }
 
+    var showsKmPaceSplits: Bool {
+        switch self {
+        case .swim_pool, .swim_open_water, .rowerg: false
+        default: true
+        }
+    }
+
     var prefersGPSTracking: Bool {
         switch self {
         case .run, .walk, .hike, .bike, .e_bike, .mtb, .swim_open_water: true

@@ -92,9 +92,11 @@ final class HealthKitCardioImportService {
             let elevationM = elevationGainMeters(workout: w)
 
             var routeGeoJSON: String?
+            var routeLocations: [CLLocation] = []
             if !isTreadmill {
                 do {
-                    let coords = try await fetchRouteCoordinates(for: w)
+                    routeLocations = try await fetchRouteLocations(for: w)
+                    let coords = routeLocations.map(\.coordinate)
                     if coords.count >= 2 {
                         routeGeoJSON = Self.geoJSONLineString(from: coords)
                         if distanceKm < 0.001 {
@@ -104,6 +106,7 @@ final class HealthKitCardioImportService {
                     }
                 } catch {
                     routeGeoJSON = nil
+                    routeLocations = []
                 }
             }
 
@@ -112,11 +115,20 @@ final class HealthKitCardioImportService {
                 return Int(round(Double(durationSec) / distanceKm))
             }()
 
+            let kmSplitsFromRoute = Self.kmSplitPaceSecFromRoute(
+                locations: routeLocations,
+                workout: w,
+                polylineLengthMeters: routeLocations.count >= 2
+                    ? Self.polylineLengthMeters(routeLocations.map(\.coordinate))
+                    : 0
+            )
+
             let title = "\(mapped.label) · Apple Health"
             let notes = "Imported from Apple Health."
 
             let statsJSON = Self.cardioImportStatsJSON(
-                inclinePct: isTreadmill ? Self.inclinePercentFromWorkoutMetadata(w) : nil
+                inclinePct: isTreadmill ? Self.inclinePercentFromWorkoutMetadata(w) : nil,
+                kmSplitPaceSec: kmSplitsFromRoute
             )
 
             let params = RPCCardioV2Params(
@@ -205,7 +217,7 @@ final class HealthKitCardioImportService {
         if let i = raw as? Int { return i != 0 }
         return false
     }
-    
+
     private static func inclinePercentFromWorkoutMetadata(_ workout: HKWorkout) -> Double? {
         guard let meta = workout.metadata else { return nil }
         let keys = [
@@ -231,12 +243,80 @@ final class HealthKitCardioImportService {
         return nil
     }
 
-    private static func cardioImportStatsJSON(inclinePct: Double?) -> AnyJSON {
+    private static func cardioImportStatsJSON(inclinePct: Double?, kmSplitPaceSec: [Int]?) -> AnyJSON {
         var out: [String: AnyJSON] = [:]
         if let inc = inclinePct, let j = try? AnyJSON(inc) {
             out["incline_pct"] = j
         }
+        if let splits = kmSplitPaceSec, !splits.isEmpty,
+           let arr = try? AnyJSON(splits.map { try AnyJSON($0) }) {
+            out[CardioKmPaceSplits.jsonKey] = arr
+        }
         return (try? AnyJSON(out)) ?? (try! AnyJSON([String: AnyJSON]()))
+    }
+
+    private static func kmSplitPaceSecFromRoute(locations: [CLLocation], workout: HKWorkout, polylineLengthMeters: Double) -> [Int]? {
+        guard locations.count >= 2, polylineLengthMeters >= 400 else { return nil }
+
+        let sorted = locations.sorted { $0.timestamp < $1.timestamp }
+        guard let first = sorted.first else { return nil }
+
+        let tStart = first.timestamp
+        var timesAtKm: [Date] = []
+        timesAtKm.reserveCapacity(Int(floor(polylineLengthMeters / 1000.0)))
+
+        var cum = 0.0
+        var nextKm = 1000.0
+
+        for i in 1..<sorted.count {
+            let a = sorted[i - 1]
+            let b = sorted[i]
+            let segM = a.distance(from: b)
+            guard segM > 0.01 else { continue }
+
+            let segStartDist = cum
+            let segEndDist = cum + segM
+
+            while nextKm <= segEndDist + 0.5 {
+                let frac = (nextKm - segStartDist) / segM
+                guard frac >= -1e-6, frac <= 1.0 + 1e-6 else { break }
+                let clamped = min(1.0, max(0.0, frac))
+                let dt = b.timestamp.timeIntervalSince(a.timestamp)
+                let t = a.timestamp.addingTimeInterval(clamped * dt)
+                timesAtKm.append(t)
+                nextKm += 1000.0
+            }
+            cum = segEndDist
+        }
+
+        guard !timesAtKm.isEmpty else { return nil }
+
+        var lapsSec: [Int] = []
+        var prevT = tStart
+        for t in timesAtKm {
+            let sec = max(1, Int(round(t.timeIntervalSince(prevT))))
+            lapsSec.append(sec)
+            prevT = t
+        }
+
+        let fullKmCount = timesAtKm.count
+        let coveredM = Double(fullKmCount) * 1000.0
+        let remainderM = polylineLengthMeters - coveredM
+        if remainderM >= 80, let lastLoc = sorted.last {
+            let endT = min(workout.endDate, lastLoc.timestamp)
+            if endT > prevT {
+                let segSec = max(1, Int(round(endT.timeIntervalSince(prevT))))
+                let remKm = remainderM / 1000.0
+                if remKm >= 0.05 {
+                    let paceEq = Int(round(Double(segSec) / remKm))
+                    if paceEq > 0, paceEq < 3600 {
+                        lapsSec.append(paceEq)
+                    }
+                }
+            }
+        }
+
+        return lapsSec.isEmpty ? nil : lapsSec
     }
 
     private func mapActivityCode(workout: HKWorkout) -> ActivityMap? {
@@ -300,7 +380,7 @@ final class HealthKitCardioImportService {
         }
     }
 
-    private func fetchRouteCoordinates(for workout: HKWorkout) async throws -> [CLLocationCoordinate2D] {
+    private func fetchRouteLocations(for workout: HKWorkout) async throws -> [CLLocation] {
         let routeType = HKSeriesType.workoutRoute()
         let pred = HKQuery.predicateForObjects(from: workout)
         let routes: [HKWorkoutRoute] = try await withCheckedThrowingContinuation { cont in
@@ -319,16 +399,16 @@ final class HealthKitCardioImportService {
             store.execute(q)
         }
 
-        var all: [CLLocationCoordinate2D] = []
+        var all: [CLLocation] = []
         for route in routes {
-            let chunk = try await routeCoordinates(for: route)
+            let chunk = try await routeLocations(for: route)
             all.append(contentsOf: chunk)
         }
-        return all
+        return all.sorted { $0.timestamp < $1.timestamp }
     }
 
-    private func routeCoordinates(for route: HKWorkoutRoute) async throws -> [CLLocationCoordinate2D] {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[CLLocationCoordinate2D], Error>) in
+    private func routeLocations(for route: HKWorkoutRoute) async throws -> [CLLocation] {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[CLLocation], Error>) in
             var collected: [CLLocation] = []
             let q = HKWorkoutRouteQuery(route: route) { _, locationsOrNil, done, error in
                 if let error {
@@ -339,7 +419,7 @@ final class HealthKitCardioImportService {
                     collected.append(contentsOf: locs)
                 }
                 if done {
-                    cont.resume(returning: collected.map(\.coordinate))
+                    cont.resume(returning: collected)
                 }
             }
             store.execute(q)
