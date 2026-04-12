@@ -354,6 +354,7 @@ struct AddWorkoutSheet: View {
                 .scrollContentBackground(.hidden)
                 .listRowBackground(Color.clear)
                 .listSectionSpacing(8)
+                .contentMargins(.bottom, 72, for: .scrollContent)
                 .sheet(item: $pickerHandle) { handle in
                     if let idx = items.firstIndex(where: { $0.id == handle.id }) {
                         ExercisePickerSheet(
@@ -532,40 +533,15 @@ struct AddWorkoutSheet: View {
                         
                         ForEach(items[i].sets.indices, id: \.self) { s in
                             Divider()
-                            HStack(spacing: 6) {
-                                Text("Set \(items[i].sets[s].setNumber)")
-                                    .font(.subheadline)
-                                    .frame(width: 46, alignment: .leading)
-                                
-                                Stepper("", value: $items[i].sets[s].setNumber, in: 1...99)
-                                    .labelsHidden()
-                                    .controlSize(.mini)
-                                    .scaleEffect(0.74, anchor: .leading)
-                                    .frame(width: 64)
-                                
-                                TextField("Reps", value: $items[i].sets[s].reps, format: .number)
-                                    .keyboardType(.numberPad)
-                                    .frame(width: 44)
-                                
-                                TextField("Weight kg", text: $items[i].sets[s].weightKg)
-                                    .keyboardType(.decimalPad)
-                                    .frame(width: 70)
-                                
-                                TextField("RPE", text: $items[i].sets[s].rpe)
-                                    .keyboardType(.decimalPad)
-                                    .frame(width: 38)
-                                
-                                TextField("Rest s", value: $items[i].sets[s].restSec, format: .number)
-                                    .keyboardType(.numberPad)
-                                    .frame(width: 54)
-                                
-                                if items[i].sets.count > 1 {
-                                    Button(role: .destructive) {
-                                        items[i].sets.remove(at: s)
-                                    } label: { Image(systemName: "minus.circle.fill") }
-                                        .buttonStyle(.borderless)
-                                }
-                            }
+                            StrengthSetRowEditor(
+                                setNumber: $items[i].sets[s].setNumber,
+                                reps: $items[i].sets[s].reps,
+                                weightKg: $items[i].sets[s].weightKg,
+                                rpe: $items[i].sets[s].rpe,
+                                restSec: $items[i].sets[s].restSec,
+                                showDelete: items[i].sets.count > 1,
+                                onDelete: { items[i].sets.remove(at: s) }
+                            )
                         }
                         
                         Divider().padding(.vertical, 4)

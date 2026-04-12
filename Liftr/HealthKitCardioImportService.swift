@@ -175,9 +175,16 @@ final class HealthKitCardioImportService {
         return summary
     }
 
-    private static let supportedWorkoutActivityTypes: [HKWorkoutActivityType] = [
-        .running, .walking, .hiking, .cycling, .swimming, .rowing
-    ]
+    private static let hkIndoorCyclingActivityRawValue: UInt = 37
+
+    private static let supportedWorkoutActivityTypes: [HKWorkoutActivityType] = {
+        var types: [HKWorkoutActivityType] = [.running, .walking, .hiking, .cycling, .swimming, .rowing]
+        if let indoor = HKWorkoutActivityType(rawValue: hkIndoorCyclingActivityRawValue),
+           !types.contains(where: { $0.rawValue == indoor.rawValue }) {
+            types.append(indoor)
+        }
+        return types
+    }()
 
     private func fetchWorkouts(from: Date, to: Date) async throws -> [HKWorkout] {
         let datePred = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
@@ -320,6 +327,9 @@ final class HealthKitCardioImportService {
     }
 
     private func mapActivityCode(workout: HKWorkout) -> ActivityMap? {
+        if workout.workoutActivityType.rawValue == Self.hkIndoorCyclingActivityRawValue {
+            return ActivityMap(code: CardioActivityType.indoor_cycling.rawValue, label: "Indoor cycling")
+        }
         switch workout.workoutActivityType {
         case .running:
             if Self.isIndoorWorkout(workout) {
@@ -334,6 +344,9 @@ final class HealthKitCardioImportService {
         case .hiking:
             return ActivityMap(code: CardioActivityType.hike.rawValue, label: "Hike")
         case .cycling:
+            if Self.isIndoorWorkout(workout) {
+                return ActivityMap(code: CardioActivityType.indoor_cycling.rawValue, label: "Indoor cycling")
+            }
             return ActivityMap(code: CardioActivityType.bike.rawValue, label: "Bike")
         case .swimming:
             let indoor = (workout.metadata?[HKMetadataKeyIndoorWorkout] as? Bool) ?? false

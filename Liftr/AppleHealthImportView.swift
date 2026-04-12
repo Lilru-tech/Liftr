@@ -13,20 +13,66 @@ struct AppleHealthImportView: View {
         List {
             Section {
                 settingsCard {
-                    Text(
-                        "Imports workouts saved in the Health app (for example from Apple Watch): run, walk, hike, bike, swim, row. "
-                            + "Indoor walk or run (treadmill) is saved as Treadmill when Apple marks the workout as indoor. "
-                            + "Route and heart rate are included when Apple provides them. Already imported sessions are skipped. "
-                            + "Other workout types in Health (strength, team sports, etc.) are not part of this import."
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Apple HealthKit")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+
+                        Text(
+                            "This screen uses HealthKit (Apple’s health framework) to read workout samples from the Health app "
+                                + "and copy them into Liftr as cardio workouts. Nothing is written back to Health from this import; "
+                                + "granting access happens in the system permission sheet."
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        Text("How import works")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.top, 4)
+
+                        Text(
+                            "You choose a date range (or a quick preset), then tap Import workouts. "
+                                + "Liftr looks in the Health app—including data from your Apple Watch if you use one—and "
+                                + "creates matching sessions here as cardio workouts. Nothing is removed or changed in Health."
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        Text(
+                            "What we import: runs, walks, hikes, outdoor bike rides, indoor cycling / stationary bike "
+                                + "(when Apple marks them indoor or as an indoor cycle workout), swims, and rowing. "
+                                + "Indoor walks and runs are saved as Treadmill. If Apple saved a GPS route, distance, or heart rate, we copy those in when they’re available."
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                        Text(
+                            "What we skip: strength training, HIIT, yoga, team sports, and every other activity type that isn’t in the list above—log those in Liftr yourself. "
+                                + "Sessions you already imported are ignored so you don’t get duplicates."
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
             Section("Date range") {
                 settingsCard {
                     VStack(alignment: .leading, spacing: 12) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                quickRangeButton("Today") { applyQuickRangeToday() }
+                                quickRangeButton("Last 7 days") { applyQuickRangeLastDays(7) }
+                                quickRangeButton("Last 14 days") { applyQuickRangeLastDays(14) }
+                            }
+                        }
+                        .padding(.bottom, 4)
+
                         DatePicker("From", selection: $fromDate, displayedComponents: [.date])
                         Divider().opacity(0.15)
                         DatePicker("To", selection: $toDate, in: fromDate ... Date(), displayedComponents: [.date])
@@ -89,7 +135,7 @@ struct AppleHealthImportView: View {
         .listRowSeparator(.hidden)
         .listSectionSeparator(.hidden)
         .background(Color.clear)
-        .navigationTitle("Apple Health")
+        .navigationTitle("Apple Health (HealthKit)")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -108,6 +154,34 @@ struct AppleHealthImportView: View {
         }
         .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
         .listRowBackground(Color.clear)
+    }
+
+    private func quickRangeButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+        }
+        .buttonStyle(.bordered)
+        .disabled(importing)
+    }
+
+    private func applyQuickRangeToday() {
+        let cal = Calendar.current
+        let t = cal.startOfDay(for: Date())
+        fromDate = t
+        toDate = t
+    }
+
+    private func applyQuickRangeLastDays(_ days: Int) {
+        let cal = Calendar.current
+        let endDay = cal.startOfDay(for: Date())
+        let startDay = cal.date(byAdding: .day, value: -(max(1, days) - 1), to: endDay) ?? endDay
+        fromDate = startDay
+        toDate = endDay
     }
 
     private func runImport() async {
