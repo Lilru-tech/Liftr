@@ -21,11 +21,11 @@ struct CompareWorkoutsView: View {
         let right_value: Double
         var id: String { metric }
         var diff: Double { left_value - right_value }
-        var diffPct: Double? {
+        var rawDiffPct: Double? {
             guard right_value != 0 else { return nil }
-            let pct = (left_value - right_value) / right_value * 100.0
-            return abs(pct) < 0.05 ? 0.0 : pct
+            return (left_value - right_value) / right_value * 100.0
         }
+        var diffPct: Double? { rawDiffPct }
 
         var hasNonZeroValues: Bool {
             abs(left_value) > 1e-9 || abs(right_value) > 1e-9
@@ -76,18 +76,26 @@ struct CompareWorkoutsView: View {
         metrics.filter(\.hasNonZeroValues)
     }
 
-    private var overallPct: Double? {
-        guard !displayMetrics.isEmpty else { return nil }
-        let included = displayMetrics.compactMap { m -> Double? in
-            guard let p = m.diffPct else { return nil }
+    private var overallSignedPcts: [Double] {
+        displayMetrics.compactMap { m -> Double? in
+            guard let p = m.rawDiffPct else { return nil }
             let signed = p * Self.metricDirection(m.metric)
             return clamp(signed, -150, 150)
         }
-        guard !included.isEmpty else { return nil }
-        return included.reduce(0, +) / Double(included.count)
     }
 
-    private var overallCount: Int { displayMetrics.count }
+    private var overallPct: Double? {
+        guard !overallSignedPcts.isEmpty else { return nil }
+        return overallSignedPcts.reduce(0, +) / Double(overallSignedPcts.count)
+    }
+
+    private var overallCount: Int { overallSignedPcts.count }
+
+    private static func overallPctFormat(_ v: Double) -> String {
+        let a = abs(v)
+        if a < 10 { return String(format: "%+.2f%%", v) }
+        return String(format: "%+.1f%%", v)
+    }
     
     var body: some View {
         VStack(spacing: 16) {
@@ -147,7 +155,7 @@ struct CompareWorkoutsView: View {
                     .padding(.top, 12)
             } else {
                 if let o = overallPct {
-                    OverallSummaryCard(valuePct: o, count: overallCount)
+                    OverallSummaryCard(valuePct: o, count: overallCount, totalRows: displayMetrics.count)
                         .padding(.bottom, 6)
                 }
 
@@ -179,7 +187,7 @@ struct CompareWorkoutsView: View {
         let m: CompareWorkoutsView.ComparableMetric
 
         private var pctBadge: (raw: Double, signed: Double)? {
-            guard let p = m.diffPct else { return nil }
+            guard let p = m.rawDiffPct else { return nil }
             let signed = p * CompareWorkoutsView.metricDirection(m.metric)
             return (p, signed)
         }
@@ -445,20 +453,28 @@ struct CompareWorkoutsView: View {
     private struct OverallSummaryCard: View {
         let valuePct: Double
         let count: Int
+        let totalRows: Int
+
+        private var subtitle: String {
+            if count == totalRows {
+                return "Based on \(count) metrics"
+            }
+            return "Based on \(count) of \(totalRows) metrics (rest need non-zero right value for %)"
+        }
 
         var body: some View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Overall")
                         .font(.subheadline.weight(.semibold))
-                    Text("Based on \(count) metrics")
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
 
-                Text(String(format: "%+.1f%%", valuePct))
+                Text(CompareWorkoutsView.overallPctFormat(valuePct))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(CompareWorkoutsView.winnerForegroundStyle(forSignedPct: valuePct))
                     .padding(.horizontal, 10)
@@ -1219,5 +1235,151 @@ struct CompareWorkoutsView: View {
     private func makeMetric(_ m: String, _ unit: String, _ lv: Double?, _ rv: Double?) -> ComparableMetric? {
         guard let lv, let rv else { return nil }
         return .init(metric: m, unit: unit, left_value: lv, right_value: rv)
+    }
+}
+
+enum CompareWorkoutCandidateOrdering {
+    static func sortForPicker(
+        _ rows: [WorkoutDetailView.CompareCandidate],
+        baselineWorkoutId: Int,
+        kind: String
+    ) async -> [WorkoutDetailView.CompareCandidate] {
+        let byDateDesc: (WorkoutDetailView.CompareCandidate, WorkoutDetailView.CompareCandidate) -> Bool = {
+            $0.started_at > $1.started_at
+        }
+        guard !rows.isEmpty else { return rows }
+
+        do {
+            switch kind.lowercased() {
+            case "strength":
+                return try await sortStrength(rows, baseline: baselineWorkoutId, byDateDesc: byDateDesc)
+            case "sport":
+                return try await sortSport(rows, baseline: baselineWorkoutId, byDateDesc: byDateDesc)
+            case "cardio":
+                return try await sortCardio(rows, baseline: baselineWorkoutId, byDateDesc: byDateDesc)
+            default:
+                return rows.sorted(by: byDateDesc)
+            }
+        } catch {
+            return rows.sorted(by: byDateDesc)
+        }
+    }
+
+    private static func sortStrength(
+        _ rows: [WorkoutDetailView.CompareCandidate],
+        baseline: Int,
+        byDateDesc: (WorkoutDetailView.CompareCandidate, WorkoutDetailView.CompareCandidate) -> Bool
+    ) async throws -> [WorkoutDetailView.CompareCandidate] {
+        let ids = Array(Set([baseline] + rows.map(\.candidate_id)))
+        let muscleByW = try await fetchPrimaryMusclesByWorkout(ids: ids)
+        let baselineMuscles = muscleByW[baseline] ?? []
+
+        func strengthTier(_ c: WorkoutDetailView.CompareCandidate) -> Int {
+            guard !baselineMuscles.isEmpty else { return 2 }
+            let cm = muscleByW[c.candidate_id] ?? []
+            if cm.isEmpty { return 2 }
+            if baselineMuscles == cm { return 0 }
+            if !baselineMuscles.isDisjoint(with: cm) { return 1 }
+            return 2
+        }
+
+        return rows.sorted { a, b in
+            let ta = strengthTier(a), tb = strengthTier(b)
+            if ta != tb { return ta < tb }
+            return byDateDesc(a, b)
+        }
+    }
+
+    private static func sortSport(
+        _ rows: [WorkoutDetailView.CompareCandidate],
+        baseline: Int,
+        byDateDesc: (WorkoutDetailView.CompareCandidate, WorkoutDetailView.CompareCandidate) -> Bool
+    ) async throws -> [WorkoutDetailView.CompareCandidate] {
+        guard let raw = try await fetchBaselineSport(workoutId: baseline) else {
+            return rows.sorted(by: byDateDesc)
+        }
+        let b = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !b.isEmpty else { return rows.sorted(by: byDateDesc) }
+        func matches(_ c: WorkoutDetailView.CompareCandidate) -> Bool {
+            (c.sport ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == b
+        }
+        return rows.sorted { a, b in
+            let ma = matches(a), mb = matches(b)
+            if ma != mb { return ma && !mb }
+            return byDateDesc(a, b)
+        }
+    }
+
+    private static func sortCardio(
+        _ rows: [WorkoutDetailView.CompareCandidate],
+        baseline: Int,
+        byDateDesc: (WorkoutDetailView.CompareCandidate, WorkoutDetailView.CompareCandidate) -> Bool
+    ) async throws -> [WorkoutDetailView.CompareCandidate] {
+        guard let b = try await fetchBaselineCardioCode(workoutId: baseline), !b.isEmpty else {
+            return rows.sorted(by: byDateDesc)
+        }
+        func normActivity(_ c: WorkoutDetailView.CompareCandidate) -> String {
+            (c.activity ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        }
+        func matches(_ c: WorkoutDetailView.CompareCandidate) -> Bool {
+            normActivity(c) == b
+        }
+        return rows.sorted { a, b in
+            let ma = matches(a), mb = matches(b)
+            if ma != mb { return ma && !mb }
+            return byDateDesc(a, b)
+        }
+    }
+
+    private static func fetchPrimaryMusclesByWorkout(ids: [Int]) async throws -> [Int: Set<String>] {
+        guard !ids.isEmpty else { return [:] }
+        let client = SupabaseManager.shared.client
+        let res = try await client
+            .from("workout_exercises")
+            .select("workout_id, exercises(muscle_primary)")
+            .in("workout_id", values: ids)
+            .execute()
+        struct MuscleRef: Decodable { let muscle_primary: String? }
+        struct Row: Decodable {
+            let workout_id: Int
+            let exercises: MuscleRef?
+        }
+        let decoded = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+        var map: [Int: Set<String>] = [:]
+        for r in decoded {
+            let m = (r.exercises?.muscle_primary ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if m.isEmpty || m == "cardio" { continue }
+            map[r.workout_id, default: []].insert(m)
+        }
+        return map
+    }
+
+    private static func fetchBaselineSport(workoutId: Int) async throws -> String? {
+        let res = try await SupabaseManager.shared.client
+            .from("sport_sessions")
+            .select("sport")
+            .eq("workout_id", value: workoutId)
+            .limit(1)
+            .execute()
+        struct R: Decodable { let sport: String? }
+        let rows = try JSONDecoder.supabase().decode([R].self, from: res.data)
+        return rows.first?.sport
+    }
+
+    private static func fetchBaselineCardioCode(workoutId: Int) async throws -> String? {
+        let res = try await SupabaseManager.shared.client
+            .from("cardio_sessions")
+            .select("activity_code, modality")
+            .eq("workout_id", value: workoutId)
+            .limit(1)
+            .execute()
+        struct R: Decodable {
+            let activity_code: String?
+            let modality: String?
+        }
+        let rows = try JSONDecoder.supabase().decode([R].self, from: res.data)
+        guard let r = rows.first else { return nil }
+        let raw = (r.activity_code?.isEmpty == false ? r.activity_code! : r.modality) ?? ""
+        return raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 }

@@ -409,6 +409,9 @@ struct EditWorkoutMetaSheet: View {
                 .scrollContentBackground(.hidden)
                 .listSectionSpacing(18)
                 .listRowBackground(Color.clear)
+                .navigationTitle("Edit workout")
+                .navigationBarTitleDisplayMode(.inline)
+                .contentMargins(.bottom, 72, for: .scrollContent)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button { Task { await saveAll() } } label: {
@@ -697,36 +700,15 @@ struct EditWorkoutMetaSheet: View {
                         
                         ForEach(s_items[i].sets.indices, id: \.self) { s in
                             Divider()
-                            HStack(spacing: 6) {
-                                Text("Set \(s_items[i].sets[s].setNumber)")
-                                    .font(.subheadline)
-                                    .frame(width: 46, alignment: .leading)
-                                
-                                Stepper("", value: $s_items[i].sets[s].setNumber, in: 1...99)
-                                    .labelsHidden()
-                                    .controlSize(.mini)
-                                    .scaleEffect(0.74, anchor: .leading)
-                                    .frame(width: 64)
-                                
-                                TextField("Reps", value: $s_items[i].sets[s].reps, format: .number)
-                                    .keyboardType(.numberPad).frame(width: 44)
-                                
-                                TextField("Weight kg", text: $s_items[i].sets[s].weightKg)
-                                    .keyboardType(.decimalPad).frame(width: 70)
-                                
-                                TextField("RPE", text: $s_items[i].sets[s].rpe)
-                                    .keyboardType(.decimalPad).frame(width: 38)
-                                
-                                TextField("Rest s", value: $s_items[i].sets[s].restSec, format: .number)
-                                    .keyboardType(.numberPad).frame(width: 54)
-                                
-                                if s_items[i].sets.count > 1 {
-                                    Button(role: .destructive) {
-                                        s_items[i].sets.remove(at: s)
-                                    } label: { Image(systemName: "minus.circle.fill") }
-                                        .buttonStyle(.borderless)
-                                }
-                            }
+                            StrengthSetRowEditor(
+                                setNumber: $s_items[i].sets[s].setNumber,
+                                reps: $s_items[i].sets[s].reps,
+                                weightKg: $s_items[i].sets[s].weightKg,
+                                rpe: $s_items[i].sets[s].rpe,
+                                restSec: $s_items[i].sets[s].restSec,
+                                showDelete: s_items[i].sets.count > 1,
+                                onDelete: { s_items[i].sets.remove(at: s) }
+                            )
                         }
                         
                         Divider().padding(.vertical, 4)

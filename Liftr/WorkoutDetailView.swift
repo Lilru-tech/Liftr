@@ -1589,10 +1589,15 @@ struct WorkoutDetailView: View {
             struct Params: Encodable { let p_viewer: UUID; let p_workout: Int; let p_limit: Int }
             let res = try await SupabaseManager.shared.client
                 .rpc("list_comparable_workouts_v1",
-                     params: Params(p_viewer: me, p_workout: workoutId, p_limit: 50))
+                     params: Params(p_viewer: me, p_workout: workoutId, p_limit: 120))
                 .execute()
             var rows = try JSONDecoder.supabase().decode([CompareCandidate].self, from: res.data)
             rows = await enrichCompareCandidatesWithOwnerUsernames(rows)
+            rows = await CompareWorkoutCandidateOrdering.sortForPicker(
+                rows,
+                baselineWorkoutId: workoutId,
+                kind: workout?.kind ?? ""
+            )
             await MainActor.run {
                 compareCandidates = rows
                 compareCandidateId = rows.first?.id

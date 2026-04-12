@@ -53,6 +53,7 @@ struct ActiveStrengthWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("isPremium") private var isPremium = false
+    @AppStorage("activeStrengthNavHintSeen") private var activeStrengthNavHintSeen = false
 
     @State private var restEndDate: Date? = nil
     @State private var restEndDateByExercise: [Int: Date] = [:]
@@ -82,6 +83,7 @@ struct ActiveStrengthWorkoutView: View {
     @State private var didFireRestFinishedFeedback: Bool = false
     @State private var beepWorkItem: DispatchWorkItem? = nil
     @State private var isBeeping: Bool = false
+    @State private var navExercisePopoverIndex: Int? = nil
     private let swipeThreshold: CGFloat = 110
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -949,7 +951,153 @@ struct ActiveStrengthWorkoutView: View {
     private func canGoPreviousExercise() -> Bool {
         currentExerciseIndex > 0
     }
+
+    private var shouldShowExerciseNavStrip: Bool {
+        !loading && error == nil && currentExercise != nil && !showCountdown && !orderedExercises.isEmpty
+    }
     
+    private func effectiveSetIndex(for ex: ExerciseRow) -> Int {
+        if currentExercise?.id == ex.id {
+            return currentSetIndex
+        }
+        return currentSetIndexByExercise[ex.id] ?? 0
+    }
+    
+    private func isExerciseCompleted(_ ex: ExerciseRow) -> Bool {
+        let total = setsFor(ex).count
+        guard total > 0 else { return false }
+        return effectiveSetIndex(for: ex) >= total
+    }
+
+    private var canJumpBetweenExercises: Bool {
+        !showCountdown && !isSaving && !showEditSheet && !isTransitioningExercise
+    }
+
+    private func jumpToExercise(index: Int) {
+        let ordered = orderedExercises
+        guard ordered.indices.contains(index) else { return }
+        guard index != currentExerciseIndex else { return }
+        guard canJumpBetweenExercises else { return }
+
+        persistStateForCurrentExercise()
+        currentExerciseIndex = index
+        if let ex = currentExercise {
+            restoreStateForExercise(ex)
+        } else {
+            currentSetIndex = 0
+            isResting = false
+            remainingRest = 0
+        }
+        dragOffsetY = 0
+    }
+
+    @ViewBuilder
+    private func exerciseNavigationStrip(availableWidth: CGFloat) -> some View {
+        let minRowWidth = max(0, availableWidth - 16)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    HStack(spacing: 8) {
+                        ForEach(orderedExercises.indices, id: \.self) { idx in
+                            exerciseNavColumnView(index: idx)
+                                .id(idx)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .frame(minWidth: minRowWidth)
+                .padding(.vertical, 4)
+            }
+            .onAppear {
+                scrollExerciseStrip(proxy: proxy, to: currentExerciseIndex, animated: false)
+            }
+            .onChange(of: currentExerciseIndex) { _, new in
+                scrollExerciseStrip(proxy: proxy, to: new, animated: true)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private func exerciseNavigationStripWithHint(availableWidth: CGFloat) -> some View {
+        VStack(spacing: 6) {
+            exerciseNavigationStrip(availableWidth: availableWidth)
+            if !activeStrengthNavHintSeen {
+                activeStrengthNavFirstHintBanner()
+            }
+        }
+    }
+
+    private func activeStrengthNavFirstHintBanner() -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Text("Desliza arriba o abajo, o toca un número, para cambiar de ejercicio.")
+                .font(.caption)
+                .multilineTextAlignment(.leading)
+                .foregroundStyle(.primary)
+            Button {
+                activeStrengthNavHintSeen = true
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.body)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cerrar aviso")
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.16), lineWidth: 0.5))
+        .padding(.horizontal, 6)
+    }
+
+    @ViewBuilder
+    private func exerciseNavColumnView(index idx: Int) -> some View {
+        let ex = orderedExercises[idx]
+        let completed = isExerciseCompleted(ex)
+        let isLast = idx == orderedExercises.count - 1
+        let isCurrent = idx == currentExerciseIndex
+        let jumpOK = canJumpBetweenExercises
+        let title = exerciseTitle(ex)
+        let plannedSets = setsFor(ex).count
+        let popBinding = Binding<Bool>(
+            get: { navExercisePopoverIndex == idx },
+            set: { newVal in
+                if newVal {
+                    navExercisePopoverIndex = idx
+                } else if navExercisePopoverIndex == idx {
+                    navExercisePopoverIndex = nil
+                }
+            }
+        )
+        StrengthExerciseNavColumn(
+            displayNumber: idx + 1,
+            exerciseTitle: title,
+            plannedSetCount: plannedSets,
+            completed: completed,
+            isLast: isLast,
+            isCurrent: isCurrent,
+            jumpOK: jumpOK,
+            navAnimationIndex: currentExerciseIndex,
+            popoverPresented: popBinding,
+            onShortTap: { jumpToExercise(index: idx) },
+            onLongPress: { navExercisePopoverIndex = idx }
+        )
+    }
+
+    private func scrollExerciseStrip(proxy: ScrollViewProxy, to index: Int, animated: Bool) {
+        guard orderedExercises.indices.contains(index) else { return }
+        if animated {
+            withAnimation(.easeInOut(duration: 0.28)) {
+                proxy.scrollTo(index, anchor: .center)
+            }
+        } else {
+            proxy.scrollTo(index, anchor: .center)
+        }
+    }
+
     private func persistStateForCurrentExercise() {
         guard let ex = currentExercise else { return }
         currentSetIndexByExercise[ex.id] = currentSetIndex
@@ -990,103 +1138,153 @@ struct ActiveStrengthWorkoutView: View {
     
     @ViewBuilder
     private func exercisePager() -> some View {
-        GeometryReader { geo in
-            let h = geo.size.height
-            let cardHeight = h * 0.68
-            let peekHeight: CGFloat = 86
-            let peekGap: CGFloat = 14
+        GeometryReader { outerGeo in
+            let H = outerGeo.size.height
+            let W = outerGeo.size.width
+            let navOverlayBlock: CGFloat = {
+                guard shouldShowExerciseNavStrip else { return 0 }
+                let stripApprox: CGFloat = 44
+                let hintApprox: CGFloat = activeStrengthNavHintSeen ? 0 : 64
+                return stripApprox + hintApprox
+            }()
+            let minGapBelowNav: CGFloat = 4
+            let minClusterTop = navOverlayBlock + minGapBelowNav
+
+            let peekHeight: CGFloat = 78
+            let peekGap: CGFloat = 12
+            let usableForCluster = H - minClusterTop
+            let cardHeightIfLoose = max(usableForCluster * 0.66, 220)
+            let neededIfLoose = cardHeightIfLoose + 2 * (peekHeight + peekGap)
+            let cardHeight: CGFloat = neededIfLoose > usableForCluster
+                ? max(usableForCluster - 2 * (peekHeight + peekGap), 200)
+                : cardHeightIfLoose
+            let needed = cardHeight + 2 * (peekHeight + peekGap)
+
             let step = cardHeight * 0.86
             let localThreshold = max(70, step * 0.35)
             let peekOffset = (cardHeight / 2) + (peekHeight / 2) + peekGap
-            let needed = cardHeight + 2 * (peekHeight + peekGap)
-            let verticalInset = max(0, (h - needed) / 2)
 
-            ZStack {
-                if let prev = previousExercise {
-                    exercisePeekCard(prev, edge: .bottom)
-                        .frame(height: peekHeight)
-                        .offset(y: -peekOffset + dragOffsetY * 0.25)
-                        .opacity(0.55)
-                        .blur(radius: 6)
-                        .scaleEffect(0.96)
-                        .allowsHitTesting(false)
+            let idealClusterTop = H * 0.5 - needed * 0.5
+            let clusterTop = max(minClusterTop, idealClusterTop)
+            let clusterBottomPad = max(0, H - clusterTop - needed)
+
+            ZStack(alignment: .top) {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: clusterTop)
+                    exercisePagerCardStack(
+                        peekHeight: peekHeight,
+                        peekGap: peekGap,
+                        cardHeight: cardHeight,
+                        peekOffset: peekOffset,
+                        step: step,
+                        localThreshold: localThreshold,
+                        neededHeight: needed
+                    )
+                    Color.clear.frame(height: clusterBottomPad)
                 }
 
-                if let cur = currentExercise {
-                    exerciseContent(cur, isActive: true)
-                        .frame(height: cardHeight)
-                        .offset(y: dragOffsetY)
-                        .allowsHitTesting(true)
-                }
-
-                if let next = nextExercise {
-                    exercisePeekCard(next, edge: .top)
-                        .frame(height: peekHeight)
-                        .offset(y: peekOffset + dragOffsetY * 0.25)
-                        .opacity(0.55)
-                        .blur(radius: 6)
-                        .scaleEffect(0.96)
-                        .allowsHitTesting(false)
+                if shouldShowExerciseNavStrip {
+                    exerciseNavigationStripWithHint(availableWidth: W)
                 }
             }
-            .padding(.vertical, verticalInset)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .simultaneousGesture(
-                DragGesture()
-                    .onChanged { value in
-                        guard canSwipeBetweenExercises() else { return }
-                        let raw = value.translation.height
-                        dragOffsetY = max(-step, min(step, raw))
+        }
+    }
+
+    @ViewBuilder
+    private func exercisePagerCardStack(
+        peekHeight: CGFloat,
+        peekGap: CGFloat,
+        cardHeight: CGFloat,
+        peekOffset: CGFloat,
+        step: CGFloat,
+        localThreshold: CGFloat,
+        neededHeight: CGFloat
+    ) -> some View {
+        ZStack {
+            if let prev = previousExercise {
+                exercisePeekCard(prev, edge: .bottom)
+                    .frame(height: peekHeight)
+                    .offset(y: -peekOffset + dragOffsetY * 0.25)
+                    .opacity(0.55)
+                    .blur(radius: 6)
+                    .scaleEffect(0.96)
+                    .allowsHitTesting(false)
+            }
+
+            if let cur = currentExercise {
+                exerciseContent(cur, isActive: true)
+                    .frame(height: cardHeight)
+                    .offset(y: dragOffsetY)
+                    .allowsHitTesting(true)
+            }
+
+            if let next = nextExercise {
+                exercisePeekCard(next, edge: .top)
+                    .frame(height: peekHeight)
+                    .offset(y: peekOffset + dragOffsetY * 0.25)
+                    .opacity(0.55)
+                    .blur(radius: 6)
+                    .scaleEffect(0.96)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: neededHeight)
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { value in
+                    guard canSwipeBetweenExercises() else { return }
+                    let raw = value.translation.height
+                    dragOffsetY = max(-step, min(step, raw))
+                }
+                .onEnded { value in
+                    guard canSwipeBetweenExercises() else {
+                        dragOffsetY = 0
+                        return
                     }
-                    .onEnded { value in
-                        guard canSwipeBetweenExercises() else {
-                            dragOffsetY = 0
-                            return
-                        }
 
-                        let t = value.translation.height
+                    let t = value.translation.height
 
-                        if t <= -localThreshold {
-                            if canGoNextExercise() {
-                                isTransitioningExercise = true
-                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-                                    dragOffsetY = -step
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                                    goToNextExercise()
-                                    dragOffsetY = 0
-                                    isTransitioningExercise = false
-                                }
-                            } else {
-                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-                                    dragOffsetY = 0
-                                }
+                    if t <= -localThreshold {
+                        if canGoNextExercise() {
+                            isTransitioningExercise = true
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                dragOffsetY = -step
                             }
-                        } else if t >= localThreshold {
-                            if canGoPreviousExercise() {
-                                isTransitioningExercise = true
-                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-                                    dragOffsetY = step
-                                }
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                                    goToPreviousExercise()
-                                    dragOffsetY = 0
-                                    isTransitioningExercise = false
-                                }
-                            } else {
-                                withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
-                                    dragOffsetY = 0
-                                }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                goToNextExercise()
+                                dragOffsetY = 0
+                                isTransitioningExercise = false
                             }
                         } else {
                             withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
                                 dragOffsetY = 0
                             }
                         }
+                    } else if t >= localThreshold {
+                        if canGoPreviousExercise() {
+                            isTransitioningExercise = true
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                dragOffsetY = step
+                            }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                                goToPreviousExercise()
+                                dragOffsetY = 0
+                                isTransitioningExercise = false
+                            }
+                        } else {
+                            withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                                dragOffsetY = 0
+                            }
+                        }
+                    } else {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                            dragOffsetY = 0
+                        }
                     }
-            )
-        }
+                }
+        )
     }
     
     private func saveAndFinishWorkout() async {
@@ -1342,5 +1540,116 @@ struct ActiveStrengthWorkoutView: View {
                 toastMessage = nil
             }
         }
+    }
+}
+
+private struct StrengthExerciseNavColumn: View {
+    let displayNumber: Int
+    let exerciseTitle: String
+    let plannedSetCount: Int
+    let completed: Bool
+    let isLast: Bool
+    let isCurrent: Bool
+    let jumpOK: Bool
+    let navAnimationIndex: Int
+    @Binding var popoverPresented: Bool
+    let onShortTap: () -> Void
+    let onLongPress: () -> Void
+
+    private var numberLabel: String { String(displayNumber) }
+
+    private var seriesLine: String {
+        if plannedSetCount <= 0 { return "Sin series en el plan" }
+        if plannedSetCount == 1 { return "1 serie" }
+        return "\(plannedSetCount) series"
+    }
+
+    private var accessibilityLine: String {
+        var parts = ["Exercise \(displayNumber)"]
+        if isCurrent { parts.append("current") }
+        if completed { parts.append("completed") }
+        if isLast { parts.append("last in workout") }
+        return parts.joined(separator: ", ")
+    }
+
+    var body: some View {
+        VStack(spacing: 5) {
+            pillStack
+            progressDot
+        }
+        .scaleEffect(isCurrent ? 1.09 : 1.0)
+        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: navAnimationIndex)
+        .popover(isPresented: $popoverPresented) {
+            VStack(alignment: .center, spacing: 8) {
+                Text(exerciseTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                Text(seriesLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(20)
+            .frame(minWidth: 200)
+            .presentationCompactAdaptation(.popover)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(accessibilityLine))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Mantén pulsado para ver el nombre y las series")
+    }
+
+    private var pillStack: some View {
+        ZStack {
+            Circle()
+                .fill(fillColor)
+            if completed && isLast {
+                Circle()
+                    .strokeBorder(Color.green, lineWidth: 2)
+            }
+            if isCurrent {
+                Circle()
+                    .strokeBorder(Color.white.opacity(0.95), lineWidth: 2.5)
+            }
+            Text(verbatim: numberLabel)
+                .font(.callout.weight(isCurrent ? .bold : .semibold))
+                .monospacedDigit()
+                .foregroundStyle(foregroundColor)
+        }
+        .frame(width: 34, height: 34)
+        .shadow(color: isCurrent ? Color.black.opacity(0.25) : .clear, radius: isCurrent ? 3 : 0, y: 1)
+        .contentShape(Circle())
+        .onTapGesture {
+            guard jumpOK, !isCurrent else { return }
+            onShortTap()
+        }
+        .onLongPressGesture(minimumDuration: 0.45) {
+            onLongPress()
+        }
+        .opacity(jumpOK || isCurrent ? 1 : 0.55)
+    }
+
+    private var progressDot: some View {
+        Circle()
+            .fill(dotColor)
+            .frame(width: 5, height: 5)
+    }
+
+    private var fillColor: Color {
+        if completed { return Color.blue.opacity(0.88) }
+        if isLast { return Color.green.opacity(0.22) }
+        return Color.primary.opacity(0.10)
+    }
+
+    private var foregroundColor: Color {
+        if completed { return .white }
+        if isLast { return .green }
+        return Color.primary
+    }
+
+    private var dotColor: Color {
+        if completed { return Color.blue.opacity(0.9) }
+        if isCurrent { return Color.white }
+        if isLast { return Color.green.opacity(0.95) }
+        return Color.primary.opacity(0.28)
     }
 }

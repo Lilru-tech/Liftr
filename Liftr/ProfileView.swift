@@ -158,6 +158,7 @@ struct ProfileView: View {
     @State private var totalDurationMin: Int = 0
     @State private var consistencyActiveBuckets: Int = 0
     @State private var consistencyBucketTotal: Int = 0
+    @State private var consistencyWorkoutMeta: [Int: (kind: String, durationMin: Int)] = [:]
     @State private var email: String? = nil
     @State private var editingProfile = false
     @State private var heightCm: String = ""
@@ -569,24 +570,33 @@ struct ProfileView: View {
             ForEach(ordered) { s in
                 let pctWorkouts = workoutTotal > 0 ? Double(s.count) / Double(workoutTotal) : 0
                 let pctTime = totalDurationMin > 0 ? Double(s.durationMin) / Double(totalDurationMin) : 0
-                HStack(alignment: .center, spacing: 10) {
-                    Circle()
-                        .fill(consistencyKindColor(s.kind))
-                        .frame(width: 8, height: 8)
-                    Text(s.kind.capitalized)
-                        .font(.subheadline.weight(.medium))
-                    Spacer(minLength: 8)
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text("\(s.count) workouts · \(formatProgressPercent(pctWorkouts))")
-                            .font(.footnote.weight(.medium).monospacedDigit())
-                        if totalDurationMin > 0 {
-                            Text("\(formatMinutes(s.durationMin)) · \(formatProgressPercent(pctTime)) of time")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
+                NavigationLink {
+                    ConsistencyDrillDownView(rootKind: s.kind, workoutMeta: consistencyWorkoutMeta)
+                        .gradientBG()
+                } label: {
+                    HStack(alignment: .center, spacing: 10) {
+                        Circle()
+                            .fill(consistencyKindColor(s.kind))
+                            .frame(width: 8, height: 8)
+                        Text(s.kind.capitalized)
+                            .font(.subheadline.weight(.medium))
+                            Spacer(minLength: 8)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(s.count) workouts · \(formatProgressPercent(pctWorkouts))")
+                                .font(.footnote.weight(.medium).monospacedDigit())
+                            if totalDurationMin > 0 {
+                                Text("\(formatMinutes(s.durationMin)) · \(formatProgressPercent(pctTime)) of time")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
                         }
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
                     }
                 }
+                .buttonStyle(.plain)
             }
             
             Divider().opacity(0.35)
@@ -1345,7 +1355,7 @@ struct ProfileView: View {
                 .listRowBackground(Color.clear)
             }
             if HealthKitCardioImportService.shared.isHealthDataAvailable {
-                Section("Apple Health") {
+                Section {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .fill(.ultraThinMaterial)
@@ -1358,11 +1368,17 @@ struct ProfileView: View {
                             AppleHealthImportView()
                                 .gradientBG()
                         } label: {
-                            HStack(spacing: 10) {
+                            HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: "heart.fill")
-                                Text("Import cardio workouts")
-                                    .font(.body.weight(.semibold))
-                                Spacer()
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Import cardio workouts")
+                                        .font(.body.weight(.semibold))
+                                    Text("Uses HealthKit to read workouts from the Health app.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
                             }
                             .padding(12)
                         }
@@ -1370,6 +1386,8 @@ struct ProfileView: View {
                     }
                     .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                     .listRowBackground(Color.clear)
+                } header: {
+                    Text("Apple Health (HealthKit)")
                 }
             }
             Section("Appearance") {
@@ -2005,6 +2023,7 @@ struct ProfileView: View {
             var kindCount: [String: Int] = [:]
             var kindMinutes: [String: Int] = [:]
             var totalMinutes = 0
+            var workoutMetaCollector: [Int: (kind: String, durationMin: Int)] = [:]
             
             for w in workouts {
                 guard let d = w.started_at else { continue }
@@ -2027,6 +2046,11 @@ struct ProfileView: View {
                 let wMins = durationMinByWorkout[w.id] ?? 0
                 kindMinutes[w.kind, default: 0] += wMins
                 totalMinutes += wMins
+                workoutMetaCollector[w.id] = (w.kind, wMins)
+            }
+            
+            await MainActor.run {
+                self.consistencyWorkoutMeta = workoutMetaCollector
             }
             let totalKcal = bucketsCalories.values.reduce(0, +)
             let totalWorkouts = bucketsCount.values.reduce(0, +)
@@ -2158,7 +2182,10 @@ struct ProfileView: View {
             }
             
         } catch {
-            await MainActor.run { self.progressError = error.localizedDescription }
+            await MainActor.run {
+                self.progressError = error.localizedDescription
+                self.consistencyWorkoutMeta = [:]
+            }
         }
     }
     
