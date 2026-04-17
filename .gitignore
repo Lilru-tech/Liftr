@@ -68,3 +68,8 @@ fastlane/test_output
 # Útil en repo PRIVADO. Si el remoto es PÚBLICO y no quieres exponer el diseño de BD,
 # deja esta regla activa. Si ya estaban en el índice: git rm -r --cached Liftr/docs
 Liftr/docs/
+
+# Supabase: SQL solo local (depuración / auditoría). Las migraciones en
+# supabase/migrations/ NO van aquí: deben commitearse para que todos apliquen el mismo esquema.
+supabase/debug*.sql
+supabase/audit/

@@ -23,6 +23,8 @@ struct Exercise: Identifiable, Decodable {
 
 struct PickerHandle: Identifiable {
     let id: UUID
+    /// Strength lane when editing multiple per-person programs in AddWorkoutSheet (0 = host).
+    var strengthLaneIndex: Int = 0
 }
 
 enum ExerciseLanguage: String, CaseIterable, Identifiable {
