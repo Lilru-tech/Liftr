@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] - 2026-04-18
+
+### Added
+- **Dual & group strength (same phone)** — Train with **one guest (dual)** or **two guests (trio)** on one device: separate lanes, shared session flow, finish for everyone. **Host** can be the workout owner **or** a listed participant (starts from their phone).
+- **Add workout — participants & group programming** — Add **participants** when creating **strength** workouts (**Plan** or **Add**). Choose **Same workout** (one session for the group) or **Per person** (each person’s own exercises, weights, and reps). **Per person** saves one workout per user and links the squad in the database so **dual/group start** can open **each person’s program** instead of cloning only the host template (see Notes).
+- **Active strength — navigation** — Progress while you complete sets: the **lane bubble fills** as sets are done; **animation** when you finish the **last set** in that exercise bubble.
+- **Consistency** — View consistency by **time**, **workouts**, **score**, and **calories** (in addition to existing views).
+- **Hyrox — “Other” exercise** — **Suggestions** from names you’ve used before when adding a custom station.
+- **Search** — **Username** shown when searching workouts so results are easier to recognise.
+- **Strength catalog** — More **strength** exercises available in the picker.
+
+### Changed
+- **Apple Health** — Reworked how **HealthKit** blocks are shown so they use **less vertical space** on screen.
+- **Consistency** — Clearer presentation of **which workout type** contributed; **colors** for workout kind are more distinct so types don’t look the same.
+- **Hyrox — Add workout** — **Layout** for **Distance, reps, weight, duration, height, and implement count** fields is tighter and easier to scan.
+
+### Fixed
+- **Ads** — **Interstitial** loading reviewed and hardened so ads fail less often in edge cases.
+- **Compare workouts — Hyrox** — Hyrox sessions compare correctly (including edge cases that broke before).
+- **Goals / recommendations** — **Workout count**, **calories**, and **score** targets the goal engine suggests now align better with **your recent history**.
+- **Apple Health import** — **Treadmill / indoor run** was sometimes imported as **indoor cycling**; import mapping is corrected.
+
+### Removed
+- **Profile (other user)** — **Notifications** entry removed from another user’s profile navigation (notifications stay on your own flow).
+
+### Notes (database / ops)
+- **Group & per-person strength**: migrations for **`plan_strength_squad_programs`** (multi-owner planned/published rows + **`workout_participants`** on each), **`strength_planning_group_id`** on **`workouts`**, and **`create_linked_strength_workout_copy`** (link existing squad partner row **without** overwriting their exercises when the group id matches). Apply **`supabase/migrations/20260417240000`** through **`20260417240200`** (and related dual/trio RLS) before release.
+- **RPC params**: call **`plan_strength_squad_programs`** with **all** string parameters present (empty string for optional fields) so PostgREST resolves the function signature.
+
+[1.8.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.8.0
+
 ## [1.7.0] - 2026-04-10
 
 ### Added

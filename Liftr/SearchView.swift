@@ -27,6 +27,7 @@ struct SearchView: View {
     @State private var query = ""
     @State private var userResults: [UserRow] = []
     @State private var workoutResults: [WorkoutSearchRow] = []
+    @State private var usernamesByUserId: [UUID: String] = [:]
     @State private var loading = false
     @State private var searchTask: Task<Void, Never>? = nil
 
@@ -66,6 +67,11 @@ struct SearchView: View {
         let kind: String
         let title: String?
         let started_at: Date?
+    }
+
+    private struct WorkoutOwnerRow: Decodable {
+        let user_id: UUID
+        let username: String
     }
 
     private var trimmedQuery: String {
@@ -289,6 +295,13 @@ struct SearchView: View {
                             Text((row.title.flatMap { $0.isEmpty ? nil : $0 }) ?? "Untitled")
                                 .font(.body.weight(.medium))
                             HStack(spacing: 6) {
+                                if let username = usernamesByUserId[row.user_id], !username.isEmpty {
+                                    Text("@\(username)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("·")
+                                        .foregroundStyle(.tertiary)
+                                }
                                 Text(row.kind.capitalized)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -386,6 +399,7 @@ struct SearchView: View {
             await MainActor.run {
                 userResults = []
                 workoutResults = []
+                usernamesByUserId = [:]
                 loading = false
             }
             return
@@ -445,10 +459,29 @@ struct SearchView: View {
                 .execute()
 
             let rows = try JSONDecoder.supabase().decode([WorkoutSearchRow].self, from: res.data)
-            await MainActor.run { self.workoutResults = rows }
+            let ownerIds = Array(Set(rows.map(\.user_id)))
+            var ownerMap: [UUID: String] = [:]
+
+            if !ownerIds.isEmpty {
+                let ownerRes = try await SupabaseManager.shared.client
+                    .from("profiles")
+                    .select("user_id, username")
+                    .in("user_id", values: ownerIds.map(\.uuidString))
+                    .execute()
+                let ownerRows = try JSONDecoder.supabase().decode([WorkoutOwnerRow].self, from: ownerRes.data)
+                ownerMap = Dictionary(uniqueKeysWithValues: ownerRows.map { ($0.user_id, $0.username) })
+            }
+
+            await MainActor.run {
+                self.workoutResults = rows
+                self.usernamesByUserId = ownerMap
+            }
             await recordSearch(term: term, scope: recordScope)
         } catch {
-            await MainActor.run { self.workoutResults = [] }
+            await MainActor.run {
+                self.workoutResults = []
+                self.usernamesByUserId = [:]
+            }
         }
     }
 }

@@ -1,6 +1,8 @@
 import SwiftUI
 import Supabase
 
+fileprivate let hyroxCustomPairingSeparator = "\u{001E}"
+
 fileprivate func compareStrengthSetMultiplicities(sortedSetNumbers: [Int]) -> [Int] {
     let r = sortedSetNumbers.count
     guard r > 0 else { return [] }
@@ -46,6 +48,9 @@ struct CompareWorkoutsView: View {
     private static let rightColor = Color(red: 0.82, green: 0.12, blue: 0.18)
 
     private static func metricDirection(_ metric: String) -> Double {
+        if metric.hasPrefix("hyrox.station."), metric.hasSuffix(".duration_sec") {
+            return -1.0
+        }
         switch metric {
         case "avg_pace_sec_per_km",
              "split_sec_per_500m",
@@ -445,8 +450,58 @@ struct CompareWorkoutsView: View {
             case "hx_avg_hr": return "Avg HR"
             case "hx_max_hr": return "Max HR"
 
-            default: return m.replacingOccurrences(of: "_", with: " ").capitalized
+            default:
+                if m.hasPrefix("hyrox.station.") {
+                    return Self.prettyHyroxStationMetric(m)
+                }
+                return m.replacingOccurrences(of: "_", with: " ").capitalized
             }
+        }
+
+        private static func prettyHyroxStationMetric(_ m: String) -> String {
+            let comps = m.split(separator: ".")
+            guard comps.count >= 4, comps[0] == "hyrox", comps[1] == "station" else {
+                return m.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+            let field = String(comps.last!)
+            let occKey = comps.dropFirst(2).dropLast().joined(separator: ".")
+            let station = hyroxOccurrenceLabel(occKey)
+            let fieldLabel: String
+            switch field {
+            case "distance_m": fieldLabel = "Distance"
+            case "reps": fieldLabel = "Reps"
+            case "duration_sec": fieldLabel = "Duration"
+            case "weight_kg": fieldLabel = "Weight"
+            case "implement_count": fieldLabel = "Implements"
+            default: fieldLabel = field.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+            return "\(station) · \(fieldLabel)"
+        }
+
+        private static func hyroxOccurrenceLabel(_ key: String) -> String {
+            if key.hasPrefix("custom\(hyroxCustomPairingSeparator)") {
+                let sep = hyroxCustomPairingSeparator
+                let parts = key.split(separator: Character(sep), omittingEmptySubsequences: false).map(String.init)
+                guard parts.count == 3,
+                      parts[0] == "custom",
+                      let ord = Int(parts[2]), ord >= 1
+                else {
+                    return key.replacingOccurrences(of: "_", with: " ").capitalized
+                }
+                let title = parts[1].localizedCapitalized
+                return ord == 1 ? title : "\(title) (\(ord))"
+            }
+
+            guard let u = key.lastIndex(of: "_") else {
+                return key.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+            let suffix = key[key.index(after: u)...]
+            guard let ord = Int(suffix), ord >= 1 else {
+                return key.replacingOccurrences(of: "_", with: " ").capitalized
+            }
+            let code = String(key[..<u])
+            let name = HyroxExerciseFormatting.label(code: code, displayName: nil, notes: nil)
+            return ord == 1 ? name : "\(name) (\(ord))"
         }
     }
     
@@ -1000,6 +1055,14 @@ struct CompareWorkoutsView: View {
                 }
             }
 
+            try await appendHyroxExerciseComparisonMetrics(
+                leftSessionId: L.id,
+                rightSessionId: R.id,
+                decoder: decoder,
+                client: client,
+                append: { m, u, lv, rv in add(m, u, lv, rv) }
+            )
+
         case "volleyball":
             struct VB: Decodable { let points: Int?; let aces: Int?; let blocks: Int?; let digs: Int? }
             let lVB = try? await client.from("volleyball_session_stats").select("*").eq("session_id", value: L.id).single().execute()
@@ -1019,6 +1082,87 @@ struct CompareWorkoutsView: View {
         }
 
         await MainActor.run { metrics = out }
+    }
+
+    private func appendHyroxExerciseComparisonMetrics(
+        leftSessionId: Int,
+        rightSessionId: Int,
+        decoder: JSONDecoder,
+        client: SupabaseClient,
+        append: (String, String, Double?, Double?) -> Void
+    ) async throws {
+        struct HyroxExerciseCompareRow: Decodable {
+            let exercise_code: String
+            let exercise_order: Int
+            let distance_m: Int?
+            let reps: Int?
+            let weight_kg: Decimal?
+            let duration_sec: Int?
+            let implement_count: Int?
+            let exercise_display_name: String?
+        }
+
+        func rowsByOccurrence(_ rows: [HyroxExerciseCompareRow]) -> [String: HyroxExerciseCompareRow] {
+            var countByCode: [String: Int] = [:]
+            var countByCustomDisplayNorm: [String: Int] = [:]
+            var dict: [String: HyroxExerciseCompareRow] = [:]
+            let sep = hyroxCustomPairingSeparator
+            for r in rows.sorted(by: { $0.exercise_order < $1.exercise_order }) {
+                let c = r.exercise_code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !c.isEmpty else { continue }
+
+                let key: String
+                if c == HyroxExerciseFormatting.customExerciseCode {
+                    let raw = (r.exercise_display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !raw.isEmpty else { continue }
+                    let norm = raw.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+                    countByCustomDisplayNorm[norm, default: 0] += 1
+                    let ord = countByCustomDisplayNorm[norm]!
+                    key = "custom\(sep)\(norm)\(sep)\(ord)"
+                } else {
+                    countByCode[c, default: 0] += 1
+                    let ord = countByCode[c]!
+                    key = "\(c)_\(ord)"
+                }
+                dict[key] = r
+            }
+            return dict
+        }
+
+        async let leftQ = client
+            .from("hyrox_session_exercises")
+            .select("exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,exercise_display_name")
+            .eq("session_id", value: leftSessionId)
+            .order("exercise_order", ascending: true)
+            .execute()
+        async let rightQ = client
+            .from("hyrox_session_exercises")
+            .select("exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,exercise_display_name")
+            .eq("session_id", value: rightSessionId)
+            .order("exercise_order", ascending: true)
+            .execute()
+
+        let leftRows = try decoder.decode([HyroxExerciseCompareRow].self, from: try await leftQ.data)
+        let rightRows = try decoder.decode([HyroxExerciseCompareRow].self, from: try await rightQ.data)
+
+        let leftMap = rowsByOccurrence(leftRows)
+        let rightMap = rowsByOccurrence(rightRows)
+        let commonKeys = Set(leftMap.keys).intersection(rightMap.keys)
+        let keysSorted = commonKeys.sorted {
+            (leftMap[$0]?.exercise_order ?? 0) < (leftMap[$1]?.exercise_order ?? 0)
+        }
+
+        let decToD: (Decimal?) -> Double? = { $0.map { NSDecimalNumber(decimal: $0).doubleValue } }
+
+        for key in keysSorted {
+            guard let a = leftMap[key], let b = rightMap[key] else { continue }
+            func m(_ field: String) -> String { "hyrox.station.\(key).\(field)" }
+            append(m("distance_m"), "m", a.distance_m.map(Double.init), b.distance_m.map(Double.init))
+            append(m("reps"), "count", a.reps.map(Double.init), b.reps.map(Double.init))
+            append(m("duration_sec"), "sec", a.duration_sec.map(Double.init), b.duration_sec.map(Double.init))
+            append(m("weight_kg"), "kg", decToD(a.weight_kg), decToD(b.weight_kg))
+            append(m("implement_count"), "count", a.implement_count.map(Double.init), b.implement_count.map(Double.init))
+        }
     }
 
     private func buildStrengthMetrics(decoder: JSONDecoder, client: SupabaseClient) async throws {

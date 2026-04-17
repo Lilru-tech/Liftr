@@ -1,6 +1,12 @@
 import SwiftUI
 import Supabase
 
+private func shouldIgnoreLeaderboardFetchError(_ error: Error) -> Bool {
+    if error is CancellationError { return true }
+    if let u = error as? URLError, u.code == .cancelled { return true }
+    return false
+}
+
 struct LeaderRow: Decodable, Identifiable {
     var id: UUID { user_id }
     let rank: Int
@@ -150,6 +156,7 @@ final class RankingVM: ObservableObject {
                 self.workoutRows = []
             }
         } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
             await MainActor.run {
                 self.error = error.localizedDescription
                 self.levelRows = []
@@ -178,6 +185,7 @@ final class RankingVM: ObservableObject {
                 self.levelRows = []
             }
         } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
             await MainActor.run {
                 self.error = error.localizedDescription
                 self.workoutRows = []
@@ -207,6 +215,7 @@ final class RankingVM: ObservableObject {
                 self.workoutRows = []
             }
         } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
             await MainActor.run {
                 self.error = error.localizedDescription
                 self.kcalRows = []
@@ -251,6 +260,7 @@ final class RankingVM: ObservableObject {
             self.levelRows = []
             self.workoutRows = []
         } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
             self.error = error.localizedDescription
             self.rows = []
             self.kcalRows = []
@@ -259,7 +269,11 @@ final class RankingVM: ObservableObject {
 }
 
 struct RankingView: View {
+    var presetMetric: LBMetric? = nil
+    var presetScope: LBScope? = nil
+
     @StateObject private var vm = RankingVM()
+    @State private var didApplyRankingPreset = false
     @AppStorage("isPremium") private var isPremium: Bool = false
 
     var body: some View {
@@ -276,7 +290,14 @@ struct RankingView: View {
             }
             .padding(.horizontal, 12)
         }
-        .onAppear { vm.load() }
+        .onAppear {
+            if !didApplyRankingPreset {
+                if let m = presetMetric { vm.metric = m }
+                if let s = presetScope { vm.scope = s }
+                didApplyRankingPreset = true
+            }
+            vm.load()
+        }
         .onChange(of: vm.scope)  { _, _ in vm.load() }
         .onChange(of: vm.period) { _, _ in vm.load() }
         .onChange(of: vm.kind)   { _, _ in vm.load() }

@@ -158,7 +158,8 @@ struct ProfileView: View {
     @State private var totalDurationMin: Int = 0
     @State private var consistencyActiveBuckets: Int = 0
     @State private var consistencyBucketTotal: Int = 0
-    @State private var consistencyWorkoutMeta: [Int: (kind: String, durationMin: Int)] = [:]
+    @State private var consistencyWorkoutMeta: [Int: ConsistencyWorkoutMeta] = [:]
+    @AppStorage("consistencyRootChartMetric") private var consistencyRootChartMetricRaw: String = ConsistencyChartMetric.duration.rawValue
     @State private var email: String? = nil
     @State private var editingProfile = false
     @State private var heightCm: String = ""
@@ -243,6 +244,7 @@ struct ProfileView: View {
                 await loadProfileHeader()
                 await refreshFollowState()
                 await loadProgress()
+                await loadUserLevel()
                 await loadUnreadNotifications()
                 if isOwnProfile {
                     await loadPremiumProduct()
@@ -323,11 +325,28 @@ struct ProfileView: View {
                 if kindDistribution.isEmpty && totalDurationMin == 0 {
                     Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
                 } else {
+                    let rootMetric = effectiveRootConsistencyMetric
                     VStack(spacing: 12) {
+                        Picker("Consistency chart", selection: $consistencyRootChartMetricRaw) {
+                            ForEach(ConsistencyChartMetric.allCases) { m in
+                                Text(m.pickerLabel).tag(m.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+
                         if #available(iOS 17.0, *) {
                             Chart(kindDistribution) { s in
                                 SectorMark(
-                                    angle: .value("Count", s.count),
+                                    angle: .value(
+                                        rootMetric.chartAxisLabel,
+                                        rootMetric.measure(
+                                            durationMin: s.durationMin,
+                                            count: s.count,
+                                            score: s.score,
+                                            kcal: s.kcal
+                                        )
+                                    ),
                                     innerRadius: .ratio(0.55),
                                     angularInset: 1.5
                                 )
@@ -350,7 +369,15 @@ struct ProfileView: View {
                             Chart(kindDistribution) { s in
                                 BarMark(
                                     x: .value("Kind", s.kind.capitalized),
-                                    y: .value("Workouts", s.count)
+                                    y: .value(
+                                        rootMetric.chartAxisLabel,
+                                        Int(round(rootMetric.measure(
+                                            durationMin: s.durationMin,
+                                            count: s.count,
+                                            score: s.score,
+                                            kcal: s.kcal
+                                        )))
+                                    )
                                 )
                             }
                             .frame(height: 220)
@@ -361,8 +388,8 @@ struct ProfileView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             }
                         }
-                        
-                        consistencyBreakdownCard
+
+                        consistencyBreakdownCard(rootMetric: rootMetric)
                     }
                 }
                 
@@ -557,19 +584,24 @@ struct ProfileView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
     
-    private var consistencyBreakdownCard: some View {
+    private func consistencyBreakdownCard(rootMetric: ConsistencyChartMetric) -> some View {
         let ordered = kindDistribution.sorted { kindSortIndex($0.kind) < kindSortIndex($1.kind) }
         let workoutTotal = ordered.reduce(0) { $0 + $1.count }
+        let totalMetricAmount = ordered.reduce(0.0) {
+            $0 + rootMetric.measure(durationMin: $1.durationMin, count: $1.count, score: $1.score, kcal: $1.kcal)
+        }
+        let totalScore = ordered.reduce(0.0) { $0 + $1.score }
+        let totalKcal = ordered.reduce(0.0) { $0 + $1.kcal }
         return VStack(alignment: .leading, spacing: 12) {
             if consistencyBucketTotal > 0 {
                 Text("\(consistencyActiveBuckets) of \(consistencyBucketTotal) \(consistencyPeriodUnitLabel) with workouts")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            
+
             ForEach(ordered) { s in
-                let pctWorkouts = workoutTotal > 0 ? Double(s.count) / Double(workoutTotal) : 0
-                let pctTime = totalDurationMin > 0 ? Double(s.durationMin) / Double(totalDurationMin) : 0
+                let v = rootMetric.measure(durationMin: s.durationMin, count: s.count, score: s.score, kcal: s.kcal)
+                let pct = totalMetricAmount > 0 ? v / totalMetricAmount : 0
                 NavigationLink {
                     ConsistencyDrillDownView(rootKind: s.kind, workoutMeta: consistencyWorkoutMeta)
                         .gradientBG()
@@ -580,16 +612,14 @@ struct ProfileView: View {
                             .frame(width: 8, height: 8)
                         Text(s.kind.capitalized)
                             .font(.subheadline.weight(.medium))
-                            Spacer(minLength: 8)
+                        Spacer(minLength: 8)
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text("\(s.count) workouts · \(formatProgressPercent(pctWorkouts))")
+                            Text(primaryConsistencyKindRowTitle(slice: s, metric: rootMetric, pct: pct))
                                 .font(.footnote.weight(.medium).monospacedDigit())
-                            if totalDurationMin > 0 {
-                                Text("\(formatMinutes(s.durationMin)) · \(formatProgressPercent(pctTime)) of time")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
-                            }
+                            Text(secondaryConsistencyKindRowSubtitle(slice: s, metric: rootMetric))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
                         Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
@@ -598,17 +628,22 @@ struct ProfileView: View {
                 }
                 .buttonStyle(.plain)
             }
-            
+
             Divider().opacity(0.35)
-            
+
             HStack(alignment: .firstTextBaseline) {
                 Text("Total")
                     .font(.footnote.weight(.semibold))
                 Spacer()
-                Text("\(workoutTotal) workouts · \(formatMinutes(totalDurationMin))")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.trailing)
+                Text(consistencyKindFooterSummary(
+                    workoutTotal: workoutTotal,
+                    totalDurationMin: totalDurationMin,
+                    totalScore: totalScore,
+                    totalKcal: totalKcal
+                ))
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
             }
         }
         .padding(14)
@@ -640,7 +675,85 @@ struct ProfileView: View {
         let kind: String
         let count: Int
         let durationMin: Int
+        let score: Double
+        let kcal: Double
         var id: String { kind }
+    }
+
+    private var effectiveRootConsistencyMetric: ConsistencyChartMetric {
+        let chosen = ConsistencyChartMetric(rawValue: consistencyRootChartMetricRaw) ?? .duration
+        func total(_ m: ConsistencyChartMetric) -> Double {
+            kindDistribution.reduce(0.0) {
+                $0 + m.measure(durationMin: $1.durationMin, count: $1.count, score: $1.score, kcal: $1.kcal)
+            }
+        }
+        if total(chosen) > 0 { return chosen }
+        for m in ConsistencyChartMetric.allCases where total(m) > 0 {
+            return m
+        }
+        return chosen
+    }
+
+    private func primaryConsistencyKindRowTitle(slice: KindSlice, metric: ConsistencyChartMetric, pct: Double) -> String {
+        let pctStr = formatProgressPercent(pct)
+        switch metric {
+        case .duration:
+            return "\(formatMinutes(slice.durationMin)) · \(pctStr)"
+        case .workouts:
+            return "\(slice.count) workouts · \(pctStr)"
+        case .score:
+            return "\(formatConsistencyPoints(slice.score)) pts · \(pctStr)"
+        case .calories:
+            return "\(formatConsistencyKcal(slice.kcal)) kcal · \(pctStr)"
+        }
+    }
+
+    private func secondaryConsistencyKindRowSubtitle(slice: KindSlice, metric: ConsistencyChartMetric) -> String {
+        var parts: [String] = []
+        if metric != .workouts {
+            parts.append(slice.count == 1 ? "1 workout" : "\(slice.count) workouts")
+        }
+        if metric != .duration, slice.durationMin > 0 {
+            parts.append(formatMinutes(slice.durationMin))
+        }
+        if metric != .score, slice.score > 0 {
+            parts.append("\(formatConsistencyPoints(slice.score)) pts")
+        }
+        if metric != .calories, slice.kcal > 0 {
+            parts.append("\(formatConsistencyKcal(slice.kcal)) kcal")
+        }
+        return parts.isEmpty ? " " : parts.joined(separator: " · ")
+    }
+
+    private func consistencyKindFooterSummary(
+        workoutTotal: Int,
+        totalDurationMin: Int,
+        totalScore: Double,
+        totalKcal: Double
+    ) -> String {
+        var parts: [String] = [
+            "\(workoutTotal) workouts",
+            "\(formatMinutes(totalDurationMin)) total",
+        ]
+        if totalScore > 0 {
+            parts.append("\(formatConsistencyPoints(totalScore)) pts")
+        }
+        if totalKcal > 0 {
+            parts.append("\(formatConsistencyKcal(totalKcal)) kcal")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func formatConsistencyPoints(_ x: Double) -> String {
+        let r = round(x)
+        if abs(x - r) < 0.05 { return String(format: "%.0f", r) }
+        return String(format: "%.1f", x)
+    }
+
+    private func formatConsistencyKcal(_ x: Double) -> String {
+        if x >= 100 { return String(format: "%.0f", x) }
+        if x >= 10 { return String(format: "%.1f", x) }
+        return String(format: "%.2f", x)
     }
     
     private var headerCard: some View {
@@ -705,39 +818,17 @@ struct ProfileView: View {
                     }
                     .foregroundStyle(.secondary)
 
-                    HStack(spacing: 8) {
-                        Text("LV \(myLevel)")
-                            .font(.caption.weight(.black))
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .layoutPriority(2)
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .background(Capsule().fill(Color.yellow.opacity(0.25)))
-                            .overlay(Capsule().stroke(Color.white.opacity(0.18)))
-
-                        Text("\(formatXP(myXP)) XP")
-                            .font(.caption.weight(.semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                            .layoutPriority(1)
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                    }
-
-                    GeometryReader { geo in
-                        let total = max(1, Double(self.nextLevelXP))
-                        let ratio = Double(self.myXP) / total
-                        let prog = min(1.0, max(0.0, ratio))
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(Color.white.opacity(0.12))
-                            Capsule().fill(Color.green.opacity(0.35))
-                                .frame(width: geo.size.width * prog)
-                                .animation(.easeInOut(duration: 0.35), value: prog)
+                    if let uid = viewingUserId {
+                        NavigationLink {
+                            UserLevelDetailView(userId: uid)
+                                .gradientBG()
+                        } label: {
+                            profileLevelSummaryContent()
                         }
+                        .buttonStyle(.plain)
+                    } else {
+                        profileLevelSummaryContent()
                     }
-                    .frame(height: 6)
-                    .clipped()
                 }
 
                 if let bio, !bio.isEmpty {
@@ -812,15 +903,18 @@ struct ProfileView: View {
             }
 
             Menu {
-                NavigationLink {
-                    NotificationsListView()
-                        .gradientBG()
-                } label: {
-                    Label(notificationsMenuTitle, systemImage: "bell.fill")
+                if isOwnProfile {
+                    NavigationLink {
+                        NotificationsListView()
+                            .gradientBG()
+                    } label: {
+                        Label(notificationsMenuTitle, systemImage: "bell.fill")
+                    }
                 }
 
                 NavigationLink {
-                    RankingView()
+                    RankingView(presetMetric: .level)
+                        .gradientBG()
                         .navigationTitle("Level Ranking")
                 } label: {
                     Label("Ranking", systemImage: "trophy")
@@ -2022,9 +2116,11 @@ struct ProfileView: View {
             }
             var kindCount: [String: Int] = [:]
             var kindMinutes: [String: Int] = [:]
+            var kindScore: [String: Double] = [:]
+            var kindKcal: [String: Double] = [:]
             var totalMinutes = 0
-            var workoutMetaCollector: [Int: (kind: String, durationMin: Int)] = [:]
-            
+            var workoutMetaCollector: [Int: ConsistencyWorkoutMeta] = [:]
+
             for w in workouts {
                 guard let d = w.started_at else { continue }
                 if (w.state ?? "published") == "planned" { continue }
@@ -2045,8 +2141,16 @@ struct ProfileView: View {
                 kindCount[w.kind, default: 0] += 1
                 let wMins = durationMinByWorkout[w.id] ?? 0
                 kindMinutes[w.kind, default: 0] += wMins
+                let sc = scoresByWorkout[w.id] ?? 0
+                kindScore[w.kind, default: 0] += sc
+                kindKcal[w.kind, default: 0] += kcal
                 totalMinutes += wMins
-                workoutMetaCollector[w.id] = (w.kind, wMins)
+                workoutMetaCollector[w.id] = ConsistencyWorkoutMeta(
+                    kind: w.kind,
+                    durationMin: wMins,
+                    score: sc,
+                    kcal: kcal
+                )
             }
             
             await MainActor.run {
@@ -2148,8 +2252,16 @@ struct ProfileView: View {
                 await MainActor.run { self.progressPoints = points }
             }
             if progressSubtab == .consistency {
-                let slices = ["strength","cardio","sport"]
-                    .map { KindSlice(kind: $0, count: kindCount[$0] ?? 0, durationMin: kindMinutes[$0] ?? 0) }
+                let slices = ["strength", "cardio", "sport"]
+                    .map { k in
+                        KindSlice(
+                            kind: k,
+                            count: kindCount[k] ?? 0,
+                            durationMin: kindMinutes[k] ?? 0,
+                            score: kindScore[k] ?? 0,
+                            kcal: kindKcal[k] ?? 0
+                        )
+                    }
                     .filter { $0.count > 0 }
                 let activeBuckets: Int
                 let consistencyTotalDays: Int
@@ -3041,6 +3153,47 @@ extension ProfileView {
         case "sport":    return AnyShapeStyle(Color.orange.opacity(0.10).gradient)
         default:         return AnyShapeStyle(.ultraThinMaterial)
         }
+    }
+
+    @ViewBuilder
+    private func profileLevelSummaryContent() -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("LV \(myLevel)")
+                    .font(.caption.weight(.black))
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(2)
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .background(Capsule().fill(Color.yellow.opacity(0.25)))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.18)))
+
+                Text("\(formatXP(myXP)) XP")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .layoutPriority(1)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+
+            GeometryReader { geo in
+                let total = max(1, Double(self.nextLevelXP))
+                let ratio = Double(self.myXP) / total
+                let prog = min(1.0, max(0.0, ratio))
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.12))
+                    Capsule().fill(Color.green.opacity(0.35))
+                        .frame(width: geo.size.width * prog)
+                        .animation(.easeInOut(duration: 0.35), value: prog)
+                }
+            }
+            .frame(height: 6)
+            .clipped()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Shows level detail and XP breakdown")
     }
     
     private func loadUserLevel() async {

@@ -4,7 +4,10 @@ import Supabase
 
 struct ConsistencyDrillDownView: View {
     let rootKind: String
-    let workoutMeta: [Int: (kind: String, durationMin: Int)]
+    let workoutMeta: [Int: ConsistencyWorkoutMeta]
+
+    @AppStorage("consistencyDrilldownChartMetric") private var consistencyDrilldownChartMetricRaw: String =
+        ConsistencyChartMetric.duration.rawValue
 
     @State private var slices: [Slice] = []
     @State private var totalDurationMin: Int = 0
@@ -16,6 +19,8 @@ struct ConsistencyDrillDownView: View {
         let title: String
         let count: Int
         let durationMin: Int
+        let score: Double
+        let kcal: Double
     }
 
     var body: some View {
@@ -37,6 +42,20 @@ struct ConsistencyDrillDownView: View {
         .task { await load() }
     }
 
+    private var effectiveDrilldownMetric: ConsistencyChartMetric {
+        let chosen = ConsistencyChartMetric(rawValue: consistencyDrilldownChartMetricRaw) ?? .duration
+        func total(_ m: ConsistencyChartMetric) -> Double {
+            slices.reduce(0.0) {
+                $0 + m.measure(durationMin: $1.durationMin, count: $1.count, score: $1.score, kcal: $1.kcal)
+            }
+        }
+        if total(chosen) > 0 { return chosen }
+        for m in ConsistencyChartMetric.allCases where total(m) > 0 {
+            return m
+        }
+        return chosen
+    }
+
     private var navigationTitle: String {
         switch rootKind.lowercased() {
         case "sport": return "Sport detail"
@@ -48,12 +67,29 @@ struct ConsistencyDrillDownView: View {
 
     @ViewBuilder
     private var scrollContent: some View {
+        let metric = effectiveDrilldownMetric
         ScrollView {
             VStack(spacing: 12) {
+                Picker("Detail chart", selection: $consistencyDrilldownChartMetricRaw) {
+                    ForEach(ConsistencyChartMetric.allCases) { m in
+                        Text(m.pickerLabel).tag(m.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+
                 if #available(iOS 17.0, *) {
                     Chart(slices) { s in
                         SectorMark(
-                            angle: .value("Share", Double(totalDurationMin > 0 ? s.durationMin : s.count)),
+                            angle: .value(
+                                metric.chartAxisLabel,
+                                metric.measure(
+                                    durationMin: s.durationMin,
+                                    count: s.count,
+                                    score: s.score,
+                                    kcal: s.kcal
+                                )
+                            ),
                             innerRadius: .ratio(0.55),
                             angularInset: 1.5
                         )
@@ -69,23 +105,44 @@ struct ConsistencyDrillDownView: View {
                     }
                 }
 
-                breakdownCard
+                drilldownBreakdownCard(metric: metric)
             }
             .padding(.vertical, 8)
         }
     }
 
-    private func chartColor(for title: String) -> Color {
-        let palette: [Double] = [0.02, 0.12, 0.22, 0.45, 0.55, 0.65, 0.75, 0.82]
-        let idx = abs(title.hashValue) % palette.count
-        return Color(hue: palette[idx], saturation: 0.52, brightness: 0.94)
+    private var chartColorsByTitle: [String: Color] {
+        let titles = Array(Set(slices.map(\.title))).sorted {
+            $0.localizedCaseInsensitiveCompare($1) == .orderedAscending
+        }
+        guard !titles.isEmpty else { return [:] }
+        let phi = 0.618_033_988_749_895
+        var hue = 0.07
+        var map: [String: Color] = [:]
+        for (i, title) in titles.enumerated() {
+            let h = hue.truncatingRemainder(dividingBy: 1.0)
+            let saturation = 0.62 + Double(i % 4) * 0.07
+            let brightness = 0.86 + Double((i / 4) % 3) * 0.05
+            map[title] = Color(hue: h, saturation: saturation, brightness: brightness)
+            hue += phi
+        }
+        return map
     }
 
-    private var breakdownCard: some View {
+    private func chartColor(for title: String) -> Color {
+        chartColorsByTitle[title] ?? Color(white: 0.55)
+    }
+
+    private func drilldownBreakdownCard(metric: ConsistencyChartMetric) -> some View {
         let ordered = slices.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         let summedSliceCounts = ordered.reduce(0) { $0 + $1.count }
         let uniqueWorkoutsInPeriod = workoutMeta.filter { $0.value.kind.lowercased() == rootKind.lowercased() }.count
         let footerWorkoutLabel = rootKind.lowercased() == "strength" ? uniqueWorkoutsInPeriod : summedSliceCounts
+        let totalMetricAmount = ordered.reduce(0.0) {
+            $0 + metric.measure(durationMin: $1.durationMin, count: $1.count, score: $1.score, kcal: $1.kcal)
+        }
+        let totalScore = ordered.reduce(0.0) { $0 + $1.score }
+        let totalKcal = ordered.reduce(0.0) { $0 + $1.kcal }
         return VStack(alignment: .leading, spacing: 12) {
             if rootKind.lowercased() == "strength" {
                 Text("One session can count toward several muscles; workout totals may add up to more than your strength sessions.")
@@ -94,7 +151,8 @@ struct ConsistencyDrillDownView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             ForEach(ordered) { s in
-                let pctT = totalDurationMin > 0 ? Double(s.durationMin) / Double(totalDurationMin) : 0
+                let v = metric.measure(durationMin: s.durationMin, count: s.count, score: s.score, kcal: s.kcal)
+                let pct = totalMetricAmount > 0 ? v / totalMetricAmount : 0
                 HStack(alignment: .center, spacing: 10) {
                     Circle()
                         .fill(chartColor(for: s.title))
@@ -103,17 +161,12 @@ struct ConsistencyDrillDownView: View {
                         .font(.subheadline.weight(.medium))
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 2) {
-                        if totalDurationMin > 0 {
-                            Text("\(formatMinutes(s.durationMin)) · \(formatPercent(pctT))")
-                                .font(.footnote.weight(.medium).monospacedDigit())
-                            Text(s.count == 1 ? "1 workout" : "\(s.count) workouts")
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        } else {
-                            Text(s.count == 1 ? "1 workout" : "\(s.count) workouts")
-                                .font(.footnote.weight(.medium).monospacedDigit())
-                        }
+                        Text(primaryDrilldownRowTitle(slice: s, metric: metric, pct: pct))
+                            .font(.footnote.weight(.medium).monospacedDigit())
+                        Text(secondaryDrilldownRowSubtitle(slice: s, metric: metric))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                 }
             }
@@ -124,8 +177,12 @@ struct ConsistencyDrillDownView: View {
                 Text("Total")
                     .font(.footnote.weight(.semibold))
                 Spacer()
-                Text("\(footerWorkoutLabel) workouts · \(formatMinutes(totalDurationMin))")
-                    .font(.footnote.weight(.semibold).monospacedDigit())
+                Text(drilldownFooterLine(
+                    footerWorkoutLabel: footerWorkoutLabel,
+                    totalScore: totalScore,
+                    totalKcal: totalKcal
+                ))
+                .font(.footnote.weight(.semibold).monospacedDigit())
             }
         }
         .padding(14)
@@ -139,6 +196,63 @@ struct ConsistencyDrillDownView: View {
                 .strokeBorder(.white.opacity(0.18), lineWidth: 0.8)
         }
         .padding(.horizontal)
+    }
+
+    private func primaryDrilldownRowTitle(slice: Slice, metric: ConsistencyChartMetric, pct: Double) -> String {
+        let pctStr = formatPercent(pct)
+        switch metric {
+        case .duration:
+            return "\(formatMinutes(slice.durationMin)) · \(pctStr)"
+        case .workouts:
+            return "\(slice.count == 1 ? "1 workout" : "\(slice.count) workouts") · \(pctStr)"
+        case .score:
+            return "\(formatDrillPoints(slice.score)) pts · \(pctStr)"
+        case .calories:
+            return "\(formatDrillKcal(slice.kcal)) kcal · \(pctStr)"
+        }
+    }
+
+    private func secondaryDrilldownRowSubtitle(slice: Slice, metric: ConsistencyChartMetric) -> String {
+        var parts: [String] = []
+        if metric != .workouts {
+            parts.append(slice.count == 1 ? "1 workout" : "\(slice.count) workouts")
+        }
+        if metric != .duration, slice.durationMin > 0 {
+            parts.append(formatMinutes(slice.durationMin))
+        }
+        if metric != .score, slice.score > 0 {
+            parts.append("\(formatDrillPoints(slice.score)) pts")
+        }
+        if metric != .calories, slice.kcal > 0 {
+            parts.append("\(formatDrillKcal(slice.kcal)) kcal")
+        }
+        return parts.isEmpty ? " " : parts.joined(separator: " · ")
+    }
+
+    private func drilldownFooterLine(footerWorkoutLabel: Int, totalScore: Double, totalKcal: Double) -> String {
+        var parts: [String] = [
+            "\(footerWorkoutLabel) workouts",
+            "\(formatMinutes(totalDurationMin)) total",
+        ]
+        if totalScore > 0 {
+            parts.append("\(formatDrillPoints(totalScore)) pts")
+        }
+        if totalKcal > 0 {
+            parts.append("\(formatDrillKcal(totalKcal)) kcal")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func formatDrillPoints(_ x: Double) -> String {
+        let r = round(x)
+        if abs(x - r) < 0.05 { return String(format: "%.0f", r) }
+        return String(format: "%.1f", x)
+    }
+
+    private func formatDrillKcal(_ x: Double) -> String {
+        if x >= 100 { return String(format: "%.0f", x) }
+        if x >= 10 { return String(format: "%.1f", x) }
+        return String(format: "%.2f", x)
     }
 
     private func formatPercent(_ p: Double) -> String {
@@ -285,21 +399,37 @@ struct ConsistencyDrillDownView: View {
 
         var countBy: [String: Int] = [:]
         var minBy: [String: Int] = [:]
+        var scoreBy: [String: Double] = [:]
+        var kcalBy: [String: Double] = [:]
 
         for wid in ids {
-            let dm = workoutMeta[wid]?.durationMin ?? 0
+            let meta = workoutMeta[wid]
+            let dm = meta?.durationMin ?? 0
+            let sc = meta?.score ?? 0
+            let kc = meta?.kcal ?? 0
             let muscles = musclesByWorkout[wid] ?? ["other"]
             let n = max(1, muscles.count)
-            let share = dm / n
+            let shareDur = dm / n
+            let shareSc = sc / Double(n)
+            let shareKc = kc / Double(n)
             for m in muscles {
                 let label = displayMuscle(m)
                 countBy[label, default: 0] += 1
-                minBy[label, default: 0] += share
+                minBy[label, default: 0] += shareDur
+                scoreBy[label, default: 0] += shareSc
+                kcalBy[label, default: 0] += shareKc
             }
         }
 
         return countBy.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.map { k in
-            Slice(id: k, title: k, count: countBy[k] ?? 0, durationMin: minBy[k] ?? 0)
+            Slice(
+                id: k,
+                title: k,
+                count: countBy[k] ?? 0,
+                durationMin: minBy[k] ?? 0,
+                score: scoreBy[k] ?? 0,
+                kcal: kcalBy[k] ?? 0
+            )
         }
     }
 
@@ -309,16 +439,30 @@ struct ConsistencyDrillDownView: View {
     ) -> [Slice] {
         var countBy: [String: Int] = [:]
         var minBy: [String: Int] = [:]
+        var scoreBy: [String: Double] = [:]
+        var kcalBy: [String: Double] = [:]
 
         for wid in workoutIds {
-            let dm = workoutMeta[wid]?.durationMin ?? 0
+            let meta = workoutMeta[wid]
+            let dm = meta?.durationMin ?? 0
+            let sc = meta?.score ?? 0
+            let kc = meta?.kcal ?? 0
             let label = labelForWorkout(wid) ?? "Other"
             countBy[label, default: 0] += 1
             minBy[label, default: 0] += dm
+            scoreBy[label, default: 0] += sc
+            kcalBy[label, default: 0] += kc
         }
 
         return countBy.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }.map { k in
-            Slice(id: k, title: k, count: countBy[k] ?? 0, durationMin: minBy[k] ?? 0)
+            Slice(
+                id: k,
+                title: k,
+                count: countBy[k] ?? 0,
+                durationMin: minBy[k] ?? 0,
+                score: scoreBy[k] ?? 0,
+                kcal: kcalBy[k] ?? 0
+            )
         }
     }
 
