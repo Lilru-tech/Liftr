@@ -2,9 +2,14 @@ import SwiftUI
 import Supabase
 import AVFoundation
 import AudioToolbox
+import UIKit
+import ImageIO
 
 struct ActiveStrengthWorkoutView: View {
     let workoutId: Int
+
+    private static let elborblaUsernameNormalized = "elborbla"
+    private static let elborblaCelebrationBasename = "elborbla_celebration"
     
     private struct ExerciseRow: Decodable, Identifiable {
         let id: Int
@@ -52,6 +57,7 @@ struct ActiveStrengthWorkoutView: View {
     
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var app: AppState
     @AppStorage("isPremium") private var isPremium = false
     @AppStorage("activeStrengthNavHintSeen") private var activeStrengthNavHintSeen = false
 
@@ -84,6 +90,7 @@ struct ActiveStrengthWorkoutView: View {
     @State private var beepWorkItem: DispatchWorkItem? = nil
     @State private var isBeeping: Bool = false
     @State private var navExercisePopoverIndex: Int? = nil
+    @State private var showElborblaCelebration = false
     private let swipeThreshold: CGFloat = 110
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
@@ -177,9 +184,21 @@ struct ActiveStrengthWorkoutView: View {
                     .transition(.opacity.combined(with: .scale))
                     .zIndex(1)
                 }
+
+                if showElborblaCelebration {
+                    ElborblaFinishCelebrationOverlay(
+                        image: Self.loadElborblaCelebrationImage(),
+                        onContinue: {
+                            showElborblaCelebration = false
+                            dismiss()
+                        }
+                    )
+                    .zIndex(3)
+                    .transition(.opacity)
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !isPremium {
+                if !isPremium, !showElborblaCelebration {
                     BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                         .frame(height: 50)
                         .padding(.horizontal)
@@ -187,6 +206,7 @@ struct ActiveStrengthWorkoutView: View {
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(showElborblaCelebration ? .hidden : .visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
@@ -969,6 +989,13 @@ struct ActiveStrengthWorkoutView: View {
         return effectiveSetIndex(for: ex) >= total
     }
 
+    private func exerciseCompletionProgress(_ ex: ExerciseRow) -> Double {
+        let total = setsFor(ex).count
+        guard total > 0 else { return 0 }
+        let completedSets = min(max(0, effectiveSetIndex(for: ex)), total)
+        return Double(completedSets) / Double(total)
+    }
+
     private var canJumpBetweenExercises: Bool {
         !showCountdown && !isSaving && !showEditSheet && !isTransitioningExercise
     }
@@ -1062,6 +1089,7 @@ struct ActiveStrengthWorkoutView: View {
         let jumpOK = canJumpBetweenExercises
         let title = exerciseTitle(ex)
         let plannedSets = setsFor(ex).count
+        let completionProgress = exerciseCompletionProgress(ex)
         let popBinding = Binding<Bool>(
             get: { navExercisePopoverIndex == idx },
             set: { newVal in
@@ -1077,6 +1105,7 @@ struct ActiveStrengthWorkoutView: View {
             exerciseTitle: title,
             plannedSetCount: plannedSets,
             completed: completed,
+            completionProgress: completionProgress,
             isLast: isLast,
             isCurrent: isCurrent,
             jumpOK: jumpOK,
@@ -1357,10 +1386,18 @@ struct ActiveStrengthWorkoutView: View {
                 .execute()
 
             NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
-            
+
+            let celebrate = await shouldShowElborblaCelebration(using: client)
+
             await MainActor.run {
                 self.isSaving = false
-                dismiss()
+                if celebrate {
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        self.showElborblaCelebration = true
+                    }
+                } else {
+                    dismiss()
+                }
             }
         } catch {
             await MainActor.run {
@@ -1368,6 +1405,47 @@ struct ActiveStrengthWorkoutView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func shouldShowElborblaCelebration(using client: SupabaseClient) async -> Bool {
+        guard let uid = await MainActor.run(body: { app.userId }) else { return false }
+        struct Row: Decodable { let username: String }
+        do {
+            let res = try await client
+                .from("profiles")
+                .select("username")
+                .eq("user_id", value: uid.uuidString)
+                .limit(1)
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+            guard let raw = rows.first?.username else { return false }
+            let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return normalized == Self.elborblaUsernameNormalized
+        } catch {
+            return false
+        }
+    }
+
+    private static func loadElborblaCelebrationImage() -> UIImage? {
+        let bundle = Bundle.main
+        let exts = ["GIF", "gif", "jpg", "jpeg", "png", "heic"]
+        for ext in exts {
+            if let url = bundle.url(forResource: elborblaCelebrationBasename, withExtension: ext),
+               let data = try? Data(contentsOf: url) {
+                return ElborblaCelebrationDecoder.uiImage(from: data, treatingGIF: ext.lowercased() == "gif")
+            }
+        }
+        for ext in exts {
+            let urls = bundle.urls(forResourcesWithExtension: ext, subdirectory: nil) ?? []
+            for url in urls {
+                let base = url.deletingPathExtension().lastPathComponent
+                guard base.caseInsensitiveCompare(elborblaCelebrationBasename) == .orderedSame else { continue }
+                if let data = try? Data(contentsOf: url) {
+                    return ElborblaCelebrationDecoder.uiImage(from: data, treatingGIF: ext.lowercased() == "gif")
+                }
+            }
+        }
+        return nil
     }
 
     private func sanitizeEndDateIfNeededOnClose() async {
@@ -1548,6 +1626,7 @@ private struct StrengthExerciseNavColumn: View {
     let exerciseTitle: String
     let plannedSetCount: Int
     let completed: Bool
+    let completionProgress: Double
     let isLast: Bool
     let isCurrent: Bool
     let jumpOK: Bool
@@ -1555,6 +1634,8 @@ private struct StrengthExerciseNavColumn: View {
     @Binding var popoverPresented: Bool
     let onShortTap: () -> Void
     let onLongPress: () -> Void
+    @State private var burstScale: CGFloat = 0.75
+    @State private var burstOpacity: Double = 0
 
     private var numberLabel: String { String(displayNumber) }
 
@@ -1567,6 +1648,8 @@ private struct StrengthExerciseNavColumn: View {
     private var accessibilityLine: String {
         var parts = ["Exercise \(displayNumber)"]
         if isCurrent { parts.append("current") }
+        let pct = Int((min(max(completionProgress, 0), 1) * 100).rounded())
+        parts.append("progress \(pct) percent")
         if completed { parts.append("completed") }
         if isLast { parts.append("last in workout") }
         return parts.joined(separator: ", ")
@@ -1596,12 +1679,24 @@ private struct StrengthExerciseNavColumn: View {
         .accessibilityLabel(Text(accessibilityLine))
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("Mantén pulsado para ver el nombre y las series")
+        .onChange(of: completionProgress) { oldValue, newValue in
+            guard oldValue < 0.999, newValue >= 0.999 else { return }
+            scheduleBurst()
+        }
     }
 
     private var pillStack: some View {
         ZStack {
             Circle()
                 .fill(fillColor)
+            GeometryReader { geo in
+                let p = min(max(completionProgress, 0), 1)
+                Rectangle()
+                    .fill(Color.blue.opacity(0.88))
+                    .frame(width: geo.size.width * p, height: geo.size.height)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .clipShape(Circle())
+            }
             if completed && isLast {
                 Circle()
                     .strokeBorder(Color.green, lineWidth: 2)
@@ -1614,6 +1709,9 @@ private struct StrengthExerciseNavColumn: View {
                 .font(.callout.weight(isCurrent ? .bold : .semibold))
                 .monospacedDigit()
                 .foregroundStyle(foregroundColor)
+            burstOverlay
+                .zIndex(2)
+                .allowsHitTesting(false)
         }
         .frame(width: 34, height: 34)
         .shadow(color: isCurrent ? Color.black.opacity(0.25) : .clear, radius: isCurrent ? 3 : 0, y: 1)
@@ -1651,5 +1749,238 @@ private struct StrengthExerciseNavColumn: View {
         if isCurrent { return Color.white }
         if isLast { return Color.green.opacity(0.95) }
         return Color.primary.opacity(0.28)
+    }
+
+    @ViewBuilder
+    private var burstOverlay: some View {
+        if burstOpacity > 0.001 {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.92), lineWidth: 2)
+                    .scaleEffect(burstScale)
+                    .opacity(burstOpacity)
+                ForEach(0..<6, id: \.self) { i in
+                    let angle = Double(i) * .pi / 3.0
+                    Circle()
+                        .fill(Color.white.opacity(0.95))
+                        .frame(width: 3.5, height: 3.5)
+                        .offset(
+                            x: CGFloat(cos(angle)) * 12 * burstScale,
+                            y: CGFloat(sin(angle)) * 12 * burstScale
+                        )
+                        .opacity(burstOpacity)
+                }
+            }
+        }
+    }
+
+    private func scheduleBurst() {
+        var snap = Transaction()
+        snap.animation = nil
+        withTransaction(snap) {
+            burstScale = 0.65
+            burstOpacity = 1
+        }
+        DispatchQueue.main.async {
+            var t = Transaction()
+            t.animation = .easeOut(duration: 2)
+            withTransaction(t) {
+                burstScale = 1.55
+                burstOpacity = 0
+            }
+        }
+    }
+}
+
+// MARK: - Elborbla finish celebration (easter egg)
+
+private enum ElborblaCelebrationDecoder {
+    private static let maxAnimatedFrames = 150
+
+    static func uiImage(from data: Data, treatingGIF: Bool) -> UIImage? {
+        if treatingGIF || isLikelyGIF(data) {
+            return animatedImageFromImageIO(data: data) ?? UIImage(data: data)
+        }
+        return UIImage(data: data)
+    }
+
+    private static func isLikelyGIF(_ data: Data) -> Bool {
+        guard data.count >= 3 else { return false }
+        return data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46
+    }
+
+    private static func animatedImageFromImageIO(data: Data) -> UIImage? {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        let count = CGImageSourceGetCount(source)
+        guard count > 1 else {
+            guard let cg = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
+            return UIImage(cgImage: cg)
+        }
+
+        let strideBy = count > maxAnimatedFrames ? Int(ceil(Double(count) / Double(maxAnimatedFrames))) : 1
+        var frames: [UIImage] = []
+        var duration: TimeInterval = 0
+
+        var index = 0
+        while index < count {
+            guard let cg = CGImageSourceCreateImageAtIndex(source, index, nil) else {
+                index += strideBy
+                continue
+            }
+            frames.append(UIImage(cgImage: cg))
+            var chunk: TimeInterval = 0
+            for j in index..<min(index + strideBy, count) {
+                chunk += gifFrameDelay(source: source, index: j)
+            }
+            duration += chunk
+            index += strideBy
+        }
+
+        guard !frames.isEmpty else { return nil }
+        let total = max(duration, 0.25)
+        return UIImage.animatedImage(with: frames, duration: total)
+    }
+
+    private static func gifFrameDelay(source: CGImageSource, index: Int) -> TimeInterval {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [String: Any],
+              let gif = props[kCGImagePropertyGIFDictionary as String] as? [String: Any] else {
+            return 0.08
+        }
+        if let u = gif[kCGImagePropertyGIFUnclampedDelayTime as String] as? Double, u > 0.011 {
+            return u
+        }
+        if let d = gif[kCGImagePropertyGIFDelayTime as String] as? Double, d > 0.011 {
+            return d
+        }
+        return 0.08
+    }
+}
+
+private struct ElborblaFinishCelebrationOverlay: View {
+    let image: UIImage?
+    let onContinue: () -> Void
+
+    @State private var appeared = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.72)
+                .ignoresSafeArea()
+
+            GeometryReader { geo in
+                let horizontalPad: CGFloat = 20
+                let maxMediaW = min(geo.size.width - horizontalPad * 2, geo.size.width * 0.5)
+                let maxMediaH = max(160, geo.size.height * 0.5)
+
+                VStack(spacing: 0) {
+                    Text("¡Entreno terminado!")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(.white)
+                        .shadow(color: .black.opacity(0.45), radius: 6, y: 2)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, geo.safeAreaInsets.top + 8)
+                        .padding(.horizontal, horizontalPad)
+                        .padding(.bottom, 12)
+
+                    Spacer(minLength: 6)
+
+                    Group {
+                        if let image {
+                            CelebrationGIFBox(image: image)
+                                .frame(width: maxMediaW, height: maxMediaH)
+                                .clipped()
+                        } else {
+                            Text("🎉")
+                                .font(.system(size: 72))
+                                .foregroundStyle(.white)
+                                .frame(width: maxMediaW, height: min(maxMediaH, 200))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .scaleEffect(appeared ? 1 : 0.88)
+                    .opacity(appeared ? 1 : 0)
+
+                    Spacer(minLength: 6)
+
+                    Button(action: onContinue) {
+                        Text("Continuar")
+                            .font(.headline.weight(.semibold))
+                            .foregroundStyle(.black.opacity(0.88))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 15)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                    .fill(Color.white)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, horizontalPad + 4)
+                    .padding(.bottom, max(geo.safeAreaInsets.bottom, 12) + 10)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.78)) {
+                appeared = true
+            }
+        }
+    }
+}
+
+private struct CelebrationGIFBox: UIViewRepresentable {
+    let image: UIImage
+
+    final class Coordinator {
+        var imageView: UIImageView?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView {
+        let box = UIView()
+        box.backgroundColor = .clear
+        box.clipsToBounds = true
+
+        let iv = UIImageView(image: image)
+        iv.contentMode = .scaleAspectFit
+        iv.clipsToBounds = true
+        iv.backgroundColor = .clear
+        iv.isUserInteractionEnabled = false
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        iv.setContentCompressionResistancePriority(.fittingSizeLevel, for: .horizontal)
+        iv.setContentCompressionResistancePriority(.fittingSizeLevel, for: .vertical)
+        box.addSubview(iv)
+
+        NSLayoutConstraint.activate([
+            iv.topAnchor.constraint(equalTo: box.topAnchor),
+            iv.leadingAnchor.constraint(equalTo: box.leadingAnchor),
+            iv.trailingAnchor.constraint(equalTo: box.trailingAnchor),
+            iv.bottomAnchor.constraint(equalTo: box.bottomAnchor),
+        ])
+
+        context.coordinator.imageView = iv
+        if (image.images?.count ?? 0) > 1 {
+            iv.animationRepeatCount = 0
+            iv.startAnimating()
+        }
+        return box
+    }
+
+    func updateUIView(_ box: UIView, context: Context) {
+        guard let iv = context.coordinator.imageView else { return }
+        iv.image = image
+        if (image.images?.count ?? 0) > 1 {
+            iv.animationRepeatCount = 0
+            iv.startAnimating()
+        } else {
+            iv.stopAnimating()
+        }
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIView, context: Context) -> CGSize? {
+        guard let w = proposal.width, let h = proposal.height,
+              w.isFinite, h.isFinite, w > 1, h > 1 else { return nil }
+        return CGSize(width: w, height: h)
     }
 }

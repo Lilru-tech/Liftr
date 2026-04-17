@@ -8,51 +8,20 @@ struct AppleHealthImportView: View {
     @State private var importing = false
     @State private var summary: HealthKitImportSummary?
     @State private var banner: String?
+    @State private var showImportHelp = false
 
     var body: some View {
         List {
             Section {
                 settingsCard {
-                    VStack(alignment: .leading, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("Apple HealthKit")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.primary)
 
                         Text(
-                            "This screen uses HealthKit (Apple’s health framework) to read workout samples from the Health app "
-                                + "and copy them into Liftr as cardio workouts. Nothing is written back to Health from this import; "
-                                + "granting access happens in the system permission sheet."
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                        Text("How import works")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .padding(.top, 4)
-
-                        Text(
-                            "You choose a date range (or a quick preset), then tap Import workouts. "
-                                + "Liftr looks in the Health app—including data from your Apple Watch if you use one—and "
-                                + "creates matching sessions here as cardio workouts. Nothing is removed or changed in Health."
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                        Text(
-                            "What we import: runs, walks, hikes, outdoor bike rides, indoor cycling / stationary bike "
-                                + "(when Apple marks them indoor or as an indoor cycle workout), swims, and rowing. "
-                                + "Indoor walks and runs are saved as Treadmill. If Apple saved a GPS route, distance, or heart rate, we copy those in when they’re available."
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                        Text(
-                            "What we skip: strength training, HIIT, yoga, team sports, and every other activity type that isn’t in the list above—log those in Liftr yourself. "
-                                + "Sessions you already imported are ignored so you don’t get duplicates."
+                            "Reads compatible workouts from the Health app and copies them into Liftr as cardio. "
+                                + "Nothing is written back to Health. Tap the info button for the full guide."
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -137,6 +106,23 @@ struct AppleHealthImportView: View {
         .background(Color.clear)
         .navigationTitle("Apple Health (HealthKit)")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showImportHelp = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+                .accessibilityLabel("Apple Health import information")
+            }
+        }
+        .sheet(isPresented: $showImportHelp) {
+            AppleHealthImportHelpSheet()
+                .presentationDetents([.medium, .large])
+                .presentationBackground(.clear)
+        }
     }
 
     @ViewBuilder

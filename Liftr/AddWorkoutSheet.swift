@@ -185,6 +185,9 @@ struct AddWorkoutSheet: View {
     @State private var hyroxStatsExpanded = false
     @State private var showWorkoutRecommend = false
     @State private var recommendKind: WorkoutKind = .strength
+    @State private var hyroxCustomDisplayNameSuggestionsFromDB: [String] = []
+    @State private var didLoadHyroxCustomDisplayNameSuggestions = false
+    @FocusState private var hyroxExerciseNameFocusedId: UUID?
 
     var body: some View {
         NavigationStack {
@@ -896,6 +899,120 @@ struct AddWorkoutSheet: View {
             }
         )
     }
+
+    private func loadHyroxCustomDisplayNameSuggestionsFromServer() async {
+        await MainActor.run {
+            guard !didLoadHyroxCustomDisplayNameSuggestions else { return }
+            didLoadHyroxCustomDisplayNameSuggestions = true
+        }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("hyrox_session_exercises")
+                .select("exercise_display_name")
+                .eq("exercise_code", value: HyroxExerciseFormatting.customExerciseCode)
+                .limit(800)
+                .execute()
+            struct Row: Decodable { let exercise_display_name: String? }
+            let rows = try JSONDecoder().decode([Row].self, from: res.data)
+            let raw = rows
+                .compactMap { $0.exercise_display_name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let deduped = Self.canonicalSortedHyroxDisplayNames(from: raw)
+            await MainActor.run { hyroxCustomDisplayNameSuggestionsFromDB = deduped }
+        } catch {
+            await MainActor.run { didLoadHyroxCustomDisplayNameSuggestions = false }
+        }
+    }
+
+    private static func normalizedHyroxDisplayNameKey(_ s: String) -> String {
+        s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+    }
+
+    private static func canonicalSortedHyroxDisplayNames(from raw: [String]) -> [String] {
+        var bestByNorm: [String: String] = [:]
+        for r in raw {
+            let t = r.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            let k = normalizedHyroxDisplayNameKey(t)
+            if let existing = bestByNorm[k] {
+                if t.count > existing.count { bestByNorm[k] = t }
+            } else {
+                bestByNorm[k] = t
+            }
+        }
+        return bestByNorm.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func hyroxFilteredExerciseNameSuggestions(exerciseIndex i: Int) -> [String] {
+        guard sport.hyExercises.indices.contains(i) else { return [] }
+        var raw: [String] = hyroxCustomDisplayNameSuggestionsFromDB
+        for (idx, ex) in sport.hyExercises.enumerated() where idx != i {
+            let t = ex.customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, HyroxExerciseCode(rawValue: ex.exerciseCode) == nil else { continue }
+            raw.append(t)
+        }
+        let deduped = Self.canonicalSortedHyroxDisplayNames(from: raw)
+        let q = sport.hyExercises[i].customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty {
+            return Array(deduped.prefix(8))
+        }
+        let qn = Self.normalizedHyroxDisplayNameKey(q)
+        let filtered = deduped.filter {
+            Self.normalizedHyroxDisplayNameKey($0).contains(qn) || $0.localizedStandardContains(q)
+        }
+        return Array(filtered.prefix(8))
+    }
+
+    @ViewBuilder
+    private func hyroxExerciseNameSuggestionsList(exerciseIndex i: Int) -> some View {
+        let rows = hyroxFilteredExerciseNameSuggestions(exerciseIndex: i)
+        if rows.isEmpty {
+            EmptyView()
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows, id: \.self) { name in
+                        Button {
+                            sport.hyExercises[i].customDisplayName = name
+                            hyroxExerciseNameFocusedId = nil
+                        } label: {
+                            Text(name)
+                                .font(.subheadline)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 160)
+            .fixedSize(horizontal: false, vertical: true)
+            .scrollClipDisabled()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.secondary.opacity(0.22), lineWidth: 0.8)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func hyroxExerciseNameFieldWithSuggestions(index i: Int) -> some View {
+        let exId = sport.hyExercises[i].id
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Exercise name", text: $sport.hyExercises[i].customDisplayName)
+                .textFieldStyle(.roundedBorder)
+                .focused($hyroxExerciseNameFocusedId, equals: exId)
+            if hyroxExerciseNameFocusedId == exId {
+                hyroxExerciseNameSuggestionsList(exerciseIndex: i)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
     
     @ViewBuilder
     private func sportSpecificFields() -> some View {
@@ -1232,29 +1349,38 @@ struct AddWorkoutSheet: View {
                         .pickerStyle(.menu)
 
                         if HyroxExerciseCode(rawValue: sport.hyExercises[i].exerciseCode) == nil {
-                            TextField("Exercise name", text: $sport.hyExercises[i].customDisplayName)
-                                .textFieldStyle(.roundedBorder)
+                            hyroxExerciseNameFieldWithSuggestions(index: i)
                         }
 
-                        HStack {
-                            TextField("Distance (m)", text: $sport.hyExercises[i].distanceM)
-                                .keyboardType(.numberPad)
-                            TextField("Reps", text: $sport.hyExercises[i].reps)
-                                .keyboardType(.numberPad)
-                        }
-
-                        HStack {
-                            TextField("Weight (kg)", text: $sport.hyExercises[i].weightKg)
-                                .keyboardType(.decimalPad)
-                            TextField("Duration (sec)", text: $sport.hyExercises[i].durationSec)
-                                .keyboardType(.numberPad)
-                        }
-
-                        HStack {
-                            TextField("Height (cm)", text: $sport.hyExercises[i].heightCm)
-                                .keyboardType(.numberPad)
-                            TextField("Implement count", text: $sport.hyExercises[i].implementCount)
-                                .keyboardType(.numberPad)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .top, spacing: 6) {
+                                StrengthStyleMetricField(title: "Distance (m)") {
+                                    TextField("—", text: $sport.hyExercises[i].distanceM)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "Reps") {
+                                    TextField("—", text: $sport.hyExercises[i].reps)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "kg") {
+                                    TextField("—", text: $sport.hyExercises[i].weightKg)
+                                        .keyboardType(.decimalPad)
+                                }
+                            }
+                            HStack(alignment: .top, spacing: 6) {
+                                StrengthStyleMetricField(title: "Duration (s)") {
+                                    TextField("—", text: $sport.hyExercises[i].durationSec)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "Height (cm)") {
+                                    TextField("—", text: $sport.hyExercises[i].heightCm)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "Implements") {
+                                    TextField("—", text: $sport.hyExercises[i].implementCount)
+                                        .keyboardType(.numberPad)
+                                }
+                            }
                         }
 
                         TextField("Notes", text: $sport.hyExercises[i].notes)
@@ -1275,6 +1401,10 @@ struct AddWorkoutSheet: View {
                 }
                 .buttonStyle(.borderless)
                 .padding(.top, 2)
+            }
+            .task(id: "\(kind.rawValue)-\(sport.sport.rawValue)") {
+                guard kind == .sport, sport.sport == .hyrox else { return }
+                await loadHyroxCustomDisplayNameSuggestionsFromServer()
             }
             
         case .ski:

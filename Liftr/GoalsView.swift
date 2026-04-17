@@ -533,7 +533,8 @@ private struct NewGoalSheet: View {
     @State private var target: String = ""
     @State private var loadingSuggestion = false
     @State private var didUserEditTitle = false
-    
+    @State private var suggestionError: String?
+
     private var metricAlreadyExists: Bool {
         existingMetrics.contains(metric)
     }
@@ -550,6 +551,7 @@ private struct NewGoalSheet: View {
             .pickerStyle(.segmented)
             .onChange(of: metric) { _, _ in
                 didUserEditTitle = false
+                suggestionError = nil
                 Task { await loadSuggestion(forceOverwrite: true) }
             }
             if metricAlreadyExists {
@@ -581,11 +583,19 @@ private struct NewGoalSheet: View {
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
 
-                Text("Recommendation is based on your recent activity (last 8 weeks). If you’re new, we use a typical average.")
+                Text("Recommendation reflects your recent activity (about the last 8 weeks). If you’re new, we use a typical average.")
                     .font(.caption2)
                     .foregroundColor(.black)
                     .multilineTextAlignment(.leading)
                     .padding(.top, 4)
+
+                if let suggestionError {
+                    Text(suggestionError)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.leading)
+                        .padding(.top, 2)
+                }
             }
 
             if loadingSuggestion {
@@ -620,8 +630,14 @@ private struct NewGoalSheet: View {
     }
 
     private func loadSuggestion(forceOverwrite: Bool = false) async {
-        guard let uid = userId else { return }
+        guard let uid = userId else {
+            await MainActor.run {
+                suggestionError = "Can’t load a recommendation without a user."
+            }
+            return
+        }
         loadingSuggestion = true
+        await MainActor.run { suggestionError = nil }
         defer { loadingSuggestion = false }
 
         do {
@@ -637,6 +653,9 @@ private struct NewGoalSheet: View {
                 }
             }
         } catch {
+            await MainActor.run {
+                suggestionError = error.localizedDescription
+            }
         }
     }
 }
