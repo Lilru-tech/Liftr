@@ -1,0 +1,2 @@
+-- Superseded by: 20260417200000_fix_create_linked_strength_workout_copy_kind.sql
+-- (Diagnostic snippets were moved into that migration’s comment block if needed.)

@@ -4,6 +4,29 @@ import MapKit
 import CoreLocation
 
 struct WorkoutDetailView: View {
+    private enum ActiveStrengthLaunch: Identifiable, Equatable {
+        case solo
+        case dual(guestWorkoutId: Int, guestAvatarURL: String?, hostAvatarURL: String?)
+        case trio(
+            guest1WorkoutId: Int,
+            guest1AvatarURL: String?,
+            guest2WorkoutId: Int,
+            guest2AvatarURL: String?,
+            hostAvatarURL: String?
+        )
+
+        var id: String {
+            switch self {
+            case .solo:
+                return "strength-solo"
+            case .dual(let guestWorkoutId, _, _):
+                return "strength-dual-\(guestWorkoutId)"
+            case .trio(let g1, _, let g2, _, _):
+                return "strength-trio-\(g1)-\(g2)"
+            }
+        }
+    }
+
     @EnvironmentObject var app: AppState
     @Environment(\.dismiss) private var dismiss
     let workoutId: Int
@@ -21,7 +44,7 @@ struct WorkoutDetailView: View {
     private var canDuplicate: Bool { canEdit || isParticipant }
     
     private var showStartButton: Bool {
-        canEdit && (workout?.state == "planned")
+        (canEdit || isParticipant) && (workout?.state == "planned")
     }
     
     struct WorkoutDetailRow: Decodable {
@@ -73,10 +96,15 @@ struct WorkoutDetailView: View {
     @State private var compareComputing = false
     @State private var showCompare = false
     @State private var showDeleteConfirm = false
-    @State private var showActiveStrength = false
     @State private var showActiveCardio = false
     @State private var showActiveSport = false
     @State private var deleteBusy = false
+    @State private var showDualStartChoice = false
+    /// Same-phone sheet: which participants are marked (default: first only → Dual). Group label when count > 1.
+    @State private var dualSheetSelectedParticipantIds: Set<UUID> = []
+    @State private var dualGuestWorkoutIdForActive: Int? = nil
+    @State private var dualGuest2WorkoutIdForActive: Int? = nil
+    @State private var activeStrengthPresentation: ActiveStrengthLaunch?
     
     @ViewBuilder
     private var editDestination: some View {
@@ -124,7 +152,8 @@ struct WorkoutDetailView: View {
             await loadCompareCandidates()
         }
         .onReceive(NotificationCenter.default.publisher(for: .workoutDidChange)) { note in
-            if let id = note.object as? Int, id == workoutId {
+            if let id = note.object as? Int,
+               id == workoutId || id == dualGuestWorkoutIdForActive || id == dualGuest2WorkoutIdForActive {
                 Task { await load(); await loadParticipants() }
             }
         }
@@ -149,10 +178,10 @@ struct WorkoutDetailView: View {
         } message: {
             Text("This will permanently delete this workout and its sets.")
         }
-        .alert("No se pudo iniciar el entreno", isPresented: $showErrorAlert) {
+        .alert("Could not start workout", isPresented: $showErrorAlert) {
             Button("OK", role: .cancel) { }
         } message: {
-            Text(alertMessage.isEmpty ? "Error desconocido" : alertMessage)
+            Text(alertMessage.isEmpty ? "Unknown error" : alertMessage)
         }
         .sheet(isPresented: $showLikesSheet) { LikersSheet(likers: likers)
                 .onAppear { Task { await loadLikers() } }
@@ -186,23 +215,77 @@ struct WorkoutDetailView: View {
                     .presentationDragIndicator(.visible)
             }
         }
+        .sheet(isPresented: $showDualStartChoice) {
+            dualStartChoiceSheet
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .gradientBG()
+                .presentationDetents([.fraction(0.42), .medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(.ultraThinMaterial)
+                .onChange(of: showDualStartChoice) { _, isOpen in
+                    if isOpen, let first = participants.first {
+                        dualSheetSelectedParticipantIds = [first.user_id]
+                    }
+                }
+                .onChange(of: participants.map(\.user_id)) { _, _ in
+                    guard showDualStartChoice else { return }
+                    let allowed = Set(participants.map(\.user_id))
+                    dualSheetSelectedParticipantIds = Set(
+                        dualSheetSelectedParticipantIds.filter { allowed.contains($0) }
+                    )
+                    if dualSheetSelectedParticipantIds.isEmpty, let first = participants.first {
+                        dualSheetSelectedParticipantIds = [first.user_id]
+                    }
+                }
+        }
         .navigationDestination(isPresented: $showEdit) {
             editDestination
         }
-        .fullScreenCover(
-            isPresented: $showActiveStrength,
-            onDismiss: {
-                Task {
-                    await load()
-                    await loadParticipants()
-                    await loadCompareCandidates()
-                    reloadKey = UUID()
-                }
+        .fullScreenCover(item: $activeStrengthPresentation, onDismiss: {
+            dualGuestWorkoutIdForActive = nil
+            dualGuest2WorkoutIdForActive = nil
+            Task {
+                await load()
+                await loadParticipants()
+                await loadCompareCandidates()
+                reloadKey = UUID()
             }
-        ) {
-            ActiveStrengthWorkoutView(workoutId: workoutId)
+        }) { launch in
+            switch launch {
+            case .solo:
+                ActiveStrengthWorkoutView(
+                    workoutId: workoutId,
+                    dualGuestWorkoutId: nil,
+                    dualGuestAvatarURL: nil,
+                    dualGuest2WorkoutId: nil,
+                    dualGuest2AvatarURL: nil,
+                    dualHostAvatarURL: profile?.avatar_url
+                )
                 .environmentObject(app)
                 .gradientBG()
+            case .dual(let guestWid, let guestAvatar, let hostAvatar):
+                ActiveStrengthWorkoutView(
+                    workoutId: workoutId,
+                    dualGuestWorkoutId: guestWid,
+                    dualGuestAvatarURL: guestAvatar,
+                    dualGuest2WorkoutId: nil,
+                    dualGuest2AvatarURL: nil,
+                    dualHostAvatarURL: hostAvatar ?? profile?.avatar_url
+                )
+                .environmentObject(app)
+                .gradientBG()
+            case .trio(let g1Wid, let g1Av, let g2Wid, let g2Av, let hostAv):
+                ActiveStrengthWorkoutView(
+                    workoutId: workoutId,
+                    dualGuestWorkoutId: g1Wid,
+                    dualGuestAvatarURL: g1Av,
+                    dualGuest2WorkoutId: g2Wid,
+                    dualGuest2AvatarURL: g2Av,
+                    dualHostAvatarURL: hostAv ?? profile?.avatar_url
+                )
+                .environmentObject(app)
+                .gradientBG()
+            }
         }
         .fullScreenCover(
             isPresented: $showActiveCardio,
@@ -406,30 +489,287 @@ struct WorkoutDetailView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
     }
     
-    private var startButtonBar: some View {
-        Button {
-            Task {
-                do {
-                    try await setWorkoutStartedNow()
+    private var shouldOfferDualStrengthStart: Bool {
+        effectiveWorkoutKindForDual == "strength" && !participants.isEmpty
+    }
 
-                    await MainActor.run {
-                        switch workout?.kind.lowercased() {
-                        case "strength":
-                            showActiveStrength = true
-                        case "cardio":
-                            showActiveCardio = true
-                        case "sport":
-                            showActiveSport = true
-                        default:
-                            break
+    private var effectiveWorkoutKindForDual: String {
+        let raw = (workout?.kind ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if raw == "strength" || raw == "cardio" || raw == "sport" { return raw }
+        let title = (workout?.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if title == "strength" { return "strength" }
+        return raw
+    }
+
+    @ViewBuilder
+    private var dualStartChoiceSheet: some View {
+        if participants.isEmpty {
+            EmptyView()
+        } else {
+            let multiInviteWorkout = participants.count > 1
+            let showsAsGroupSession = dualSheetSelectedParticipantIds.count > 1
+            let soleSelectedPick: ParticipantRow? = {
+                guard dualSheetSelectedParticipantIds.count == 1,
+                      let only = dualSheetSelectedParticipantIds.first
+                else { return nil }
+                return participants.first { $0.user_id == only }
+            }()
+            VStack(spacing: 16) {
+                Text(showsAsGroupSession ? "Group workout" : "Dual workout")
+                    .font(.title3.weight(.bold))
+                if multiInviteWorkout {
+                    Text(
+                        "Tap to select people. Dual: exactly one selected. Group: pick two (you plus two partners on this phone, three people total)."
+                    )
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(participants) { p in
+                                dualParticipantSelectRow(
+                                    participant: p,
+                                    isSelected: dualSheetSelectedParticipantIds.contains(p.user_id)
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    var next = dualSheetSelectedParticipantIds
+                                    if next.contains(p.user_id) {
+                                        if next.count > 1 { next.remove(p.user_id) }
+                                    } else {
+                                        if next.count >= 2 { return }
+                                        next.insert(p.user_id)
+                                    }
+                                    dualSheetSelectedParticipantIds = next
+                                }
+                            }
                         }
                     }
-                } catch {
-                    await MainActor.run {
-                        alertMessage = error.localizedDescription
-                        showErrorAlert = true
+                    .frame(maxHeight: 240)
+                } else if let p = participants.first {
+                    HStack(spacing: 12) {
+                        AvatarView(urlString: p.avatar_url)
+                            .frame(width: 56, height: 56)
+                        Text("@\(p.username ?? "user")")
+                            .font(.title3.weight(.semibold))
+                            .lineLimit(1)
+                    }
+                    Text("Train together on this phone. Each person keeps their own weight, reps, and rest timers.")
+                        .font(.subheadline)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                }
+                HStack(spacing: 12) {
+                    Button("Just me") {
+                        showDualStartChoice = false
+                        Task { await startPlannedWorkout(dualParticipantId: nil, dualGuestAvatar: nil) }
+                    }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+
+                    Button(showsAsGroupSession ? "Group" : "Dual") {
+                        showDualStartChoice = false
+                        if dualSheetSelectedParticipantIds.count > 1 {
+                            let picks = participants.filter { dualSheetSelectedParticipantIds.contains($0.user_id) }
+                            guard picks.count >= 2 else { return }
+                            let pair = Array(picks.prefix(2))
+                            guard pair.count == 2 else { return }
+                            Task { await startPlannedTrioStrength(guestA: pair[0], guestB: pair[1]) }
+                            return
+                        }
+                        guard let pick = soleSelectedPick else { return }
+                        Task { await startPlannedWorkout(dualParticipantId: pick.user_id, dualGuestAvatar: pick.avatar_url) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    private func dualParticipantSelectRow(participant p: ParticipantRow, isSelected: Bool) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+            AvatarView(urlString: p.avatar_url)
+                .frame(width: 44, height: 44)
+            Text("@\(p.username ?? "user")")
+                .font(.body.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(isSelected ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.04))
+        )
+    }
+
+    private struct CreateLinkedStrengthRPC: Encodable {
+        let p_source_workout_id: Int64
+        let p_target_user_id: UUID
+    }
+
+    private func rpcCreateLinkedStrengthCopy(targetUserId: UUID) async throws -> Int64 {
+        let client = SupabaseManager.shared.client
+        let params = CreateLinkedStrengthRPC(
+            p_source_workout_id: Int64(workoutId),
+            p_target_user_id: targetUserId
+        )
+        let res = try await client.rpc("create_linked_strength_workout_copy", params: params).execute()
+        let data = res.data
+        if let id = try? JSONDecoder().decode(Int64.self, from: data) {
+            return id
+        }
+        if let arr = try? JSONDecoder().decode([Int64].self, from: data), let id = arr.first {
+            return id
+        }
+        throw NSError(
+            domain: "DualWorkout",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Could not create the linked workout copy (invalid RPC response)."]
+        )
+    }
+
+    /// `create_linked_strength_workout_copy` reads `workouts.kind` from the source row; an empty string is not a valid `workout_kind` enum value.
+    private func ensureStrengthKindPersistedBeforeLinkedCopy() async throws {
+        struct KindPatch: Encodable { let kind: String }
+        _ = try await SupabaseManager.shared.client
+            .from("workouts")
+            .update(KindPatch(kind: "strength"))
+            .eq("id", value: workoutId)
+            .execute()
+
+        await MainActor.run {
+            guard let w = workout else { return }
+            self.workout = WorkoutDetailRow(
+                id: w.id,
+                user_id: w.user_id,
+                kind: "strength",
+                title: w.title,
+                notes: w.notes,
+                started_at: w.started_at,
+                ended_at: w.ended_at,
+                duration_min: w.duration_min,
+                perceived_intensity: w.perceived_intensity,
+                state: w.state,
+                calories_kcal: w.calories_kcal
+            )
+        }
+        NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
+    }
+
+    private func startPlannedWorkout(dualParticipantId: UUID?, dualGuestAvatar: String?) async {
+        do {
+            try await setWorkoutStartedNow()
+
+            if let pid = dualParticipantId, effectiveWorkoutKindForDual == "strength" {
+                try await ensureStrengthKindPersistedBeforeLinkedCopy()
+                let newWid = try await rpcCreateLinkedStrengthCopy(targetUserId: pid)
+                await MainActor.run {
+                    let gid = Int(newWid)
+                    dualGuestWorkoutIdForActive = gid
+                    dualGuest2WorkoutIdForActive = nil
+                    let hostURL = profile?.avatar_url
+                    switch effectiveWorkoutKindForDual {
+                    case "strength":
+                        activeStrengthPresentation = .dual(
+                            guestWorkoutId: gid,
+                            guestAvatarURL: dualGuestAvatar,
+                            hostAvatarURL: hostURL
+                        )
+                    case "cardio":
+                        showActiveCardio = true
+                    case "sport":
+                        showActiveSport = true
+                    default:
+                        break
+                    }
+                    #if DEBUG
+                    print(
+                        "[DualStrengthPresent] item=dual guestWid=\(gid) "
+                            + "guestAvLen=\(dualGuestAvatar?.count ?? 0) hostAvLen=\(hostURL?.count ?? 0) "
+                            + "profileNil=\(profile == nil)"
+                    )
+                    #endif
+                }
+            } else {
+                await MainActor.run {
+                    dualGuestWorkoutIdForActive = nil
+                    dualGuest2WorkoutIdForActive = nil
+                    switch effectiveWorkoutKindForDual {
+                    case "strength":
+                        activeStrengthPresentation = .solo
+                    case "cardio":
+                        showActiveCardio = true
+                    case "sport":
+                        showActiveSport = true
+                    default:
+                        break
                     }
                 }
+            }
+        } catch {
+            let detail = Self.describeSupabaseError(error)
+            print("[DualStart][ERROR] workoutId=\(workoutId) dual=\(dualParticipantId != nil) :: \(detail)")
+            await MainActor.run {
+                alertMessage = error.localizedDescription
+                showErrorAlert = true
+            }
+        }
+    }
+
+    private func startPlannedTrioStrength(guestA: ParticipantRow, guestB: ParticipantRow) async {
+        do {
+            try await setWorkoutStartedNow()
+            try await ensureStrengthKindPersistedBeforeLinkedCopy()
+            let w1 = try await rpcCreateLinkedStrengthCopy(targetUserId: guestA.user_id)
+            let w2 = try await rpcCreateLinkedStrengthCopy(targetUserId: guestB.user_id)
+            await MainActor.run {
+                let id1 = Int(w1)
+                let id2 = Int(w2)
+                dualGuestWorkoutIdForActive = id1
+                dualGuest2WorkoutIdForActive = id2
+                let hostURL = profile?.avatar_url
+                activeStrengthPresentation = .trio(
+                    guest1WorkoutId: id1,
+                    guest1AvatarURL: guestA.avatar_url,
+                    guest2WorkoutId: id2,
+                    guest2AvatarURL: guestB.avatar_url,
+                    hostAvatarURL: hostURL
+                )
+            }
+        } catch {
+            let detail = Self.describeSupabaseError(error)
+            print("[TrioStart][ERROR] workoutId=\(workoutId) :: \(detail)")
+            await MainActor.run {
+                alertMessage = error.localizedDescription
+                showErrorAlert = true
+            }
+        }
+    }
+
+    private static func describeSupabaseError(_ error: Error) -> String {
+        if let pe = error as? PostgrestError {
+            var parts: [String] = [pe.message]
+            if let c = pe.code, !c.isEmpty { parts.append("code=\(c)") }
+            if let h = pe.hint, !h.isEmpty { parts.append("hint=\(h)") }
+            if let d = pe.detail, !d.isEmpty { parts.append("detail=\(d)") }
+            return parts.joined(separator: " | ")
+        }
+        return "\(error.localizedDescription) [\(String(describing: Swift.type(of: error)))]"
+    }
+
+    private var startButtonBar: some View {
+        Button {
+            if shouldOfferDualStrengthStart {
+                showDualStartChoice = true
+            } else {
+                Task { await startPlannedWorkout(dualParticipantId: nil, dualGuestAvatar: nil) }
             }
         } label: {
             Text("Start")
@@ -853,7 +1193,7 @@ struct WorkoutDetailView: View {
             throw NSError(
                 domain: "StartWorkout",
                 code: 0,
-                userInfo: [NSLocalizedDescriptionKey: "No se actualizó ninguna fila (RLS/policy o workoutId inválido)."]
+                userInfo: [NSLocalizedDescriptionKey: "No row was updated (RLS/policy or invalid workout id)."]
             )
         }
 

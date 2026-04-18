@@ -57,6 +57,29 @@ enum PublishMode: String, CaseIterable, Identifiable {
     var stateParam: String { self == .add ? "published" : "planned" }
 }
 
+enum PlannedGroupStrengthProgramming: String, CaseIterable, Identifiable, Hashable {
+    case sharedSessionTemplate
+    case individualPlans
+
+    var id: String { rawValue }
+
+    var segmentedLabel: String {
+        switch self {
+        case .sharedSessionTemplate: return "Same workout"
+        case .individualPlans: return "Per person"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .sharedSessionTemplate:
+            return "One strength workout for the group — same exercises and sets — whether you save as Plan or Add."
+        case .individualPlans:
+            return "Each person gets their own strength workout (exercises, weights, reps). Use the person switch above the editor. Works for Plan or Add."
+        }
+    }
+}
+
 enum RacketMode: String, CaseIterable, Identifiable {
     case singles, doubles, mixedDoubles
     var id: String { rawValue }
@@ -140,6 +163,8 @@ struct AddWorkoutDraft {
     var endedAt: Date? = nil
     var perceived: WorkoutIntensity = .moderate
     var strengthItems: [EditableExercise] = []
+    var plannedStrengthPerPerson: Bool = false
+    var strengthLaneItems: [[EditableExercise]]? = nil
     var cardio: CardioForm? = nil
     var sport: SportForm? = nil
 }
@@ -176,8 +201,13 @@ struct AddWorkoutSheet: View {
     @State private var didEditCardioDuration = false
     @State private var didEditSportDuration  = false
     @State private var showParticipantsPicker = false
-    @State private var confirmRemoveIndex: Int? = nil
+    @State private var confirmRemoveStrengthExercise: (lane: Int, index: Int)? = nil
     @State private var publishMode: PublishMode = .add
+    @State private var groupProgrammingMode: PlannedGroupStrengthProgramming = .sharedSessionTemplate
+    @State private var strengthLaneItems: [[EditableExercise]] = [[EditableExercise()]]
+    @State private var strengthProgramPage: Int = 0
+    /// Target lane when applying strength recommendation (nil = host / single list).
+    @State private var strengthRecommendTargetLane: Int?
     @State private var durationLabelMin: Int? = nil
     @State private var didApplyDraft = false
     @State private var isApplyingDraft = false
@@ -185,6 +215,9 @@ struct AddWorkoutSheet: View {
     @State private var hyroxStatsExpanded = false
     @State private var showWorkoutRecommend = false
     @State private var recommendKind: WorkoutKind = .strength
+    @State private var hyroxCustomDisplayNameSuggestionsFromDB: [String] = []
+    @State private var didLoadHyroxCustomDisplayNameSuggestions = false
+    @FocusState private var hyroxExerciseNameFocusedId: UUID?
 
     var body: some View {
         NavigationStack {
@@ -330,6 +363,36 @@ struct AddWorkoutSheet: View {
                                 Label("Add participants", systemImage: "person.crop.circle.badge.plus")
                             }
                             .buttonStyle(.borderless)
+
+                            if kind == .strength, !participants.isEmpty {
+                                Divider().padding(.vertical, 6)
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Group programming")
+                                        .font(.subheadline.weight(.semibold))
+
+                                    Text("Same strength session for everyone, or a separate workout per person (different lifts, weights, reps). Applies to Plan and Add.")
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(.top, 2)
+
+                                    Picker("", selection: $groupProgrammingMode) {
+                                        ForEach(PlannedGroupStrengthProgramming.allCases) { mode in
+                                            Text(mode.segmentedLabel).tag(mode)
+                                        }
+                                    }
+                                    .pickerStyle(.segmented)
+                                    .padding(.vertical, 6)
+
+                                    Text(groupProgrammingMode.detail)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .padding(.top, 2)
+                                }
+                                .padding(.top, 4)
+                                .padding(.bottom, 2)
+                            }
                         }
                     } header: {
                         Text("PARTICIPANTS").foregroundStyle(.secondary)
@@ -356,33 +419,7 @@ struct AddWorkoutSheet: View {
                 .listSectionSpacing(8)
                 .contentMargins(.bottom, 72, for: .scrollContent)
                 .sheet(item: $pickerHandle) { handle in
-                    if let idx = items.firstIndex(where: { $0.id == handle.id }) {
-                        ExercisePickerSheet(
-                            all: catalog,
-                            selected: Binding(
-                                get: {
-                                    guard let exid = items[idx].exerciseId else { return nil }
-                                    return catalog.first(where: { $0.id == exid })
-                                },
-                                set: { picked in
-                                    items[idx].exerciseId = picked?.id
-                                    if let ex = picked {
-                                        items[idx].exerciseName = ex.localizedName(for: exerciseLanguageFromGlobalStorage())
-                                    } else {
-                                        items[idx].exerciseName = ""
-                                    }
-                                }
-                            )
-                        )
-                        .gradientBG()
-                        .presentationDetents([.large])
-                        .presentationBackground(.clear)
-                    } else {
-                        ExercisePickerSheet(all: catalog, selected: .constant(nil))
-                            .gradientBG()
-                            .presentationDetents([.large])
-                            .presentationBackground(.clear)
-                    }
+                    strengthExercisePickerSheet(for: handle)
                 }
                 .sheet(isPresented: $showHelp) {
                     WorkoutHelpSheet()
@@ -442,22 +479,54 @@ struct AddWorkoutSheet: View {
                 pickerHandle = nil
             }
         }
+        .onChange(of: participants.map(\.user_id)) { _, _ in
+            if participants.isEmpty {
+                groupProgrammingMode = .sharedSessionTemplate
+            }
+            syncStrengthLaneRowsWithParticipants()
+        }
+        .onChange(of: publishMode) { _, _ in
+            if kind == .strength, groupProgrammingMode == .individualPlans {
+                syncStrengthLaneRowsWithParticipants()
+            }
+        }
+        .onChange(of: kind) { _, new in
+            if new != .strength {
+                groupProgrammingMode = .sharedSessionTemplate
+                strengthLaneItems = [[EditableExercise()]]
+            }
+        }
+        .onChange(of: groupProgrammingMode) { _, new in
+            if new == .individualPlans, kind == .strength, !participants.isEmpty {
+                syncStrengthLaneRowsWithParticipants()
+            } else if new == .sharedSessionTemplate {
+                if let first = strengthLaneItems.first {
+                    items = first
+                }
+            }
+        }
         .banner($banner)
         .alert(
             "Are you sure you want to remove the exercise?",
             isPresented: Binding(
-                get: { confirmRemoveIndex != nil },
-                set: { if !$0 { confirmRemoveIndex = nil } }
+                get: { confirmRemoveStrengthExercise != nil },
+                set: { if !$0 { confirmRemoveStrengthExercise = nil } }
             )
         ) {
             Button("Remove", role: .destructive) {
-                if let idx = confirmRemoveIndex {
-                    items.remove(at: idx)
+                if let req = confirmRemoveStrengthExercise {
+                    if usePerPersonStrengthEditor,
+                       req.lane >= 0, req.lane < strengthLaneItems.count,
+                       strengthLaneItems[req.lane].indices.contains(req.index) {
+                        strengthLaneItems[req.lane].remove(at: req.index)
+                    } else if items.indices.contains(req.index) {
+                        items.remove(at: req.index)
+                    }
                 }
-                confirmRemoveIndex = nil
+                confirmRemoveStrengthExercise = nil
             }
             Button("Cancel", role: .cancel) {
-                confirmRemoveIndex = nil
+                confirmRemoveStrengthExercise = nil
             }
         }
     }
@@ -479,121 +548,174 @@ struct AddWorkoutSheet: View {
         }
         .disabled(loading || !canSave)
     }
-    
+
+    private var usePerPersonStrengthEditor: Bool {
+        kind == .strength && !participants.isEmpty && groupProgrammingMode == .individualPlans
+    }
+
+    private func strengthItemsBinding(lane: Int) -> Binding<[EditableExercise]> {
+        Binding(
+            get: {
+                guard lane >= 0, lane < strengthLaneItems.count else { return [EditableExercise()] }
+                return strengthLaneItems[lane]
+            },
+            set: { newVal in
+                guard lane >= 0, lane < strengthLaneItems.count else { return }
+                strengthLaneItems[lane] = newVal
+            }
+        )
+    }
+
+    private func strengthLaneHeaderTitle(lane: Int) -> String {
+        guard lane >= 0, lane < strengthLaneItems.count else { return "Exercises" }
+        if lane == 0 { return "Exercises — You" }
+        let pi = lane - 1
+        guard participants.indices.contains(pi) else { return "Exercises" }
+        let p = participants[pi]
+        let name = (p.username?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+        return "Exercises — \(name ?? p.user_id.uuidString)"
+    }
+
+    private func strengthLanePickerShortLabel(lane: Int) -> String {
+        guard lane >= 0, lane < strengthLaneItems.count else { return "—" }
+        if lane == 0 { return "You" }
+        let pi = lane - 1
+        guard participants.indices.contains(pi) else { return "—" }
+        let p = participants[pi]
+        let name = (p.username?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+        let base = name ?? String(p.user_id.uuidString.prefix(8))
+        if base.count <= 14 { return base }
+        return String(base.prefix(13)) + "…"
+    }
+
+    private func syncStrengthLaneRowsWithParticipants() {
+        guard usePerPersonStrengthEditor else { return }
+        let needed = 1 + participants.count
+        let seedHost: [EditableExercise] = {
+            if strengthLaneItems.count == 1,
+               strengthLaneItems[0].count == 1,
+               strengthLaneItems[0][0].exerciseId == nil {
+                return items.map { $0.deepCopied() }
+            }
+            if let first = strengthLaneItems.first, first.contains(where: { exerciseSelected($0) }) {
+                return first.map { $0.deepCopied() }
+            }
+            return items.map { $0.deepCopied() }
+        }()
+        if strengthLaneItems.count != needed {
+            strengthLaneItems = (0..<needed).map { _ in seedHost.map { $0.deepCopied() } }
+        }
+        strengthProgramPage = min(max(0, strengthProgramPage), max(0, strengthLaneItems.count - 1))
+    }
+
+    @ViewBuilder
+    private func strengthExercisePickerSheet(for handle: PickerHandle) -> some View {
+        let lane = handle.strengthLaneIndex
+        let source: [EditableExercise] = {
+            if usePerPersonStrengthEditor, lane >= 0, lane < strengthLaneItems.count {
+                return strengthLaneItems[lane]
+            }
+            return items
+        }()
+        if let idx = source.firstIndex(where: { $0.id == handle.id }) {
+            ExercisePickerSheet(
+                all: catalog,
+                selected: Binding(
+                    get: {
+                        let row: [EditableExercise] = {
+                            if usePerPersonStrengthEditor, lane >= 0, lane < strengthLaneItems.count {
+                                return strengthLaneItems[lane]
+                            }
+                            return items
+                        }()
+                        guard idx < row.count else { return nil }
+                        guard let exid = row[idx].exerciseId else { return nil }
+                        return catalog.first(where: { $0.id == exid })
+                    },
+                    set: { picked in
+                        if usePerPersonStrengthEditor, lane >= 0, lane < strengthLaneItems.count {
+                            guard idx < strengthLaneItems[lane].count else { return }
+                            strengthLaneItems[lane][idx].exerciseId = picked?.id
+                            if let ex = picked {
+                                strengthLaneItems[lane][idx].exerciseName = ex.localizedName(for: exerciseLanguageFromGlobalStorage())
+                            } else {
+                                strengthLaneItems[lane][idx].exerciseName = ""
+                            }
+                        } else {
+                            guard idx < items.count else { return }
+                            items[idx].exerciseId = picked?.id
+                            if let ex = picked {
+                                items[idx].exerciseName = ex.localizedName(for: exerciseLanguageFromGlobalStorage())
+                            } else {
+                                items[idx].exerciseName = ""
+                            }
+                        }
+                    }
+                )
+            )
+            .gradientBG()
+            .presentationDetents([.large])
+            .presentationBackground(.clear)
+        } else {
+            ExercisePickerSheet(all: catalog, selected: .constant(nil))
+                .gradientBG()
+                .presentationDetents([.large])
+                .presentationBackground(.clear)
+        }
+    }
+
     private var strengthSection: some View {
         Section {
-            SectionCard {
-                Button {
-                    recommendKind = .strength
-                    showWorkoutRecommend = true
-                } label: {
-                    Label("Suggest next session", systemImage: "sparkles")
-                }
-                .buttonStyle(.borderless)
-                .disabled(loadingCatalog)
-                
-                Divider().padding(.vertical, 6)
-                
-                ForEach(items.indices, id: \.self) { i in
-                    if i != items.startIndex { Divider().padding(.vertical, 6) }
-                    
-                    VStack(spacing: 0) {
-                        
-                        FieldRowPlain("Exercise") {
-                            Button {
-                                pickerHandle = .init(id: items[i].id)
-                            } label: {
-                                HStack {
-                                    Image(systemName: "list.bullet.rectangle.portrait")
-                                    Text(exerciseLabel(for: items[i]))
-                                        .foregroundStyle(exerciseSelected(items[i]) ? .primary : .secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                    Spacer()
-                                    if loadingCatalog { ProgressView() }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(loadingCatalog || catalog.isEmpty)
+            if usePerPersonStrengthEditor {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Person")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("Person", selection: $strengthProgramPage) {
+                        ForEach(0..<strengthLaneItems.count, id: \.self) { lane in
+                            Text(strengthLanePickerShortLabel(lane: lane)).tag(lane)
                         }
-                        
-                        Divider()
-                        
-                        FieldRowPlain("Alias") {
-                            TextField("Exercise name (optional)", text: $items[i].exerciseName)
-                                .textFieldStyle(.plain)
-                        }
-                        
-                        Divider()
-                        
-                        FieldRowPlain("Notes") {
-                            TextField("Notes (exercise)", text: $items[i].notes)
-                                .textFieldStyle(.plain)
-                        }
-                        
-                        ForEach(items[i].sets.indices, id: \.self) { s in
-                            Divider()
-                            StrengthSetRowEditor(
-                                setNumber: $items[i].sets[s].setNumber,
-                                reps: $items[i].sets[s].reps,
-                                weightKg: $items[i].sets[s].weightKg,
-                                rpe: $items[i].sets[s].rpe,
-                                restSec: $items[i].sets[s].restSec,
-                                showDelete: items[i].sets.count > 1,
-                                onDelete: { items[i].sets.remove(at: s) }
-                            )
-                        }
-                        
-                        Divider().padding(.vertical, 4)
-                        HStack {
-                            Button {
-                                items[i].sets.append(EditableSet(setNumber: 1))
-                            } label: { Label("Add set", systemImage: "plus.circle") }
-                                .buttonStyle(.borderless)
-                            
-                            Spacer()
-                            
-                            if items.count > 1 {
-                                Button(role: .destructive) {
-                                    confirmRemoveIndex = i
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "trash")
-                                        Text("Remove exercise")
-                                    }
-                                }
-                                .buttonStyle(.borderless)
-                            }
-                        }
-                        
                     }
-                    .padding(6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color.yellow.opacity(items[i].id == recentlyAddedExerciseId ? 0.18 : 0))
+                    .pickerStyle(.segmented)
+
+                    StrengthExercisesEditorBlock(
+                        exercises: strengthItemsBinding(lane: strengthProgramPage),
+                        laneIndex: strengthProgramPage,
+                        headerTitle: strengthLaneHeaderTitle(lane: strengthProgramPage),
+                        pickerHandle: $pickerHandle,
+                        confirmRemoveStrengthExercise: $confirmRemoveStrengthExercise,
+                        recentlyAddedExerciseId: $recentlyAddedExerciseId,
+                        catalog: catalog,
+                        loadingCatalog: loadingCatalog,
+                        exerciseLabel: { exerciseLabel(for: $0) },
+                        exerciseSelected: { exerciseSelected($0) },
+                        onSuggest: {
+                            recommendKind = .strength
+                            strengthRecommendTargetLane = strengthProgramPage
+                            showWorkoutRecommend = true
+                        }
                     )
-                    .animation(.easeInOut(duration: 0.6), value: recentlyAddedExerciseId)
                 }
-                
-                Divider().padding(.vertical, 6)
-                Button {
-                    let nextOrder = (items.last?.orderIndex ?? 0) + 1
-                    let new = EditableExercise(orderIndex: nextOrder)
-                    items.append(new)
-                    recentlyAddedExerciseId = new.id
-                    Task {
-                        try? await Task.sleep(nanoseconds: 1_200_000_000)
-                        await MainActor.run {
-                            if recentlyAddedExerciseId == new.id { recentlyAddedExerciseId = nil }
-                        }
+            } else {
+                StrengthExercisesEditorBlock(
+                    exercises: $items,
+                    laneIndex: 0,
+                    headerTitle: nil,
+                    pickerHandle: $pickerHandle,
+                    confirmRemoveStrengthExercise: $confirmRemoveStrengthExercise,
+                    recentlyAddedExerciseId: $recentlyAddedExerciseId,
+                    catalog: catalog,
+                    loadingCatalog: loadingCatalog,
+                    exerciseLabel: { exerciseLabel(for: $0) },
+                    exerciseSelected: { exerciseSelected($0) },
+                    onSuggest: {
+                        recommendKind = .strength
+                        strengthRecommendTargetLane = nil
+                        showWorkoutRecommend = true
                     }
-                } label: {
-                    Label("Add exercise", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .padding(.top, 2)
+                )
             }
-            
+
             saveButton
                 .padding(.top, 8)
         } header: {
@@ -857,10 +979,13 @@ struct AddWorkoutSheet: View {
     private var canSave: Bool {
         switch kind {
         case .strength:
-            guard items.contains(where: { exerciseSelected($0) }) else { return false }
-            for ex in items where exerciseSelected(ex) {
-                let hasValidSet = ex.cleanSets().contains { $0.reps != nil }
-                if !hasValidSet { return false }
+            let programs: [[EditableExercise]] = usePerPersonStrengthEditor ? strengthLaneItems : [items]
+            for lane in programs {
+                guard lane.contains(where: { exerciseSelected($0) }) else { return false }
+                for ex in lane where exerciseSelected(ex) {
+                    let hasValidSet = ex.cleanSets().contains { $0.reps != nil }
+                    if !hasValidSet { return false }
+                }
             }
             return true
         case .cardio:
@@ -895,6 +1020,120 @@ struct AddWorkoutSheet: View {
                 }
             }
         )
+    }
+
+    private func loadHyroxCustomDisplayNameSuggestionsFromServer() async {
+        await MainActor.run {
+            guard !didLoadHyroxCustomDisplayNameSuggestions else { return }
+            didLoadHyroxCustomDisplayNameSuggestions = true
+        }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("hyrox_session_exercises")
+                .select("exercise_display_name")
+                .eq("exercise_code", value: HyroxExerciseFormatting.customExerciseCode)
+                .limit(800)
+                .execute()
+            struct Row: Decodable { let exercise_display_name: String? }
+            let rows = try JSONDecoder().decode([Row].self, from: res.data)
+            let raw = rows
+                .compactMap { $0.exercise_display_name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let deduped = Self.canonicalSortedHyroxDisplayNames(from: raw)
+            await MainActor.run { hyroxCustomDisplayNameSuggestionsFromDB = deduped }
+        } catch {
+            await MainActor.run { didLoadHyroxCustomDisplayNameSuggestions = false }
+        }
+    }
+
+    private static func normalizedHyroxDisplayNameKey(_ s: String) -> String {
+        s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+    }
+
+    private static func canonicalSortedHyroxDisplayNames(from raw: [String]) -> [String] {
+        var bestByNorm: [String: String] = [:]
+        for r in raw {
+            let t = r.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            let k = normalizedHyroxDisplayNameKey(t)
+            if let existing = bestByNorm[k] {
+                if t.count > existing.count { bestByNorm[k] = t }
+            } else {
+                bestByNorm[k] = t
+            }
+        }
+        return bestByNorm.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func hyroxFilteredExerciseNameSuggestions(exerciseIndex i: Int) -> [String] {
+        guard sport.hyExercises.indices.contains(i) else { return [] }
+        var raw: [String] = hyroxCustomDisplayNameSuggestionsFromDB
+        for (idx, ex) in sport.hyExercises.enumerated() where idx != i {
+            let t = ex.customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, HyroxExerciseCode(rawValue: ex.exerciseCode) == nil else { continue }
+            raw.append(t)
+        }
+        let deduped = Self.canonicalSortedHyroxDisplayNames(from: raw)
+        let q = sport.hyExercises[i].customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty {
+            return Array(deduped.prefix(8))
+        }
+        let qn = Self.normalizedHyroxDisplayNameKey(q)
+        let filtered = deduped.filter {
+            Self.normalizedHyroxDisplayNameKey($0).contains(qn) || $0.localizedStandardContains(q)
+        }
+        return Array(filtered.prefix(8))
+    }
+
+    @ViewBuilder
+    private func hyroxExerciseNameSuggestionsList(exerciseIndex i: Int) -> some View {
+        let rows = hyroxFilteredExerciseNameSuggestions(exerciseIndex: i)
+        if rows.isEmpty {
+            EmptyView()
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows, id: \.self) { name in
+                        Button {
+                            sport.hyExercises[i].customDisplayName = name
+                            hyroxExerciseNameFocusedId = nil
+                        } label: {
+                            Text(name)
+                                .font(.subheadline)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 160)
+            .fixedSize(horizontal: false, vertical: true)
+            .scrollClipDisabled()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.secondary.opacity(0.22), lineWidth: 0.8)
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func hyroxExerciseNameFieldWithSuggestions(index i: Int) -> some View {
+        let exId = sport.hyExercises[i].id
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Exercise name", text: $sport.hyExercises[i].customDisplayName)
+                .textFieldStyle(.roundedBorder)
+                .focused($hyroxExerciseNameFocusedId, equals: exId)
+            if hyroxExerciseNameFocusedId == exId {
+                hyroxExerciseNameSuggestionsList(exerciseIndex: i)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
     }
     
     @ViewBuilder
@@ -1232,29 +1471,38 @@ struct AddWorkoutSheet: View {
                         .pickerStyle(.menu)
 
                         if HyroxExerciseCode(rawValue: sport.hyExercises[i].exerciseCode) == nil {
-                            TextField("Exercise name", text: $sport.hyExercises[i].customDisplayName)
-                                .textFieldStyle(.roundedBorder)
+                            hyroxExerciseNameFieldWithSuggestions(index: i)
                         }
 
-                        HStack {
-                            TextField("Distance (m)", text: $sport.hyExercises[i].distanceM)
-                                .keyboardType(.numberPad)
-                            TextField("Reps", text: $sport.hyExercises[i].reps)
-                                .keyboardType(.numberPad)
-                        }
-
-                        HStack {
-                            TextField("Weight (kg)", text: $sport.hyExercises[i].weightKg)
-                                .keyboardType(.decimalPad)
-                            TextField("Duration (sec)", text: $sport.hyExercises[i].durationSec)
-                                .keyboardType(.numberPad)
-                        }
-
-                        HStack {
-                            TextField("Height (cm)", text: $sport.hyExercises[i].heightCm)
-                                .keyboardType(.numberPad)
-                            TextField("Implement count", text: $sport.hyExercises[i].implementCount)
-                                .keyboardType(.numberPad)
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(alignment: .top, spacing: 6) {
+                                StrengthStyleMetricField(title: "Distance (m)") {
+                                    TextField("—", text: $sport.hyExercises[i].distanceM)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "Reps") {
+                                    TextField("—", text: $sport.hyExercises[i].reps)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "kg") {
+                                    TextField("—", text: $sport.hyExercises[i].weightKg)
+                                        .keyboardType(.decimalPad)
+                                }
+                            }
+                            HStack(alignment: .top, spacing: 6) {
+                                StrengthStyleMetricField(title: "Duration (s)") {
+                                    TextField("—", text: $sport.hyExercises[i].durationSec)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "Height (cm)") {
+                                    TextField("—", text: $sport.hyExercises[i].heightCm)
+                                        .keyboardType(.numberPad)
+                                }
+                                StrengthStyleMetricField(title: "Implements") {
+                                    TextField("—", text: $sport.hyExercises[i].implementCount)
+                                        .keyboardType(.numberPad)
+                                }
+                            }
                         }
 
                         TextField("Notes", text: $sport.hyExercises[i].notes)
@@ -1275,6 +1523,10 @@ struct AddWorkoutSheet: View {
                 }
                 .buttonStyle(.borderless)
                 .padding(.top, 2)
+            }
+            .task(id: "\(kind.rawValue)-\(sport.sport.rawValue)") {
+                guard kind == .sport, sport.sport == .hyrox else { return }
+                await loadHyroxCustomDisplayNameSuggestionsFromServer()
             }
             
         case .ski:
@@ -1385,23 +1637,59 @@ struct AddWorkoutSheet: View {
             
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            
+
+            if kind == .strength, usePerPersonStrengthEditor, participants.count > 2 {
+                error = "Per-person planning supports at most two partners (three people total)."
+                return
+            }
+
             switch kind {
             case .strength:
-                let strengthItems = items.compactMap { $0.toStrengthItem() }
-                let params = RPCStrengthParams(
-                    p_user_id: userId,
-                    p_items: strengthItems,
-                    p_title: title.isEmpty ? nil : title,
-                    p_started_at: iso.string(from: startedAt),
-                    p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
-                    p_notes: note.isEmpty ? nil : note,
-                    p_perceived_intensity: perceived.rawValue,
-                    p_state: publishMode.stateParam
-                )
-                _ = try await client.rpc("create_strength_workout", params: params).execute()
-                if newWorkoutId == nil {
-                    newWorkoutId = try await fetchLastWorkoutId(for: userId, kind: .strength)
+                if usePerPersonStrengthEditor {
+                    var rows: [PlanStrengthSquadProgramRow] = []
+                    guard let me = app.userId else { throw NSError(domain: "AddWorkout", code: 1, userInfo: [NSLocalizedDescriptionKey: "Not signed in"]) }
+                    let hostItems = strengthLaneItems[0].compactMap { $0.toStrengthItem() }
+                    guard !hostItems.isEmpty else { throw NSError(domain: "AddWorkout", code: 2, userInfo: [NSLocalizedDescriptionKey: "Host program is empty"]) }
+                    rows.append(.init(owner_user_id: me, items: hostItems))
+                    for (i, p) in participants.enumerated() {
+                        let lane = i + 1
+                        guard strengthLaneItems.indices.contains(lane) else { continue }
+                        let theirs = strengthLaneItems[lane].compactMap { $0.toStrengthItem() }
+                        guard !theirs.isEmpty else {
+                            throw NSError(domain: "AddWorkout", code: 3, userInfo: [NSLocalizedDescriptionKey: "Each person needs at least one valid exercise."])
+                        }
+                        rows.append(.init(owner_user_id: p.user_id, items: theirs))
+                    }
+                    // PostgREST matches RPC by the set of argument names sent; optional `nil` keys are often
+                    // omitted, which would leave a 4-arg call and no matching function — always send every param.
+                    let squadParams = PlanStrengthSquadProgramsRPC(
+                        p_programs: rows,
+                        p_title: title,
+                        p_notes: note,
+                        p_started_at: iso.string(from: startedAt),
+                        p_perceived_intensity: perceived.rawValue,
+                        p_state: publishMode.stateParam,
+                        p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : ""
+                    )
+                    let res = try await client.rpc("plan_strength_squad_programs", params: squadParams).execute()
+                    let created = try JSONDecoder().decode([Int64].self, from: res.data)
+                    newWorkoutId = created.first
+                } else {
+                    let strengthItems = items.compactMap { $0.toStrengthItem() }
+                    let params = RPCStrengthParams(
+                        p_user_id: userId,
+                        p_items: strengthItems,
+                        p_title: title.isEmpty ? nil : title,
+                        p_started_at: iso.string(from: startedAt),
+                        p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
+                        p_notes: note.isEmpty ? nil : note,
+                        p_perceived_intensity: perceived.rawValue,
+                        p_state: publishMode.stateParam
+                    )
+                    _ = try await client.rpc("create_strength_workout", params: params).execute()
+                    if newWorkoutId == nil {
+                        newWorkoutId = try await fetchLastWorkoutId(for: userId, kind: .strength)
+                    }
                 }
                 
             case .cardio:
@@ -1492,7 +1780,7 @@ struct AddWorkoutSheet: View {
                     )
                 }
             }
-            if let wid = newWorkoutId {
+            if let wid = newWorkoutId, !(kind == .strength && usePerPersonStrengthEditor) {
                 await addParticipants(to: wid)
             }
             if let wid = newWorkoutId,
@@ -1502,7 +1790,15 @@ struct AddWorkoutSheet: View {
                     workoutId: Int(wid)
                 )
             }
-            await showSuccessAndGoHome(publishMode == .add ? "Workout published! 💪" : "Workout planned! 🗓️")
+            let successMessage: String = {
+                if kind == .strength, usePerPersonStrengthEditor {
+                    return publishMode == .add
+                        ? "Everyone’s workout is saved! 💪"
+                        : "Everyone’s plan is saved! 🗓️"
+                }
+                return publishMode == .add ? "Workout published! 💪" : "Workout planned! 🗓️"
+            }()
+            await showSuccessAndGoHome(successMessage)
         } catch {
             self.error = error.localizedDescription
         }
@@ -1520,6 +1816,10 @@ struct AddWorkoutSheet: View {
         cardio = CardioForm()
         sport = SportForm()
         perceived = .moderate
+        groupProgrammingMode = .sharedSessionTemplate
+        strengthLaneItems = [[EditableExercise()]]
+        strengthProgramPage = 0
+        strengthRecommendTargetLane = nil
     }
     
     @MainActor
@@ -1760,7 +2060,7 @@ struct AddWorkoutSheet: View {
     }
     
     private func applyStrengthRecommendation(_ rec: [StrengthRecommendationExercise]) {
-        items = rec.enumerated().map { idx, ex in
+        let newItems: [EditableExercise] = rec.enumerated().map { idx, ex in
             var e = EditableExercise()
             e.exerciseId = ex.exerciseId
             e.exerciseName = ex.displayName
@@ -1768,6 +2068,13 @@ struct AddWorkoutSheet: View {
             e.notes = ""
             e.sets = collapsedEditableSetsFromRecommendation(ex.sets)
             return e
+        }
+        let lane = strengthRecommendTargetLane ?? (usePerPersonStrengthEditor ? strengthProgramPage : 0)
+        strengthRecommendTargetLane = nil
+        if usePerPersonStrengthEditor, strengthLaneItems.indices.contains(lane) {
+            strengthLaneItems[lane] = newItems
+        } else {
+            items = newItems
         }
     }
     
@@ -1961,8 +2268,18 @@ struct AddWorkoutSheet: View {
  
         switch d.kind {
         case .strength:
-            items = d.strengthItems.isEmpty ? [EditableExercise()] : d.strengthItems
-            
+            if d.plannedStrengthPerPerson, let lanes = d.strengthLaneItems, !lanes.isEmpty {
+                groupProgrammingMode = .individualPlans
+                strengthLaneItems = lanes
+                if let first = lanes.first {
+                    items = first
+                }
+            } else {
+                groupProgrammingMode = .sharedSessionTemplate
+                items = d.strengthItems.isEmpty ? [EditableExercise()] : d.strengthItems
+                strengthLaneItems = [items.map { $0.deepCopied() }]
+            }
+
         case .cardio:
             cardio = d.cardio ?? CardioForm()
             
@@ -2083,6 +2400,27 @@ struct EditableExercise: Identifiable {
             sets: cleaned.map { $0.toStrengthSet() },
             custom_name: exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : exerciseName
         )
+    }
+}
+
+extension EditableExercise {
+    func deepCopied() -> EditableExercise {
+        var copy = EditableExercise()
+        copy.exerciseId = exerciseId
+        copy.exerciseName = exerciseName
+        copy.orderIndex = orderIndex
+        copy.notes = notes
+        copy.sets = sets.map {
+            EditableSet(
+                setNumber: $0.setNumber,
+                reps: $0.reps,
+                weightKg: $0.weightKg,
+                rpe: $0.rpe,
+                restSec: $0.restSec,
+                notes: $0.notes
+            )
+        }
+        return copy
     }
 }
 
@@ -2287,6 +2625,21 @@ struct RPCStrengthParams: Encodable {
     }
 }
 
+private struct PlanStrengthSquadProgramRow: Encodable {
+    let owner_user_id: UUID
+    let items: [RPCStrengthParams.StrengthItem]
+}
+
+private struct PlanStrengthSquadProgramsRPC: Encodable {
+    let p_programs: [PlanStrengthSquadProgramRow]
+    let p_title: String
+    let p_notes: String
+    let p_started_at: String
+    let p_perceived_intensity: String
+    let p_state: String
+    let p_ended_at: String
+}
+
 struct FootballStatsForm: Codable {
     var position: String
     var minutesPlayed: String
@@ -2414,6 +2767,240 @@ struct RPCSportWrapper: Encodable {
 struct RPCSportV2Wrapper: Encodable {
     let p: AnyJSON
     let p_stats: AnyJSON?
+}
+
+// MARK: - Strength exercise editor (shared + per-person lanes)
+
+private struct StrengthExercisesEditorBlock: View {
+    @Binding var exercises: [EditableExercise]
+    let laneIndex: Int
+    let headerTitle: String?
+    @Binding var pickerHandle: PickerHandle?
+    @Binding var confirmRemoveStrengthExercise: (lane: Int, index: Int)?
+    @Binding var recentlyAddedExerciseId: UUID?
+    let catalog: [Exercise]
+    let loadingCatalog: Bool
+    let exerciseLabel: (EditableExercise) -> String
+    let exerciseSelected: (EditableExercise) -> Bool
+    let onSuggest: () -> Void
+
+    var body: some View {
+        SectionCard {
+            if let headerTitle {
+                Text(headerTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Divider().padding(.vertical, 4)
+            }
+
+            Button(action: onSuggest) {
+                Label("Suggest next session", systemImage: "sparkles")
+            }
+            .buttonStyle(.borderless)
+            .disabled(loadingCatalog)
+
+            Divider().padding(.vertical, 6)
+
+            ForEach(Array(exercises.enumerated()), id: \.element.id) { i, _ in
+                if i != exercises.startIndex { Divider().padding(.vertical, 6) }
+
+                VStack(spacing: 0) {
+                    FieldRowPlain("Exercise") {
+                        Button {
+                            pickerHandle = PickerHandle(id: exercises[i].id, strengthLaneIndex: laneIndex)
+                        } label: {
+                            HStack {
+                                Image(systemName: "list.bullet.rectangle.portrait")
+                                Text(exerciseLabel(exercises[i]))
+                                    .foregroundStyle(exerciseSelected(exercises[i]) ? .primary : .secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Spacer()
+                                if loadingCatalog { ProgressView() }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(loadingCatalog || catalog.isEmpty)
+                    }
+
+                    Divider()
+
+                    FieldRowPlain("Alias") {
+                        TextField("Exercise name (optional)", text: nameBinding(i))
+                            .textFieldStyle(.plain)
+                    }
+
+                    Divider()
+
+                    FieldRowPlain("Notes") {
+                        TextField("Notes (exercise)", text: notesBinding(i))
+                            .textFieldStyle(.plain)
+                    }
+
+                    ForEach(exercises[i].sets.indices, id: \.self) { s in
+                        Divider()
+                        StrengthSetRowEditor(
+                            setNumber: setNumberBinding(i, s),
+                            reps: repsBinding(i, s),
+                            weightKg: weightBinding(i, s),
+                            rpe: rpeBinding(i, s),
+                            restSec: restBinding(i, s),
+                            showDelete: exercises[i].sets.count > 1,
+                            onDelete: { removeSet(exerciseIndex: i, setIndex: s) }
+                        )
+                    }
+
+                    Divider().padding(.vertical, 4)
+                    HStack {
+                        Button {
+                            appendSet(exerciseIndex: i)
+                        } label: { Label("Add set", systemImage: "plus.circle") }
+                            .buttonStyle(.borderless)
+
+                        Spacer()
+
+                        if exercises.count > 1 {
+                            Button(role: .destructive) {
+                                confirmRemoveStrengthExercise = (laneIndex, i)
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "trash")
+                                    Text("Remove exercise")
+                                }
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.yellow.opacity(exercises[i].id == recentlyAddedExerciseId ? 0.18 : 0))
+                )
+                .animation(.easeInOut(duration: 0.6), value: recentlyAddedExerciseId)
+            }
+
+            Divider().padding(.vertical, 6)
+            Button {
+                let nextOrder = (exercises.last?.orderIndex ?? 0) + 1
+                var new = EditableExercise()
+                new.orderIndex = nextOrder
+                exercises.append(new)
+                recentlyAddedExerciseId = new.id
+                Task {
+                    try? await Task.sleep(nanoseconds: 1_200_000_000)
+                    await MainActor.run {
+                        if recentlyAddedExerciseId == new.id { recentlyAddedExerciseId = nil }
+                    }
+                }
+            } label: {
+                Label("Add exercise", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+            .padding(.top, 2)
+        }
+    }
+
+    private func replaceExercise(_ index: Int, _ mutate: (inout EditableExercise) -> Void) {
+        var copy = exercises
+        guard copy.indices.contains(index) else { return }
+        mutate(&copy[index])
+        exercises = copy
+    }
+
+    private func nameBinding(_ i: Int) -> Binding<String> {
+        Binding(
+            get: { exercises[safe: i]?.exerciseName ?? "" },
+            set: { nv in replaceExercise(i) { $0.exerciseName = nv } }
+        )
+    }
+
+    private func notesBinding(_ i: Int) -> Binding<String> {
+        Binding(
+            get: { exercises[safe: i]?.notes ?? "" },
+            set: { nv in replaceExercise(i) { $0.notes = nv } }
+        )
+    }
+
+    private func setNumberBinding(_ i: Int, _ s: Int) -> Binding<Int> {
+        Binding(
+            get: { exercises[safe: i]?.sets[safe: s]?.setNumber ?? 1 },
+            set: { newVal in
+                replaceExercise(i) { ex in
+                    guard ex.sets.indices.contains(s) else { return }
+                    ex.sets[s].setNumber = newVal
+                }
+            }
+        )
+    }
+
+    private func repsBinding(_ i: Int, _ s: Int) -> Binding<Int?> {
+        Binding(
+            get: { exercises[safe: i]?.sets[safe: s]?.reps },
+            set: { newVal in
+                replaceExercise(i) { ex in
+                    guard ex.sets.indices.contains(s) else { return }
+                    ex.sets[s].reps = newVal
+                }
+            }
+        )
+    }
+
+    private func weightBinding(_ i: Int, _ s: Int) -> Binding<String> {
+        Binding(
+            get: { exercises[safe: i]?.sets[safe: s]?.weightKg ?? "" },
+            set: { newVal in
+                replaceExercise(i) { ex in
+                    guard ex.sets.indices.contains(s) else { return }
+                    ex.sets[s].weightKg = newVal
+                }
+            }
+        )
+    }
+
+    private func rpeBinding(_ i: Int, _ s: Int) -> Binding<String> {
+        Binding(
+            get: { exercises[safe: i]?.sets[safe: s]?.rpe ?? "" },
+            set: { newVal in
+                replaceExercise(i) { ex in
+                    guard ex.sets.indices.contains(s) else { return }
+                    ex.sets[s].rpe = newVal
+                }
+            }
+        )
+    }
+
+    private func restBinding(_ i: Int, _ s: Int) -> Binding<Int?> {
+        Binding(
+            get: { exercises[safe: i]?.sets[safe: s]?.restSec },
+            set: { newVal in
+                replaceExercise(i) { ex in
+                    guard ex.sets.indices.contains(s) else { return }
+                    ex.sets[s].restSec = newVal
+                }
+            }
+        )
+    }
+
+    private func appendSet(exerciseIndex i: Int) {
+        replaceExercise(i) { ex in
+            ex.sets.append(EditableSet(setNumber: 1))
+        }
+    }
+
+    private func removeSet(exerciseIndex i: Int, setIndex s: Int) {
+        replaceExercise(i) { ex in
+            guard ex.sets.indices.contains(s) else { return }
+            ex.sets.remove(at: s)
+        }
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard indices.contains(index) else { return nil }
+        return self[index]
+    }
 }
 
 private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {

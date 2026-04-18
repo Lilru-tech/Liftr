@@ -1,5 +1,32 @@
 import SwiftUI
 
+struct StrengthStyleMetricField<Content: View>: View {
+    let title: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .center, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.65)
+                .multilineTextAlignment(.center)
+            content()
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .textFieldStyle(.plain)
+                .lineLimit(1)
+                .minimumScaleFactor(0.55)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 4)
+                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
 struct StrengthSetRowEditor: View {
     @Binding var setNumber: Int
     @Binding var reps: Int?
@@ -35,19 +62,19 @@ struct StrengthSetRowEditor: View {
             }
 
             HStack(alignment: .top, spacing: 6) {
-                metricCell(title: "Reps") {
+                StrengthStyleMetricField(title: "Reps") {
                     TextField("—", value: $reps, format: .number)
                         .keyboardType(.numberPad)
                 }
-                metricCell(title: "kg") {
+                StrengthStyleMetricField(title: "kg") {
                     TextField("—", text: $weightKg)
                         .keyboardType(.decimalPad)
                 }
-                metricCell(title: "RPE") {
+                StrengthStyleMetricField(title: "RPE") {
                     TextField("—", text: $rpe)
                         .keyboardType(.decimalPad)
                 }
-                metricCell(title: "Rest s") {
+                StrengthStyleMetricField(title: "Rest s") {
                     TextField("—", value: $restSec, format: .number)
                         .keyboardType(.numberPad)
                 }
@@ -55,27 +82,5 @@ struct StrengthSetRowEditor: View {
         }
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder
-    private func metricCell<Inner: View>(title: String, @ViewBuilder field: () -> Inner) -> some View {
-        VStack(alignment: .center, spacing: 4) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            field()
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.plain)
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 4)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-        }
-        .frame(maxWidth: .infinity)
     }
 }
