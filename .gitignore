@@ -69,7 +69,8 @@ fastlane/test_output
 # deja esta regla activa. Si ya estaban en el índice: git rm -r --cached Liftr/docs
 Liftr/docs/
 
-# Supabase: SQL solo local (depuración / auditoría). Las migraciones en
-# supabase/migrations/ NO van aquí: deben commitearse para que todos apliquen el mismo esquema.
+# Supabase: SQL solo local (depuración / auditoría).
+# Migraciones: ignorar carpeta (no subir al remoto). Si ya estaban trackeadas: git rm -r --cached supabase/migrations
+supabase/migrations/
 supabase/debug*.sql
 supabase/audit/

@@ -1,5 +1,6 @@
 import SwiftUI
 import Supabase
+import CryptoKit
 
 enum WorkoutIntensity: String, CaseIterable, Identifiable {
     case easy, moderate, hard, max
@@ -206,7 +207,6 @@ struct AddWorkoutSheet: View {
     @State private var groupProgrammingMode: PlannedGroupStrengthProgramming = .sharedSessionTemplate
     @State private var strengthLaneItems: [[EditableExercise]] = [[EditableExercise()]]
     @State private var strengthProgramPage: Int = 0
-    /// Target lane when applying strength recommendation (nil = host / single list).
     @State private var strengthRecommendTargetLane: Int?
     @State private var durationLabelMin: Int? = nil
     @State private var didApplyDraft = false
@@ -218,6 +218,17 @@ struct AddWorkoutSheet: View {
     @State private var hyroxCustomDisplayNameSuggestionsFromDB: [String] = []
     @State private var didLoadHyroxCustomDisplayNameSuggestions = false
     @FocusState private var hyroxExerciseNameFocusedId: UUID?
+    @State private var saveNewStrengthRoutine = false
+    @State private var newStrengthRoutineName = ""
+    @State private var newStrengthRoutineFolderId: Int64? = nil
+    @State private var strengthFoldersForPicker: [StrengthRoutineFolderRow] = []
+    @State private var showStrengthRoutinesSheet = false
+    @FocusState private var focusNewRoutineNameField: Bool
+    @State private var showReplaceRoutineConfirm = false
+    @State private var replaceRoutinePendingId: Int64?
+    /// `true` when the replace dialog was shown from **Save routine only**; `false` from publish+routine.
+    @State private var replacePendingIsRoutineOnly = false
+    @State private var loadingRoutineOnly = false
 
     var body: some View {
         NavigationStack {
@@ -441,6 +452,18 @@ struct AddWorkoutSheet: View {
                     )
                     .environmentObject(app)
                 }
+                .toolbar {
+                    if kind == .strength {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                showStrengthRoutinesSheet = true
+                            } label: {
+                                Image(systemName: "rectangle.stack")
+                            }
+                            .accessibilityLabel("Routines")
+                        }
+                    }
+                }
             }
         }
         .task {
@@ -470,6 +493,47 @@ struct AddWorkoutSheet: View {
             .presentationDetents([.large])
             .presentationBackground(.clear)
         }
+        .sheet(isPresented: $showStrengthRoutinesSheet) {
+            StrengthRoutinesPickerSheet(
+                exerciseDisplayName: { exerciseId in
+                    catalog.first(where: { $0.id == exerciseId })?.localizedName(for: exerciseLanguage) ?? ""
+                },
+                onApply: { loaded in
+                    applyLoadedStrengthRoutine(loaded)
+                }
+            )
+            .gradientBG()
+            .presentationDetents([.large])
+            .presentationBackground(.clear)
+        }
+        .onChange(of: showStrengthRoutinesSheet) { _, isPresented in
+            if !isPresented, kind == .strength {
+                Task { await loadStrengthFoldersForPicker() }
+            }
+        }
+        .confirmationDialog(
+            "Replace existing routine?",
+            isPresented: $showReplaceRoutineConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Replace") {
+                let id = replaceRoutinePendingId
+                let routineOnly = replacePendingIsRoutineOnly
+                replaceRoutinePendingId = nil
+                replacePendingIsRoutineOnly = false
+                if routineOnly {
+                    Task { await saveStrengthRoutineOnlyWithReplace(replacingRoutineId: id) }
+                } else {
+                    Task { await saveWithReplaceConfirm(replacingRoutineId: id) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                replaceRoutinePendingId = nil
+                replacePendingIsRoutineOnly = false
+            }
+        } message: {
+            Text("A routine with this name already exists in this folder. Replacing removes the old template and saves the program you have in the editor now.")
+        }
         .onChange(of: app.addDraftKey) { _, _ in
             if let d = app.addDraft {
                 isApplyingDraft = true
@@ -491,9 +555,29 @@ struct AddWorkoutSheet: View {
             }
         }
         .onChange(of: kind) { _, new in
+            if new == .strength {
+                Task { await loadStrengthFoldersForPicker() }
+            }
             if new != .strength {
                 groupProgrammingMode = .sharedSessionTemplate
                 strengthLaneItems = [[EditableExercise()]]
+                saveNewStrengthRoutine = false
+                newStrengthRoutineName = ""
+                newStrengthRoutineFolderId = nil
+                focusNewRoutineNameField = false
+            }
+        }
+        .onChange(of: saveNewStrengthRoutine) { _, isOn in
+            if isOn {
+                Task { await loadStrengthFoldersForPicker() }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 220_000_000)
+                    focusNewRoutineNameField = true
+                }
+            } else {
+                newStrengthRoutineName = ""
+                newStrengthRoutineFolderId = nil
+                focusNewRoutineNameField = false
             }
         }
         .onChange(of: groupProgrammingMode) { _, new in
@@ -542,11 +626,36 @@ struct AddWorkoutSheet: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
-            .background((!loading && canSave) ? Color.blue : Color.gray.opacity(0.5),
+            .background((!loading && !loadingRoutineOnly && canSave) ? Color.blue : Color.gray.opacity(0.5),
                         in: RoundedRectangle(cornerRadius: 14))
             .foregroundStyle(.white)
         }
-        .disabled(loading || !canSave)
+        .disabled(loading || loadingRoutineOnly || !canSave)
+    }
+
+    private var saveRoutineOnlyButton: some View {
+        Button {
+            Task { await saveStrengthRoutineOnly() }
+        } label: {
+            HStack {
+                if loadingRoutineOnly { ProgressView().tint(.white) }
+                Text(loadingRoutineOnly ? "Saving…" : "Save without logging a workout")
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                (!loading && !loadingRoutineOnly && canSaveRoutineOnly)
+                    ? Color.cyan
+                    : Color.gray.opacity(0.5),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .foregroundStyle(.white)
+        }
+        .disabled(loading || loadingRoutineOnly || !canSaveRoutineOnly)
     }
 
     private var usePerPersonStrengthEditor: Bool {
@@ -714,6 +823,52 @@ struct AddWorkoutSheet: View {
                         showWorkoutRecommend = true
                     }
                 )
+            }
+
+            SectionCard {
+                Text("ROUTINE TEMPLATE")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                FieldRowPlain("Create routine") {
+                    Toggle("", isOn: $saveNewStrengthRoutine)
+                        .labelsHidden()
+                        .accessibilityLabel("Create routine")
+                }
+                if saveNewStrengthRoutine {
+                    Group {
+                        Divider()
+                        FieldRowPlain("Routine name") {
+                            TextField("Routine name", text: $newStrengthRoutineName)
+                                .textFieldStyle(.plain)
+                                .focused($focusNewRoutineNameField)
+                        }
+                        if !strengthFoldersForPicker.isEmpty {
+                            Divider()
+                            FieldRowPlain("Folder (optional)") {
+                                Picker("Folder (optional)", selection: $newStrengthRoutineFolderId) {
+                                    Text("None").tag(Int64?.none)
+                                    ForEach(strengthFoldersForPicker) { f in
+                                        Text(f.name).tag(Int64?.some(f.id))
+                                    }
+                                }
+                                .labelsHidden()
+                                // Default picker style in Forms can use a very large/ambiguous hit area; menu keeps taps on the chevron/label.
+                                .pickerStyle(.menu)
+                            }
+                        }
+                        Divider()
+                        saveRoutineOnlyButton
+                    }
+                }
+                if usePerPersonStrengthEditor {
+                    Divider()
+                    Text("Routines use only the program for the person selected above (You / partner).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.vertical, 4)
+                }
             }
 
             saveButton
@@ -987,6 +1142,10 @@ struct AddWorkoutSheet: View {
                     if !hasValidSet { return false }
                 }
             }
+            if saveNewStrengthRoutine {
+                let t = newStrengthRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if t.isEmpty { return false }
+            }
             return true
         case .cardio:
             return true
@@ -996,6 +1155,21 @@ struct AddWorkoutSheet: View {
             }
             return true
         }
+    }
+
+    /// Save a strength routine template without creating a workout (same exercise/reps validation as publish).
+    private var canSaveRoutineOnly: Bool {
+        guard kind == .strength, saveNewStrengthRoutine else { return false }
+        let programs: [[EditableExercise]] = usePerPersonStrengthEditor ? strengthLaneItems : [items]
+        for lane in programs {
+            guard lane.contains(where: { exerciseSelected($0) }) else { return false }
+            for ex in lane where exerciseSelected(ex) {
+                let hasValidSet = ex.cleanSets().contains { $0.reps != nil }
+                if !hasValidSet { return false }
+            }
+        }
+        let t = newStrengthRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !t.isEmpty
     }
 
     private func hyroxExercisePickerBinding(index: Int) -> Binding<String> {
@@ -1624,6 +1798,22 @@ struct AddWorkoutSheet: View {
         durationLabelMin = secs > 0 ? secs / 60 : 0
     }
     
+    private func loadStrengthFoldersForPicker() async {
+        do {
+            let client = SupabaseManager.shared.client
+            let res = try await client
+                .from("strength_routine_folders")
+                .select("id,name,updated_at,sort_order")
+                .order("sort_order", ascending: true)
+                .order("name", ascending: true)
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([StrengthRoutineFolderRow].self, from: res.data)
+            await MainActor.run { strengthFoldersForPicker = rows }
+        } catch {
+            await MainActor.run { strengthFoldersForPicker = [] }
+        }
+    }
+    
     private func save() async {
         error = nil
         loading = true
@@ -1633,7 +1823,7 @@ struct AddWorkoutSheet: View {
             let client = SupabaseManager.shared.client
             let session = try await client.auth.session
             let userId = session.user.id
-            var newWorkoutId: Int64? = nil
+            var _: Int64? = nil
             
             let iso = ISO8601DateFormatter()
             iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -1643,7 +1833,132 @@ struct AddWorkoutSheet: View {
                 return
             }
 
-            switch kind {
+            if kind == .strength, saveNewStrengthRoutine {
+                let routineTitle = newStrengthRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !routineTitle.isEmpty {
+                    if let existingId = try await StrengthRoutineNameValidator.existingRoutineIdForName(
+                        client: client,
+                        userId: userId,
+                        trimmedName: routineTitle,
+                        excludingRoutineId: nil,
+                        folderId: newStrengthRoutineFolderId
+                    ) {
+                        await MainActor.run {
+                            replacePendingIsRoutineOnly = false
+                            replaceRoutinePendingId = existingId
+                            showReplaceRoutineConfirm = true
+                        }
+                        return
+                    }
+                }
+            }
+
+            try await performSaveWorkoutAndRoutine(replacingRoutineId: nil)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func saveWithReplaceConfirm(replacingRoutineId: Int64?) async {
+        guard let rid = replacingRoutineId else { return }
+        error = nil
+        loading = true
+        defer { loading = false }
+        do {
+            try await performSaveWorkoutAndRoutine(replacingRoutineId: rid)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func saveStrengthRoutineOnly() async {
+        error = nil
+        guard kind == .strength, canSaveRoutineOnly else { return }
+        loadingRoutineOnly = true
+        defer { loadingRoutineOnly = false }
+        do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let userId = session.user.id
+            let routineTitle = newStrengthRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let existingId = try await StrengthRoutineNameValidator.existingRoutineIdForName(
+                client: client,
+                userId: userId,
+                trimmedName: routineTitle,
+                excludingRoutineId: nil,
+                folderId: newStrengthRoutineFolderId
+            ) {
+                await MainActor.run {
+                    replacePendingIsRoutineOnly = true
+                    replaceRoutinePendingId = existingId
+                    showReplaceRoutineConfirm = true
+                }
+                return
+            }
+            try await performSaveStrengthRoutineOnly(replacingRoutineId: nil)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func saveStrengthRoutineOnlyWithReplace(replacingRoutineId: Int64?) async {
+        guard let rid = replacingRoutineId else { return }
+        error = nil
+        loadingRoutineOnly = true
+        defer { loadingRoutineOnly = false }
+        do {
+            try await performSaveStrengthRoutineOnly(replacingRoutineId: rid)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func performSaveStrengthRoutineOnly(replacingRoutineId: Int64?) async throws {
+        let client = SupabaseManager.shared.client
+        let session = try await client.auth.session
+        let userId = session.user.id
+        let routineTitle = newStrengthRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !routineTitle.isEmpty else { return }
+        let templateExercises = strengthExercisesForRoutineTemplate()
+        let outcome = try await persistStrengthRoutineTemplate(
+            client: client,
+            userId: userId,
+            name: routineTitle,
+            folderId: newStrengthRoutineFolderId,
+            exercises: templateExercises,
+            replaceRoutineId: replacingRoutineId
+        )
+        var message = "Routine saved."
+        if outcome.alsoHasAnotherRoutineWithSameProgram {
+            message += " You already have another saved routine with the same exercises in this folder."
+        }
+        await MainActor.run {
+            banner = Banner(message: message, type: .success)
+            newStrengthRoutineName = ""
+            newStrengthRoutineFolderId = nil
+            saveNewStrengthRoutine = false
+            focusNewRoutineNameField = false
+        }
+    }
+
+    private func performSaveWorkoutAndRoutine(replacingRoutineId: Int64?) async throws {
+        let client = SupabaseManager.shared.client
+        let session = try await client.auth.session
+        let userId = session.user.id
+        var newWorkoutId: Int64? = nil
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        if kind == .strength, usePerPersonStrengthEditor, participants.count > 2 {
+            throw NSError(
+                domain: "AddWorkout",
+                code: 0,
+                userInfo: [NSLocalizedDescriptionKey: "Per-person planning supports at most two partners (three people total)."]
+            )
+        }
+
+        switch kind {
             case .strength:
                 if usePerPersonStrengthEditor {
                     var rows: [PlanStrengthSquadProgramRow] = []
@@ -1660,8 +1975,6 @@ struct AddWorkoutSheet: View {
                         }
                         rows.append(.init(owner_user_id: p.user_id, items: theirs))
                     }
-                    // PostgREST matches RPC by the set of argument names sent; optional `nil` keys are often
-                    // omitted, which would leave a 4-arg call and no matching function — always send every param.
                     let squadParams = PlanStrengthSquadProgramsRPC(
                         p_programs: rows,
                         p_title: title,
@@ -1798,10 +2111,31 @@ struct AddWorkoutSheet: View {
                 }
                 return publishMode == .add ? "Workout published! 💪" : "Workout planned! 🗓️"
             }()
-            await showSuccessAndGoHome(successMessage)
-        } catch {
-            self.error = error.localizedDescription
-        }
+            var routineSaveSuffix = ""
+            if kind == .strength, saveNewStrengthRoutine {
+                let routineTitle = newStrengthRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !routineTitle.isEmpty {
+                    do {
+                        let templateExercises = strengthExercisesForRoutineTemplate()
+                        let outcome = try await persistStrengthRoutineTemplate(
+                            client: client,
+                            userId: userId,
+                            name: routineTitle,
+                            folderId: newStrengthRoutineFolderId,
+                            exercises: templateExercises,
+                            replaceRoutineId: replacingRoutineId
+                        )
+                        routineSaveSuffix = " Routine saved."
+                        if outcome.alsoHasAnotherRoutineWithSameProgram {
+                            routineSaveSuffix += " You already have another saved routine with the same exercises in this folder."
+                        }
+                    } catch {
+                        routineSaveSuffix = " " + strengthRoutineUserFacingSaveError(error)
+                        print("[StrengthRoutine][SAVE]", error.localizedDescription)
+                    }
+                }
+            }
+            await showSuccessAndGoHome(successMessage + routineSaveSuffix)
     }
     
     @MainActor
@@ -1820,6 +2154,13 @@ struct AddWorkoutSheet: View {
         strengthLaneItems = [[EditableExercise()]]
         strengthProgramPage = 0
         strengthRecommendTargetLane = nil
+        saveNewStrengthRoutine = false
+        newStrengthRoutineName = ""
+        newStrengthRoutineFolderId = nil
+        focusNewRoutineNameField = false
+        replaceRoutinePendingId = nil
+        showReplaceRoutineConfirm = false
+        replacePendingIsRoutineOnly = false
     }
     
     @MainActor
@@ -1844,7 +2185,62 @@ struct AddWorkoutSheet: View {
         let rows = try JSONDecoder().decode([Row].self, from: res.data)
         return rows.first?.id
     }
+
+    private func strengthExercisesForRoutineTemplate() -> [EditableExercise] {
+        if usePerPersonStrengthEditor, strengthLaneItems.indices.contains(strengthProgramPage) {
+            return strengthLaneItems[strengthProgramPage]
+        }
+        return items
+    }
+
+    private func applyLoadedStrengthRoutine(_ exercises: [EditableExercise]) {
+        guard !exercises.isEmpty else { return }
+        let normalized = exercises.enumerated().map { idx, ex -> EditableExercise in
+            var c = ex.deepCopied()
+            c.orderIndex = idx + 1
+            return c
+        }
+        if usePerPersonStrengthEditor, strengthLaneItems.indices.contains(strengthProgramPage) {
+            strengthLaneItems[strengthProgramPage] = normalized
+        } else {
+            items = normalized
+        }
+    }
+
+    private func persistStrengthRoutineTemplate(
+        client: SupabaseClient,
+        userId: UUID,
+        name: String,
+        folderId: Int64?,
+        exercises: [EditableExercise],
+        replaceRoutineId: Int64? = nil
+    ) async throws -> StrengthRoutinePersistOutcome {
+        try await insertStrengthRoutineTemplate(
+            client: client,
+            userId: userId,
+            name: name,
+            folderId: folderId,
+            exercises: exercises,
+            replaceRoutineId: replaceRoutineId
+        )
+    }
     
+    private func strengthRoutineUserFacingSaveError(_ error: Error) -> String {
+        let ns = error as NSError
+        if ns.domain == "StrengthRoutine",
+           let msg = ns.userInfo[NSLocalizedDescriptionKey] as? String, !msg.isEmpty {
+            return msg
+        }
+        if let pe = error as? PostgrestError {
+            if pe.code == "23505" {
+                return "A routine with this name already exists in this folder. Choose another name."
+            }
+            let parts = [pe.message, pe.detail, pe.hint].compactMap { $0 }.filter { !$0.isEmpty }
+            if !parts.isEmpty { return parts.joined(separator: " ") }
+        }
+        return "Routine was not saved."
+    }
+
     private func addParticipants(to workoutId: Int64) async {
         guard !participants.isEmpty else { return }
         let client = SupabaseManager.shared.client
@@ -2769,8 +3165,6 @@ struct RPCSportV2Wrapper: Encodable {
     let p_stats: AnyJSON?
 }
 
-// MARK: - Strength exercise editor (shared + per-person lanes)
-
 private struct StrengthExercisesEditorBlock: View {
     @Binding var exercises: [EditableExercise]
     let laneIndex: Int
@@ -2793,91 +3187,43 @@ private struct StrengthExercisesEditorBlock: View {
                 Divider().padding(.vertical, 4)
             }
 
+            Text("QUICK ACTIONS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
             Button(action: onSuggest) {
-                Label("Suggest next session", systemImage: "sparkles")
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .imageScale(.medium)
+                    Text("Suggest next session")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .foregroundStyle(.blue)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .disabled(loadingCatalog)
+            .padding(.vertical, 4)
 
             Divider().padding(.vertical, 6)
 
-            ForEach(Array(exercises.enumerated()), id: \.element.id) { i, _ in
-                if i != exercises.startIndex { Divider().padding(.vertical, 6) }
+            Text("LIFTS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 2)
 
-                VStack(spacing: 0) {
-                    FieldRowPlain("Exercise") {
-                        Button {
-                            pickerHandle = PickerHandle(id: exercises[i].id, strengthLaneIndex: laneIndex)
-                        } label: {
-                            HStack {
-                                Image(systemName: "list.bullet.rectangle.portrait")
-                                Text(exerciseLabel(exercises[i]))
-                                    .foregroundStyle(exerciseSelected(exercises[i]) ? .primary : .secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                                Spacer()
-                                if loadingCatalog { ProgressView() }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(loadingCatalog || catalog.isEmpty)
-                    }
+            Text("Use the arrows on each exercise to change order.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 4)
 
-                    Divider()
-
-                    FieldRowPlain("Alias") {
-                        TextField("Exercise name (optional)", text: nameBinding(i))
-                            .textFieldStyle(.plain)
-                    }
-
-                    Divider()
-
-                    FieldRowPlain("Notes") {
-                        TextField("Notes (exercise)", text: notesBinding(i))
-                            .textFieldStyle(.plain)
-                    }
-
-                    ForEach(exercises[i].sets.indices, id: \.self) { s in
-                        Divider()
-                        StrengthSetRowEditor(
-                            setNumber: setNumberBinding(i, s),
-                            reps: repsBinding(i, s),
-                            weightKg: weightBinding(i, s),
-                            rpe: rpeBinding(i, s),
-                            restSec: restBinding(i, s),
-                            showDelete: exercises[i].sets.count > 1,
-                            onDelete: { removeSet(exerciseIndex: i, setIndex: s) }
-                        )
-                    }
-
-                    Divider().padding(.vertical, 4)
-                    HStack {
-                        Button {
-                            appendSet(exerciseIndex: i)
-                        } label: { Label("Add set", systemImage: "plus.circle") }
-                            .buttonStyle(.borderless)
-
-                        Spacer()
-
-                        if exercises.count > 1 {
-                            Button(role: .destructive) {
-                                confirmRemoveStrengthExercise = (laneIndex, i)
-                            } label: {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "trash")
-                                    Text("Remove exercise")
-                                }
-                            }
-                            .buttonStyle(.borderless)
-                        }
-                    }
+            VStack(spacing: 12) {
+                ForEach(Array(exercises.enumerated()), id: \.element.id) { i, _ in
+                    exerciseEditorBlock(index: i)
                 }
-                .padding(6)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.yellow.opacity(exercises[i].id == recentlyAddedExerciseId ? 0.18 : 0))
-                )
-                .animation(.easeInOut(duration: 0.6), value: recentlyAddedExerciseId)
             }
 
             Divider().padding(.vertical, 6)
@@ -2899,6 +3245,137 @@ private struct StrengthExercisesEditorBlock: View {
             .buttonStyle(.borderless)
             .padding(.top, 2)
         }
+    }
+
+    @ViewBuilder
+    private func exerciseEditorBlock(index i: Int) -> some View {
+        VStack(spacing: 0) {
+            FieldRowPlain("Exercise") {
+                Button {
+                    pickerHandle = PickerHandle(id: exercises[i].id, strengthLaneIndex: laneIndex)
+                } label: {
+                    HStack {
+                        Image(systemName: "list.bullet.rectangle.portrait")
+                        Text(exerciseLabel(exercises[i]))
+                            .foregroundStyle(exerciseSelected(exercises[i]) ? .primary : .secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer()
+                        if loadingCatalog { ProgressView() }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(loadingCatalog || catalog.isEmpty)
+            }
+
+            Divider()
+
+            FieldRowPlain("Alias") {
+                TextField("Exercise name (optional)", text: nameBinding(i))
+                    .textFieldStyle(.plain)
+            }
+
+            Divider()
+
+            FieldRowPlain("Notes") {
+                TextField("Notes (exercise)", text: notesBinding(i))
+                    .textFieldStyle(.plain)
+            }
+
+            ForEach(exercises[i].sets.indices, id: \.self) { s in
+                Divider()
+                StrengthSetRowEditor(
+                    setNumber: setNumberBinding(i, s),
+                    reps: repsBinding(i, s),
+                    weightKg: weightBinding(i, s),
+                    rpe: rpeBinding(i, s),
+                    restSec: restBinding(i, s),
+                    showDelete: exercises[i].sets.count > 1,
+                    onDelete: { removeSet(exerciseIndex: i, setIndex: s) }
+                )
+            }
+
+            Divider().padding(.vertical, 4)
+            HStack {
+                Button {
+                    appendSet(exerciseIndex: i)
+                } label: { Label("Add set", systemImage: "plus.circle") }
+                    .buttonStyle(.borderless)
+
+                Spacer()
+
+                if exercises.count > 1 {
+                    HStack(spacing: 2) {
+                        Button {
+                            moveExercise(from: i, direction: -1)
+                        } label: {
+                            Image(systemName: "chevron.up")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 36, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(i == 0)
+                        .opacity(i == 0 ? 0.35 : 1)
+
+                        Button {
+                            moveExercise(from: i, direction: 1)
+                        } label: {
+                            Image(systemName: "chevron.down")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 36, height: 32)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(i == exercises.count - 1)
+                        .opacity(i == exercises.count - 1 ? 0.35 : 1)
+                    }
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Reorder exercise")
+                }
+
+                if exercises.count > 1 {
+                    Button(role: .destructive) {
+                        confirmRemoveStrengthExercise = (laneIndex, i)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.body)
+                            .frame(width: 40, height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Remove exercise")
+                }
+            }
+        }
+        .padding(8)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.white.opacity(0.07))
+                if exercises[i].id == recentlyAddedExerciseId {
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.yellow.opacity(0.2))
+                }
+            }
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(.white.opacity(0.16), lineWidth: 0.8)
+        )
+        .animation(.easeInOut(duration: 0.6), value: recentlyAddedExerciseId)
+    }
+
+    private func moveExercise(from index: Int, direction: Int) {
+        let newIndex = index + direction
+        guard exercises.indices.contains(index), exercises.indices.contains(newIndex) else { return }
+        var next = exercises
+        next.swapAt(index, newIndex)
+        for idx in next.indices {
+            next[idx].orderIndex = idx + 1
+        }
+        exercises = next
     }
 
     private func replaceExercise(_ index: Int, _ mutate: (inout EditableExercise) -> Void) {
@@ -3019,6 +3496,1324 @@ private func msToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
     guard (0...59).contains(M), (0...59).contains(S), H >= 0 else { return nil }
     let total = H*3600 + M*60 + S
     return total > 0 ? total : nil
+}
+
+private struct StrengthRoutineFolderRow: Identifiable, Hashable, Decodable {
+    let id: Int64
+    let name: String
+    let updated_at: Date?
+    let sort_order: Int?
+}
+
+private struct StrengthRoutineListRow: Identifiable, Decodable {
+    let id: Int64
+    let name: String
+    let updated_at: Date?
+    let folder_id: Int64?
+    let sort_order: Int?
+}
+
+private struct StrengthRoutineDetailWire: Decodable {
+    let id: Int64
+    let name: String
+    let strength_routine_exercises: [StrengthRoutineExerciseWire]?
+}
+
+private struct StrengthRoutineExerciseWire: Decodable {
+    let exercise_id: Int64
+    let order_index: Int
+    let notes: String?
+    let custom_name: String?
+    let strength_routine_sets: [StrengthRoutineSetWire]?
+}
+
+private struct StrengthRoutineSetWire: Decodable {
+    let set_number: Int
+    let reps: Int?
+    let weight_kg: Double?
+    let rpe: Double?
+    let rest_sec: Int?
+    let notes: String?
+}
+
+private func strengthRoutineDetailSelect() -> String {
+    "id,name,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes))"
+}
+
+private func editableExercisesFromRoutineDetail(
+    _ detail: StrengthRoutineDetailWire,
+    exerciseDisplayName: (Int64) -> String
+) -> [EditableExercise] {
+    let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
+    return exs.map { ex in
+        let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
+        let mappedSets: [EditableSet] = setsSorted.map { s in
+            EditableSet(
+                setNumber: s.set_number,
+                reps: s.reps,
+                weightKg: s.weight_kg.map { String($0) } ?? "",
+                rpe: s.rpe.map { String($0) } ?? "",
+                restSec: s.rest_sec,
+                notes: s.notes ?? ""
+            )
+        }
+        let fallbackSets = mappedSets.isEmpty ? [EditableSet(setNumber: 1)] : mappedSets
+        let displayName: String = {
+            if let cn = ex.custom_name, !cn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return cn }
+            return exerciseDisplayName(ex.exercise_id)
+        }()
+        return EditableExercise(
+            exerciseId: ex.exercise_id,
+            exerciseName: displayName,
+            orderIndex: ex.order_index,
+            notes: ex.notes ?? "",
+            sets: fallbackSets
+        )
+    }
+}
+
+enum StrengthRoutineNameValidator {
+    static func isRoutineNameTaken(
+        client: SupabaseClient,
+        userId: UUID,
+        trimmedName: String,
+        excludingRoutineId: Int64?,
+        folderId: Int64? = nil
+    ) async throws -> Bool {
+        if let _ = try await existingRoutineIdForName(
+            client: client,
+            userId: userId,
+            trimmedName: trimmedName,
+            excludingRoutineId: excludingRoutineId,
+            folderId: folderId
+        ) {
+            return true
+        }
+        return false
+    }
+
+    static func existingRoutineIdForName(
+        client: SupabaseClient,
+        userId: UUID,
+        trimmedName: String,
+        excludingRoutineId: Int64?,
+        folderId: Int64? = nil
+    ) async throws -> Int64? {
+        let t = trimmedName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        struct R: Decodable { let id: Int64 }
+        let rows: [R]
+        if let fid = folderId {
+            let res = try await client
+                .from("strength_routines")
+                .select("id")
+                .eq("user_id", value: userId)
+                .eq("name", value: t)
+                .eq("folder_id", value: Int(fid))
+                .limit(1)
+                .execute()
+            rows = try JSONDecoder.supabase().decode([R].self, from: res.data)
+        } else {
+            let res = try await client
+                .from("strength_routines")
+                .select("id")
+                .eq("user_id", value: userId)
+                .eq("name", value: t)
+                .is("folder_id", value: nil)
+                .limit(1)
+                .execute()
+            rows = try JSONDecoder.supabase().decode([R].self, from: res.data)
+        }
+        guard let row = rows.first else { return nil }
+        if let ex = excludingRoutineId, row.id == ex { return nil }
+        return row.id
+    }
+}
+
+private struct StrengthRoutinePersistOutcome {
+    let alsoHasAnotherRoutineWithSameProgram: Bool
+}
+
+private func strengthRoutineContentFingerprint(from exercises: [EditableExercise]) -> String {
+    let items = exercises.compactMap { $0.toStrengthItem() }.sorted { $0.order_index < $1.order_index }
+    var lines: [String] = []
+    for item in items {
+        let setParts = item.sets.sorted { $0.set_number < $1.set_number }.map { s in
+            let w = s.weight_kg.map { String($0) } ?? ""
+            let r = s.rpe.map { String($0) } ?? ""
+            let rest = s.rest_sec.map { String($0) } ?? ""
+            let rep = s.reps.map { String($0) } ?? ""
+            return "\(s.set_number)|\(rep)|\(w)|\(r)|\(rest)|\(s.notes ?? "")"
+        }
+        let cn = item.custom_name ?? ""
+        let note = item.notes ?? ""
+        lines.append("\(item.exercise_id)|\(item.order_index)|\(cn)|\(note)|" + setParts.joined(separator: ";"))
+    }
+    let joined = lines.joined(separator: "\n")
+    let digest = SHA256.hash(data: Data(joined.utf8))
+    return digest.map { String(format: "%02x", $0) }.joined()
+}
+
+private func nextRoutineSortOrderForInsert(
+    client: SupabaseClient,
+    userId: UUID,
+    folderId: Int64?
+) async throws -> Int {
+    struct R: Decodable { let sort_order: Int? }
+    let res: [R]
+    if let fid = folderId {
+        let r = try await client
+            .from("strength_routines")
+            .select("sort_order")
+            .eq("user_id", value: userId)
+            .eq("folder_id", value: Int(fid))
+            .order("sort_order", ascending: false)
+            .limit(1)
+            .execute()
+        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
+    } else {
+        let r = try await client
+            .from("strength_routines")
+            .select("sort_order")
+            .eq("user_id", value: userId)
+            .is("folder_id", value: nil)
+            .order("sort_order", ascending: false)
+            .limit(1)
+            .execute()
+        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
+    }
+    return (res.first?.sort_order ?? 0) + 1
+}
+
+private func otherRoutinesWithSameContentCount(
+    client: SupabaseClient,
+    userId: UUID,
+    folderId: Int64?,
+    contentHash: String,
+    excludingRoutineId: Int64
+) async throws -> Int {
+    struct R: Decodable { let id: Int64 }
+    let res: [R]
+    if let fid = folderId {
+        let r = try await client
+            .from("strength_routines")
+            .select("id")
+            .eq("user_id", value: userId)
+            .eq("content_hash", value: contentHash)
+            .eq("folder_id", value: Int(fid))
+            .neq("id", value: Int(excludingRoutineId))
+            .limit(8)
+            .execute()
+        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
+    } else {
+        let r = try await client
+            .from("strength_routines")
+            .select("id")
+            .eq("user_id", value: userId)
+            .eq("content_hash", value: contentHash)
+            .is("folder_id", value: nil)
+            .neq("id", value: Int(excludingRoutineId))
+            .limit(8)
+            .execute()
+        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
+    }
+    return res.count
+}
+
+private func insertStrengthRoutineTemplate(
+    client: SupabaseClient,
+    userId: UUID,
+    name: String,
+    folderId: Int64?,
+    exercises: [EditableExercise],
+    replaceRoutineId: Int64? = nil
+) async throws -> StrengthRoutinePersistOutcome {
+    let strengthItems = exercises.compactMap { $0.toStrengthItem() }
+    guard !strengthItems.isEmpty else {
+        throw NSError(
+            domain: "StrengthRoutine",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Add at least one exercise with reps before saving a routine."]
+        )
+    }
+
+    struct RoutineIdRow: Decodable { let id: Int64 }
+    struct RoutineExerciseIdRow: Decodable { let id: Int64 }
+
+    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return StrengthRoutinePersistOutcome(alsoHasAnotherRoutineWithSameProgram: false)
+    }
+
+    let contentHash = strengthRoutineContentFingerprint(from: exercises)
+
+    if let rid = replaceRoutineId {
+        _ = try await client
+            .from("strength_routines")
+            .delete()
+            .eq("id", value: Int(rid))
+            .eq("user_id", value: userId)
+            .execute()
+    }
+
+    let nextSort = try await nextRoutineSortOrderForInsert(client: client, userId: userId, folderId: folderId)
+
+    struct StrengthRoutineRowInsert: Encodable {
+        let user_id: UUID
+        let name: String
+        let folder_id: Int64?
+        let content_hash: String
+        let sort_order: Int
+    }
+
+    let headerRes = try await client
+        .from("strength_routines")
+        .insert(
+            StrengthRoutineRowInsert(
+                user_id: userId,
+                name: trimmed,
+                folder_id: folderId,
+                content_hash: contentHash,
+                sort_order: nextSort
+            ),
+            returning: .representation
+        )
+        .select("id")
+        .limit(1)
+        .execute()
+
+    let idRows = try JSONDecoder.supabase().decode([RoutineIdRow].self, from: headerRes.data)
+    guard let routineId = idRows.first?.id else {
+        throw NSError(
+            domain: "StrengthRoutine",
+            code: 3,
+            userInfo: [NSLocalizedDescriptionKey: "Routine was not saved (could not read the new routine)."]
+        )
+    }
+
+    struct StrengthRoutineExerciseRowInsert: Encodable {
+        let routine_id: Int64
+        let exercise_id: Int64
+        let order_index: Int
+        let notes: String?
+        let custom_name: String?
+    }
+
+    struct StrengthRoutineSetRowInsert: Encodable {
+        let routine_exercise_id: Int64
+        let set_number: Int
+        let reps: Int?
+        let weight_kg: Double?
+        let rpe: Double?
+        let rest_sec: Int?
+        let notes: String?
+    }
+
+    for item in strengthItems {
+        let exRes = try await client
+            .from("strength_routine_exercises")
+            .insert(
+                StrengthRoutineExerciseRowInsert(
+                    routine_id: routineId,
+                    exercise_id: item.exercise_id,
+                    order_index: item.order_index,
+                    notes: item.notes,
+                    custom_name: item.custom_name
+                ),
+                returning: .representation
+            )
+            .select("id")
+            .limit(1)
+            .execute()
+
+        let exIdRows = try JSONDecoder.supabase().decode([RoutineExerciseIdRow].self, from: exRes.data)
+        guard let exerciseRowId = exIdRows.first?.id else {
+            throw NSError(
+                domain: "StrengthRoutine",
+                code: 3,
+                userInfo: [NSLocalizedDescriptionKey: "Routine was not saved (exercise row missing)."]
+            )
+        }
+
+        let setRows: [StrengthRoutineSetRowInsert] = item.sets.map { s in
+            StrengthRoutineSetRowInsert(
+                routine_exercise_id: exerciseRowId,
+                set_number: s.set_number,
+                reps: s.reps,
+                weight_kg: s.weight_kg,
+                rpe: s.rpe,
+                rest_sec: s.rest_sec,
+                notes: s.notes
+            )
+        }
+        if !setRows.isEmpty {
+            _ = try await client.from("strength_routine_sets").insert(setRows).execute()
+        }
+    }
+
+    let dupCount = try await otherRoutinesWithSameContentCount(
+        client: client,
+        userId: userId,
+        folderId: folderId,
+        contentHash: contentHash,
+        excludingRoutineId: routineId
+    )
+    return StrengthRoutinePersistOutcome(alsoHasAnotherRoutineWithSameProgram: dupCount > 0)
+}
+
+private func nextFolderSortOrderForInsert(client: SupabaseClient, userId: UUID) async throws -> Int {
+    struct R: Decodable { let sort_order: Int? }
+    let res = try await client
+        .from("strength_routine_folders")
+        .select("sort_order")
+        .eq("user_id", value: userId)
+        .order("sort_order", ascending: false)
+        .limit(1)
+        .execute()
+    let rows = try JSONDecoder.supabase().decode([R].self, from: res.data)
+    return (rows.first?.sort_order ?? 0) + 1
+}
+
+private struct StrengthRoutinesPickerSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let exerciseDisplayName: (Int64) -> String
+    let onApply: ([EditableExercise]) -> Void
+
+    @State private var routines: [StrengthRoutineListRow] = []
+    @State private var folders: [StrengthRoutineFolderRow] = []
+    @State private var loading = false
+    @State private var errorMessage: String?
+    @State private var showRenameSheet = false
+    @State private var renameRoutineId: Int64?
+    @State private var renameRoutineFolderId: Int64?
+    @State private var renameDraft = ""
+    @State private var renameError: String?
+    @State private var routineIdPendingDelete: Int64?
+    @State private var showNewFolderSheet = false
+    @State private var newFolderName = ""
+    @State private var newFolderError: String?
+    @State private var showRenameFolderSheet = false
+    @State private var renameFolderId: Int64?
+    @State private var renameFolderDraft = ""
+    @State private var renameFolderError: String?
+    @State private var folderIdPendingDelete: Int64?
+    @State private var collapsedFolderIds: Set<Int64> = []
+    @State private var isUnfiledSectionCollapsed: Bool = false
+    @AppStorage("strengthRoutinesSheet.collapsedFolderIdsCSV") private var collapsedFolderIdsCSV: String = ""
+    @AppStorage("strengthRoutinesSheet.unfiledSectionCollapsed") private var storedUnfiledCollapsed: Bool = false
+    @State private var routineSearchText: String = ""
+    @State private var showDuplicateSheet = false
+    @State private var duplicateSourceRoutine: StrengthRoutineListRow?
+    @State private var duplicateNameDraft: String = ""
+    @State private var duplicateTargetFolderId: Int64? = nil
+    @State private var duplicateError: String?
+
+    private var sortedFolders: [StrengthRoutineFolderRow] {
+        folders.sorted { a, b in
+            let ao = Int64(a.sort_order ?? 0)
+            let bo = Int64(b.sort_order ?? 0)
+            if ao != bo { return ao < bo }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
+    }
+
+    private var displayRoutines: [StrengthRoutineListRow] {
+        let q = routineSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return routines }
+        return routines.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    }
+
+    private var displayFolders: [StrengthRoutineFolderRow] {
+        let q = routineSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty { return sortedFolders }
+        return sortedFolders.filter { f in
+            f.name.localizedCaseInsensitiveContains(q)
+                || displayRoutines.contains(where: { $0.folder_id == f.id })
+        }
+    }
+
+    private func routinesUnfiled() -> [StrengthRoutineListRow] {
+        displayRoutines
+            .filter { $0.folder_id == nil }
+            .sorted { a, b in
+                let ao = Int64(a.sort_order ?? 0)
+                let bo = Int64(b.sort_order ?? 0)
+                if ao != bo { return ao < bo }
+                return (a.updated_at ?? .distantPast) > (b.updated_at ?? .distantPast)
+            }
+    }
+
+    private func routines(inFolderId fid: Int64) -> [StrengthRoutineListRow] {
+        displayRoutines
+            .filter { $0.folder_id == fid }
+            .sorted { a, b in
+                let ao = Int64(a.sort_order ?? 0)
+                let bo = Int64(b.sort_order ?? 0)
+                if ao != bo { return ao < bo }
+                return (a.updated_at ?? .distantPast) > (b.updated_at ?? .distantPast)
+            }
+    }
+
+    private func applyCollapsedPersistence() {
+        if !collapsedFolderIdsCSV.isEmpty {
+            collapsedFolderIds = Set(collapsedFolderIdsCSV.split(separator: ",").compactMap { Int64(String($0)) })
+        }
+        isUnfiledSectionCollapsed = storedUnfiledCollapsed
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if let errorMessage {
+                        SectionCard {
+                            Text(errorMessage)
+                                .foregroundStyle(.red)
+                                .font(.footnote)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    SectionCard {
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundStyle(.secondary)
+                            TextField("Search routines", text: $routineSearchText)
+                                .textFieldStyle(.plain)
+                        }
+                    }
+                    if loading, routines.isEmpty, folders.isEmpty {
+                        SectionCard {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                    } else if routines.isEmpty, folders.isEmpty {
+                        SectionCard {
+                            Text("No saved routines yet. Save one when you publish a strength workout.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    } else if !routineSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, displayRoutines.isEmpty {
+                        SectionCard {
+                            Text("No matching routines.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        if !routinesUnfiled().isEmpty {
+                            collapsibleUnfiledSection()
+                        }
+                        ForEach(displayFolders) { folder in
+                            folderSection(folder)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 28)
+            }
+            .scrollIndicators(.visible)
+            .navigationTitle("Routines")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    HStack {
+                        Menu {
+                            Button("Expand all") {
+                                withAnimation(.snappy) {
+                                    collapsedFolderIds = []
+                                    isUnfiledSectionCollapsed = false
+                                }
+                            }
+                            Button("Collapse all") {
+                                withAnimation(.snappy) {
+                                    collapsedFolderIds = Set(sortedFolders.map(\.id))
+                                    isUnfiledSectionCollapsed = routines.contains { $0.folder_id == nil }
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "chevron.up.chevron.down")
+                        }
+                        Button {
+                            newFolderName = ""
+                            newFolderError = nil
+                            showNewFolderSheet = true
+                        } label: {
+                            Image(systemName: "folder.badge.plus")
+                        }
+                        Button {
+                            Task { await loadRoutines() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(loading)
+                    }
+                }
+            }
+        }
+        .task {
+            await loadRoutines()
+            applyCollapsedPersistence()
+        }
+        .onChange(of: collapsedFolderIds) { _, new in
+            collapsedFolderIdsCSV = new.sorted().map { String($0) }.joined(separator: ",")
+        }
+        .onChange(of: isUnfiledSectionCollapsed) { _, v in
+            storedUnfiledCollapsed = v
+        }
+        .sheet(isPresented: $showRenameSheet) {
+            NavigationStack {
+                ScrollView {
+                    SectionCard {
+                        if let renameError {
+                            Text(renameError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        FieldRowPlain("Routine name") {
+                            TextField("Routine name", text: $renameDraft)
+                                .textFieldStyle(.plain)
+                        }
+                    }
+                    .padding(16)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("Rename routine")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showRenameSheet = false
+                            renameRoutineId = nil
+                            renameRoutineFolderId = nil
+                            renameError = nil
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            Task { await saveRename() }
+                        }
+                        .disabled(renameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showNewFolderSheet) {
+            NavigationStack {
+                ScrollView {
+                    SectionCard {
+                        if let newFolderError {
+                            Text(newFolderError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        FieldRowPlain("Folder name") {
+                            TextField("Folder name", text: $newFolderName)
+                                .textFieldStyle(.plain)
+                        }
+                    }
+                    .padding(16)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("New folder")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showNewFolderSheet = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Create") {
+                            Task { await createFolder() }
+                        }
+                        .disabled(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showRenameFolderSheet) {
+            NavigationStack {
+                ScrollView {
+                    SectionCard {
+                        if let renameFolderError {
+                            Text(renameFolderError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        FieldRowPlain("Folder name") {
+                            TextField("Folder name", text: $renameFolderDraft)
+                                .textFieldStyle(.plain)
+                        }
+                    }
+                    .padding(16)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("Rename folder")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showRenameFolderSheet = false
+                            renameFolderId = nil
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            Task { await saveRenameFolder() }
+                        }
+                        .disabled(renameFolderDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showDuplicateSheet) {
+            NavigationStack {
+                ScrollView {
+                    SectionCard {
+                        if let duplicateError {
+                            Text(duplicateError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        FieldRowPlain("Routine name") {
+                            TextField("Routine name", text: $duplicateNameDraft)
+                                .textFieldStyle(.plain)
+                        }
+                        if !sortedFolders.isEmpty {
+                            Divider()
+                            FieldRowPlain("Folder") {
+                                Picker("", selection: $duplicateTargetFolderId) {
+                                    Text("No folder").tag(Int64?.none)
+                                    ForEach(sortedFolders) { f in
+                                        Text(f.name).tag(Int64?.some(f.id))
+                                    }
+                                }
+                                .labelsHidden()
+                            }
+                        }
+                    }
+                    .padding(16)
+                }
+                .scrollIndicators(.hidden)
+                .navigationTitle("Duplicate routine")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            showDuplicateSheet = false
+                            duplicateSourceRoutine = nil
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            Task { await saveDuplicateRoutine() }
+                        }
+                        .disabled(duplicateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+        .confirmationDialog(
+            "Delete this routine?",
+            isPresented: Binding(
+                get: { routineIdPendingDelete != nil },
+                set: { if !$0 { routineIdPendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = routineIdPendingDelete {
+                    Task { await deleteRoutine(id: id) }
+                }
+                routineIdPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                routineIdPendingDelete = nil
+            }
+        }
+        .confirmationDialog(
+            "Delete this folder?",
+            isPresented: Binding(
+                get: { folderIdPendingDelete != nil },
+                set: { if !$0 { folderIdPendingDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                if let id = folderIdPendingDelete {
+                    Task { await deleteFolder(id: id) }
+                }
+                folderIdPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) {
+                folderIdPendingDelete = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func collapsibleUnfiledSection() -> some View {
+        let rows = routinesUnfiled()
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 6) {
+                Button {
+                    withAnimation(.snappy) { isUnfiledSectionCollapsed.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isUnfiledSectionCollapsed ? 0 : 90))
+                        Text("No folder")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isUnfiledSectionCollapsed ? "Expand No folder" : "Collapse No folder")
+                Spacer()
+            }
+            .padding(.horizontal, 2)
+
+            if !isUnfiledSectionCollapsed {
+                ForEach(rows) { row in
+                    routineCard(row)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func folderSection(_ folder: StrengthRoutineFolderRow) -> some View {
+        let inFolder = routines(inFolderId: folder.id)
+        let isCollapsed = collapsedFolderIds.contains(folder.id)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 6) {
+                Button {
+                    withAnimation(.snappy) {
+                        if isCollapsed { collapsedFolderIds.remove(folder.id) } else { collapsedFolderIds.insert(folder.id) }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                        Text(folder.name)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isCollapsed ? "Expand folder \(folder.name)" : "Collapse folder \(folder.name)")
+                Spacer()
+                Menu {
+                    Button("Rename folder") {
+                        renameFolderId = folder.id
+                        renameFolderDraft = folder.name
+                        renameFolderError = nil
+                        showRenameFolderSheet = true
+                    }
+                    if routineSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       let idx = sortedFolders.firstIndex(where: { $0.id == folder.id }) {
+                        if idx > 0 {
+                            Button("Move folder up") {
+                                Task { await swapFolderSortOrder(at: idx, with: idx - 1) }
+                            }
+                        }
+                        if idx < sortedFolders.count - 1 {
+                            Button("Move folder down") {
+                                Task { await swapFolderSortOrder(at: idx, with: idx + 1) }
+                            }
+                        }
+                    }
+                    Button("Delete folder", role: .destructive) {
+                        folderIdPendingDelete = folder.id
+                    }
+                } label: {
+                    Image(systemName: "folder.badge.gearshape")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 2)
+            .padding(.top, routinesUnfiled().isEmpty && folder.id == sortedFolders.first?.id ? 0 : 6)
+
+            if !isCollapsed {
+                if inFolder.isEmpty {
+                    SectionCard {
+                        Text("No routines in this folder")
+                            .font(.footnote)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    ForEach(inFolder) { row in
+                        routineCard(row)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func routineCard(_ row: StrengthRoutineListRow) -> some View {
+        SectionCard {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(row.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    if let u = row.updated_at {
+                        Text(u, format: .dateTime.day().month().year().hour().minute())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Menu {
+                    Button("Rename") {
+                        renameRoutineId = row.id
+                        renameRoutineFolderId = row.folder_id
+                        renameDraft = row.name
+                        renameError = nil
+                        showRenameSheet = true
+                    }
+                    Button("Duplicate") {
+                        duplicateSourceRoutine = row
+                        duplicateNameDraft = "Copy of \(row.name)"
+                        duplicateTargetFolderId = row.folder_id
+                        duplicateError = nil
+                        showDuplicateSheet = true
+                    }
+                    if routineSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                       let neigh = routineNeighborInfo(row) {
+                        if neigh.index > 0 {
+                            Button("Move up") {
+                                Task { await swapRoutineSortOrder(row, withOffset: -1) }
+                            }
+                        }
+                        if neigh.index < neigh.list.count - 1 {
+                            Button("Move down") {
+                                Task { await swapRoutineSortOrder(row, withOffset: 1) }
+                            }
+                        }
+                    }
+                    Menu("Move to") {
+                        Button("No folder") {
+                            Task { await moveRoutine(row, to: nil) }
+                        }
+                        ForEach(sortedFolders) { f in
+                            Button(f.name) {
+                                Task { await moveRoutine(row, to: f.id) }
+                            }
+                        }
+                    }
+                    Button("Delete", role: .destructive) {
+                        routineIdPendingDelete = row.id
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+
+                Button {
+                    Task { await applyRoutine(id: row.id) }
+                } label: {
+                    Text("Apply")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(.white)
+                        .background(Color.blue, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func orderedRoutinesInGroup(_ row: StrengthRoutineListRow) -> [StrengthRoutineListRow] {
+        routines
+            .filter { $0.folder_id == row.folder_id }
+            .sorted { a, b in
+                let ao = Int64(a.sort_order ?? 0)
+                let bo = Int64(b.sort_order ?? 0)
+                if ao != bo { return ao < bo }
+                return a.id < b.id
+            }
+    }
+
+    private func routineNeighborInfo(_ row: StrengthRoutineListRow) -> (list: [StrengthRoutineListRow], index: Int)? {
+        let list = orderedRoutinesInGroup(row)
+        guard let i = list.firstIndex(where: { $0.id == row.id }) else { return nil }
+        return (list, i)
+    }
+
+    private func swapRoutineSortOrder(_ row: StrengthRoutineListRow, withOffset: Int) async {
+        guard let info = routineNeighborInfo(row) else { return }
+        let j = info.index + withOffset
+        guard info.list.indices.contains(j) else { return }
+        let a = info.list[info.index]
+        let b = info.list[j]
+        let ao = Int(a.sort_order ?? 0)
+        let bo = Int(b.sort_order ?? 0)
+        await MainActor.run { errorMessage = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            struct P: Encodable { let sort_order: Int }
+            _ = try await client
+                .from("strength_routines")
+                .update(P(sort_order: bo))
+                .eq("id", value: Int(a.id))
+                .execute()
+            _ = try await client
+                .from("strength_routines")
+                .update(P(sort_order: ao))
+                .eq("id", value: Int(b.id))
+                .execute()
+            await loadRoutines()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func swapFolderSortOrder(at i: Int, with j: Int) async {
+        let list = sortedFolders
+        guard list.indices.contains(i), list.indices.contains(j) else { return }
+        let a = list[i]
+        let b = list[j]
+        let ao = a.sort_order ?? 0
+        let bo = b.sort_order ?? 0
+        await MainActor.run { errorMessage = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            struct P: Encodable { let sort_order: Int }
+            _ = try await client
+                .from("strength_routine_folders")
+                .update(P(sort_order: bo))
+                .eq("id", value: Int(a.id))
+                .execute()
+            _ = try await client
+                .from("strength_routine_folders")
+                .update(P(sort_order: ao))
+                .eq("id", value: Int(b.id))
+                .execute()
+            await loadRoutines()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func saveDuplicateRoutine() async {
+        guard let src = duplicateSourceRoutine else { return }
+        let name = duplicateNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            await MainActor.run { duplicateError = "Enter a routine name." }
+            return
+        }
+        await MainActor.run { duplicateError = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let taken = try await StrengthRoutineNameValidator.isRoutineNameTaken(
+                client: client,
+                userId: session.user.id,
+                trimmedName: name,
+                excludingRoutineId: nil,
+                folderId: duplicateTargetFolderId
+            )
+            if taken {
+                await MainActor.run {
+                    duplicateError = "A routine with this name already exists in this folder."
+                }
+                return
+            }
+            let res = try await client
+                .from("strength_routines")
+                .select(strengthRoutineDetailSelect())
+                .eq("id", value: Int(src.id))
+                .single()
+                .execute()
+            let detail = try JSONDecoder.supabase().decode(StrengthRoutineDetailWire.self, from: res.data)
+            let built = editableExercisesFromRoutineDetail(detail, exerciseDisplayName: exerciseDisplayName)
+            guard !built.isEmpty else {
+                await MainActor.run { duplicateError = "This routine has no exercises to copy." }
+                return
+            }
+            _ = try await insertStrengthRoutineTemplate(
+                client: client,
+                userId: session.user.id,
+                name: name,
+                folderId: duplicateTargetFolderId,
+                exercises: built,
+                replaceRoutineId: nil
+            )
+            await MainActor.run {
+                showDuplicateSheet = false
+                duplicateSourceRoutine = nil
+            }
+            await loadRoutines()
+        } catch {
+            await MainActor.run { duplicateError = error.localizedDescription }
+        }
+    }
+
+    private func loadRoutines() async {
+        await MainActor.run {
+            loading = true
+            errorMessage = nil
+        }
+        defer { Task { await MainActor.run { loading = false } } }
+        do {
+            let client = SupabaseManager.shared.client
+            let rRes = try await client
+                .from("strength_routines")
+                .select("id,name,updated_at,folder_id,sort_order")
+                .order("sort_order", ascending: true)
+                .order("name", ascending: true)
+                .execute()
+            let fRes = try await client
+                .from("strength_routine_folders")
+                .select("id,name,updated_at,sort_order")
+                .order("sort_order", ascending: true)
+                .order("name", ascending: true)
+                .execute()
+            let rRows = try JSONDecoder.supabase().decode([StrengthRoutineListRow].self, from: rRes.data)
+            let fRows = try JSONDecoder.supabase().decode([StrengthRoutineFolderRow].self, from: fRes.data)
+            await MainActor.run {
+                routines = rRows
+                folders = fRows
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func applyRoutine(id: Int64) async {
+        await MainActor.run { errorMessage = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            let res = try await client
+                .from("strength_routines")
+                .select(strengthRoutineDetailSelect())
+                .eq("id", value: Int(id))
+                .single()
+                .execute()
+            let detail = try JSONDecoder.supabase().decode(StrengthRoutineDetailWire.self, from: res.data)
+            let built = editableExercisesFromRoutineDetail(detail, exerciseDisplayName: exerciseDisplayName)
+            guard !built.isEmpty else {
+                await MainActor.run { errorMessage = "This routine has no exercises." }
+                return
+            }
+            await MainActor.run {
+                onApply(built)
+                dismiss()
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func deleteRoutine(id: Int64) async {
+        await MainActor.run { errorMessage = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            _ = try await client
+                .from("strength_routines")
+                .delete()
+                .eq("id", value: Int(id))
+                .execute()
+            await loadRoutines()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func moveRoutine(_ row: StrengthRoutineListRow, to folderId: Int64?) async {
+        await MainActor.run { errorMessage = nil }
+        if row.folder_id == folderId { return }
+        do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let taken = try await StrengthRoutineNameValidator.isRoutineNameTaken(
+                client: client,
+                userId: session.user.id,
+                trimmedName: row.name,
+                excludingRoutineId: row.id,
+                folderId: folderId
+            )
+            if taken {
+                await MainActor.run {
+                    errorMessage = "A routine with this name already exists in that folder."
+                }
+                return
+            }
+            let nextOrder = try await nextRoutineSortOrderForInsert(
+                client: client,
+                userId: session.user.id,
+                folderId: folderId
+            )
+            struct Patch: Encodable { let folder_id: Int64?; let sort_order: Int }
+            _ = try await client
+                .from("strength_routines")
+                .update(Patch(folder_id: folderId, sort_order: nextOrder))
+                .eq("id", value: Int(row.id))
+                .execute()
+            await loadRoutines()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func createFolder() async {
+        let trimmed = newFolderName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await MainActor.run { newFolderError = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let next = try await nextFolderSortOrderForInsert(client: client, userId: session.user.id)
+            struct Ins: Encodable { let user_id: UUID; let name: String; let sort_order: Int }
+            _ = try await client
+                .from("strength_routine_folders")
+                .insert(Ins(user_id: session.user.id, name: trimmed, sort_order: next))
+                .execute()
+            await MainActor.run {
+                showNewFolderSheet = false
+                newFolderName = ""
+            }
+            await loadRoutines()
+        } catch {
+            await MainActor.run {
+                if let pe = error as? PostgrestError, pe.code == "23505" {
+                    newFolderError = "A folder with this name already exists."
+                } else {
+                    newFolderError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func saveRenameFolder() async {
+        let trimmed = renameFolderDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let fid = renameFolderId else { return }
+        await MainActor.run { renameFolderError = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let existing = try await client
+                .from("strength_routine_folders")
+                .select("id")
+                .eq("user_id", value: session.user.id)
+                .eq("name", value: trimmed)
+                .limit(1)
+                .execute()
+            struct Fid: Decodable { let id: Int64 }
+            let found = try JSONDecoder.supabase().decode([Fid].self, from: existing.data)
+            if let other = found.first, other.id != fid {
+                await MainActor.run {
+                    renameFolderError = "A folder with this name already exists."
+                }
+                return
+            }
+            struct NamePatch: Encodable { let name: String }
+            _ = try await client
+                .from("strength_routine_folders")
+                .update(NamePatch(name: trimmed))
+                .eq("id", value: Int(fid))
+                .execute()
+            await MainActor.run {
+                showRenameFolderSheet = false
+                renameFolderId = nil
+            }
+            await loadRoutines()
+        } catch {
+            if let pe = error as? PostgrestError, pe.code == "23505" {
+                await MainActor.run { renameFolderError = "A folder with this name already exists." }
+            } else {
+                await MainActor.run { renameFolderError = error.localizedDescription }
+            }
+        }
+    }
+
+    private func deleteFolder(id: Int64) async {
+        await MainActor.run { errorMessage = nil }
+        do {
+            let client = SupabaseManager.shared.client
+            _ = try await client
+                .from("strength_routine_folders")
+                .delete()
+                .eq("id", value: Int(id))
+                .execute()
+            await loadRoutines()
+        } catch {
+            let text = (error as? PostgrestError).map { e in
+                e.message + (e.detail.map { " \($0)" } ?? "")
+            } ?? error.localizedDescription
+            let lower = text.lowercased()
+            await MainActor.run {
+                if lower.contains("foreign key") || lower.contains("strength_routines") || lower.contains("violat") {
+                    errorMessage = "This folder still has routines. Move or remove them first."
+                } else {
+                    errorMessage = text
+                }
+            }
+        }
+    }
+
+    private func saveRename() async {
+        let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let rid = renameRoutineId else { return }
+        await MainActor.run {
+            errorMessage = nil
+            renameError = nil
+        }
+        do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let taken = try await StrengthRoutineNameValidator.isRoutineNameTaken(
+                client: client,
+                userId: session.user.id,
+                trimmedName: trimmed,
+                excludingRoutineId: rid,
+                folderId: renameRoutineFolderId
+            )
+            if taken {
+                await MainActor.run {
+                    renameError = "A routine with this name already exists in this folder. Choose another name."
+                }
+                return
+            }
+            struct NamePatch: Encodable { let name: String }
+            _ = try await client
+                .from("strength_routines")
+                .update(NamePatch(name: trimmed))
+                .eq("id", value: Int(rid))
+                .execute()
+            await MainActor.run {
+                showRenameSheet = false
+                renameRoutineId = nil
+                renameRoutineFolderId = nil
+                renameError = nil
+            }
+            await loadRoutines()
+        } catch {
+            await MainActor.run { renameError = error.localizedDescription }
+        }
+    }
 }
 
 private struct ParticipantsPickerSheet: View {

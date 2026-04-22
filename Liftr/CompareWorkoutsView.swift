@@ -53,9 +53,13 @@ struct CompareWorkoutsView: View {
         }
         switch metric {
         case "avg_pace_sec_per_km",
+             "fastest_km_pace_sec",
              "split_sec_per_500m",
              "sec_per_km",
              "sec_per_500m",
+             // Lower HR = “better” for a casual efficiency read (less strain at comparable effort).
+             "avg_hr",
+             "max_hr",
              "score_against",
              "hx_penalty_time_sec",
              "hx_official_time_sec",
@@ -66,6 +70,20 @@ struct CompareWorkoutsView: View {
         default:
             return 1.0
         }
+    }
+
+    /// Bar width fractions in \([0,1]\) of the available track. For “higher is better” metrics, length ∝ value / max. For “lower is better” (pace, HR,…), we use **inverse** `1/v` so e.g. faster pace (fewer s/km) → longer bar, and the **ratio** of the two bars matches the ratio of those scores (not a squashed 8 % strip from min–max normalization).
+    private static func barPairFractions(left: Double, right: Double, metric: String) -> (CGFloat, CGFloat) {
+        let maxV0 = max(left, right, 0.0001)
+        if metricDirection(metric) >= 0 {
+            return (CGFloat(left / maxV0), CGFloat(right / maxV0))
+        }
+        let e = 1e-6
+        let sL = 1.0 / max(left, e)
+        let sR = 1.0 / max(right, e)
+        let m = max(sL, sR)
+        if m < 1e-20 { return (0.5, 0.5) }
+        return (CGFloat(sL / m), CGFloat(sR / m))
     }
 
     private static func winnerForegroundStyle(forSignedPct signed: Double) -> Color {
@@ -204,7 +222,8 @@ struct CompareWorkoutsView: View {
                         .font(.subheadline.weight(.semibold))
                     Spacer()
                     if let b = pctBadge {
-                        Text(pctString(b.raw))
+                        // Show *signed* %: positive when left (green) is “better” for that metric, negative when right wins.
+                        Text(pctString(b.signed))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(CompareWorkoutsView.winnerForegroundStyle(forSignedPct: b.signed))
                             .padding(.horizontal, 8)
@@ -233,11 +252,14 @@ struct CompareWorkoutsView: View {
                 }
 
                 GeometryReader { geo in
-                    let outerW  = geo.size.width
-                    let usableW = max(0, outerW - 20)
-                    let maxV    = max(m.left_value, m.right_value, 0.0001)
-                    let leftW   = CGFloat(m.left_value  / maxV) * usableW
-                    let rightW  = CGFloat(m.right_value / maxV) * usableW
+                    let usableW = max(0, geo.size.width - 20)
+                    let (lf, rf) = CompareWorkoutsView.barPairFractions(
+                        left: m.left_value,
+                        right: m.right_value,
+                        metric: m.metric
+                    )
+                    let leftW = lf * usableW
+                    let rightW = rf * usableW
 
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -337,6 +359,7 @@ struct CompareWorkoutsView: View {
             case "distance_km": return "Distance"
             case "duration_sec": return "Duration"
             case "avg_pace_sec_per_km": return "Avg pace"
+            case "fastest_km_pace_sec": return "Fastest km"
             case "avg_hr": return "Avg HR"
             case "max_hr": return "Max HR"
             case "elevation_gain_m": return "Elevation gain"
@@ -710,6 +733,14 @@ struct CompareWorkoutsView: View {
         let swim_laps: Int?
         let pool_length_m: Int?
         let split_sec_per_500m: Int?
+        /// Per-km pace in seconds; same key as `CardioKmPaceSplits.jsonKey`.
+        let km_split_pace_sec: [Int]?
+    }
+
+    /// Best (fastest) km = minimum seconds per km among recorded splits; ignores non-positive entries.
+    private static func fastestKmPaceSecFromSplits(_ splits: [Int]?) -> Double? {
+        guard let s = splits?.filter({ $0 > 0 }), !s.isEmpty else { return nil }
+        return s.map(Double.init).min()
     }
 
     private func buildCardioMetrics(decoder: JSONDecoder, client: SupabaseClient) async throws {
@@ -741,6 +772,11 @@ struct CompareWorkoutsView: View {
         add("distance_km", "km", d(L.distance_km), d(R.distance_km))
         add("duration_sec", "sec", L.duration_sec.map(Double.init), R.duration_sec.map(Double.init))
         add("avg_pace_sec_per_km", "sec_per_km", L.avg_pace_sec_per_km.map(Double.init), R.avg_pace_sec_per_km.map(Double.init))
+        if let le = LE, let re = RE,
+           let lFast = Self.fastestKmPaceSecFromSplits(le.km_split_pace_sec),
+           let rFast = Self.fastestKmPaceSecFromSplits(re.km_split_pace_sec) {
+            add("fastest_km_pace_sec", "sec_per_km", lFast, rFast)
+        }
         add("avg_hr", "bpm", L.avg_hr.map(Double.init), R.avg_hr.map(Double.init))
         add("max_hr", "bpm", L.max_hr.map(Double.init), R.max_hr.map(Double.init))
         add("elevation_gain_m", "m", L.elevation_gain_m.map(Double.init), R.elevation_gain_m.map(Double.init))
