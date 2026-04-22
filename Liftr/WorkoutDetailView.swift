@@ -100,7 +100,6 @@ struct WorkoutDetailView: View {
     @State private var showActiveSport = false
     @State private var deleteBusy = false
     @State private var showDualStartChoice = false
-    /// Same-phone sheet: which participants are marked (default: first only → Dual). Group label when count > 1.
     @State private var dualSheetSelectedParticipantIds: Set<UUID> = []
     @State private var dualGuestWorkoutIdForActive: Int? = nil
     @State private var dualGuest2WorkoutIdForActive: Int? = nil
@@ -635,7 +634,6 @@ struct WorkoutDetailView: View {
         )
     }
 
-    /// `create_linked_strength_workout_copy` reads `workouts.kind` from the source row; an empty string is not a valid `workout_kind` enum value.
     private func ensureStrengthKindPersistedBeforeLinkedCopy() async throws {
         struct KindPatch: Encodable { let kind: String }
         _ = try await SupabaseManager.shared.client

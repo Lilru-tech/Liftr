@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.0] - 2026-04-22
+
+### Added
+- **Strength routines — folders** — Save routines inside optional user folders and keep names unique per scope (**No folder** or within the selected folder).
+- **Strength routines — management actions** — Duplicate a routine with a custom name/folder, move routines between folders, and reorder both routines and folders manually.
+- **Strength routines — list tools** — Search routines by name, collapse/expand folder sections, and use **Expand all** / **Collapse all** actions.
+- **Strength routines — duplicate program detection** — Store a **`content_hash`** fingerprint and show a success suffix when another routine with the same program already exists in that folder.
+- **Compare workouts — cardio (fastest km)** — When both sessions have **`km_split_pace_sec`** in stats, compare **fastest km** (best split) and list it **right after Avg pace**.
+
+### Changed
+- **Save as routine flow** — Name conflicts are now checked before persistence; if the target name already exists, the flow offers **Replace** instead of failing immediately.
+- **Routine ordering** — Routine and folder lists now use persistent **`sort_order`** instead of implicit id/date ordering.
+- **Collapsible state UX** — Folder collapsed state persists across openings of the routines sheet.
+- **Compare workouts — cardio** — **Difference %** for each row now uses the same sign as “who won” (e.g. positive when the **green** session is better for *lower is better* metrics). **Bar length** for pace (avg, fastest, row **/500m**), and **avg/max HR** (treated as *lower = better* for a simple efficiency read) uses **inverse `1 / value` scaling** so both bars stay visible and scale with the gap, not a fixed tiny loser strip. **Duration** and **distance** still use direct proportion to raw values.
+
+### Fixed
+- **Routine replace flow** — Replacing an existing routine now removes the target row and inserts the new template in one consistent path.
+- **Routine save messaging** — Success and error messages were refined for routine-specific outcomes during workout publish.
+
+### Notes (database / ops)
+- Apply migrations for routines in this release window: **`20260421200000_strength_routines.sql`**, **`20260422200000_strength_routines_content_hash.sql`**, **`20260422210000_strength_routine_folders.sql`**, and **`20260422220000_strength_routines_sort_order.sql`**.
+- If a migration was already applied remotely, re-running the same SQL manually can show **already exists** errors; this is expected for non-idempotent statements.
+
+[1.9.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.9.0
+
 ## [1.8.0] - 2026-04-18
 
 ### Added
