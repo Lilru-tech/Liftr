@@ -31,6 +31,10 @@ playground.xcworkspace
 
 .build/
 
+# Salida de Xcode / SPM en carpetas del repo (nunca subir)
+**/build/
+.derived-liveactivity-check/
+
 # CocoaPods
 #
 # We recommend against adding the Pods directory to your .gitignore. However

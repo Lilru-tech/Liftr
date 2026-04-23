@@ -6,75 +6,101 @@
 //
 
 import ActivityKit
+import LiftrWorkoutActivityKit
 import WidgetKit
 import SwiftUI
 
-struct LiftrWorkoutLiveActivityAttributes: ActivityAttributes {
-    public struct ContentState: Codable, Hashable {
-        // Dynamic stateful properties about your activity go here!
-        var emoji: String
-    }
-
-    // Fixed non-changing properties about your activity go here!
-    var name: String
-}
-
 struct LiftrWorkoutLiveActivityLiveActivity: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: LiftrWorkoutLiveActivityAttributes.self) { context in
-            // Lock screen/banner UI goes here
-            VStack {
-                Text("Hello \(context.state.emoji)")
+        ActivityConfiguration(for: WorkoutLiveActivityAttributes.self) { context in
+            HStack(spacing: 10) {
+                Image(systemName: kindIcon(context.state.kind))
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Liftr")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.85))
+                    Text(context.state.kind.shortLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Spacer(minLength: 0)
+                // En Live Activity, `Text(…, .timer)` se actualiza solo; `TimelineView` suele quedar congelada (0:00).
+                SessionWorkoutTimer(start: context.state.startTime, font: .title3.weight(.semibold))
+                    .multilineTextAlignment(.trailing)
             }
-            .activityBackgroundTint(Color.cyan)
-            .activitySystemActionForegroundColor(Color.black)
-
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .activityBackgroundTint(Color.black.opacity(0.5))
         } dynamicIsland: { context in
             DynamicIsland {
-                // Expanded UI goes here.  Compose the expanded UI through
-                // various regions, like leading/trailing/center/bottom
                 DynamicIslandExpandedRegion(.leading) {
-                    Text("Leading")
+                    Image(systemName: kindIcon(context.state.kind))
+                        .font(.title2)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("Trailing")
+                    Text(context.state.kind.shortLabel)
+                        .font(.headline)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    Text("Bottom \(context.state.emoji)")
-                    // more content
+                    SessionWorkoutTimer(start: context.state.startTime, font: .title2.weight(.semibold))
                 }
             } compactLeading: {
-                Text("L")
+                // Ancho fijo: el icono no participa en un HStack “infinito” con el trailing.
+                Image(systemName: "stopwatch")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 18, height: 15, alignment: .center)
             } compactTrailing: {
-                Text("T \(context.state.emoji)")
+                // `Text(…, .timer)` pide ancho de layout enorme; el contenedor fija el tamaño de la píldora compacta.
+                DynamicIslandCompactTimer(start: context.state.startTime)
             } minimal: {
-                Text(context.state.emoji)
+                Image(systemName: "stopwatch")
             }
-            .widgetURL(URL(string: "http://www.apple.com"))
-            .keylineTint(Color.red)
+        }
+    }
+
+    private func kindIcon(_ kind: WorkoutLiveSessionKind) -> String {
+        switch kind {
+        case .strength: "dumbbell.fill"
+        case .sport: "sportscourt.fill"
+        case .cardio: "figure.run"
         }
     }
 }
 
-extension LiftrWorkoutLiveActivityAttributes {
-    fileprivate static var preview: LiftrWorkoutLiveActivityAttributes {
-        LiftrWorkoutLiveActivityAttributes(name: "World")
+// MARK: - Crono (usa `Text(…, .timer)`: en ActivityKit avanza; `TimelineView` no tick en la isla/lock y se queda en 0:00)
+
+private struct SessionWorkoutTimer: View {
+    var start: Date
+    var font: Font
+
+    var body: some View {
+        Text(start, style: .timer)
+            .font(font)
+            .monospacedDigit()
+            .foregroundStyle(.white)
     }
 }
 
-extension LiftrWorkoutLiveActivityAttributes.ContentState {
-    fileprivate static var smiley: LiftrWorkoutLiveActivityAttributes.ContentState {
-        LiftrWorkoutLiveActivityAttributes.ContentState(emoji: "😀")
-     }
-     
-     fileprivate static var starEyes: LiftrWorkoutLiveActivityAttributes.ContentState {
-         LiftrWorkoutLiveActivityAttributes.ContentState(emoji: "🤩")
-     }
-}
+/// Crono del compact: mismo `Text(…, .timer)` (sigue actualizando), envuelto en un ancho fijo para no alargar la isla.
+private struct DynamicIslandCompactTimer: View {
+    var start: Date
 
-#Preview("Notification", as: .content, using: LiftrWorkoutLiveActivityAttributes.preview) {
-   LiftrWorkoutLiveActivityLiveActivity()
-} contentStates: {
-    LiftrWorkoutLiveActivityAttributes.ContentState.smiley
-    LiftrWorkoutLiveActivityAttributes.ContentState.starEyes
+    private static let slotWidth: CGFloat = 58
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 0)
+            Text(start, style: .timer)
+                .font(.caption2.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.42)
+        }
+        .frame(width: Self.slotWidth, alignment: .trailing)
+        .clipped()
+    }
 }

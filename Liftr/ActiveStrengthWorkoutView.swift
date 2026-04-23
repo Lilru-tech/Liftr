@@ -362,10 +362,15 @@ struct ActiveStrengthWorkoutView: View {
                 
                 if showCountdown {
                     StartWorkoutCountdownView {
+                        let start = Date()
                         withAnimation(.easeInOut) {
                             showCountdown = false
-                            strengthWorkoutSessionStart = Date()
+                            strengthWorkoutSessionStart = start
                         }
+                        WorkoutLiveActivityManager.startIfAvailable(
+                            startTime: start,
+                            kind: .strength
+                        )
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.ultraThinMaterial)
@@ -413,6 +418,9 @@ struct ActiveStrengthWorkoutView: View {
             } message: {
                 Text(dualIncompleteFinishMessage())
             }
+        }
+        .onDisappear {
+            WorkoutLiveActivityManager.endIfAvailable()
         }
         .sheet(isPresented: $showEditSheet) {
             VStack(spacing: 20) {
