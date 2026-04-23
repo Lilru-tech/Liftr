@@ -226,7 +226,6 @@ struct AddWorkoutSheet: View {
     @FocusState private var focusNewRoutineNameField: Bool
     @State private var showReplaceRoutineConfirm = false
     @State private var replaceRoutinePendingId: Int64?
-    /// `true` when the replace dialog was shown from **Save routine only**; `false` from publish+routine.
     @State private var replacePendingIsRoutineOnly = false
     @State private var loadingRoutineOnly = false
 
@@ -853,7 +852,6 @@ struct AddWorkoutSheet: View {
                                     }
                                 }
                                 .labelsHidden()
-                                // Default picker style in Forms can use a very large/ambiguous hit area; menu keeps taps on the chevron/label.
                                 .pickerStyle(.menu)
                             }
                         }
@@ -1157,7 +1155,6 @@ struct AddWorkoutSheet: View {
         }
     }
 
-    /// Save a strength routine template without creating a workout (same exercise/reps validation as publish).
     private var canSaveRoutineOnly: Bool {
         guard kind == .strength, saveNewStrengthRoutine else { return false }
         let programs: [[EditableExercise]] = usePerPersonStrengthEditor ? strengthLaneItems : [items]

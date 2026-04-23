@@ -57,7 +57,6 @@ struct CompareWorkoutsView: View {
              "split_sec_per_500m",
              "sec_per_km",
              "sec_per_500m",
-             // Lower HR = “better” for a casual efficiency read (less strain at comparable effort).
              "avg_hr",
              "max_hr",
              "score_against",
@@ -72,7 +71,6 @@ struct CompareWorkoutsView: View {
         }
     }
 
-    /// Bar width fractions in \([0,1]\) of the available track. For “higher is better” metrics, length ∝ value / max. For “lower is better” (pace, HR,…), we use **inverse** `1/v` so e.g. faster pace (fewer s/km) → longer bar, and the **ratio** of the two bars matches the ratio of those scores (not a squashed 8 % strip from min–max normalization).
     private static func barPairFractions(left: Double, right: Double, metric: String) -> (CGFloat, CGFloat) {
         let maxV0 = max(left, right, 0.0001)
         if metricDirection(metric) >= 0 {
@@ -222,7 +220,6 @@ struct CompareWorkoutsView: View {
                         .font(.subheadline.weight(.semibold))
                     Spacer()
                     if let b = pctBadge {
-                        // Show *signed* %: positive when left (green) is “better” for that metric, negative when right wins.
                         Text(pctString(b.signed))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(CompareWorkoutsView.winnerForegroundStyle(forSignedPct: b.signed))
@@ -733,11 +730,9 @@ struct CompareWorkoutsView: View {
         let swim_laps: Int?
         let pool_length_m: Int?
         let split_sec_per_500m: Int?
-        /// Per-km pace in seconds; same key as `CardioKmPaceSplits.jsonKey`.
         let km_split_pace_sec: [Int]?
     }
-
-    /// Best (fastest) km = minimum seconds per km among recorded splits; ignores non-positive entries.
+    
     private static func fastestKmPaceSecFromSplits(_ splits: [Int]?) -> Double? {
         guard let s = splits?.filter({ $0 > 0 }), !s.isEmpty else { return nil }
         return s.map(Double.init).min()
