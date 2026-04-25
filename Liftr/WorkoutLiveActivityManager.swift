@@ -2,7 +2,6 @@ import Foundation
 import ActivityKit
 import LiftrWorkoutActivityKit
 
-/// Inicia o termina la Live Activity (Dynamic Island / lock) del entreno.
 @MainActor
 enum WorkoutLiveActivityManager {
     private static var current: Activity<WorkoutLiveActivityAttributes>?
@@ -15,7 +14,6 @@ enum WorkoutLiveActivityManager {
         }
     }
 
-    /// Llamadas desde botones; no bloquea el hilo principal.
     static func startIfAvailable(startTime: Date, kind: WorkoutLiveSessionKind) {
         Task { @MainActor in
             if #available(iOS 16.2, *) {
@@ -44,7 +42,6 @@ enum WorkoutLiveActivityManager {
                 pushType: nil
             )
         } catch {
-            // Usuario sin permiso, denegado en ajustes, etc.
         }
     }
 
