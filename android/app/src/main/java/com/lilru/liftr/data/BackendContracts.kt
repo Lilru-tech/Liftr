@@ -1,0 +1,100 @@
+package com.lilru.liftr.data
+
+/**
+ * Single source of truth for Supabase table/view/rpc names used by Liftr clients.
+ *
+ * Goal: avoid typo regressions and keep Android aligned with iOS contracts.
+ */
+object BackendContracts {
+    object Tables {
+        const val AVATARS = "avatars"
+        const val BASKETBALL_SESSION_STATS = "basketball_session_stats"
+        const val CARDIO_SESSIONS = "cardio_sessions"
+        const val CARDIO_SESSION_STATS = "cardio_session_stats"
+        const val COMPETITIONS = "competitions"
+        const val COMPETITION_BLOCKS = "competition_blocks"
+        const val COMPETITION_GOALS = "competition_goals"
+        const val COMPETITION_WORKOUTS = "competition_workouts"
+        const val CONTACT_MESSAGES = "contact_messages"
+        const val EXERCISES = "exercises"
+        const val EXERCISE_SETS = "exercise_sets"
+        const val FEATURE_REQUESTS = "feature_requests"
+        const val FEATURE_REQUEST_COMMENTS = "feature_request_comments"
+        const val FEATURE_REQUEST_VOTES = "feature_request_votes"
+        const val FOLLOWS = "follows"
+        const val FOOTBALL_SESSION_STATS = "football_session_stats"
+        const val HANDBALL_SESSION_STATS = "handball_session_stats"
+        const val HOCKEY_SESSION_STATS = "hockey_session_stats"
+        const val HYROX_SESSION_EXERCISES = "hyrox_session_exercises"
+        const val HYROX_SESSION_STATS = "hyrox_session_stats"
+        const val LEVEL_THRESHOLDS = "level_thresholds"
+        const val NOTIFICATIONS = "notifications"
+        const val PROFILES = "profiles"
+        const val RACKET_SESSION_STATS = "racket_session_stats"
+        const val RUGBY_SESSION_STATS = "rugby_session_stats"
+        const val SKI_SESSION_STATS = "ski_session_stats"
+        const val SPORT_SESSIONS = "sport_sessions"
+        const val STRENGTH_ROUTINES = "strength_routines"
+        const val STRENGTH_ROUTINE_EXERCISES = "strength_routine_exercises"
+        const val STRENGTH_ROUTINE_FOLDERS = "strength_routine_folders"
+        const val STRENGTH_ROUTINE_SETS = "strength_routine_sets"
+        const val USER_FAVORITE_EXERCISES = "user_favorite_exercises"
+        const val VOLLEYBALL_SESSION_STATS = "volleyball_session_stats"
+        const val WEEKLY_GOALS = "weekly_goals"
+        const val WEEKLY_GOAL_RESULTS = "weekly_goal_results"
+        const val WORKOUTS = "workouts"
+        const val WORKOUT_COMMENTS = "workout_comments"
+        const val WORKOUT_COMMENT_LIKES = "workout_comment_likes"
+        const val WORKOUT_EXERCISES = "workout_exercises"
+        const val WORKOUT_LIKES = "workout_likes"
+        const val WORKOUT_PARTICIPANTS = "workout_participants"
+        const val WORKOUT_SCORES = "workout_scores"
+        const val XP_EVENTS = "xp_events"
+    }
+
+    object Views {
+        const val VW_FEATURE_REQUEST_COMMENTS = "vw_feature_request_comments"
+        const val VW_FEATURE_REQUESTS = "vw_feature_requests"
+        const val VW_PROFILE_COUNTS = "vw_profile_counts"
+        const val VW_SPORT_SESSION_FULL = "vw_sport_session_full"
+        const val VW_USER_PRS = "vw_user_prs"
+        const val VW_WORKOUT_VOLUME = "vw_workout_volume"
+    }
+
+    object Rpc {
+        const val ADD_WORKOUT_PARTICIPANT = "add_workout_participant"
+        const val CAN_COMPARE_WORKOUT_V1 = "can_compare_workout_v1"
+        const val CHECK_AND_UNLOCK_ACHIEVEMENTS_FOR = "check_and_unlock_achievements_for"
+        const val CLEAR_USER_SEARCH_RECENT = "clear_user_search_recent"
+        const val CREATE_CARDIO_WORKOUT_V2 = "create_cardio_workout_v2"
+        const val CREATE_LINKED_STRENGTH_WORKOUT_COPY = "create_linked_strength_workout_copy"
+        const val CREATE_SPORT_WORKOUT_V2 = "create_sport_workout_v2"
+        const val CREATE_STRENGTH_WORKOUT = "create_strength_workout"
+        const val DELETE_MY_ACCOUNT = "delete_my_account"
+        const val FETCH_DUAL_LINKED_STRENGTH_WORKOUT_DATA = "fetch_dual_linked_strength_workout_data"
+        const val GET_BEST_WORKOUTS_LEADERBOARD_V1 = "get_best_workouts_leaderboard_v1"
+        const val GET_CALORIES_LEADERBOARD_V1 = "get_calories_leaderboard_v1"
+        const val GET_EXERCISES_USAGE = "get_exercises_usage"
+        const val GET_GOAL_STATS = "get_goal_stats"
+        const val GET_LEADERBOARD_V1 = "get_leaderboard_v1"
+        const val GET_LEVEL_LEADERBOARD_V1 = "get_level_leaderboard_v1"
+        const val GET_USER_ACHIEVEMENTS = "get_user_achievements"
+        const val GET_USER_LEVEL = "get_user_level"
+        const val GET_WEEKLY_GOAL_RECOMMENDATION = "get_weekly_goal_recommendation"
+        const val LIST_COMPARABLE_WORKOUTS_V1 = "list_comparable_workouts_v1"
+        const val PLAN_STRENGTH_SQUAD_PROGRAMS = "plan_strength_squad_programs"
+        const val PRECHECK_SIGNUP = "precheck_signup"
+        const val RECOMPUTE_WEEKLY_GOAL_RESULTS = "recompute_weekly_goal_results"
+        const val RECORD_SEARCH = "record_search"
+        const val REVIEW_COMPETITION_WORKOUT = "review_competition_workout"
+        const val SUBMIT_WORKOUT_TO_COMPETITION = "submit_workout_to_competition"
+        const val TRENDING_SEARCH_QUERIES_24H = "trending_search_queries_24h"
+        const val UPDATE_SPORT_WORKOUT_V2 = "update_sport_workout_v2"
+        const val USER_SEARCH_RECENT_LIST = "user_search_recent_list"
+    }
+
+    /** Supabase Edge Functions (invoke con JWT de sesión), alineado con [Liftr/ProfileView.swift]. */
+    object EdgeFunctions {
+        const val DELETE_AUTH_USER = "delete-auth-user"
+    }
+}
