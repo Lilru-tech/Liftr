@@ -146,9 +146,10 @@ struct RootView: View {
                         .gradientBG()
                 }
 
-            case .competitionDetail(_):
+            case .competitionDetail(let competitionId):
                 NavigationStack {
-                    CompetitionsHubView()
+                    CompetitionDetailFromIdView(competitionId: competitionId)
+                        .environmentObject(app)
                         .gradientBG()
                 }
             }

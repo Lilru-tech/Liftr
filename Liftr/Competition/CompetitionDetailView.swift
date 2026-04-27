@@ -202,3 +202,70 @@ private struct WorkoutRowView: View {
         return f.string(from: d)
     }
 }
+
+// MARK: - From notification (competition_id)
+
+/// Carga por id; alineado con Android [CompetitionDetailFromIdScreen] y [NotificationRouter] `CompetitionDetailById`.
+struct CompetitionDetailFromIdView: View {
+    @EnvironmentObject var app: AppState
+    let competitionId: Int
+
+    @State private var competition: CompetitionRow?
+    @State private var goal: CompetitionGoalRow?
+    @State private var profilesById: [UUID: ProfileLiteRow] = [:]
+    @State private var bootError: String?
+    @State private var bootLoading = true
+
+    var body: some View {
+        Group {
+            if bootLoading {
+                ProgressView("Loading…")
+            } else if let bootError {
+                Text(bootError)
+                    .foregroundStyle(.red)
+                    .padding()
+            } else if let c = competition {
+                CompetitionDetailView(
+                    competition: c,
+                    goal: goal,
+                    myId: app.userId,
+                    profilesById: profilesById
+                )
+            } else {
+                Text("Competition not found")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        await MainActor.run { bootLoading = true; bootError = nil }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("competitions")
+                .select("*")
+                .eq("id", value: competitionId)
+                .single()
+                .execute()
+
+            let row = try JSONDecoder.supabase().decode(CompetitionRow.self, from: res.data)
+            let goals = try await CompetitionService.shared.fetchGoals(for: [row.id])
+            let g = goals[row.id]
+            let uids = [row.user_a, row.user_b]
+            let profs = try await CompetitionService.shared.fetchProfiles(userIds: uids)
+
+            await MainActor.run {
+                self.competition = row
+                self.goal = g
+                self.profilesById = profs
+                self.bootLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.bootError = error.localizedDescription
+                self.bootLoading = false
+            }
+        }
+    }
+}
