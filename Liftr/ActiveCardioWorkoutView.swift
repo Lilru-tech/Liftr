@@ -360,6 +360,7 @@ struct ActiveCardioWorkoutView: View {
             }
         }
         .onDisappear {
+            WorkoutLiveActivityManager.endIfAvailable()
             Task { await sanitizeEndDateIfNeededOnClose() }
         }
         .onReceive(timer) { _ in
@@ -385,8 +386,16 @@ struct ActiveCardioWorkoutView: View {
                 gpsTracker.applyProfile(p)
             }
         }
-        .onChange(of: isRunning) { _, _ in
+        .onChange(of: isRunning) { _, running in
             syncGPSTrackingState()
+            if running {
+                WorkoutLiveActivityManager.startIfAvailable(
+                    startTime: Date().addingTimeInterval(-Double(elapsedSec)),
+                    kind: .cardio
+                )
+            } else {
+                WorkoutLiveActivityManager.endIfAvailable()
+            }
         }
         .onChange(of: showCountdown) { _, _ in
             syncGPSTrackingState()

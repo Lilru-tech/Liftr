@@ -221,6 +221,19 @@ struct ActiveSportWorkoutView: View {
         .task {
             await loadSport()
         }
+        .onChange(of: isRunning) { _, running in
+            if running {
+                WorkoutLiveActivityManager.startIfAvailable(
+                    startTime: Date().addingTimeInterval(-Double(elapsedSec)),
+                    kind: .sport
+                )
+            } else {
+                WorkoutLiveActivityManager.endIfAvailable()
+            }
+        }
+        .onDisappear {
+            WorkoutLiveActivityManager.endIfAvailable()
+        }
     }
     
     private var statsOrSummarySection: some View {

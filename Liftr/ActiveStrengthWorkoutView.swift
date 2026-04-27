@@ -15,6 +15,11 @@ private func dualStrengthDebug(_ message: String) {
 private func dualStrengthDebug(_ message: String) {}
 #endif
 
+private struct NavStripScrollEdgeFades: Equatable {
+    var showLeading: Bool
+    var showTrailing: Bool
+}
+
 struct ActiveStrengthWorkoutView: View {
     let workoutId: Int
     let dualGuestWorkoutId: Int?
@@ -135,6 +140,8 @@ struct ActiveStrengthWorkoutView: View {
     @State private var guestDataError: String?
     @State private var isSaving = false
     @State private var showCountdown = true
+    @State private var strengthWorkoutSessionStart: Date? = nil
+    @State private var strengthWorkoutElapsedTick: UInt32 = 0
     @State private var currentExerciseIndex: Int = 0
     @State private var guestCurrentExerciseIndex: Int = 0
     @State private var currentSetIndex: Int = 0
@@ -186,6 +193,9 @@ struct ActiveStrengthWorkoutView: View {
     @State private var beepWorkItem: DispatchWorkItem? = nil
     @State private var isBeeping: Bool = false
     @State private var navExercisePopoverIndex: String? = nil
+    @State private var strengthNavStripWaveIndex: Int? = nil
+    @State private var strengthNavStripWaveTask: Task<Void, Never>?
+    @State private var navStripScrollEdgeFades = NavStripScrollEdgeFades(showLeading: false, showTrailing: false)
     @State private var showElborblaCelebration = false
     private let swipeThreshold: CGFloat = 110
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -352,9 +362,15 @@ struct ActiveStrengthWorkoutView: View {
                 
                 if showCountdown {
                     StartWorkoutCountdownView {
+                        let start = Date()
                         withAnimation(.easeInOut) {
                             showCountdown = false
+                            strengthWorkoutSessionStart = start
                         }
+                        WorkoutLiveActivityManager.startIfAvailable(
+                            startTime: start,
+                            kind: .strength
+                        )
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.ultraThinMaterial)
@@ -388,6 +404,11 @@ struct ActiveStrengthWorkoutView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
                 }
+                if !showCountdown, strengthWorkoutSessionStart != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        strengthWorkoutSessionElapsedChip()
+                    }
+                }
             }
             .alert("Not everyone is finished", isPresented: $showDualIncompleteFinishConfirm) {
                 Button("Cancel", role: .cancel) {}
@@ -397,6 +418,9 @@ struct ActiveStrengthWorkoutView: View {
             } message: {
                 Text(dualIncompleteFinishMessage())
             }
+        }
+        .onDisappear {
+            WorkoutLiveActivityManager.endIfAvailable()
         }
         .sheet(isPresented: $showEditSheet) {
             VStack(spacing: 20) {
@@ -433,12 +457,19 @@ struct ActiveStrengthWorkoutView: View {
             .presentationDetents([.medium])
         }
         .onReceive(restTimer) { _ in
-            guard isResting || gIsResting || g2IsResting else { return }
-            syncRestCountdownFromEndDate()
+            if isResting || gIsResting || g2IsResting {
+                syncRestCountdownFromEndDate()
+            }
+            if strengthWorkoutSessionStart != nil, !showCountdown {
+                strengthWorkoutElapsedTick &+= 1
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
             syncRestCountdownFromEndDate()
+            if strengthWorkoutSessionStart != nil {
+                strengthWorkoutElapsedTick &+= 1
+            }
         }
         .onAppear {
             #if DEBUG
@@ -863,6 +894,57 @@ struct ActiveStrengthWorkoutView: View {
             if !isExerciseCompleted(ex, lane: lane) { return true }
         }
         return false
+    }
+
+    private func allExercisesCompleted(for lane: StrengthLaneKind) -> Bool {
+        let list = orderedExercises(lane: lane)
+        for ex in list {
+            if !isExerciseCompleted(ex, lane: lane) { return false }
+        }
+        return true
+    }
+
+    private func cancelStrengthNavStripWave() {
+        strengthNavStripWaveTask?.cancel()
+        strengthNavStripWaveTask = nil
+        strengthNavStripWaveIndex = nil
+    }
+
+    private func startStrengthNavStripWaveIfNeeded(lane: StrengthLaneKind) {
+        let list = orderedExercises(lane: lane)
+        let n = list.count
+        guard n > 0, allExercisesCompleted(for: lane) else { return }
+        strengthNavStripWaveTask?.cancel()
+        strengthNavStripWaveIndex = nil
+        strengthNavStripWaveTask = Task { @MainActor in
+            for i in 0..<n {
+                if Task.isCancelled { return }
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
+                    strengthNavStripWaveIndex = i
+                }
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+            if n > 1 {
+                for i in stride(from: n - 1, through: 0, by: -1) {
+                    if Task.isCancelled { return }
+                    withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
+                        strengthNavStripWaveIndex = i
+                    }
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                }
+            }
+            for i in 0..<n {
+                if Task.isCancelled { return }
+                withAnimation(.spring(response: 0.22, dampingFraction: 0.72)) {
+                    strengthNavStripWaveIndex = i
+                }
+                try? await Task.sleep(nanoseconds: 150_000_000)
+            }
+            if Task.isCancelled { return }
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.8)) {
+                strengthNavStripWaveIndex = nil
+            }
+        }
     }
 
     private func dualPartnerProgressNote() -> String? {
@@ -1795,7 +1877,18 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     @ViewBuilder
-    private func exerciseNavigationStrip(lane: StrengthLaneKind, availableWidth: CGFloat) -> some View {
+    private func navStripBubblesRow(lane: StrengthLaneKind) -> some View {
+        let list = orderedExercises(lane: lane)
+        HStack(alignment: .top, spacing: 8) {
+            ForEach(Array(list.enumerated()), id: \.element.id) { idx, _ in
+                exerciseNavColumnView(lane: lane, index: idx)
+                    .id(navStripRowId(lane: lane, index: idx))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func exerciseNavigationStrip(lane: StrengthLaneKind) -> some View {
         let list = orderedExercises(lane: lane)
         let currentIdx: Int = {
             switch lane {
@@ -1804,22 +1897,80 @@ struct ActiveStrengthWorkoutView: View {
             case .guest2: return g2CurrentExerciseIndex
             }
         }()
-        let minRowWidth = max(0, availableWidth - 16)
         ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    HStack(spacing: 8) {
-                        ForEach(Array(list.enumerated()), id: \.element.id) { idx, _ in
-                            exerciseNavColumnView(lane: lane, index: idx)
-                                .id(navStripRowId(lane: lane, index: idx))
+            GeometryReader { g in
+                let availableWidth = g.size.width
+                let minRowWidth = max(0, availableWidth - 16)
+                let n = list.count
+                let bubbleBarWidth = CGFloat(n) * 34 + CGFloat(max(0, n - 1)) * 8
+                let useCenteringSpacers = bubbleBarWidth < minRowWidth
+                ZStack(alignment: .center) {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        Group {
+                            if useCenteringSpacers {
+                                HStack(alignment: .top, spacing: 0) {
+                                    Spacer(minLength: 0)
+                                    navStripBubblesRow(lane: lane)
+                                    Spacer(minLength: 0)
+                                }
+                                .frame(minWidth: minRowWidth)
+                            } else {
+                                navStripBubblesRow(lane: lane)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .onScrollGeometryChange(
+                        for: NavStripScrollEdgeFades.self,
+                        of: { geo in
+                            let x = geo.contentOffset.x
+                            let cw = geo.contentSize.width
+                            let v = geo.containerSize.width
+                            if cw <= v + 0.5 {
+                                return NavStripScrollEdgeFades(showLeading: false, showTrailing: false)
+                            }
+                            let maxOff = max(0, cw - v)
+                            return NavStripScrollEdgeFades(
+                                showLeading: x > 2,
+                                showTrailing: x < maxOff - 2
+                            )
+                        },
+                        action: { _, new in
+                            navStripScrollEdgeFades = new
+                        }
+                    )
+                    HStack(alignment: .center, spacing: 0) {
+                        if navStripScrollEdgeFades.showLeading {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .black.opacity(0.2), location: 0),
+                                    .init(color: .black.opacity(0.05), location: 0.55),
+                                    .init(color: .black.opacity(0), location: 1)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: 28, height: 50)
+                        }
+                        Spacer(minLength: 0)
+                        if navStripScrollEdgeFades.showTrailing {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .black.opacity(0), location: 0),
+                                    .init(color: .black.opacity(0.05), location: 0.45),
+                                    .init(color: .black.opacity(0.2), location: 1)
+                                ],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            .frame(width: 28, height: 50)
                         }
                     }
-                    Spacer(minLength: 0)
+                    .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56, alignment: .center)
+                    .allowsHitTesting(false)
                 }
-                .frame(minWidth: minRowWidth)
-                .padding(.vertical, 4)
             }
+            .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56, alignment: .center)
             .onAppear {
                 scrollExerciseStrip(proxy: proxy, lane: lane, to: currentIdx, animated: false)
             }
@@ -1838,6 +1989,14 @@ struct ActiveStrengthWorkoutView: View {
                     scrollExerciseStrip(proxy: proxy, lane: lane, to: new, animated: true)
                 }
             }
+            .onChange(of: allExercisesCompleted(for: lane)) { was, now in
+                if now, !was {
+                    startStrengthNavStripWaveIfNeeded(lane: lane)
+                } else if !now {
+                    cancelStrengthNavStripWave()
+                }
+            }
+            .onDisappear(perform: cancelStrengthNavStripWave)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 2)
@@ -1858,15 +2017,50 @@ struct ActiveStrengthWorkoutView: View {
     private func exerciseNavigationStripWithHint(availableWidth: CGFloat) -> some View {
         VStack(spacing: 6) {
             if isDualMode {
-                exerciseNavigationStrip(lane: mainDisplayLane, availableWidth: availableWidth)
+                exerciseNavigationStrip(lane: mainDisplayLane)
                     .id(mainDisplayLane)
+                    .frame(maxWidth: .infinity, maxHeight: 56, alignment: .center)
             } else {
-                exerciseNavigationStrip(lane: .host, availableWidth: availableWidth)
+                exerciseNavigationStrip(lane: .host)
+                    .frame(maxWidth: .infinity, maxHeight: 56, alignment: .center)
             }
             if !activeStrengthNavHintSeen {
                 activeStrengthNavFirstHintBanner()
             }
         }
+        .frame(maxWidth: availableWidth)
+    }
+
+    private var strengthWorkoutElapsedDisplayString: String {
+        _ = strengthWorkoutElapsedTick
+        guard let start = strengthWorkoutSessionStart else { return "0:00" }
+        let elapsed = max(0, Int(floor(Date().timeIntervalSince(start))))
+        let h = elapsed / 3600
+        let m = (elapsed % 3600) / 60
+        let s = elapsed % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
+
+    @ViewBuilder
+    private func strengthWorkoutSessionElapsedChip() -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "stopwatch")
+                .font(.caption.weight(.semibold))
+                .accessibilityHidden(true)
+            Text(strengthWorkoutElapsedDisplayString)
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Workout time, \(strengthWorkoutElapsedDisplayString)")
     }
 
     private func activeStrengthNavFirstHintBanner() -> some View {
@@ -1929,6 +2123,8 @@ struct ActiveStrengthWorkoutView: View {
             completionProgress: completionProgress,
             isLast: isLast,
             isCurrent: isCurrent,
+            allWorkoutExercisesComplete: allExercisesCompleted(for: lane),
+            isWavePulsing: strengthNavStripWaveIndex == idx,
             jumpOK: jumpOK,
             navAnimationIndex: currentIdx,
             popoverPresented: popBinding,
@@ -2801,6 +2997,10 @@ struct ActiveStrengthWorkoutView: View {
 }
 
 private struct StrengthExerciseNavColumn: View {
+    private static let celebrationFill = Color(red: 0.99, green: 0.86, blue: 0.28)
+    private static let celebrationProgress = Color(red: 0.90, green: 0.68, blue: 0.04)
+    private static let celebrationDot = Color(red: 0.97, green: 0.80, blue: 0.18)
+
     let displayNumber: Int
     let exerciseTitle: String
     let plannedSetCount: Int
@@ -2808,6 +3008,8 @@ private struct StrengthExerciseNavColumn: View {
     let completionProgress: Double
     let isLast: Bool
     let isCurrent: Bool
+    let allWorkoutExercisesComplete: Bool
+    let isWavePulsing: Bool
     let jumpOK: Bool
     let navAnimationIndex: Int
     @Binding var popoverPresented: Bool
@@ -2834,13 +3036,18 @@ private struct StrengthExerciseNavColumn: View {
         return parts.joined(separator: ", ")
     }
 
+    private var bubbleLayoutScale: CGFloat {
+        (isCurrent ? 1.09 : 1.0) * (isWavePulsing ? 1.18 : 1.0)
+    }
+
     var body: some View {
         VStack(spacing: 5) {
             pillStack
             progressDot
         }
-        .scaleEffect(isCurrent ? 1.09 : 1.0)
+        .scaleEffect(bubbleLayoutScale)
         .animation(.spring(response: 0.34, dampingFraction: 0.72), value: navAnimationIndex)
+        .animation(.spring(response: 0.24, dampingFraction: 0.75), value: isWavePulsing)
         .popover(isPresented: $popoverPresented) {
             VStack(alignment: .center, spacing: 8) {
                 Text(exerciseTitle)
@@ -2871,14 +3078,17 @@ private struct StrengthExerciseNavColumn: View {
             GeometryReader { geo in
                 let p = min(max(completionProgress, 0), 1)
                 Rectangle()
-                    .fill(Color.blue.opacity(0.88))
+                    .fill(completed && allWorkoutExercisesComplete ? Self.celebrationProgress.opacity(0.92) : Color.blue.opacity(0.88))
                     .frame(width: geo.size.width * p, height: geo.size.height)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .clipShape(Circle())
             }
             if completed && isLast {
                 Circle()
-                    .strokeBorder(Color.green, lineWidth: 2)
+                    .strokeBorder(
+                        allWorkoutExercisesComplete ? Self.celebrationProgress : Color.green,
+                        lineWidth: 2
+                    )
             }
             if isCurrent {
                 Circle()
@@ -2912,7 +3122,10 @@ private struct StrengthExerciseNavColumn: View {
     }
 
     private var fillColor: Color {
-        if completed { return Color.blue.opacity(0.88) }
+        if completed {
+            if allWorkoutExercisesComplete { return Self.celebrationFill.opacity(0.92) }
+            return Color.blue.opacity(0.88)
+        }
         if isLast { return Color.green.opacity(0.22) }
         return Color.primary.opacity(0.10)
     }
@@ -2924,7 +3137,10 @@ private struct StrengthExerciseNavColumn: View {
     }
 
     private var dotColor: Color {
-        if completed { return Color.blue.opacity(0.9) }
+        if completed {
+            if allWorkoutExercisesComplete { return Self.celebrationDot.opacity(0.95) }
+            return Color.blue.opacity(0.9)
+        }
         if isCurrent { return Color.white }
         if isLast { return Color.green.opacity(0.95) }
         return Color.primary.opacity(0.28)
