@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="contact_support_subjects">
+        <item>Bug Report</item>
+        <item>User Report</item>
+        <item>Feature Request</item>
+        <item>Account Problem</item>
+        <item>Login Issue</item>
+        <item>Data or Stats Issue</item>
+        <item>Workout Sync Problem</item>
+        <item>Payment Issue</item>
+        <item>Lost Purchases or Coins</item>
+        <item>Abuse or Harassment</item>
+        <item>Privacy Concern</item>
+        <item>Security Vulnerability</item>
+        <item>General Feedback</item>
+        <item>Other</item>
+    </string-array>
+</resources>
