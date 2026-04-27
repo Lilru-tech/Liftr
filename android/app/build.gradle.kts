@@ -7,6 +7,16 @@ val localProperties = Properties().apply {
         FileInputStream(f).use { load(it) }
     }
 }
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) {
+        FileInputStream(f).use { load(it) }
+    }
+}
+val hasReleaseKeystore = keystoreProperties.getProperty("storeFile")?.isNotBlank() == true &&
+    keystoreProperties.getProperty("storePassword")?.isNotBlank() == true &&
+    keystoreProperties.getProperty("keyAlias")?.isNotBlank() == true &&
+    keystoreProperties.getProperty("keyPassword")?.isNotBlank() == true
 
 fun requireQuoted(value: String): String =
     value.replace("\\", "\\\\").replace("\"", "\\\"")
@@ -47,8 +57,21 @@ android {
         manifestPlaceholders["GOOGLE_MAPS_KEY"] = mapsApiKey
     }
 
+    signingConfigs {
+        create("release") {
+            if (hasReleaseKeystore) {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
     buildTypes {
         release {
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -115,4 +138,14 @@ dependencies {
     implementation("androidx.glance:glance-appwidget:1.1.0")
     implementation("androidx.glance:glance:1.1.0")
     implementation("androidx.glance:glance-material3:1.1.0")
+}
+
+val isReleaseRequested = gradle.startParameter.taskNames.any {
+    it.contains("Release", ignoreCase = true)
+}
+if (isReleaseRequested && !hasReleaseKeystore) {
+    error(
+        "Missing release signing config. Create android/keystore.properties from " +
+            "android/keystore.properties.example before running release tasks."
+    )
 }

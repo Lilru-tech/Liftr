@@ -10,7 +10,8 @@ Complementa [publishing.md §4](publishing.md) con pasos concretos para el módu
 ## 2. Claves y firma (release)
 
 - Generar o importar un **keystore** de publicación. **No** subas el keystore al repositorio: guárdalo de forma segura (gestor de secretos, backup cifrado).
-- En `android/` puedes añadir `keystore.properties` (git-ignored) o variables de entorno, y mapear en el `build` de release. El esqueleto inicial deja `minifyEnabled` desactivado; activad **R8/ProGuard** y reglas al estabilizar la app.
+- En `android/` usa `keystore.properties` (git-ignored) a partir de `android/keystore.properties.example` para mapear firma release en Gradle.
+- El build de `release` ya usa **R8/ProGuard** (`isMinifyEnabled = true`); mantened reglas en `app/proguard-rules.pro`.
 - Google recomienda **Play App Signing**: tú subes con una clave de subida, Google firma con la de distribución. Sigue [la guía actual](https://support.google.com/googleplay/android-developer) en el panel de la consola.
 
 ## 3. Construir un Android App Bundle (`.aab`)

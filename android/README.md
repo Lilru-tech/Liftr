@@ -13,7 +13,11 @@ Cliente **nativo (Kotlin + Jetpack Compose)** para [Google Play](https://play.go
 1. Copiá o fusioná con `local.properties` a partir de [local.properties.example](local.properties.example):
    - `sdk.dir=…` (Android Studio suele crearlo al abrir el proyecto en esta carpeta).
    - `supabase.url` y `supabase.anonKey` (misma instancia y rol `anon` que en iOS; nunca commitear claves reales).
-2. Abrí el directorio `android/` en Android Studio o ejecutá:
+2. Para **release en Play**:
+   - Generá un keystore de subida (ejemplo): `keytool -genkeypair -v -keystore upload-keystore.jks -alias upload -keyalg RSA -keysize 2048 -validity 10000`
+   - Copiá [keystore.properties.example](keystore.properties.example) a `keystore.properties` y completá `storeFile`, `storePassword`, `keyAlias`, `keyPassword`.
+   - `keystore.properties` no se versiona (está ignorado por git).
+3. Abrí el directorio `android/` en Android Studio o ejecutá:
    - `./gradlew :app:assembleDebug` — depuración.
    - `./gradlew :app:bundleRelease` — **AAB** para publicación, tras configurar firma de release (véase [android-play-release.md](../docs/android-play-release.md)).
 
