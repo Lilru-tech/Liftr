@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.9.1] - 2026-04-26
+
+### Added
+- **Active strength workout** — Added a golden state for exercise bubbles once all sets in the exercise are completed.
+- **Active strength workout** — Added a completion animation when all exercises in the workout are done.
+- **Active strength workout** — Added an elapsed timer to show how much time has passed since workout start.
+- **Active strength workout** — Added fade hints on the left/right edges of the bubble rail when there is horizontal scroll available.
+- **Live Activities** — Ongoing active workouts now appear in the Dynamic Island and on the lock screen.
+
+### Changed
+- **Hyrox active workout** — Exercises can now be moved up and down directly in the list.
+- **Workout notes inputs** — Replaced compact note inputs with text areas to make writing longer notes easier.
+
 ## [1.9.0] - 2026-04-22
 
 ### Added
@@ -28,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - If a migration was already applied remotely, re-running the same SQL manually can show **already exists** errors; this is expected for non-idempotent statements.
 
 [1.9.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.9.0
+[1.9.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.9.1
 
 ## [1.8.0] - 2026-04-18
 
