@@ -299,12 +299,12 @@ struct EditWorkoutMetaSheet: View {
                             
                             Divider().padding(.vertical, 6)
                             
-                            FieldRowPlain("Notes") {
-                                TextField("Notes", text: $notes, axis: .vertical)
-                                    .textFieldStyle(.plain)
-                                    .lineLimit(3, reservesSpace: true)
-                                    .layoutPriority(1)
-                            }
+                            FieldRowNotes(
+                                "Notes",
+                                text: $notes,
+                                placeholder: "Notes",
+                                lineRange: 2...18
+                            )
                             
                             Divider().padding(.vertical, 6)
                             
@@ -637,12 +637,12 @@ struct EditWorkoutMetaSheet: View {
                 
                 Divider().padding(.vertical, 6)
                 
-                FieldRowPlain("Session Notes") {
-                    TextField("Optional", text: $s_sessionNotes, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .lineLimit(3, reservesSpace: true)
-                        .layoutPriority(1)
-                }
+                FieldRowNotes(
+                    "Session notes (optional)",
+                    text: $s_sessionNotes,
+                    placeholder: "Add session notes…",
+                    lineRange: 2...14
+                )
                 
                 Divider().padding(.vertical, 6)
                 
@@ -693,10 +693,12 @@ struct EditWorkoutMetaSheet: View {
                         
                         Divider()
                         
-                        FieldRowPlain("Notes") {
-                            TextField("Notes (exercise)", text: $s_items[i].notes)
-                                .textFieldStyle(.plain)
-                        }
+                        FieldRowNotes(
+                            "Notes",
+                            text: $s_items[i].notes,
+                            placeholder: "Notes (exercise)",
+                            lineRange: 2...8
+                        )
                         
                         ForEach(s_items[i].sets.indices, id: \.self) { s in
                             Divider()
@@ -1842,6 +1844,17 @@ struct EditWorkoutMetaSheet: View {
         }
     }
 
+    private func moveHyroxExerciseInEditor(from index: Int, direction: Int) {
+        var list = hyExercises
+        let j = index + direction
+        guard list.indices.contains(index), list.indices.contains(j) else { return }
+        list.swapAt(index, j)
+        for idx in list.indices {
+            list[idx].exerciseOrder = idx + 1
+        }
+        hyExercises = list
+    }
+
     private func editHyroxExercisePickerBinding(index: Int) -> Binding<String> {
         Binding(
             get: { HyroxExerciseFormatting.pickerTag(for: hyExercises[index].exerciseCode) },
@@ -2063,6 +2076,13 @@ struct EditWorkoutMetaSheet: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            if !hyExercises.isEmpty {
+                Text("Use the arrows on each exercise to change order.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             ForEach(hyExercises.indices, id: \.self) { i in
                 Divider().padding(.vertical, 6)
 
@@ -2077,16 +2097,6 @@ struct EditWorkoutMetaSheet: View {
                         .pickerStyle(.menu)
 
                         Spacer()
-
-                        Button(role: .destructive) {
-                            hyExercises.remove(at: i)
-                            for idx in hyExercises.indices {
-                                hyExercises[idx].exerciseOrder = idx + 1
-                            }
-                        } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.borderless)
                     }
 
                     if HyroxExerciseCode(rawValue: hyExercises[i].exerciseCode) == nil {
@@ -2117,8 +2127,64 @@ struct EditWorkoutMetaSheet: View {
                             .keyboardType(.numberPad)
                     }
 
-                    TextField("Notes", text: $hyExercises[i].notes)
-                        .textFieldStyle(.plain)
+                    FieldRowNotes(
+                        "Notes",
+                        text: $hyExercises[i].notes,
+                        placeholder: "Notes",
+                        lineRange: 2...8
+                    )
+                    .padding(.top, 2)
+
+                    HStack {
+                        Spacer(minLength: 0)
+
+                        if hyExercises.count > 1 {
+                            HStack(spacing: 2) {
+                                Button {
+                                    moveHyroxExerciseInEditor(from: i, direction: -1)
+                                } label: {
+                                    Image(systemName: "chevron.up")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(width: 36, height: 32)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(i == 0)
+                                .opacity(i == 0 ? 0.35 : 1)
+
+                                Button {
+                                    moveHyroxExerciseInEditor(from: i, direction: 1)
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(width: 36, height: 32)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(i == hyExercises.count - 1)
+                                .opacity(i == hyExercises.count - 1 ? 0.35 : 1)
+                            }
+                            .foregroundStyle(.secondary)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Reorder exercise")
+                        }
+
+                        if hyExercises.count > 1 {
+                            Button(role: .destructive) {
+                                hyExercises.remove(at: i)
+                                for idx in hyExercises.indices {
+                                    hyExercises[idx].exerciseOrder = idx + 1
+                                }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.body)
+                                    .frame(width: 40, height: 36)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Remove exercise")
+                        }
+                    }
                 }
             }
 

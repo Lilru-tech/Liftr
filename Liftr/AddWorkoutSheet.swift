@@ -226,7 +226,6 @@ struct AddWorkoutSheet: View {
     @FocusState private var focusNewRoutineNameField: Bool
     @State private var showReplaceRoutineConfirm = false
     @State private var replaceRoutinePendingId: Int64?
-    /// `true` when the replace dialog was shown from **Save routine only**; `false` from publish+routine.
     @State private var replacePendingIsRoutineOnly = false
     @State private var loadingRoutineOnly = false
 
@@ -303,15 +302,12 @@ struct AddWorkoutSheet: View {
                             }
                             
                             Divider()
-                            FieldRowPlain("Notes") {
-                                VStack(alignment: .leading, spacing: 0) {
-                                    TextField("Notes", text: $note, axis: .vertical)
-                                        .textFieldStyle(.plain)
-                                        .lineLimit(1...4)
-                                        .padding(.vertical, 6)
-                                }
-                                .alignmentGuide(.firstTextBaseline) { d in d[.bottom] }
-                            }
+                            FieldRowNotes(
+                                "Notes",
+                                text: $note,
+                                placeholder: "Notes",
+                                lineRange: 2...18
+                            )
                             Divider()
                             FieldRowPlain("Intensity") {
                                 Picker("", selection: $perceived) {
@@ -853,7 +849,6 @@ struct AddWorkoutSheet: View {
                                     }
                                 }
                                 .labelsHidden()
-                                // Default picker style in Forms can use a very large/ambiguous hit area; menu keeps taps on the chevron/label.
                                 .pickerStyle(.menu)
                             }
                         }
@@ -1117,10 +1112,12 @@ struct AddWorkoutSheet: View {
                 
                 Divider()
                 
-                FieldRowPlain {
-                    TextField("Session notes (optional)", text: $sport.sessionNotes, axis: .vertical)
-                        .textFieldStyle(.plain)
-                }
+                FieldRowNotes(
+                    "Session notes (optional)",
+                    text: $sport.sessionNotes,
+                    placeholder: "Add session notes…",
+                    lineRange: 2...14
+                )
             }
             
             saveButton
@@ -1157,7 +1154,6 @@ struct AddWorkoutSheet: View {
         }
     }
 
-    /// Save a strength routine template without creating a workout (same exercise/reps validation as publish).
     private var canSaveRoutineOnly: Bool {
         guard kind == .strength, saveNewStrengthRoutine else { return false }
         let programs: [[EditableExercise]] = usePerPersonStrengthEditor ? strengthLaneItems : [items]
@@ -1608,6 +1604,13 @@ struct AddWorkoutSheet: View {
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                if !sport.hyExercises.isEmpty {
+                    Text("Use the arrows on each exercise to change order.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 if sport.hyExercises.isEmpty {
                     Text("No Hyrox exercises added")
                         .font(.footnote)
@@ -1623,17 +1626,6 @@ struct AddWorkoutSheet: View {
                                 .font(.footnote.weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Spacer()
-                            if sport.hyExercises.count > 1 {
-                                Button(role: .destructive) {
-                                    sport.hyExercises.remove(at: i)
-                                    for idx in sport.hyExercises.indices {
-                                        sport.hyExercises[idx].exerciseOrder = idx + 1
-                                    }
-                                } label: {
-                                    Image(systemName: "trash")
-                                }
-                                .buttonStyle(.borderless)
-                            }
                         }
 
                         Picker("", selection: hyroxExercisePickerBinding(index: i)) {
@@ -1679,8 +1671,64 @@ struct AddWorkoutSheet: View {
                             }
                         }
 
-                        TextField("Notes", text: $sport.hyExercises[i].notes)
-                            .textFieldStyle(.roundedBorder)
+                        FieldRowNotes(
+                            "Notes",
+                            text: $sport.hyExercises[i].notes,
+                            placeholder: "Notes",
+                            lineRange: 2...8
+                        )
+                        .padding(.top, 2)
+
+                        HStack {
+                            Spacer(minLength: 0)
+
+                            if sport.hyExercises.count > 1 {
+                                HStack(spacing: 2) {
+                                    Button {
+                                        moveHyroxExercise(from: i, direction: -1)
+                                    } label: {
+                                        Image(systemName: "chevron.up")
+                                            .font(.subheadline.weight(.semibold))
+                                            .frame(width: 36, height: 32)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(i == 0)
+                                    .opacity(i == 0 ? 0.35 : 1)
+
+                                    Button {
+                                        moveHyroxExercise(from: i, direction: 1)
+                                    } label: {
+                                        Image(systemName: "chevron.down")
+                                            .font(.subheadline.weight(.semibold))
+                                            .frame(width: 36, height: 32)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(i == sport.hyExercises.count - 1)
+                                    .opacity(i == sport.hyExercises.count - 1 ? 0.35 : 1)
+                                }
+                                .foregroundStyle(.secondary)
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel("Reorder exercise")
+                            }
+
+                            if sport.hyExercises.count > 1 {
+                                Button(role: .destructive) {
+                                    sport.hyExercises.remove(at: i)
+                                    for idx in sport.hyExercises.indices {
+                                        sport.hyExercises[idx].exerciseOrder = idx + 1
+                                    }
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.body)
+                                        .frame(width: 40, height: 36)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Remove exercise")
+                            }
+                        }
                     }
                 }
 
@@ -1756,6 +1804,17 @@ struct AddWorkoutSheet: View {
         }
     }
     
+    private func moveHyroxExercise(from index: Int, direction: Int) {
+        var list = sport.hyExercises
+        let j = index + direction
+        guard list.indices.contains(index), list.indices.contains(j) else { return }
+        list.swapAt(index, j)
+        for idx in list.indices {
+            list[idx].exerciseOrder = idx + 1
+        }
+        sport.hyExercises = list
+    }
+
     private func patchHyroxExerciseDisplayNames(
         client: SupabaseClient,
         workoutId: Int,
@@ -3277,10 +3336,12 @@ private struct StrengthExercisesEditorBlock: View {
 
             Divider()
 
-            FieldRowPlain("Notes") {
-                TextField("Notes (exercise)", text: notesBinding(i))
-                    .textFieldStyle(.plain)
-            }
+            FieldRowNotes(
+                "Notes",
+                text: notesBinding(i),
+                placeholder: "Notes (exercise)",
+                lineRange: 2...8
+            )
 
             ForEach(exercises[i].sets.indices, id: \.self) { s in
                 Divider()
