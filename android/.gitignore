@@ -1,0 +1,19 @@
+# Build
+/build
+**/build
+.gradle
+
+# Local
+local.properties
+*.jks
+*.keystore
+keystore.properties
+secrets.properties
+
+# IDE
+.idea
+*.iml
+.DS_Store
+
+# Captures / profilers
+/captures

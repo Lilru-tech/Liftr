@@ -78,3 +78,6 @@ Liftr/docs/
 supabase/migrations/
 supabase/debug*.sql
 supabase/audit/
+
+# Android local logs / diagnostics
+android-logcat*.txt
