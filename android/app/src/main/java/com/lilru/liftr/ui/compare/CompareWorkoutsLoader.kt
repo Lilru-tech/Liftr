@@ -49,7 +49,8 @@ private data class SetRow(
     @SerialName("set_number") val setNumber: Int,
     val reps: Int? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
-    val rpe: Double? = null
+    val rpe: Double? = null,
+    @SerialName("rest_sec") val restSec: Int? = null
 )
 
 private data class StrengthStats(
@@ -60,7 +61,9 @@ private data class StrengthStats(
     val maxWeightKg: Double?,
     val maxSetVolumeKg: Double?,
     val avgRpe: Double?,
-    val hardSetsCount: Int
+    val hardSetsCount: Int,
+    val totalRestSec: Double,
+    val avgRestSec: Double?
 )
 
 /**
@@ -211,11 +214,11 @@ private suspend fun buildStrengthStats(supabase: SupabaseClient, wid: Int): Stre
         }
     val exIds = compJson.decodeFromString<List<WeId>>(exRes.data).map { it.id }
     if (exIds.isEmpty()) {
-        return StrengthStats(0, 0, 0, 0.0, null, null, null, 0)
+        return StrengthStats(0, 0, 0, 0.0, null, null, null, 0, 0.0, null)
     }
     val setsRes = supabase.from(BackendContracts.Tables.EXERCISE_SETS)
         .select(
-            columns = Columns.raw("id, workout_exercise_id, set_number, reps, weight_kg, rpe")
+            columns = Columns.raw("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
         ) {
             filter { isIn("workout_exercise_id", exIds) }
             order("set_number", Order.ASCENDING)
@@ -230,6 +233,8 @@ private suspend fun buildStrengthStats(supabase: SupabaseClient, wid: Int): Stre
     var rpeWeightTotal = 0.0
     var hardSets = 0
     var setsCount = 0
+    var totalRestSec = 0.0
+    var restMultWeight = 0.0
     for ((_, mutRows) in byWe) {
         val rows = mutRows.sortedBy { it.id }
         val nums = rows.map { it.setNumber }
@@ -254,9 +259,16 @@ private suspend fun buildStrengthStats(supabase: SupabaseClient, wid: Int): Stre
                 rpeWeightTotal += m
                 if (r >= 8.0) hardSets += mult
             }
+            val restVal = max(s.restSec ?: 0, 0)
+            val mRest = mult.toDouble()
+            totalRestSec += restVal * mRest
+            if (restVal > 0) {
+                restMultWeight += mRest
+            }
         }
     }
     val avgRpe = if (rpeWeightTotal > 0) rpeWeightedSum / rpeWeightTotal else null
+    val avgRestSec = if (restMultWeight > 0) totalRestSec / restMultWeight else null
     return StrengthStats(
         exercisesCount = exIds.size,
         setsCount = setsCount,
@@ -265,7 +277,9 @@ private suspend fun buildStrengthStats(supabase: SupabaseClient, wid: Int): Stre
         maxWeightKg = maxWeightKg,
         maxSetVolumeKg = maxSetVolumeKg,
         avgRpe = avgRpe,
-        hardSetsCount = hardSets
+        hardSetsCount = hardSets,
+        totalRestSec = totalRestSec,
+        avgRestSec = avgRestSec
     )
 }
 
@@ -320,6 +334,19 @@ private suspend fun buildStrengthMetrics(
     out.addM("max_set_volume_kg", "kg", lStats.maxSetVolumeKg, rStats.maxSetVolumeKg)
     out.addM("avg_rpe", "rpe", lStats.avgRpe, rStats.avgRpe)
     out.addM("hard_sets_count", "count", lStats.hardSetsCount.toDouble(), rStats.hardSetsCount.toDouble())
+    out.addM("total_rest_sec", "sec", lStats.totalRestSec, rStats.totalRestSec)
+    out.addM("avg_rest_sec", "sec", lStats.avgRestSec, rStats.avgRestSec)
+    fun restPct(totalRest: Double, durationSec: Double?): Double? {
+        val d = durationSec ?: return null
+        if (d <= 0) return null
+        return 100.0 * totalRest / d
+    }
+    out.addM(
+        "rest_pct_of_session",
+        "pct",
+        restPct(lStats.totalRestSec, lDur),
+        restPct(rStats.totalRestSec, rDur)
+    )
     return out
 }
 

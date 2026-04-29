@@ -59,7 +59,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
@@ -324,6 +324,48 @@ private fun ProfileIosStyleHeader(
                 } else if (ui.isOwnProfile) {
                     TextButton(onClick = onOpenBioSheet) {
                         Text(stringResource(R.string.profile_add_bio))
+                    }
+                }
+                if (profileUserId != null &&
+                    (ui.weeklyGoalsTotal > 0 || ui.achievementsTotal > 0)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (ui.weeklyGoalsTotal > 0) {
+                            Text(
+                                text = stringResource(
+                                    R.string.profile_header_goals_snippet,
+                                    ui.weeklyGoalsDone,
+                                    ui.weeklyGoalsTotal
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clickable(onClick = onMenuGoals)
+                            )
+                        }
+                        if (ui.weeklyGoalsTotal > 0 && ui.achievementsTotal > 0) {
+                            Text(
+                                " · ",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                            )
+                        }
+                        if (ui.achievementsTotal > 0) {
+                            Text(
+                                text = stringResource(
+                                    R.string.profile_header_achievements_snippet,
+                                    ui.achievementsUnlocked,
+                                    ui.achievementsTotal
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.clickable(onClick = onMenuAchievements)
+                            )
+                        }
                     }
                 }
                 if (!ui.isOwnProfile) {
@@ -846,7 +888,7 @@ fun ProfileTabScreen(
                 showUsernameInCard = onBack == null,
                 toggleFollow = vm::toggleFollow
             )
-            PrimaryTabRow(selectedTabIndex = safeTabIndex) {
+            SecondaryTabRow(selectedTabIndex = safeTabIndex) {
                 tabEntries.forEachIndexed { i, tab ->
                     Tab(
                         selected = safeTabIndex == i,
@@ -860,7 +902,9 @@ fun ProfileTabScreen(
                                         ProfileMainTab.Progress -> R.string.profile_tab_progress
                                         ProfileMainTab.Settings -> R.string.profile_tab_settings
                                     }
-                                )
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1
                             )
                         }
                     )

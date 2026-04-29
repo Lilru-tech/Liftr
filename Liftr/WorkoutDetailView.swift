@@ -518,7 +518,7 @@ struct WorkoutDetailView: View {
                     .font(.title3.weight(.bold))
                 if multiInviteWorkout {
                     Text(
-                        "Tap to select people. Dual: exactly one selected. Group: pick two (you plus two partners on this phone, three people total)."
+                        "Tap to select people. Dual: exactly one selected. Group: pick two (you plus two partners on this phone, three people total). Each lane keeps separate results."
                     )
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
@@ -554,7 +554,7 @@ struct WorkoutDetailView: View {
                             .font(.title3.weight(.semibold))
                             .lineLimit(1)
                     }
-                    Text("Train together on this phone. Each person keeps their own weight, reps, and rest timers.")
+                    Text("Train together on this phone. Each person keeps their own weight, reps, and rest timers, with separate workout results.")
                         .font(.subheadline)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)

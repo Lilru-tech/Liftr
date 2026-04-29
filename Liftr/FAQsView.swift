@@ -8,6 +8,16 @@ struct FAQsView: View {
         let category: String
     }
 
+    private let sectionOrder: [String] = [
+        "General",
+        "Active Strength Workout",
+        "Group Workouts",
+        "Apple Health Import (Cardio)",
+        "Goals, Ranking & Competitions",
+        "Privacy, Account & Support",
+        "Premium & Ads"
+    ]
+
     private var faqsBySection: [String: [FAQ]] {
         let faqs: [FAQ] = [
             FAQ(
@@ -17,88 +27,134 @@ struct FAQsView: View {
             ),
             FAQ(
                 question: "What are the main sections of the app?",
-                answer: "There are 5 tabs: Home (your workouts and the workouts of people you follow), Search (find users and view their profiles), Add Workout (create or schedule a session), Ranking (see who is on top by different metrics) and Profile (view and edit your profile, PRs, progress and settings).",
+                answer: "There are 5 tabs: Home, Search, Add Workout, Ranking and Profile. Home shows your feed and summaries, Search helps you discover users, Add Workout is for creating or planning sessions, Ranking compares stats, and Profile includes your calendar, PRs, progress and settings.",
                 category: "General"
             ),
-
             FAQ(
-                question: "What can I see on the Home screen?",
-                answer: "On Home you see your workouts and the workouts of people you follow. You can filter by All, Strength, Cardio or Sport. At the top you’ll find cards for: today’s workouts, your current streak (plus how many workouts you’ve done this week and total points), your strongest week by points and your highest-scoring workout. There’s also a monthly card with number of workouts, total points, percentage vs last month, plus a chart you can share.",
-                category: "Home"
+                question: "Can I create workouts now and also plan them for later?",
+                answer: "Yes. In Add Workout you can publish a completed workout or save it as planned (draft) and start it later from workout details.",
+                category: "General"
             ),
             FAQ(
-                question: "What information appears in each workout card?",
-                answer: "Each card shows: profile photo, username, workout title, date, category (Strength, Cardio or Sport), points earned and number of likes. Tapping the card opens the full workout details.",
-                category: "Home"
-            ),
-
-            FAQ(
-                question: "What can I do from the workout detail screen?",
-                answer: "If the workout is yours you can edit it, duplicate it, delete it and compare it with other workouts of the same type. You’ll always see the full details, the likes (with the list of who liked it) and the comments.",
-                category: "Workouts"
+                question: "Where can I find routines and workout suggestions?",
+                answer: "When creating a strength workout, you can load routines and use suggested sessions based on your training history.",
+                category: "General"
             ),
             FAQ(
-                question: "What is a Draft workout and what does the Start button do?",
-                answer: "If you create a workout as a Draft (planned), a Start button will appear. Tapping it opens the active workout view, where you can see remaining time, sets and reps (Strength), goals, cards and assists or other stats (Sport), or distance and pace (Cardio). From this view you can fill in the data while you train.",
-                category: "Workouts"
-            ),
-
-            FAQ(
-                question: "How do I add or schedule a workout?",
-                answer: "In the Add Workout tab you choose: workout type (Strength, Cardio or Sport), mode (add now or schedule), title, start date and time, whether it has finished, end date and time, notes and intensity. Then you can add participants (people you follow) and fill in the specific fields for that type of workout: total volume, sets and reps in Strength; pace, distance and other data in Cardio; or match stats such as goals, cards and assists in Sport.",
-                category: "Add workouts"
+                question: "What can I edit while a strength workout is active?",
+                answer: "During the active strength flow, you can edit reps, weight and rest for the current set configuration, add sets, remove sets, move to the next exercise, or finish early.",
+                category: "Active Strength Workout"
             ),
             FAQ(
-                question: "Where do the workouts I add appear?",
-                answer: "All workouts you create appear on Home and also in your profile, whether they are past sessions or scheduled ones.",
-                category: "Add workouts"
-            ),
-
-            FAQ(
-                question: "What is the Search tab for?",
-                answer: "Search lets you find other users by name and open their profiles. From there you can see their workouts, PRs and progress, and decide if you want to follow them.",
-                category: "Search & ranking"
+                question: "How does rest work in active strength workouts?",
+                answer: "If a set has rest seconds configured, the app starts a rest timer after you tap the rest button. You can skip rest any time. The top stopwatch shows elapsed session time.",
+                category: "Active Strength Workout"
             ),
             FAQ(
-                question: "What does the Ranking tab show?",
-                answer: "Ranking shows who has the most workouts, the most points and other stats among your friends or globally. There are filters so you can choose which type of ranking you want to see.",
-                category: "Search & ranking"
-            ),
-
-            FAQ(
-                question: "What can I see and change in my profile?",
-                answer: "In Profile you see your photo (tap it to change it), your username, followers and following (each with its own list), your level and XP, and your bio (editable). You also have shortcuts to the Ranking, your notifications and your unlocked achievements.",
-                category: "Profile"
+                question: "When are active strength changes saved?",
+                answer: "The workout is persisted when you finish the session. If you finish early, only the sets you actually performed are saved.",
+                category: "Active Strength Workout"
             ),
             FAQ(
-                question: "What do the Calendar, PRs and Progress tabs show inside Profile?",
-                answer: "Calendar shows the current month: days with completed workouts are highlighted in green and days with planned workouts (Drafts) in maroon. PRs shows your personal records for different exercises and sports. Progress shows your evolution by number of workouts and score, for different time ranges (week, month, year).",
-                category: "Profile"
+                question: "Can I run supersets in the active strength view?",
+                answer: "There is no dedicated superset mode in this flow. Work is tracked exercise by exercise with per-set reps, weight and rest.",
+                category: "Active Strength Workout"
             ),
             FAQ(
-                question: "What options are available in Settings inside Profile?",
-                answer: "In Settings you can become Premium to remove ads, change the app background color, contact support, update your personal info (height, weight, date of birth), delete your account or sign out.",
-                category: "Profile"
+                question: "What is dual/group strength on one phone?",
+                answer: "From a planned strength workout, you can start just yourself, dual (you + 1 partner), or group (you + 2 partners) on the same device.",
+                category: "Group Workouts"
             ),
-
+            FAQ(
+                question: "Do all participants keep separate results in dual/group mode?",
+                answer: "Yes. Each lane keeps its own reps, weights and rest timers while sharing the same screen for navigation.",
+                category: "Group Workouts"
+            ),
+            FAQ(
+                question: "What happens if not everyone is done and we tap Finish?",
+                answer: "You will see a warning and can cancel or finish for everyone. Finishing closes and saves all linked workouts running on that phone.",
+                category: "Group Workouts"
+            ),
+            FAQ(
+                question: "What does Liftr import from Apple Health?",
+                answer: "Only compatible cardio workouts: running, walking, hiking, cycling, swimming and rowing. Indoor runs/walks map to treadmill activities.",
+                category: "Apple Health Import (Cardio)"
+            ),
+            FAQ(
+                question: "Does Liftr write back to Apple Health?",
+                answer: "No. This integration is read-only for import. Liftr does not write, edit or delete workouts in Apple Health.",
+                category: "Apple Health Import (Cardio)"
+            ),
+            FAQ(
+                question: "Is Apple Health import automatic?",
+                answer: "No. Import is manual: choose a date range in Settings and tap Import workouts.",
+                category: "Apple Health Import (Cardio)"
+            ),
+            FAQ(
+                question: "Why was a Health workout not imported?",
+                answer: "Common reasons: unsupported activity type, date outside your selected range, duplicate workout already imported, or missing read permissions.",
+                category: "Apple Health Import (Cardio)"
+            ),
+            FAQ(
+                question: "What can I do in Ranking?",
+                answer: "You can compare performance globally or with friends, across periods and workout kinds, and switch metrics such as score, calories, level and top workouts.",
+                category: "Goals, Ranking & Competitions"
+            ),
+            FAQ(
+                question: "How do weekly goals work?",
+                answer: "You can set weekly goals for workouts, calories or score and track progress through the week. Suggested targets are based on your recent history.",
+                category: "Goals, Ranking & Competitions"
+            ),
+            FAQ(
+                question: "What are competitions in Liftr?",
+                answer: "Competitions let you challenge others with defined rules and review participating workouts in dedicated competition screens.",
+                category: "Goals, Ranking & Competitions"
+            ),
+            FAQ(
+                question: "Why do Calendar and Progress show different workout counts?",
+                answer: "The Calendar heatmap includes days when you logged a workout as the owner and days when you only joined someone else’s session as a participant. The Progress tab only aggregates workouts you own (same rule as your published volume), excludes planned drafts, and uses rolling windows: Week is the last 7 days, Month is the last 30 days, and Year is the last 12 calendar months—so it may not match the natural month shown in Calendar.",
+                category: "Goals, Ranking & Competitions"
+            ),
+            FAQ(
+                question: "What can I manage in Profile settings?",
+                answer: "You can update personal info, contact support, open FAQs, import cardio from Apple Health, restore purchases, sign out, or permanently delete your account.",
+                category: "Privacy, Account & Support"
+            ),
+            FAQ(
+                question: "Can I delete my account?",
+                answer: "Yes. Account deletion is available in Profile settings and removes your account data according to app policy.",
+                category: "Privacy, Account & Support"
+            ),
+            FAQ(
+                question: "How do I ask for help or suggest features?",
+                answer: "Use Contact Support for issues and the Feature Requests section to propose product ideas directly in the app.",
+                category: "Privacy, Account & Support"
+            ),
             FAQ(
                 question: "How are workout points calculated?",
-                answer: "Your score depends on several factors: your weight, age and sex, the type of workout and its specific data. In Strength we look at total volume lifted, sets and reps; in Cardio, pace, distance and time; and in Sport, match stats like goals, cards, assists and more. The harder and more demanding the session, the more points you earn.",
-                category: "Scoring & Premium"
+                answer: "Score depends on your profile factors and workout data. Strength uses volume, reps and sets; cardio uses distance, pace and time; sport uses match stats. More demanding sessions earn more points.",
+                category: "Premium & Ads"
             ),
             FAQ(
-                question: "What are the benefits of being a Premium user?",
-                answer: "With a Premium subscription you remove ads from the app. The subscription is monthly and is managed through your Apple account. You can restore purchases from Settings if you change devices.",
-                category: "Scoring & Premium"
+                question: "What are Premium benefits?",
+                answer: "Premium removes ads in the app. It is billed monthly via Apple and can be restored from Settings.",
+                category: "Premium & Ads"
             )
         ]
 
         return Dictionary(grouping: faqs, by: { $0.category })
     }
 
+    private var orderedSections: [String] {
+        let available = Set(faqsBySection.keys)
+        let preferred = sectionOrder.filter { available.contains($0) }
+        let remaining = available.subtracting(preferred).sorted()
+        return preferred + remaining
+    }
+
     var body: some View {
         List {
-            ForEach(faqsBySection.keys.sorted(), id: \.self) { section in
+            ForEach(orderedSections, id: \.self) { section in
                 if let items = faqsBySection[section] {
                     Section(section) {
                         ForEach(items) { faq in

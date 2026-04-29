@@ -133,6 +133,7 @@ dependencies {
     implementation("com.google.maps.android:maps-compose:4.4.1")
     implementation("com.google.android.gms:play-services-ads:23.5.0")
     implementation("com.google.android.ump:user-messaging-platform:3.0.0")
+    implementation("com.google.android.play:app-update:2.1.0")
     implementation("com.android.billingclient:billing-ktx:7.1.1")
     implementation("androidx.health.connect:connect-client:1.1.0-alpha10")
     implementation("androidx.glance:glance-appwidget:1.1.0")

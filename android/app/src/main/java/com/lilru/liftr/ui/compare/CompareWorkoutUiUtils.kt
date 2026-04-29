@@ -13,6 +13,7 @@ object CompareWorkoutFormat {
         return when (metric) {
             "avg_pace_sec_per_km", "fastest_km_pace_sec", "split_sec_per_500m",
             "sec_per_km", "sec_per_500m", "avg_hr", "max_hr", "score_against",
+            "total_rest_sec", "avg_rest_sec", "rest_pct_of_session",
             "hx_penalty_time_sec", "hx_official_time_sec", "hx_rank_overall", "hx_rank_category", "hx_no_reps" -> -1.0
             else -> 1.0
         }
@@ -120,6 +121,9 @@ object CompareWorkoutFormat {
         "max_set_volume_kg" -> "Top set volume"
         "avg_rpe" -> "Average RPE"
         "hard_sets_count" -> "Hard sets (RPE ≥ 8)"
+        "total_rest_sec" -> "Planned rest (total)"
+        "avg_rest_sec" -> "Planned rest (avg per set)"
+        "rest_pct_of_session" -> "Planned rest (% of session)"
         "avg_reps_per_exercise" -> "Reps / exercise"
         "avg_sets_per_exercise" -> "Sets / exercise"
         "vb_points" -> "Points"

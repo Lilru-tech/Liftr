@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.loadProfileAvatarUrl
 import com.lilru.liftr.data.SupabaseResponseDecoding
+import com.lilru.liftr.ui.goals.LiftrGoalsTime
 import com.lilru.liftr.ui.notifications.UnreadNotificationCounter
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -13,6 +14,7 @@ import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.storage.storage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,6 +66,34 @@ private data class FollowEdge(
     @SerialName("followee_id") val followeeId: String
 )
 
+@Serializable
+private data class WeeklyGoalHeaderWire(
+    val id: Long,
+    @SerialName("user_id") val userId: String,
+    @SerialName("week_start") val weekStart: String,
+    val metric: String,
+    @SerialName("target_value") val targetValue: Double,
+    val title: String? = null
+)
+
+@Serializable
+private data class WeeklyResultHeaderWire(
+    @SerialName("goal_id") val goalId: Long,
+    @SerialName("is_completed") val isCompleted: Boolean = false
+)
+
+@Serializable
+private data class AchHeaderWire(
+    @SerialName("is_unlocked") val isUnlocked: Boolean = false
+)
+
+private data class HeaderSnippets(
+    val goalsDone: Int,
+    val goalsTotal: Int,
+    val achUnlocked: Int,
+    val achTotal: Int
+)
+
 data class ProfileUiState(
     val loading: Boolean = true,
     val isRefreshing: Boolean = false,
@@ -93,7 +123,11 @@ data class ProfileUiState(
     val weightKgDraft: String = "",
     val hasBirthDate: Boolean = false,
     val birthDateMillis: Long? = null,
-    val saveProfileMetricsBusy: Boolean = false
+    val saveProfileMetricsBusy: Boolean = false,
+    val weeklyGoalsDone: Int = 0,
+    val weeklyGoalsTotal: Int = 0,
+    val achievementsUnlocked: Int = 0,
+    val achievementsTotal: Int = 0
 )
 
 class ProfileViewModel(
@@ -184,7 +218,9 @@ class ProfileViewModel(
                 } else {
                     runCatching {
                         supabase.from(BackendContracts.Tables.FOLLOWS)
-                            .select(columns = Columns.raw("follower_id")) {
+                            // Necesitamos ambas columnas: si solo pides follower_id, el JSON no trae
+                            // followee_id y la deserialización a [FollowEdge] falla → siempre "no sigo".
+                            .select(columns = Columns.raw("follower_id, followee_id")) {
                                 filter {
                                     eq("follower_id", user.id)
                                     eq("followee_id", uid)
@@ -204,6 +240,7 @@ class ProfileViewModel(
                         } else {
                             null
                         }
+                val headerSnippets = runCatching { loadProfileHeaderSnippets(supabase, uid) }.getOrNull()
                 _uiState.value = ProfileUiState(
                     loading = false,
                     isRefreshing = false,
@@ -226,7 +263,11 @@ class ProfileViewModel(
                     } ?: "",
                     weightKgDraft = profile?.weightKg?.let { String.format(Locale.US, "%.1f", it) } ?: "",
                     hasBirthDate = dobStr != null,
-                    birthDateMillis = dobMillis
+                    birthDateMillis = dobMillis,
+                    weeklyGoalsDone = headerSnippets?.goalsDone ?: 0,
+                    weeklyGoalsTotal = headerSnippets?.goalsTotal ?: 0,
+                    achievementsUnlocked = headerSnippets?.achUnlocked ?: 0,
+                    achievementsTotal = headerSnippets?.achTotal ?: 0
                 )
             } catch (e: Throwable) {
                 _uiState.value = _uiState.value.copy(
@@ -470,6 +511,68 @@ class ProfileViewModel(
                 )
             }
         }
+    }
+
+    private suspend fun loadProfileHeaderSnippets(
+        supabase: SupabaseClient,
+        uid: String
+    ): HeaderSnippets {
+        var achUnlocked = 0
+        var achTotal = 0
+        runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.GET_USER_ACHIEVEMENTS,
+                buildJsonObject { put("p_user_id", uid) }
+            ) { }
+            val rows = SupabaseResponseDecoding.decodeListOrObject<AchHeaderWire>(res.data)
+            achTotal = rows.size
+            achUnlocked = rows.count { it.isUnlocked }
+        }
+        var gDone = 0
+        var gTotal = 0
+        runCatching {
+            val weekStr = LiftrGoalsTime.currentWeekStartDateString()
+            supabase.postgrest.rpc(
+                BackendContracts.Rpc.RECOMPUTE_WEEKLY_GOAL_RESULTS,
+                buildJsonObject {
+                    put("p_user_id", uid)
+                    put("p_week_start", weekStr)
+                }
+            ) { }
+            val gRes = supabase.from(BackendContracts.Tables.WEEKLY_GOALS)
+                .select(
+                    columns = Columns.raw("id,user_id,week_start,metric,target_value,title")
+                ) {
+                    filter {
+                        eq("user_id", uid)
+                        eq("week_start", weekStr)
+                    }
+                    order("updated_at", Order.DESCENDING)
+                }
+            val goals = SupabaseResponseDecoding.decodeListOrObject<WeeklyGoalHeaderWire>(gRes.data)
+            gTotal = goals.size
+            if (goals.isNotEmpty()) {
+                val goalIds = goals.map { it.id }
+                val rRes = supabase.from(BackendContracts.Tables.WEEKLY_GOAL_RESULTS)
+                    .select(
+                        columns = Columns.raw("goal_id,user_id,week_start,achieved_value,is_completed")
+                    ) {
+                        filter {
+                            isIn("goal_id", goalIds.map { it.toString() })
+                            eq("week_start", weekStr)
+                        }
+                    }
+                val byGoal = SupabaseResponseDecoding.decodeListOrObject<WeeklyResultHeaderWire>(rRes.data)
+                    .associateBy { it.goalId }
+                gDone = goals.count { byGoal[it.id]?.isCompleted == true }
+            }
+        }
+        return HeaderSnippets(
+            goalsDone = gDone,
+            goalsTotal = gTotal,
+            achUnlocked = achUnlocked,
+            achTotal = achTotal
+        )
     }
 
     private fun parseIsoDateToMillis(s: String): Long? = runCatching {

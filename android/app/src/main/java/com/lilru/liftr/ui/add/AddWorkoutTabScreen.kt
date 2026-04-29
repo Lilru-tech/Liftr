@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -163,7 +164,7 @@ fun AddWorkoutTabScreen(
         addAll(ui.selectedParticipantIds.toList())
     }
     val exerciseLangScope = rememberCoroutineScope()
-    var exerciseLang by remember { mutableStateOf("es") }
+    var exerciseLang by remember { mutableStateOf("en") }
     LaunchedEffect(app) {
         exerciseLang = withContext(Dispatchers.IO) { ExerciseLanguagePreferences.read(app) }
     }
@@ -176,6 +177,7 @@ fun AddWorkoutTabScreen(
     var showParticipantsSheet by remember { mutableStateOf(false) }
     var participantsSearchQuery by remember { mutableStateOf("") }
     var showWorkoutHelp by rememberSaveable { mutableStateOf(false) }
+    var showClearStrengthDialog by remember { mutableStateOf(false) }
     var exerciseSearch by remember { mutableStateOf("") }
     var exercisePickerForDraftId by remember { mutableStateOf<String?>(null) }
     val routinesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -763,6 +765,16 @@ fun AddWorkoutTabScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(stringResource(R.string.add_add_exercise))
+                        }
+                        val canClearAllStrength = strengthExercises.size > 1 ||
+                            strengthExercises.any { it.exerciseId != null || it.exerciseName.isNotBlank() }
+                        if (canClearAllStrength) {
+                            OutlinedButton(
+                                onClick = { showClearStrengthDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.add_clear_all_exercises))
+                            }
                         }
                     }
                 }
@@ -1408,6 +1420,28 @@ fun AddWorkoutTabScreen(
             }
         }
     }
+    }
+    if (showClearStrengthDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearStrengthDialog = false },
+            title = { Text(stringResource(R.string.add_clear_all_exercises)) },
+            text = { Text(stringResource(R.string.add_clear_all_exercises_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearStrengthDialog = false
+                        vm.clearAllStrengthExercises()
+                    }
+                ) {
+                    Text(stringResource(R.string.add_clear_all_exercises_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearStrengthDialog = false }) {
+                    Text(stringResource(R.string.add_routine_dialog_cancel))
+                }
+            }
+        )
     }
     if (showRoutinesSheet) {
         ModalBottomSheet(

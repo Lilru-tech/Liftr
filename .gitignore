@@ -79,5 +79,14 @@ supabase/migrations/
 supabase/debug*.sql
 supabase/audit/
 
+# Android — caché de Gradle y archivos locales / secretos (nunca subir)
+android/.gradle/
+android/local.properties
+android/keystore.properties
+android/**/*.jks
+
 # Android local logs / diagnostics
 android-logcat*.txt
+
+# SQL suelto en docs/ (raíz del repo); depuración / parches manuales (alineado con ignorar Liftr/docs/)
+docs/*.sql

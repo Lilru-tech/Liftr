@@ -203,6 +203,7 @@ struct AddWorkoutSheet: View {
     @State private var didEditSportDuration  = false
     @State private var showParticipantsPicker = false
     @State private var confirmRemoveStrengthExercise: (lane: Int, index: Int)? = nil
+    @State private var showClearAllStrengthExercisesConfirm = false
     @State private var publishMode: PublishMode = .add
     @State private var groupProgrammingMode: PlannedGroupStrengthProgramming = .sharedSessionTemplate
     @State private var strengthLaneItems: [[EditableExercise]] = [[EditableExercise()]]
@@ -609,6 +610,21 @@ struct AddWorkoutSheet: View {
                 confirmRemoveStrengthExercise = nil
             }
         }
+        .alert("Clear all exercises?", isPresented: $showClearAllStrengthExercisesConfirm) {
+            Button("Clear all", role: .destructive) {
+                if usePerPersonStrengthEditor,
+                   strengthProgramPage >= 0, strengthProgramPage < strengthLaneItems.count {
+                    strengthLaneItems[strengthProgramPage] = [EditableExercise()]
+                } else {
+                    items = [EditableExercise()]
+                }
+                confirmRemoveStrengthExercise = nil
+                recentlyAddedExerciseId = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes every exercise in this list and leaves one empty row.")
+        }
     }
     
     private var saveButton: some View {
@@ -794,6 +810,7 @@ struct AddWorkoutSheet: View {
                         loadingCatalog: loadingCatalog,
                         exerciseLabel: { exerciseLabel(for: $0) },
                         exerciseSelected: { exerciseSelected($0) },
+                        onRequestClearAll: { showClearAllStrengthExercisesConfirm = true },
                         onSuggest: {
                             recommendKind = .strength
                             strengthRecommendTargetLane = strengthProgramPage
@@ -813,6 +830,7 @@ struct AddWorkoutSheet: View {
                     loadingCatalog: loadingCatalog,
                     exerciseLabel: { exerciseLabel(for: $0) },
                     exerciseSelected: { exerciseSelected($0) },
+                    onRequestClearAll: { showClearAllStrengthExercisesConfirm = true },
                     onSuggest: {
                         recommendKind = .strength
                         strengthRecommendTargetLane = nil
@@ -3235,6 +3253,7 @@ private struct StrengthExercisesEditorBlock: View {
     let loadingCatalog: Bool
     let exerciseLabel: (EditableExercise) -> String
     let exerciseSelected: (EditableExercise) -> Bool
+    let onRequestClearAll: () -> Void
     let onSuggest: () -> Void
 
     var body: some View {
@@ -3277,7 +3296,20 @@ private struct StrengthExercisesEditorBlock: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 4)
+                .padding(.bottom, exercises.count > 1 ? 2 : 4)
+
+            if exercises.count > 1 {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("Clear all", role: .destructive) {
+                        onRequestClearAll()
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Clear all exercises")
+                }
+                .padding(.bottom, 2)
+            }
 
             VStack(spacing: 12) {
                 ForEach(Array(exercises.enumerated()), id: \.element.id) { i, _ in

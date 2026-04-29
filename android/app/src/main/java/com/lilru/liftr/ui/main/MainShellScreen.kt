@@ -5,16 +5,19 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Leaderboard
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CheckCircle
@@ -33,6 +36,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -52,7 +56,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.install.model.UpdateAvailability
 import com.lilru.liftr.R
+import com.lilru.liftr.update.PlayStoreUpdatePrompt
 import com.lilru.liftr.auth.PostLoginShellMessage
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
@@ -110,19 +120,20 @@ private fun MainTabIcon(
     myAvatarUrl: String?,
     contentDescription: String
 ) {
+    val iconMod = Modifier.size(22.dp)
     when (tab) {
-        MainTab.Home -> Icon(Icons.Filled.Home, contentDescription = contentDescription)
-        MainTab.Search -> Icon(Icons.Filled.Search, contentDescription = contentDescription)
-        MainTab.Add -> Icon(Icons.Filled.Add, contentDescription = contentDescription)
-        MainTab.Ranking -> Icon(Icons.Filled.Leaderboard, contentDescription = contentDescription)
+        MainTab.Home -> Icon(Icons.Filled.Home, contentDescription = contentDescription, modifier = iconMod)
+        MainTab.Search -> Icon(Icons.Filled.Search, contentDescription = contentDescription, modifier = iconMod)
+        MainTab.Add -> Icon(Icons.Filled.Add, contentDescription = contentDescription, modifier = iconMod)
+        MainTab.Ranking -> Icon(Icons.Filled.EmojiEvents, contentDescription = contentDescription, modifier = iconMod)
         MainTab.Profile -> {
             val u = myAvatarUrl?.trim()?.takeIf { it.isNotEmpty() }
             if (u == null) {
-                Icon(Icons.Filled.Person, contentDescription = contentDescription)
+                Icon(Icons.Filled.Person, contentDescription = contentDescription, modifier = iconMod)
             } else {
                 Box(
                     modifier = Modifier
-                        .size(26.dp)
+                        .size(24.dp)
                         .clip(CircleShape)
                 ) {
                     AsyncImage(
@@ -159,10 +170,26 @@ fun MainShellScreen(
     var topBanner by remember { mutableStateOf<AppBannerEvent?>(null) }
     var topBannerHideJob by remember { mutableStateOf<Job?>(null) }
     val coroutineScope = rememberCoroutineScope()
+    val updatePrefs = remember { PlayStoreUpdatePrompt.prefs(context) }
+    var showUpdateBanner by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         PostLoginShellMessage.take()?.let { m ->
             snackbarHostState.showSnackbar("✓ $m")
+        }
+    }
+    LaunchedEffect(Unit) {
+        if (!PlayStoreUpdatePrompt.canCheck(updatePrefs)) return@LaunchedEffect
+        val act = context as? Activity ?: return@LaunchedEffect
+        PlayStoreUpdatePrompt.markCheckStart(updatePrefs)
+        val manager = AppUpdateManagerFactory.create(act)
+        manager.appUpdateInfo.addOnSuccessListener { info ->
+            if (info.updateAvailability() != UpdateAvailability.UPDATE_AVAILABLE) return@addOnSuccessListener
+            val v = info.availableVersionCode()
+            if (PlayStoreUpdatePrompt.shouldShowPrompt(updatePrefs, v)) {
+                PlayStoreUpdatePrompt.recordPromptShown(updatePrefs, v)
+                showUpdateBanner = true
+            }
         }
     }
 
@@ -247,6 +274,11 @@ fun MainShellScreen(
             bottomBar = {
                 if (showTabShell) {
                 NavigationBar(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    // Evita insets dobles: el Scaffold reserva el espacio; la spec M3 usa 80dp de alto.
+                    windowInsets = WindowInsets(0, 0, 0, 0),
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
                 ) {
                     MainTab.entries.forEach { tab ->
@@ -441,45 +473,104 @@ fun MainShellScreen(
             }
         }
 
-        AnimatedVisibility(
-            visible = topBanner != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
+        Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
+                .zIndex(2f)
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            val b = topBanner ?: return@AnimatedVisibility
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = when (b) {
-                        is AppBannerEvent.Success -> Color(0xFF2E7D32)
-                        is AppBannerEvent.Error -> Color(0xFFC62828)
-                        is AppBannerEvent.Info -> Color(0xFF1565C0)
-                    }
-                )
+            AnimatedVisibility(
+                visible = showUpdateBanner,
+                enter = fadeIn(),
+                exit = fadeOut()
             ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
+                    )
                 ) {
-                    Icon(
-                        imageVector = when (b) {
-                            is AppBannerEvent.Success -> Icons.Filled.CheckCircle
-                            is AppBannerEvent.Error -> Icons.Filled.Error
-                            is AppBannerEvent.Info -> Icons.Filled.Info
-                        },
-                        contentDescription = null,
-                        tint = Color.White
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            stringResource(R.string.app_update_banner_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            stringResource(R.string.app_update_banner_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(onClick = { showUpdateBanner = false }) {
+                                Text(stringResource(R.string.app_update_banner_later))
+                            }
+                            TextButton(
+                                onClick = {
+                                    val pkg = context.packageName
+                                    try {
+                                        context.startActivity(
+                                            Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse("market://details?id=$pkg")
+                                            )
+                                        )
+                                    } catch (_: Exception) {
+                                        context.startActivity(
+                                            Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse("https://play.google.com/store/apps/details?id=$pkg")
+                                            )
+                                        )
+                                    }
+                                }
+                            ) {
+                                Text(stringResource(R.string.app_update_banner_action))
+                            }
+                        }
+                    }
+                }
+            }
+            AnimatedVisibility(
+                visible = topBanner != null,
+                enter = fadeIn(),
+                exit = fadeOut()
+            ) {
+                val b = topBanner ?: return@AnimatedVisibility
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = when (b) {
+                            is AppBannerEvent.Success -> Color(0xFF2E7D32)
+                            is AppBannerEvent.Error -> Color(0xFFC62828)
+                            is AppBannerEvent.Info -> Color(0xFF1565C0)
+                        }
                     )
-                    Text(
-                        b.message,
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f)
-                    )
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = when (b) {
+                                is AppBannerEvent.Success -> Icons.Filled.CheckCircle
+                                is AppBannerEvent.Error -> Icons.Filled.Error
+                                is AppBannerEvent.Info -> Icons.Filled.Info
+                            },
+                            contentDescription = null,
+                            tint = Color.White
+                        )
+                        Text(
+                            b.message,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
         }

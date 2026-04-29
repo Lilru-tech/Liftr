@@ -8,10 +8,10 @@
 
 /* Begin PBXBuildFile section */
 		CF4BDEF92F9A1AA3001158D0 /* LiftrWorkoutActivityKit in Frameworks */ = {isa = PBXBuildFile; productRef = CFDB00022E9F8FA5002E1FCA /* LiftrWorkoutActivityKit */; };
-		CF4BDFEA2F9A1F22001158D0 /* LiftrWorkoutActivityKit in Frameworks */ = {isa = PBXBuildFile; productRef = CFDB00022E9F8FA5002E1FCA /* LiftrWorkoutActivityKit */; };
 		CF4BDFD12F9A1EDD001158D0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF4BDFD02F9A1EDD001158D0 /* WidgetKit.framework */; };
 		CF4BDFD32F9A1EDD001158D0 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF4BDFD22F9A1EDD001158D0 /* SwiftUI.framework */; };
 		CF4BDFE42F9A1EDE001158D0 /* LiftrWorkoutLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CF4BDFEA2F9A1F22001158D0 /* LiftrWorkoutActivityKit in Frameworks */ = {isa = PBXBuildFile; productRef = CFDB00022E9F8FA5002E1FCA /* LiftrWorkoutActivityKit */; };
 		CF5BF0BC2EE805240084B612 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF5BF0BB2EE805240084B612 /* StoreKit.framework */; };
 		CFB0221D2EE0579F00E3E3D7 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = CFB0221C2EE0579F00E3E3D7 /* FirebaseAnalytics */; };
 		CFB0221F2EE0579F00E3E3D7 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = CFB0221E2EE0579F00E3E3D7 /* FirebaseMessaging */; };
@@ -644,7 +644,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9.1;
+				MARKETING_VERSION = 1.10.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -676,7 +676,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.9.1;
+				MARKETING_VERSION = 1.10.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

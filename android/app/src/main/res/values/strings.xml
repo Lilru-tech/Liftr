@@ -1,5 +1,24 @@
 <resources>
     <string name="app_name">Liftr</string>
+    <string name="app_update_banner_title">Update available</string>
+    <string name="app_update_banner_body">A new version of Liftr is on Google Play.</string>
+    <string name="app_update_banner_later">Later</string>
+    <string name="app_update_banner_action">Update</string>
+    <string name="profile_header_goals_snippet">%1$d/%2$d goals</string>
+    <string name="profile_header_achievements_snippet">%1$d/%2$d</string>
+    <string name="add_clear_all_exercises">Clear all exercises</string>
+    <string name="add_clear_all_exercises_message">Remove every exercise and start with a single empty block?</string>
+    <string name="add_clear_all_exercises_confirm">Clear all</string>
+    <string name="profile_progress_sub_weekday">Weekday</string>
+    <string name="profile_progress_weekday_summary">Weekday summary</string>
+    <string name="profile_progress_weekday_strongest">Strongest day: %1$s · %2$s avg</string>
+    <string name="profile_progress_weekday_lowest">Lowest day: %1$s · %2$s avg</string>
+    <string name="profile_progress_weekday_avg_active">Avg across active weekdays: %1$s</string>
+    <string name="profile_progress_weekday_y_axis_workouts">Avg workouts</string>
+    <string name="profile_progress_weekday_y_axis_score">Avg score</string>
+    <string name="profile_progress_weekday_y_axis_kcal">Avg kcal</string>
+    <string name="profile_progress_weekday_y_axis_hours">Avg hours</string>
+    <string name="profile_progress_metric_hours">Hours</string>
     <string name="supabase_unconfigured">Supabase is not configured. Add supabase.url and supabase.anonKey to local.properties and rebuild.</string>
     <string name="auth_loading">Restoring session…</string>
     <string name="auth_sign_in_subtitle">Sign in to continue tracking your workouts.</string>
