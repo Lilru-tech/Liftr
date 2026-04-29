@@ -1,6 +1,6 @@
 # Publicación: App Store (iOS) y Google Play (Android)
 
-Este documento aplica a **Liftr**: repositorio con app **iOS** en **Swift** / **SwiftUI** (`Liftr.xcodeproj`), sin módulo Android en el monorepo.
+Este documento aplica a **Liftr**: repositorio con app **iOS** en **Swift** / **SwiftUI** (`Liftr.xcodeproj`) y un módulo **Android** (Kotlin, carpeta [android/](../android/README.md)) hacia la misma ficha de producto.
 
 ---
 
@@ -31,6 +31,8 @@ Resumen de alto nivel (sujeto a la documentación actual de Apple):
 
 ## 3. Si publicas en Google Play — hace falta un camino a Android
 
+En este repo, la **decisión de stack** (nativo, multiplataforma, KMP) y el **inventario iOS → Android** están en [android-strategy.md](android-strategy.md) y [android-parity-inventory.md](android-parity-inventory.md). Instrucciones concretas de `local.properties`, AAB, firma y pistas: [android-play-release.md](android-play-release.md).
+
 Antes de Play Console, el producto necesita un **.aab** creíble. Opciones frecuentes (elige según **equipo**, **plazo** y **gusto de mantenimiento**):
 
 | Enfoque | Resumen | Cuándo encaja |
@@ -45,7 +47,7 @@ Criterios útiles a la hora de decidir:
 - **Fidelidad por plataforma:** nativo Android a menudo maximiza adherencia a guías y APIs propias; las soluciones multiplataforma varían en el detalle.
 - **Coste de mantenimiento:** dos apps nativas = dos releases; un solo monorepo multiplataforma = otra curva de aprendizaje y de tooling.
 
-Hasta exista un módulo Android o un monorepo multiplataforma en el repositorio, el checklist siguiente es **futuro**, aplicable **cuando ya tengas** un AAB de pruebas o producción.
+El módulo `android/` de este repositorio permite generar un **AAB/ APK de depuración**; el resto del checklist aplica en cuanto tengas un **.aab** firmado listo para pistas o producción en la consola.
 
 ---
 

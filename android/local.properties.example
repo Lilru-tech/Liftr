@@ -1,0 +1,19 @@
+# Copiar a local.properties (local.properties no se versiona).
+# Android Studio suele rellenar automáticamente la línea sdk.dir al abrir el proyecto.
+sdk.dir=/path/to/Android/sdk
+
+# Supabase (misma URL y anon key pública que el cliente iOS: Liftr/SupabaseManager o variables de entorno de build).
+# Sin estas claves, la app compila pero el cliente Supabase queda inactivo hasta recompilar.
+supabase.url=
+supabase.anonKey=
+
+# Google Play: la suscripción premium debe existir con el id de strings.xml (billing_premium_sku).
+# UMP (MainActivity) se ejecuta antes de inicializar AdMob.
+
+# AdMob: id del banner (BuildConfig.AD_BANNER_UNIT_ID). En Home se muestra bajo el feed si el usuario no es Premium,
+# alineado con el banner de feed en iOS; el shell solo hospeda snackbars/banners in-app (AppSnackbar).
+# admob.bannerId=ca-app-pub-XXXX/YYYY
+
+# Google Maps: clave con Maps SDK for Android habilitada (ruta en cardio activo y detalle). Sin clave, la app compila
+# y se muestra un texto de ayuda en lugar del mapa.
+# maps.apiKey=YOUR_KEY
