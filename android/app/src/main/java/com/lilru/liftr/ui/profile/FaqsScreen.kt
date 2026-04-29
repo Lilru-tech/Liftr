@@ -26,7 +26,7 @@ fun FaqsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val sections = FaqsData.sections
+    val sections = FaqsData.orderedSections
     Column(
         modifier = modifier
             .fillMaxSize()

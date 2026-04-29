@@ -27,13 +27,13 @@ object ExerciseLanguagePreferences {
         val legacy = context.applicationContext
             .getSharedPreferences(LEGACY_PREFS, MODE_PRIVATE)
             .getString(LEGACY_KEY, null)
-        val v = (legacy ?: "es").ifEmpty { "es" }
+        val v = (legacy ?: "en").ifEmpty { "en" }
         set(context, v)
         v
     }
 
     suspend fun set(context: Context, lang: String) {
-        val v = if (lang.isNotEmpty()) lang else "es"
+        val v = if (lang.isNotEmpty()) lang else "en"
         context.exerciseLanguageDataStore.edit { p ->
             p[keyLang] = v
         }

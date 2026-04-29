@@ -63,7 +63,7 @@ class LiftrFirebaseMessagingService : FirebaseMessagingService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val n = NotificationCompat.Builder(this, chId)
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_liftr)
             .setContentTitle(title)
             .setContentText(body)
             .setAutoCancel(true)

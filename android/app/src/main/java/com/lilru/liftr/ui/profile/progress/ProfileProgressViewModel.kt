@@ -24,6 +24,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.temporal.TemporalAdjusters
+import java.util.Locale
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -44,11 +45,13 @@ data class ProfileProgressUiState(
     val subtab: ProfileProgressSubtab = ProfileProgressSubtab.CONSISTENCY,
     val activityMetric: ProfileActivityMetric = ProfileActivityMetric.WORKOUTS,
     val consistencyMetric: ConsistencyChartMetric = ConsistencyChartMetric.DURATION,
+    val weekdayMetric: WeekdayProgressMetric = WeekdayProgressMetric.WORKOUTS,
     val kindDistribution: List<KindSlice> = emptyList(),
     val totalDurationMin: Int = 0,
     val consistencyActiveBuckets: Int = 0,
     val consistencyBucketTotal: Int = 0,
     val progressPoints: List<ProgressPoint> = emptyList(),
+    val weekdayPoints: List<WeekdayPointUi> = emptyList(),
     val workoutMeta: Map<Int, ConsistencyWorkoutMeta> = emptyMap(),
     val activityCaloriesSummary: ProgressMetricSummary? = null,
     val activityScoreSummary: ProgressMetricSummary? = null
@@ -136,6 +139,10 @@ class ProfileProgressViewModel(
         }
     }
 
+    fun setWeekdayMetric(m: WeekdayProgressMetric) {
+        _uiState.update { it.copy(weekdayMetric = m) }
+    }
+
     fun load() {
         viewModelScope.launch {
             _uiState.update { it.copy(loading = true, error = null) }
@@ -202,6 +209,28 @@ class ProfileProgressViewModel(
                 val kindKc = mutableMapOf<String, Double>()
                 var totalMins = 0
                 val metaCollector = mutableMapOf<Int, ConsistencyWorkoutMeta>()
+                val weekdayOcc = weekdayOccurrenceCounts(w.start, w.endExclusive)
+                val wkLabels = defaultWeekdayLabelsForLocale(Locale.getDefault())
+                val weekdayW = IntArray(7)
+                val weekdaySc = DoubleArray(7)
+                val weekdayKc = DoubleArray(7)
+                val weekdayDm = IntArray(7)
+                // Paridad con iOS [loadProgress] weekday*Totals: se acumula por filas ya filtradas en la query,
+                // no depende de encajar en la clave de bucket del gráfico Activity/Consistency. Si no, un desfase
+                // (p. ej. emulador UTC) puede vaciar el bloque "Weekday" aunque haya entrenos.
+                for (wk in workouts) {
+                    val t = wk.startedAt?.let { parseInstant(it) } ?: continue
+                    if ((wk.state ?: "published") == "planned") continue
+                    if (t < w.start.toInstant() || t >= w.endExclusive.toInstant()) continue
+                    val widx = (t.atZone(zone).toLocalDate().dayOfWeek.value + 6) % 7
+                    val scW = scoreByW[wk.id] ?: 0.0
+                    val kcW = wk.caloriesKcal ?: 0.0
+                    val dmW = durByW[wk.id] ?: 0
+                    weekdayW[widx] += 1
+                    weekdaySc[widx] += scW
+                    weekdayKc[widx] += kcW
+                    weekdayDm[widx] += dmW
+                }
                 for (wk in workouts) {
                     val t = wk.startedAt?.let { parseInstant(it) } ?: continue
                     if ((wk.state ?: "published") == "planned") continue
@@ -220,6 +249,17 @@ class ProfileProgressViewModel(
                     kindKc[k] = (kindKc[k] ?: 0.0) + kcal
                     totalMins += dm
                     metaCollector[wk.id] = ConsistencyWorkoutMeta(k, dm, sc, kcal)
+                }
+                val weekdayList = (0..6).map { idx ->
+                    WeekdayPointUi(
+                        weekdayIndex = idx,
+                        label = wkLabels.getOrElse(idx) { "?" },
+                        occurrences = weekdayOcc[idx],
+                        workoutsTotal = weekdayW[idx],
+                        scoreTotal = weekdaySc[idx],
+                        caloriesTotal = weekdayKc[idx],
+                        durationMinutesTotal = weekdayDm[idx]
+                    )
                 }
                 val slices = listOf("strength", "cardio", "sport").mapNotNull { k ->
                     val c = kindCount[k] ?: 0
@@ -276,7 +316,7 @@ class ProfileProgressViewModel(
                             ProgressPoint(label, avg)
                         }
                     }
-                    ProfileProgressSubtab.CONSISTENCY -> { }
+                    ProfileProgressSubtab.CONSISTENCY, ProfileProgressSubtab.WEEKDAY -> { }
                 }
                 val publishedWorkoutCount = workouts.count { (it.state ?: "published") != "planned" }
                 var calSum: ProgressMetricSummary? = null
@@ -333,6 +373,7 @@ class ProfileProgressViewModel(
                         consistencyActiveBuckets = activeB,
                         consistencyBucketTotal = totalB,
                         progressPoints = points,
+                        weekdayPoints = weekdayList,
                         workoutMeta = metaCollector,
                         activityCaloriesSummary = calSum,
                         activityScoreSummary = scoreSum
@@ -349,6 +390,18 @@ class ProfileProgressViewModel(
     fun metaForRootKind(rootKind: String): Map<Int, ConsistencyWorkoutMeta> {
         val k = rootKind.lowercase()
         return _uiState.value.workoutMeta.filter { it.value.kind == k }
+    }
+
+    private fun weekdayOccurrenceCounts(start: ZonedDateTime, endExclusive: ZonedDateTime): IntArray {
+        val counts = IntArray(7)
+        var d = start.toLocalDate()
+        val end = endExclusive.toLocalDate()
+        while (d < end) {
+            val idx = (d.dayOfWeek.value + 6) % 7
+            counts[idx]++
+            d = d.plusDays(1)
+        }
+        return counts
     }
 
     private fun timeWindow(

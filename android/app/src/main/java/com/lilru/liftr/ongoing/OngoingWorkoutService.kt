@@ -224,7 +224,7 @@ class OngoingWorkoutService : Service() {
             .setContentTitle(getString(R.string.ongoing_workout_notif_title))
             .setContentText(line)
             .setStyle(NotificationCompat.BigTextStyle().bigText(line))
-            .setSmallIcon(R.drawable.ic_launcher)
+            .setSmallIcon(R.drawable.ic_stat_liftr)
             .setOngoing(true)
             .setContentIntent(pi)
             .setPriority(NotificationCompat.PRIORITY_LOW)

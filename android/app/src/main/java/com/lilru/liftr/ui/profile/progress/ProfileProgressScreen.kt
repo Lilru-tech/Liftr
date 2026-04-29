@@ -42,6 +42,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.components.LiftrBackTopBar
 import io.github.jan.supabase.SupabaseClient
+import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -74,6 +76,7 @@ fun ProfileProgressScreen(
 ) {
     val app = LocalContext.current.applicationContext as Application
     val vm: ProfileProgressViewModel = viewModel(
+        key = userId,
         factory = ProfileProgressViewModelFactory(app, supabase, userId)
     )
     val ui by vm.uiState.collectAsStateWithLifecycle()
@@ -134,7 +137,8 @@ fun ProfileProgressScreen(
                 val subTabs = listOf(
                     ProfileProgressSubtab.ACTIVITY,
                     ProfileProgressSubtab.INTENSITY,
-                    ProfileProgressSubtab.CONSISTENCY
+                    ProfileProgressSubtab.CONSISTENCY,
+                    ProfileProgressSubtab.WEEKDAY
                 )
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     subTabs.forEachIndexed { i, t ->
@@ -151,6 +155,7 @@ fun ProfileProgressScreen(
                                     ProfileProgressSubtab.ACTIVITY -> stringResource(R.string.profile_progress_sub_activity)
                                     ProfileProgressSubtab.INTENSITY -> stringResource(R.string.profile_progress_sub_intensity)
                                     ProfileProgressSubtab.CONSISTENCY -> stringResource(R.string.profile_progress_sub_consistency)
+                                    ProfileProgressSubtab.WEEKDAY -> stringResource(R.string.profile_progress_sub_weekday)
                                 }
                             )
                         }
@@ -202,6 +207,30 @@ fun ProfileProgressScreen(
                                             ConsistencyChartMetric.WORKOUTS -> stringResource(R.string.profile_progress_consistency_workouts)
                                             ConsistencyChartMetric.SCORE -> stringResource(R.string.profile_progress_consistency_score)
                                             ConsistencyChartMetric.CALORIES -> stringResource(R.string.profile_progress_consistency_kcal)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    ProfileProgressSubtab.WEEKDAY -> {
+                        val wms = WeekdayProgressMetric.entries
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            wms.forEachIndexed { i, m ->
+                                SegmentedButton(
+                                    selected = ui.weekdayMetric == m,
+                                    onClick = { vm.setWeekdayMetric(m) },
+                                    shape = SegmentedButtonDefaults.itemShape(i, wms.size),
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
+                                        .height(ProgressSegmentButtonHeight)
+                                ) {
+                                    ProgressSegmentLabel(
+                                        when (m) {
+                                            WeekdayProgressMetric.WORKOUTS -> stringResource(R.string.profile_progress_metric_workouts)
+                                            WeekdayProgressMetric.SCORE -> stringResource(R.string.profile_progress_metric_score)
+                                            WeekdayProgressMetric.CALORIES -> stringResource(R.string.profile_progress_metric_calories)
+                                            WeekdayProgressMetric.HOURS -> stringResource(R.string.profile_progress_metric_hours)
                                         }
                                     )
                                 }
@@ -344,9 +373,105 @@ fun ProfileProgressScreen(
                         }
                     }
                 }
+                ProfileProgressSubtab.WEEKDAY -> {
+                    val wm = ui.weekdayMetric
+                    val yAxis = when (wm) {
+                        WeekdayProgressMetric.WORKOUTS -> stringResource(R.string.profile_progress_weekday_y_axis_workouts)
+                        WeekdayProgressMetric.SCORE -> stringResource(R.string.profile_progress_weekday_y_axis_score)
+                        WeekdayProgressMetric.CALORIES -> stringResource(R.string.profile_progress_weekday_y_axis_kcal)
+                        WeekdayProgressMetric.HOURS -> stringResource(R.string.profile_progress_weekday_y_axis_hours)
+                    }
+                    val pts = ui.weekdayPoints
+                    val hasAny = pts.any { p -> p.totalValue(wm) > 0 }
+                    if (!hasAny) {
+                        Text(
+                            stringResource(R.string.profile_progress_no_data),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        val nonZero = pts.filter { it.averageValue(wm) > 0 }
+                        val strongest = nonZero.maxByOrNull { it.averageValue(wm) }
+                        val lowest = nonZero.minByOrNull { it.averageValue(wm) }
+                        val avgActive = if (nonZero.isNotEmpty()) {
+                            nonZero.sumOf { it.averageValue(wm) } / nonZero.size.toDouble()
+                        } else {
+                            0.0
+                        }
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        ) {
+                            item {
+                                Text(
+                                    stringResource(R.string.profile_progress_weekday_summary),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            item {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (strongest != null) {
+                                        Text(
+                                            stringResource(
+                                                R.string.profile_progress_weekday_strongest,
+                                                strongest.label,
+                                                formatWeekdayMetric(strongest.averageValue(wm), wm)
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (lowest != null && (strongest == null || lowest.label != strongest.label)) {
+                                        Text(
+                                            stringResource(
+                                                R.string.profile_progress_weekday_lowest,
+                                                lowest.label,
+                                                formatWeekdayMetric(lowest.averageValue(wm), wm)
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (nonZero.isNotEmpty()) {
+                                        Text(
+                                            stringResource(
+                                                R.string.profile_progress_weekday_avg_active,
+                                                formatWeekdayMetric(avgActive, wm)
+                                            ),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                            item {
+                                ProfileWeekdayBarChart(
+                                    points = pts,
+                                    metric = wm,
+                                    barColor = MaterialTheme.colorScheme.primary,
+                                    yAxisLabel = yAxis
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
+}
+
+private fun formatWeekdayMetric(value: Double, m: WeekdayProgressMetric): String = when (m) {
+    WeekdayProgressMetric.WORKOUTS, WeekdayProgressMetric.SCORE -> {
+        if (abs(value - value.roundToInt()) < 0.05) {
+            "${value.roundToInt()}"
+        } else {
+            String.format(Locale.US, "%.1f", value)
+        }
+    }
+    WeekdayProgressMetric.CALORIES -> "${value.roundToInt()} kcal"
+    WeekdayProgressMetric.HOURS -> String.format(Locale.US, "%.2f h", value)
 }
 
 @Composable

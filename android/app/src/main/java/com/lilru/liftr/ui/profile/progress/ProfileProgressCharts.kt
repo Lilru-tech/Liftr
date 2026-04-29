@@ -121,6 +121,89 @@ fun ProfileActivityLineChart(
     }
 }
 
+@Composable
+fun ProfileWeekdayBarChart(
+    points: List<WeekdayPointUi>,
+    metric: WeekdayProgressMetric,
+    barColor: Color,
+    yAxisLabel: String,
+    modifier: Modifier = Modifier
+        .fillMaxWidth()
+        .height(220.dp)
+) {
+    if (points.isEmpty()) return
+    val values = points.map { it.averageValue(metric) }
+    val maxV = values.maxOrNull() ?: 0.0
+    val maxY = max(1.0, maxV * 1.15)
+    val minY = -maxY * 0.05
+    val gridBg = Color.Gray.copy(alpha = 0.18f)
+    Column(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(180.dp)
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            Text(
+                yAxisLabel,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+            )
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val padL = 4.dp.toPx()
+                val padR = 8.dp.toPx()
+                val padT = 28.dp.toPx()
+                val padB = 28.dp.toPx()
+                val w = size.width - padL - padR
+                val h = size.height - padT - padB
+                drawRoundRect(
+                    color = gridBg,
+                    topLeft = Offset(padL, padT),
+                    size = Size(w, h)
+                )
+                val n = points.size.coerceAtLeast(1)
+                val slotW = w / n
+                val barFrac = 0.55f
+                for (i in points.indices) {
+                    val v = values[i]
+                    val nv = ((v - minY) / (maxY - minY)).toFloat().coerceIn(0f, 1f)
+                    val hBar = h * nv
+                    val barW = slotW * barFrac
+                    val xCenter = padL + slotW * (i + 0.5f)
+                    val x = xCenter - barW / 2f
+                    val yTop = padT + h - hBar
+                    drawRect(
+                        color = barColor,
+                        topLeft = Offset(x, yTop),
+                        size = Size(barW, hBar)
+                    )
+                }
+            }
+        }
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            points.forEach { p ->
+                Text(
+                    p.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+    }
+}
+
 data class DonutSegment(val label: String, val value: Double, val color: Color)
 
 @Composable

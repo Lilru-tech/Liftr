@@ -379,6 +379,10 @@ class AddWorkoutViewModel(
         updateActiveExercises { list -> list + StrengthExerciseDraft(exerciseId = ex.id, exerciseName = name) }
     }
 
+    fun clearAllStrengthExercises() {
+        updateActiveExercises { listOf(StrengthExerciseDraft()) }
+    }
+
     fun removeExercise(exerciseDraftId: String) {
         updateActiveExercises { list ->
             val next = list.filterNot { it.id == exerciseDraftId }
