@@ -99,6 +99,29 @@ struct ActiveStrengthWorkoutView: View {
     
     private struct WorkoutEndPatch: Encodable {
         let ended_at: Date
+        /// Wall-clock session length; backend score for strength may depend on this (was never sent on finish before).
+        let duration_min: Int?
+    }
+
+    private struct WorkoutStartedAtRow: Decodable {
+        let started_at: Date?
+    }
+
+    private func fetchWorkoutStartedAt(client: SupabaseClient, workoutId: Int) async throws -> Date? {
+        let res = try await client
+            .from("workouts")
+            .select("started_at")
+            .eq("id", value: workoutId)
+            .single()
+            .execute()
+        return try JSONDecoder.supabase().decode(WorkoutStartedAtRow.self, from: res.data).started_at
+    }
+
+    private func strengthSessionDurationMinutes(startedAt: Date?, endedAt: Date) -> Int? {
+        guard let start = startedAt else { return nil }
+        let sec = endedAt.timeIntervalSince(start)
+        guard sec > 0 else { return 1 }
+        return max(1, Int(sec / 60.0))
     }
     
     private struct WorkoutSanitizePatch: Encodable {
@@ -438,6 +461,11 @@ struct ActiveStrengthWorkoutView: View {
                 TextField("Rest (sec)", text: $editRestText)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
+
+                Text("Edits update this workout flow now and are written when you finish the workout.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
                 
                 HStack {
                     Button("Cancel") {
@@ -2616,9 +2644,13 @@ struct ActiveStrengthWorkoutView: View {
         do {
             try await persistExerciseRows(exList, performedMap: performedMap)
 
+            let endTime = Date()
+            let hostStart = try await fetchWorkoutStartedAt(client: client, workoutId: workoutId)
+            let hostDur = strengthSessionDurationMinutes(startedAt: hostStart, endedAt: endTime)
+
             _ = try await client
                 .from("workouts")
-                .update(WorkoutEndPatch(ended_at: Date()))
+                .update(WorkoutEndPatch(ended_at: endTime, duration_min: hostDur))
                 .eq("id", value: workoutId)
                 .execute()
 
@@ -2626,9 +2658,11 @@ struct ActiveStrengthWorkoutView: View {
 
             if let gid = guestWorkoutId {
                 try await persistExerciseRows(guestExList, performedMap: guestPerformedMap)
+                let gStart = try await fetchWorkoutStartedAt(client: client, workoutId: gid)
+                let gDur = strengthSessionDurationMinutes(startedAt: gStart, endedAt: endTime)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: Date()))
+                    .update(WorkoutEndPatch(ended_at: endTime, duration_min: gDur))
                     .eq("id", value: gid)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: gid)
@@ -2636,9 +2670,11 @@ struct ActiveStrengthWorkoutView: View {
 
             if let g2id = guest2WorkoutId {
                 try await persistExerciseRows(guest2ExList, performedMap: guest2PerformedMap)
+                let g2Start = try await fetchWorkoutStartedAt(client: client, workoutId: g2id)
+                let g2Dur = strengthSessionDurationMinutes(startedAt: g2Start, endedAt: endTime)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: Date()))
+                    .update(WorkoutEndPatch(ended_at: endTime, duration_min: g2Dur))
                     .eq("id", value: g2id)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: g2id)

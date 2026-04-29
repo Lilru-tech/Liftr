@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.0] - 2026-04-29
+
+### Added
+- **FAQs** — Updated questions and answers in the in-app FAQ.
+- **Muscle group labels** — Primary muscle display names use **English** labels (aligned with the catalog / `muscle_primary` usage in the app).
+- **App update notice** — Warns when the installed build is **not the latest** (prompts the user to update).
+- **Progress — Weekday chart** — New chart showing how training **varies by day of the week** (Mon–Sun).
+- **Profile & related views** — More at-a-glance data: **active goals**, **achievements** progress (e.g. **unlocked / 298**), and additional summary lines in other relevant screens.
+- **Add workout (Strength) — Clear all** — **Clear all exercises** for the current list (with confirmation), leaving a single empty exercise block instead of deleting one by one.
+- **Compare workouts (Strength) — Rest metrics** — Compare **planned rest** from logged sets: **total rest (sec)**, **average rest per set** (among sets with non-zero rest), and **planned rest as % of session duration** (when session length is available).
+
+### Fixed
+- **Strength scoring (server)** — Strength **v2** scores were **capped at 200** in some paths; the cap is corrected in database scoring logic (see Notes).
+
+### Notes (database / ops)
+- **Exercise catalog** — e.g. **Dumbbell Overhead Triceps Extension** and any related rows are **data / catalog** updates in Supabase, not app-only changes.
+- **Score cap** — Apply the **`score_strength_v2` / `LEAST(200, …)`** (or equivalent) fix in your Supabase project so published scores no longer flatline at 200 when the true score is higher. See project SQL notes (e.g. `docs/fix_score_strength_v2_cap.sql`) if present.
+
+[1.10.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.10.0
+
 ## [1.9.0] - 2026-04-22
 
 ### Added

@@ -66,6 +66,9 @@ struct CompareWorkoutsView: View {
              "hx_rank_category",
              "hx_no_reps":
             return -1.0
+        case "total_rest_sec", "avg_rest_sec", "rest_pct_of_session":
+            // Less planned rest / lower share of session = "better" for density in the bar UI.
+            return -1.0
         default:
             return 1.0
         }
@@ -419,6 +422,9 @@ struct CompareWorkoutsView: View {
             case "hard_sets_count": return "Hard sets (RPE ≥ 8)"
             case "avg_reps_per_exercise": return "Reps / exercise"
             case "avg_sets_per_exercise": return "Sets / exercise"
+            case "total_rest_sec": return "Planned rest (total)"
+            case "avg_rest_sec": return "Planned rest (avg per set)"
+            case "rest_pct_of_session": return "Planned rest (% of session)"
             case "vb_points": return "Points"
             case "vb_aces": return "Aces"
             case "vb_blocks": return "Blocks"
@@ -1210,6 +1216,7 @@ struct CompareWorkoutsView: View {
             let reps: Int?
             let weight_kg: Decimal?
             let rpe: Decimal?
+            let rest_sec: Int?
         }
         struct StrengthStats {
             let exercisesCount: Int
@@ -1220,6 +1227,8 @@ struct CompareWorkoutsView: View {
             let maxSetVolumeKg: Double?
             let avgRpe: Double?
             let hardSetsCount: Int
+            let totalRestSec: Double
+            let avgRestSec: Double?
         }
 
         @Sendable
@@ -1240,13 +1249,15 @@ struct CompareWorkoutsView: View {
                     maxWeightKg: nil,
                     maxSetVolumeKg: nil,
                     avgRpe: nil,
-                    hardSetsCount: 0
+                    hardSetsCount: 0,
+                    totalRestSec: 0,
+                    avgRestSec: nil
                 )
             }
 
             let setsRes = try await client
                 .from("exercise_sets")
-                .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe")
+                .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
                 .in("workout_exercise_id", values: exIds)
                 .execute()
             let sets = try decoder.decode([SetRow].self, from: setsRes.data)
@@ -1264,6 +1275,8 @@ struct CompareWorkoutsView: View {
             var rpeWeightTotal = 0.0
             var hardSets = 0
             var setsCount = 0
+            var totalRestSec = 0.0
+            var restMultWeight = 0.0
 
             for (_, var rows) in setsByExercise {
                 rows.sort { $0.id < $1.id }
@@ -1301,10 +1314,18 @@ struct CompareWorkoutsView: View {
                         rpeWeightTotal += m
                         if r >= 8.0 { hardSets += mult }
                     }
+
+                    let restVal = max(s.rest_sec ?? 0, 0)
+                    let mRest = Double(mult)
+                    totalRestSec += Double(restVal) * mRest
+                    if restVal > 0 {
+                        restMultWeight += mRest
+                    }
                 }
             }
 
             let avgRpe = rpeWeightTotal > 0 ? (rpeWeightedSum / rpeWeightTotal) : nil
+            let avgRestSec = restMultWeight > 0 ? (totalRestSec / restMultWeight) : nil
 
             return StrengthStats(
                 exercisesCount: exIds.count,
@@ -1314,7 +1335,9 @@ struct CompareWorkoutsView: View {
                 maxWeightKg: maxWeightKg,
                 maxSetVolumeKg: maxSetVolumeKg,
                 avgRpe: avgRpe,
-                hardSetsCount: hardSets
+                hardSetsCount: hardSets,
+                totalRestSec: totalRestSec,
+                avgRestSec: avgRestSec
             )
         }
 
@@ -1403,6 +1426,14 @@ struct CompareWorkoutsView: View {
         add("max_set_volume_kg", "kg", lStats.maxSetVolumeKg, rStats.maxSetVolumeKg, to: &out)
         add("avg_rpe", "rpe", lStats.avgRpe, rStats.avgRpe, to: &out)
         add("hard_sets_count", "count", Double(lStats.hardSetsCount), Double(rStats.hardSetsCount), to: &out)
+
+        add("total_rest_sec", "sec", lStats.totalRestSec, rStats.totalRestSec, to: &out)
+        add("avg_rest_sec", "sec", lStats.avgRestSec, rStats.avgRestSec, to: &out)
+        func restPct(_ totalRest: Double, _ durationSec: Double?) -> Double? {
+            guard let d = durationSec, d > 0 else { return nil }
+            return 100.0 * totalRest / d
+        }
+        add("rest_pct_of_session", "pct", restPct(lStats.totalRestSec, lDurSec), restPct(rStats.totalRestSec, rDurSec), to: &out)
 
         await MainActor.run { metrics = out }
     }

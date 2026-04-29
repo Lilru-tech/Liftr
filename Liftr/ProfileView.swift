@@ -134,7 +134,9 @@ struct ProfileView: View {
     @State private var mutatingFollow = false
     @State private var progressRange: ProgressRange = .week
     @State private var progressMetric: ProgressMetric = .workouts
+    @State private var weekdayMetric: WeekdayMetric = .workouts
     @State private var progressPoints: [ProgressPoint] = []
+    @State private var weekdayPoints: [WeekdayPoint] = []
     @State private var progressLoading = false
     @State private var progressError: String?
     @State private var caloriesTotal: Double = 0
@@ -152,12 +154,17 @@ struct ProfileView: View {
     @State private var myLevel: Int = 1
     @State private var myXP: Int64 = 0
     @State private var nextLevelXP: Int64 = 120
-    private enum ProgressSubtab: CaseIterable { case activity, intensity, consistency }
+    private enum ProgressSubtab: CaseIterable { case activity, intensity, consistency, weekdaySummary }
     @State private var progressSubtab: ProgressSubtab = .activity
     @State private var kindDistribution: [KindSlice] = []
     @State private var totalDurationMin: Int = 0
     @State private var consistencyActiveBuckets: Int = 0
     @State private var consistencyBucketTotal: Int = 0
+    @State private var progressParticipantSessionsCount: Int = 0
+    @State private var profileAchievementsUnlocked: Int = 0
+    @State private var profileAchievementsTotal: Int = 0
+    @State private var profileWeeklyGoalsDone: Int = 0
+    @State private var profileWeeklyGoalsTotal: Int = 0
     @State private var consistencyWorkoutMeta: [Int: ConsistencyWorkoutMeta] = [:]
     @AppStorage("consistencyRootChartMetric") private var consistencyRootChartMetricRaw: String = ConsistencyChartMetric.duration.rawValue
     @State private var email: String? = nil
@@ -193,36 +200,7 @@ struct ProfileView: View {
     @State private var tab: Tab = .calendar
     
     var body: some View {
-        VStack(spacing: 12) {
-            VStack(spacing: 12) {
-                headerCard
-                
-                Picker("", selection: $tab) {
-                    Text("Calendar").tag(Tab.calendar)
-                    Text("PRs").tag(Tab.prs)
-                    Text("Progress").tag(Tab.progress)
-                    if isOwnProfile {
-                        Text("Settings").tag(Tab.settings)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                
-                switch tab {
-                case .calendar: calendarView
-                case .prs: prsView
-                case .progress: progressView
-                case .settings: settingsView
-                }
-            }
-            
-            if !isPremium {
-                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
-                    .frame(height: 50)
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
-            }
-        }
+        profileRootView
         .foregroundStyle(.primary)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -231,6 +209,7 @@ struct ProfileView: View {
             let session = try? await SupabaseManager.shared.client.auth.session
             print("[Auth] user.id:", session?.user.id.uuidString ?? "nil")
             await loadProfileHeader()
+            await loadProfileHeaderSnippets()
             await refreshFollowState()
             await loadProgress()
             await loadUserLevel()
@@ -242,6 +221,7 @@ struct ProfileView: View {
         .onChange(of: app.userId) { _, _ in
             Task {
                 await loadProfileHeader()
+                await loadProfileHeaderSnippets()
                 await refreshFollowState()
                 await loadProgress()
                 await loadUserLevel()
@@ -258,6 +238,7 @@ struct ProfileView: View {
         }
         .onChange(of: progressRange) { _, _ in Task { await loadProgress() } }
         .onChange(of: progressMetric) { _, _ in Task { await loadProgress() } }
+        .onChange(of: weekdayMetric) { _, _ in Task { await loadProgress() } }
         .onChange(of: progressSubtab) { _, _ in Task { await loadProgress() } }
         .sheet(isPresented: $showEditProfile) {
             if isOwnProfile {
@@ -278,6 +259,61 @@ struct ProfileView: View {
             }
         }
     }
+
+    private var profileRootView: some View {
+        VStack(spacing: 12) {
+            headerCard
+
+            Picker("", selection: $tab) {
+                Text("Calendar").tag(Tab.calendar)
+                Text("PRs").tag(Tab.prs)
+                Text("Progress").tag(Tab.progress)
+                if isOwnProfile {
+                    Text("Settings").tag(Tab.settings)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+
+            Group {
+                switch tab {
+                case .calendar: calendarTabContent
+                case .prs: prsTabContent
+                case .progress: progressTabContent
+                case .settings: settingsView
+                }
+            }
+            .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+
+            if !isPremium {
+                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                    .frame(height: 50)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .background(.ultraThinMaterial)
+            }
+        }
+    }
+
+    private var calendarTabContent: some View {
+        ScrollView {
+            calendarView
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var prsTabContent: some View {
+        prsView
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var progressTabContent: some View {
+        ScrollView {
+            progressView
+                .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
     
     private var prsView: some View {
         PRsListView(
@@ -289,30 +325,58 @@ struct ProfileView: View {
     
     private var progressView: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                Picker("Range", selection: $progressRange) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Period")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Picker("Period", selection: $progressRange) {
                     Text("Week").tag(ProgressRange.week)
                     Text("Month").tag(ProgressRange.month)
                     Text("Year").tag(ProgressRange.year)
                 }
                 .pickerStyle(.segmented)
-                
-                Picker("View", selection: $progressSubtab) {
+
+                Text("Analysis")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 2)
+                Picker("Analysis", selection: $progressSubtab) {
                     Text("Activity").tag(ProgressSubtab.activity)
                     Text("Intensity").tag(ProgressSubtab.intensity)
                     Text("Consistency").tag(ProgressSubtab.consistency)
+                    Text("Weekday").tag(ProgressSubtab.weekdaySummary)
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal)
+
             if progressSubtab == .activity {
-                HStack {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Metric")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                     Picker("Metric", selection: $progressMetric) {
                         Text("Workouts").tag(ProgressMetric.workouts)
                         Text("Score").tag(ProgressMetric.score)
                         Text("Calories").tag(ProgressMetric.calories)
                     }
                     .pickerStyle(.segmented)
+                }
+                .padding(.horizontal)
+            } else if progressSubtab == .weekdaySummary {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Metric")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("Metric", selection: $weekdayMetric) {
+                        Text("Workouts").tag(WeekdayMetric.workouts)
+                        Text("Score").tag(WeekdayMetric.score)
+                        Text("Calories").tag(WeekdayMetric.calories)
+                        Text("Hours").tag(WeekdayMetric.hours)
+                    }
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .padding(.horizontal)
             }
@@ -393,6 +457,8 @@ struct ProfileView: View {
                     }
                 }
                 
+            } else if progressSubtab == .weekdaySummary {
+                weekdaySummaryView
             } else if progressPoints.isEmpty {
                 Text("No data for this period").foregroundStyle(.secondary).padding(.horizontal)
                 
@@ -580,8 +646,156 @@ struct ProfileView: View {
                 .frame(height: 240)
                 .padding(.horizontal)
             }
+
+            progressScopeFootnote
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.bottom, 20)
+    }
+
+    @ViewBuilder
+    private var profileHeaderMetricSnippets: some View {
+        if profileWeeklyGoalsTotal > 0 || profileAchievementsTotal > 0, let uid = viewingUserId {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                if profileWeeklyGoalsTotal > 0 {
+                    NavigationLink {
+                        GoalsView(userId: uid, viewedUsername: username)
+                            .gradientBG()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "target")
+                                .font(.caption2.weight(.semibold))
+                            Text("\(profileWeeklyGoalsDone)/\(profileWeeklyGoalsTotal) goals")
+                                .lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+
+                if profileWeeklyGoalsTotal > 0 && profileAchievementsTotal > 0 {
+                    Text(" · ")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                if profileAchievementsTotal > 0 {
+                    NavigationLink {
+                        AchievementsGridView(userId: uid, viewedUsername: username)
+                            .gradientBG()
+                            .navigationTitle("@\(username) · Achievements")
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "rosette")
+                                .font(.caption2.weight(.semibold))
+                            Text("\(profileAchievementsUnlocked)/\(profileAchievementsTotal)")
+                                .lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 2)
+        }
+    }
+
+    @ViewBuilder
+    private var progressScopeFootnote: some View {
+        if !progressLoading, progressError == nil {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Progress counts only workouts you own (not sessions where you are only a participant). Planned drafts are excluded. “Month” is a rolling 30-day window, which can differ from the calendar month in the Calendar tab.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if progressParticipantSessionsCount > 0 {
+                    Text("In this period you also joined \(progressParticipantSessionsCount) session(s) owned by someone else—check the Calendar tab for those days.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top, 4)
+        }
+    }
+
+    private var weekdaySummaryView: some View {
+        let maxY = weekdayPoints.map { $0.averageValue(for: weekdayMetric) }.max() ?? 0
+        let yUpper = max(1, maxY * 1.15)
+        let nonZero = weekdayPoints.filter { $0.averageValue(for: weekdayMetric) > 0 }
+        let strongest = nonZero.max { $0.averageValue(for: weekdayMetric) < $1.averageValue(for: weekdayMetric) }
+        let lowest = nonZero.min { $0.averageValue(for: weekdayMetric) < $1.averageValue(for: weekdayMetric) }
+        let avgAcrossWeekdays = nonZero.isEmpty
+            ? 0
+            : nonZero.reduce(0.0) { $0 + $1.averageValue(for: weekdayMetric) } / Double(nonZero.count)
+
+        return VStack(spacing: 12) {
+            if nonZero.isEmpty {
+                Text("No data for this period")
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                .stroke(.white.opacity(0.18), lineWidth: 0.8)
+                        )
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Weekday summary")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(progressRange == .week ? "Week" : (progressRange == .month ? "Month" : "Year"))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let strongest {
+                            Text("Strongest day: \(strongest.label) · \(formatWeekdayMetricValue(strongest.averageValue(for: weekdayMetric), metric: weekdayMetric)) avg")
+                                .font(.footnote.weight(.semibold))
+                                .monospacedDigit()
+                        }
+
+                        if let lowest {
+                            Text("Lowest day: \(lowest.label) · \(formatWeekdayMetricValue(lowest.averageValue(for: weekdayMetric), metric: weekdayMetric)) avg")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .monospacedDigit()
+                        }
+
+                        Text("Avg across active weekdays: \(formatWeekdayMetricValue(avgAcrossWeekdays, metric: weekdayMetric))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    .padding(12)
+                }
+                .padding(.horizontal)
+
+                Chart(weekdayPoints) { p in
+                    BarMark(
+                        x: .value("Day", p.label),
+                        y: .value("Avg", p.averageValue(for: weekdayMetric))
+                    )
+                }
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(Color.gray.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .chartYAxisLabel(weekdayMetric.axisLabel)
+                .chartYScale(domain: 0...yUpper)
+                .frame(height: 240)
+                .padding(.horizontal)
+            }
+        }
     }
     
     private func consistencyBreakdownCard(rootMetric: ConsistencyChartMetric) -> some View {
@@ -663,12 +877,54 @@ struct ProfileView: View {
     private enum ProgressRange: CaseIterable { case week, month, year }
     
     private enum ProgressMetric: CaseIterable { case workouts, score, calories }
+
+    private enum WeekdayMetric: CaseIterable {
+        case workouts, score, calories, hours
+
+        var axisLabel: String {
+            switch self {
+            case .workouts: return "Avg workouts"
+            case .score: return "Avg score"
+            case .calories: return "Avg kcal"
+            case .hours: return "Avg hours"
+            }
+        }
+    }
     
     private struct ProgressPoint: Identifiable {
         let id = UUID()
         let date: Date
         let label: String
         let value: Double
+    }
+
+    private struct WeekdayPoint: Identifiable {
+        let weekdayIndex: Int
+        let label: String
+        let occurrences: Int
+        let workoutsTotal: Int
+        let scoreTotal: Double
+        let caloriesTotal: Double
+        let durationMinutesTotal: Int
+        var id: Int { weekdayIndex }
+
+        func totalValue(for metric: WeekdayMetric) -> Double {
+            switch metric {
+            case .workouts:
+                return Double(workoutsTotal)
+            case .score:
+                return scoreTotal
+            case .calories:
+                return caloriesTotal
+            case .hours:
+                return Double(durationMinutesTotal) / 60.0
+            }
+        }
+
+        func averageValue(for metric: WeekdayMetric) -> Double {
+            guard occurrences > 0 else { return 0 }
+            return totalValue(for: metric) / Double(occurrences)
+        }
     }
     
     private struct KindSlice: Identifiable {
@@ -755,6 +1011,20 @@ struct ProfileView: View {
         if x >= 10 { return String(format: "%.1f", x) }
         return String(format: "%.2f", x)
     }
+
+    private func formatWeekdayMetricValue(_ value: Double, metric: WeekdayMetric) -> String {
+        switch metric {
+        case .workouts, .score:
+            if abs(value - round(value)) < 0.05 {
+                return String(format: "%.0f", round(value))
+            }
+            return String(format: "%.1f", value)
+        case .calories:
+            return "\(Int(value.rounded())) kcal"
+        case .hours:
+            return String(format: "%.2f h", value)
+        }
+    }
     
     private var headerCard: some View {
         HStack(alignment: .top, spacing: 14) {
@@ -781,8 +1051,8 @@ struct ProfileView: View {
                         .accessibilityHint("Tap to preview")
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
                 VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text("@\(username.isEmpty ? "user" : username)")
                         .font(.title3).fontWeight(.semibold)
                     HStack(spacing: 8) {
@@ -874,6 +1144,8 @@ struct ProfileView: View {
                     .foregroundStyle(.secondary)
                 }
 
+                profileHeaderMetricSnippets
+
                 if !isOwnProfile {
                     HStack(spacing: 10) {
                         followButton
@@ -940,7 +1212,18 @@ struct ProfileView: View {
                         CompetitionsHubView()
                             .gradientBG()
                     } label: {
-                        Label("Competitions", systemImage: "figure.fencing")
+                        HStack {
+                            Label("Competitions", systemImage: "figure.fencing")
+                            if pendingCompetitionsCount > 0 {
+                                Spacer(minLength: 8)
+                                Text(pendingCompetitionsCount > 99 ? "99+" : "\(pendingCompetitionsCount)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(Color.red.opacity(0.92)))
+                            }
+                        }
                     }
                 }
 
@@ -1056,14 +1339,14 @@ struct ProfileView: View {
             
             if let selectedDay, let uid = viewingUserId {
                 DayWorkoutsList(userId: uid, selectedDay: selectedDay)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, alignment: .top)
             } else {
                 Text("Select a day to see your workouts")
                     .font(.subheadline).foregroundStyle(.secondary).padding(.top, 6)
             }
         }
+        .padding(.bottom, 12)
         .task { await prepareMonthAndLoad() }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
     
     private struct PRRow: Decodable, Identifiable {
@@ -1841,6 +2124,87 @@ struct ProfileView: View {
     private func loadUnreadNotifications() async {
         guard isOwnProfile else { return }
         await app.refreshUnreadNotificationsCount()
+        await loadPendingCompetitionsCount()
+    }
+
+    private func loadPendingCompetitionsCount() async {
+        guard let uid = app.userId else {
+            await MainActor.run {
+                pendingCompetitionsCount = 0
+                hasUnreadCompetitions = false
+            }
+            return
+        }
+        do {
+            await CompetitionService.shared.expirePendingIfNeeded()
+            let rows = try await CompetitionService.shared.fetchCompetitions(for: uid)
+            let now = Date()
+            let pending = rows.filter { $0.status == .pending && $0.invite_expires_at > now }.count
+            await MainActor.run {
+                pendingCompetitionsCount = pending
+                hasUnreadCompetitions = pending > 0
+            }
+        } catch {
+            await MainActor.run {
+                pendingCompetitionsCount = 0
+                hasUnreadCompetitions = false
+            }
+        }
+    }
+
+    private func loadProfileHeaderSnippets() async {
+        guard let uid = viewingUserId else { return }
+
+        var achTotal = 0
+        var achUnlocked = 0
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_user_achievements", params: ["p_user_id": uid.uuidString])
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([AchievementRow].self, from: res.data)
+            achTotal = rows.count
+            achUnlocked = rows.filter(\.is_unlocked).count
+        } catch { }
+
+        var gTotal = 0
+        var gDone = 0
+        do {
+            let goals = try await GoalsManager.fetchGoalsForCurrentWeek(for: uid)
+            gTotal = goals.count
+            gDone = goals.filter(\.isCompleted).count
+        } catch { }
+
+        await MainActor.run {
+            profileAchievementsTotal = achTotal
+            profileAchievementsUnlocked = achUnlocked
+            profileWeeklyGoalsTotal = gTotal
+            profileWeeklyGoalsDone = gDone
+        }
+    }
+
+    private func fetchParticipantOnlyWorkoutCount(userId: UUID, start: Date, end: Date, iso: ISO8601DateFormatter) async throws -> Int {
+        let pres = try await SupabaseManager.shared.client
+            .from("workout_participants")
+            .select("workout_id")
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+
+        struct PId: Decodable { let workout_id: Int }
+        let pIds = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+        guard !pIds.isEmpty else { return 0 }
+
+        let wres = try await SupabaseManager.shared.client
+            .from("workouts")
+            .select("id,state")
+            .in("id", values: pIds)
+            .neq("user_id", value: userId.uuidString)
+            .gte("started_at", value: iso.string(from: start))
+            .lt("started_at", value: iso.string(from: end))
+            .execute()
+
+        struct Wmini: Decodable { let id: Int; let state: String? }
+        let rows = try JSONDecoder.supabase().decode([Wmini].self, from: wres.data)
+        return rows.filter { ($0.state ?? "published") != "planned" }.count
     }
     
     private func loadProfileHeader() async {
@@ -2048,7 +2412,11 @@ struct ProfileView: View {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         iso.timeZone = .current
-        
+
+        let participantFetch = Task {
+            (try? await fetchParticipantOnlyWorkoutCount(userId: uid, start: start, end: end, iso: iso)) ?? 0
+        }
+
         do {
             let res = try await SupabaseManager.shared.client
                 .from("workouts")
@@ -2120,6 +2488,12 @@ struct ProfileView: View {
             var kindKcal: [String: Double] = [:]
             var totalMinutes = 0
             var workoutMetaCollector: [Int: ConsistencyWorkoutMeta] = [:]
+            let weekdayOccurrences = weekdayOccurrenceCounts(start: start, end: end, calendar: cal)
+            let weekdayLabels = weekdays()
+            var weekdayWorkoutsTotals = Array(repeating: 0, count: 7)
+            var weekdayScoreTotals = Array(repeating: 0.0, count: 7)
+            var weekdayCaloriesTotals = Array(repeating: 0.0, count: 7)
+            var weekdayDurationTotals = Array(repeating: 0, count: 7)
 
             for w in workouts {
                 guard let d = w.started_at else { continue }
@@ -2151,6 +2525,11 @@ struct ProfileView: View {
                     score: sc,
                     kcal: kcal
                 )
+                let weekdayIndex = mondayBasedWeekdayIndex(for: d, calendar: cal)
+                weekdayWorkoutsTotals[weekdayIndex] += 1
+                weekdayScoreTotals[weekdayIndex] += sc
+                weekdayCaloriesTotals[weekdayIndex] += kcal
+                weekdayDurationTotals[weekdayIndex] += wMins
             }
             
             await MainActor.run {
@@ -2226,6 +2605,21 @@ struct ProfileView: View {
                 self.scoreStreakDays = scoreStreak
                 self.scorePerMinute = scorePerMin
             }
+
+            let weekdaySummary: [WeekdayPoint] = (0..<7).map { idx in
+                WeekdayPoint(
+                    weekdayIndex: idx,
+                    label: weekdayLabels[idx],
+                    occurrences: weekdayOccurrences[idx],
+                    workoutsTotal: weekdayWorkoutsTotals[idx],
+                    scoreTotal: weekdayScoreTotals[idx],
+                    caloriesTotal: weekdayCaloriesTotals[idx],
+                    durationMinutesTotal: weekdayDurationTotals[idx]
+                )
+            }
+            await MainActor.run {
+                self.weekdayPoints = weekdaySummary
+            }
             if progressSubtab == .activity {
                 let ordered = bucketsCount.keys.sorted()
                 let points: [ProgressPoint] = ordered.map { k in
@@ -2292,13 +2686,44 @@ struct ProfileView: View {
                     self.progressPoints = []
                 }
             }
-            
+            if progressSubtab == .weekdaySummary {
+                await MainActor.run {
+                    self.progressPoints = []
+                    self.kindDistribution = []
+                }
+            }
+
+            let participantSessions = await participantFetch.value
+            await MainActor.run {
+                self.progressParticipantSessionsCount = participantSessions
+            }
+
         } catch {
+            let participantSessions = await participantFetch.value
             await MainActor.run {
                 self.progressError = error.localizedDescription
                 self.consistencyWorkoutMeta = [:]
+                self.progressParticipantSessionsCount = participantSessions
             }
         }
+    }
+
+    private func mondayBasedWeekdayIndex(for date: Date, calendar: Calendar) -> Int {
+        let weekday = calendar.component(.weekday, from: date)
+        return (weekday + 5) % 7
+    }
+
+    private func weekdayOccurrenceCounts(start: Date, end: Date, calendar: Calendar) -> [Int] {
+        var counts = Array(repeating: 0, count: 7)
+        var cursor = calendar.startOfDay(for: start)
+        let boundary = calendar.startOfDay(for: end)
+        while cursor < boundary {
+            let idx = mondayBasedWeekdayIndex(for: cursor, calendar: calendar)
+            counts[idx] += 1
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+        return counts
     }
     
     private func handlePickedItem(_ item: PhotosPickerItem?) async {
@@ -2761,9 +3186,7 @@ private struct DayWorkoutsList: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)
             } else {
-                GeometryReader { _ in
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
+                LazyVStack(spacing: 12) {
                             ForEach(workouts) { w in
                                 NavigationLink {
                                     WorkoutDetailView(workoutId: w.id, ownerId: w.user_id)
@@ -2918,9 +3341,7 @@ private struct DayWorkoutsList: View {
                                     }
                                 }
                             }
-                        }
-                        Color.clear.frame(height: 8)
-                    }
+                    Color.clear.frame(height: 8)
                 }
             }
         }

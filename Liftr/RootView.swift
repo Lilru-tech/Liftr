@@ -4,7 +4,10 @@ enum Tab: Hashable { case home, search, add, ranking, profile }
 
 struct RootView: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.openURL) private var openURL
     @State private var showAuthAlert = false
+    @State private var updatePrompt: AppUpdatePrompt?
+    @State private var didRunUpdateCheck = false
     
     var body: some View {
         TabView(selection: $app.selectedTab) {
@@ -45,6 +48,14 @@ struct RootView: View {
                 .badge(app.unreadNotificationsCount)
         }
         .onAppear {
+            if !didRunUpdateCheck {
+                didRunUpdateCheck = true
+                Task {
+                    let prompt = await AppUpdateChecker.shared.checkForRecommendedUpdate()
+                    await MainActor.run { updatePrompt = prompt }
+                }
+            }
+
             if let pending = app.pendingNotification {
                 print("🧭 [RootView] onAppear with pendingNotification:", pending)
                 Task { @MainActor in
@@ -159,6 +170,57 @@ struct RootView: View {
         } message: {
             Text("Sign up or login to register your workouts.")
         }
+        .overlay(alignment: .top) {
+            if let prompt = updatePrompt {
+                updateBanner(prompt)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .zIndex(99)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: updatePrompt != nil)
+    }
+
+    @ViewBuilder
+    private func updateBanner(_ prompt: AppUpdatePrompt) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.blue)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Update available")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Version \(prompt.latestVersion) is available on the App Store.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) {
+                Button("Later") {
+                    updatePrompt = nil
+                }
+                .buttonStyle(.bordered)
+
+                Button("Update") {
+                    openURL(prompt.storeURL)
+                    updatePrompt = nil
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(0.2))
+        )
+        .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 4)
     }
 }
 
