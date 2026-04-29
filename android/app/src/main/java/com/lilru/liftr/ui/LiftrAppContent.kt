@@ -28,14 +28,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
 import com.lilru.liftr.R
 import com.lilru.liftr.auth.AuthViewModel
 import com.lilru.liftr.auth.AuthViewModelFactory
-import com.lilru.liftr.ui.auth.LoginScreen
-import com.lilru.liftr.ui.auth.RegisterScreen
 import com.lilru.liftr.ui.main.MainShellScreen
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.SupabaseClient
@@ -89,41 +84,18 @@ fun LiftrAppContent(
             }
             MainShellScreen(
                 supabase = supabase,
-                onSignOut = viewModel::signOut
+                onSignOut = viewModel::signOut,
+                isAuthenticated = true,
+                authViewModel = viewModel
             )
         }
         is SessionStatus.NotAuthenticated,
         is SessionStatus.RefreshFailure -> {
-            AuthNavHost(
-                viewModel = viewModel
-            )
-        }
-    }
-}
-
-@Composable
-private fun AuthNavHost(
-    viewModel: AuthViewModel
-) {
-    val nav = rememberNavController()
-    NavHost(
-        navController = nav,
-        startDestination = "login"
-    ) {
-        composable("login") {
-            LoginScreen(
-                viewModel = viewModel,
-                onNavigateToRegister = {
-                    nav.navigate("register") {
-                        launchSingleTop = true
-                    }
-                }
-            )
-        }
-        composable("register") {
-            RegisterScreen(
-                viewModel = viewModel,
-                onBack = { nav.popBackStack() }
+            MainShellScreen(
+                supabase = supabase,
+                onSignOut = { },
+                isAuthenticated = false,
+                authViewModel = viewModel
             )
         }
     }

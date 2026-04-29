@@ -207,8 +207,7 @@ fun HomeTabScreen(
                 onSelectWorkout = { selected = it },
                 me = me,
                 onOpenGoals = {
-                    val u = me
-                    if (u != null) AppNavEvents.send(MainOverlay.Goals(u))
+                    me?.let { u -> AppNavEvents.send(MainOverlay.Goals(u)) }
                 },
                 onOpenCompetitions = { AppNavEvents.send(MainOverlay.CompetitionsHub) },
                 onSetCollapse = { c ->

@@ -3,17 +3,24 @@ package com.lilru.liftr.ui.main
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
@@ -30,11 +37,11 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +61,7 @@ import androidx.compose.ui.zIndex
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import android.app.Activity
@@ -63,7 +71,9 @@ import com.google.android.play.core.appupdate.AppUpdateManagerFactory
 import com.google.android.play.core.install.model.UpdateAvailability
 import com.lilru.liftr.R
 import com.lilru.liftr.update.PlayStoreUpdatePrompt
+import com.lilru.liftr.auth.AuthViewModel
 import com.lilru.liftr.auth.PostLoginShellMessage
+import com.lilru.liftr.ui.auth.ProfileAuthNavHost
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
 import com.lilru.liftr.data.loadProfileAvatarUrl
@@ -118,18 +128,20 @@ private fun selectTabForRootOverlay(overlay: MainOverlay): MainTab? = when (over
 private fun MainTabIcon(
     tab: MainTab,
     myAvatarUrl: String?,
-    contentDescription: String
+    contentDescription: String,
+    iconTint: Color? = null
 ) {
     val iconMod = Modifier.size(22.dp)
+    val vectorTint = iconTint ?: Color.Unspecified
     when (tab) {
-        MainTab.Home -> Icon(Icons.Filled.Home, contentDescription = contentDescription, modifier = iconMod)
-        MainTab.Search -> Icon(Icons.Filled.Search, contentDescription = contentDescription, modifier = iconMod)
-        MainTab.Add -> Icon(Icons.Filled.Add, contentDescription = contentDescription, modifier = iconMod)
-        MainTab.Ranking -> Icon(Icons.Filled.EmojiEvents, contentDescription = contentDescription, modifier = iconMod)
+        MainTab.Home -> Icon(Icons.Filled.Home, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
+        MainTab.Search -> Icon(Icons.Filled.Search, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
+        MainTab.Add -> Icon(Icons.Filled.Add, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
+        MainTab.Ranking -> Icon(Icons.Filled.EmojiEvents, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
         MainTab.Profile -> {
             val u = myAvatarUrl?.trim()?.takeIf { it.isNotEmpty() }
             if (u == null) {
-                Icon(Icons.Filled.Person, contentDescription = contentDescription, modifier = iconMod)
+                Icon(Icons.Filled.Person, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
             } else {
                 Box(
                     modifier = Modifier
@@ -148,11 +160,83 @@ private fun MainTabIcon(
     }
 }
 
+/** Barra de tabs compacta: mismos insets que Material [NavigationBar], altura fija (no ~80dp). */
+@Composable
+private fun LiftrMainBottomBar(
+    selected: MainTab,
+    onSelect: (MainTab) -> Unit,
+    isAuthenticated: Boolean,
+    tabUnread: Int,
+    myAvatarUrl: String?
+) {
+    val container = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
+    val pill = MaterialTheme.colorScheme.secondaryContainer
+    val onSelected = MaterialTheme.colorScheme.onSecondaryContainer
+    val onIdle = MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        color = container,
+        contentColor = onIdle,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(NavigationBarDefaults.windowInsets)
+                .height(58.dp)
+                .selectableGroup(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            for (tab in MainTab.entries) {
+                val desc = stringResource(tab.titleRes)
+                val isSelected = selected == tab
+                val iconTint = if (isSelected) onSelected else onIdle
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable(
+                            role = Role.Tab,
+                            onClick = { onSelect(tab) }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 40.dp, minHeight = 32.dp)
+                            .widthIn(max = 58.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .then(
+                                if (isSelected) Modifier.background(pill.copy(alpha = 0.55f))
+                                else Modifier
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (isAuthenticated && tab == MainTab.Profile && tabUnread > 0) {
+                            BadgedBox(
+                                badge = { Badge { Text(tabUnread.toString()) } }
+                            ) {
+                                MainTabIcon(tab, myAvatarUrl, desc, iconTint = iconTint)
+                            }
+                        } else {
+                            MainTabIcon(tab, myAvatarUrl, desc, iconTint = iconTint)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainShellScreen(
     supabase: SupabaseClient,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    isAuthenticated: Boolean = true,
+    authViewModel: AuthViewModel
 ) {
     val context = LocalContext.current
     var backgroundTheme by remember { mutableStateOf(LiftrPreferences.backgroundTheme(context)) }
@@ -173,9 +257,11 @@ fun MainShellScreen(
     val updatePrefs = remember { PlayStoreUpdatePrompt.prefs(context) }
     var showUpdateBanner by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        PostLoginShellMessage.take()?.let { m ->
-            snackbarHostState.showSnackbar("✓ $m")
+    LaunchedEffect(isAuthenticated) {
+        if (isAuthenticated) {
+            PostLoginShellMessage.take()?.let { m ->
+                snackbarHostState.showSnackbar("✓ $m")
+            }
         }
     }
     LaunchedEffect(Unit) {
@@ -219,14 +305,19 @@ fun MainShellScreen(
             }
         }
     }
-    LaunchedEffect(supabase) {
+    LaunchedEffect(isAuthenticated, supabase) {
+        if (!isAuthenticated) {
+            tabUnread = 0
+            return@LaunchedEffect
+        }
         tabUnread = UnreadNotificationCounter.count(supabase)
         while (true) {
             delay(60_000L)
             tabUnread = UnreadNotificationCounter.count(supabase)
         }
     }
-    LaunchedEffect(supabase) {
+    LaunchedEffect(isAuthenticated, supabase) {
+        if (!isAuthenticated) return@LaunchedEffect
         NotificationUnreadSync.events.collect {
             tabUnread = UnreadNotificationCounter.count(supabase)
         }
@@ -273,36 +364,13 @@ fun MainShellScreen(
             topBar = {},
             bottomBar = {
                 if (showTabShell) {
-                NavigationBar(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(60.dp),
-                    // Evita insets dobles: el Scaffold reserva el espacio; la spec M3 usa 80dp de alto.
-                    windowInsets = WindowInsets(0, 0, 0, 0),
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
-                ) {
-                    MainTab.entries.forEach { tab ->
-                        val desc = stringResource(tab.titleRes)
-                        NavigationBarItem(
-                            selected = selected == tab,
-                            onClick = { selected = tab },
-                            icon = {
-                                if (tab == MainTab.Profile && tabUnread > 0) {
-                                    BadgedBox(
-                                        badge = {
-                                            Badge { Text(tabUnread.toString()) }
-                                        }
-                                    ) {
-                                        MainTabIcon(tab, myAvatarUrl, desc)
-                                    }
-                                } else {
-                                    MainTabIcon(tab, myAvatarUrl, desc)
-                                }
-                            },
-                            label = null
-                        )
-                    }
-                }
+                LiftrMainBottomBar(
+                    selected = selected,
+                    onSelect = { selected = it },
+                    isAuthenticated = isAuthenticated,
+                    tabUnread = tabUnread,
+                    myAvatarUrl = myAvatarUrl
+                )
                 }
             }
         ) { paddingValues ->
@@ -347,6 +415,8 @@ fun MainShellScreen(
                             selected = MainTab.Home
                             homeRefreshNonce++
                         },
+                        isSignedIn = isAuthenticated,
+                        onGoToSignIn = { selected = MainTab.Profile },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
@@ -367,18 +437,27 @@ fun MainShellScreen(
                 }
 
                 MainTab.Profile -> {
-                    ProfileTabScreen(
-                        supabase = supabase,
-                        onSignOut = onSignOut,
-                        backgroundThemeId = backgroundTheme,
-                        onBackgroundThemeChange = { id ->
-                            LiftrPreferences.setBackgroundTheme(context, id)
-                            backgroundTheme = id
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
-                    )
+                    if (isAuthenticated) {
+                        ProfileTabScreen(
+                            supabase = supabase,
+                            onSignOut = onSignOut,
+                            backgroundThemeId = backgroundTheme,
+                            onBackgroundThemeChange = { id ->
+                                LiftrPreferences.setBackgroundTheme(context, id)
+                                backgroundTheme = id
+                            },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(paddingValues)
+                        )
+                    } else {
+                        ProfileAuthNavHost(
+                            viewModel = authViewModel,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(paddingValues)
+                        )
+                    }
                 }
                 }
             } else {

@@ -267,7 +267,23 @@ class HomeViewModel(
                 _uiState.value = st.copy(loading = true, error = null)
             }
             runCatching {
-                val me = supabase.auth.currentUserOrNull()?.id ?: error("No active session")
+                val me = supabase.auth.currentUserOrNull()?.id
+                if (me == null) {
+                    nextFeedPage = 0
+                    cachedFolloweeIds = emptyList()
+                    _uiState.value = HomeUiState(
+                        loading = false,
+                        isRefreshing = false,
+                        error = null,
+                        kindFilter = st.kindFilter,
+                        workouts = emptyList(),
+                        monthSummary = null,
+                        recentPrs = emptyList(),
+                        canLoadMore = false,
+                        isLoadingMore = false
+                    )
+                    return@launch
+                }
                 val followees = fetchFolloweeIds(me)
                 cachedFolloweeIds = followees
                 val visibleUserIds = (listOf(me) + followees).distinct()
