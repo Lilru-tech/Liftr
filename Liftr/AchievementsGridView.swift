@@ -40,26 +40,41 @@ func symbolForAchievement(code: String, category: String) -> String {
         return "figure.hiking"
 
     case c.hasPrefix("hyrox_"):
-        return "stopwatch"
+        return "figure.mixed.cardio"
 
     case c.hasPrefix("cardio_"),
          c.hasPrefix("duration_"),
         c.hasPrefix("elev_gain_"):
         return "heart.circle.fill"
 
-    case c.hasPrefix("padel_"),
-         c.hasPrefix("tennis_"),
-         c.hasPrefix("table_tennis_"),
-         c.hasPrefix("squash_"):
-        return "sportscourt.fill"
+    case c.hasPrefix("padel_"):
+        return "figure.pickleball"
+    case c.hasPrefix("tennis_"):
+        return "figure.tennis"
+    case c.hasPrefix("table_tennis_"):
+        return "figure.table.tennis"
+    case c.hasPrefix("squash_"):
+        return "figure.squash"
+    case c.hasPrefix("badminton_"):
+        return "figure.badminton"
+    case c.hasPrefix("handball_"):
+        return "figure.handball"
+    case c.hasPrefix("hockey_"):
+        return "figure.field.hockey"
+    case c.hasPrefix("rugby_"):
+        return "figure.rugby"
+    case c.hasPrefix("racket_"):
+        return "tennis.racket"
+    case c.hasPrefix("ski_"):
+        return "figure.skiing.downhill"
     case c.hasPrefix("football_"):
         return "soccerball"
     case c.hasPrefix("basketball_"):
         return "basketball"
     case c.hasPrefix("volleyball_"):
         return "volleyball"
-    case c.hasPrefix("badminton_"):
-        return "sportscourt.fill"
+    case c.hasPrefix("sport_"):
+        return "medal.fill"
 
     case c.hasPrefix("likes_given_"),
          c.hasPrefix("likes_received_"),
@@ -92,9 +107,10 @@ func symbolForAchievement(code: String, category: String) -> String {
     }
 
     switch k {
+    case "general":  return "star.circle.fill"
     case "strength": return "dumbbell.fill"
     case "cardio":   return "figure.run"
-    case "sport":    return "sportscourt.fill"
+    case "sport":    return "medal.fill"
     case "streak":   return "flame.fill"
     case "ranking":  return "trophy.fill"
     case "social":   return "person.2.fill"
@@ -118,6 +134,7 @@ func prettySubtype(from code: String, fallbackCategory: String) -> String {
     case c.hasPrefix("hike_"): return "Hiking"
     case c.hasPrefix("treadmill_"): return "Treadmill"
     case c.hasPrefix("hyrox_"): return "HYROX"
+    case c.hasPrefix("sport_"): return "Multi-sport"
     case c.hasPrefix("padel_"): return "Padel"
     case c.hasPrefix("tennis_"): return "Tennis"
     case c.hasPrefix("table_tennis_"): return "Table Tennis"
@@ -126,6 +143,11 @@ func prettySubtype(from code: String, fallbackCategory: String) -> String {
     case c.hasPrefix("basketball_"): return "Basketball"
     case c.hasPrefix("volleyball_"): return "Volleyball"
     case c.hasPrefix("badminton_"): return "Badminton"
+    case c.hasPrefix("handball_"): return "Handball"
+    case c.hasPrefix("hockey_"): return "Hockey"
+    case c.hasPrefix("rugby_"): return "Rugby"
+    case c.hasPrefix("racket_"): return "Racket"
+    case c.hasPrefix("ski_"): return "Ski"
     default:
         return fallbackCategory.capitalized
     }

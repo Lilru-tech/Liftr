@@ -7,6 +7,7 @@ package com.lilru.liftr.data
  */
 object BackendContracts {
     object Tables {
+        const val ACHIEVEMENTS = "achievements"
         const val AVATARS = "avatars"
         const val BASKETBALL_SESSION_STATS = "basketball_session_stats"
         const val CARDIO_SESSIONS = "cardio_sessions"
@@ -38,6 +39,7 @@ object BackendContracts {
         const val STRENGTH_ROUTINE_EXERCISES = "strength_routine_exercises"
         const val STRENGTH_ROUTINE_FOLDERS = "strength_routine_folders"
         const val STRENGTH_ROUTINE_SETS = "strength_routine_sets"
+        const val USER_ACHIEVEMENTS = "user_achievements"
         const val USER_FAVORITE_EXERCISES = "user_favorite_exercises"
         const val VOLLEYBALL_SESSION_STATS = "volleyball_session_stats"
         const val WEEKLY_GOALS = "weekly_goals"
@@ -74,8 +76,11 @@ object BackendContracts {
         const val FETCH_DUAL_LINKED_STRENGTH_WORKOUT_DATA = "fetch_dual_linked_strength_workout_data"
         const val GET_BEST_WORKOUTS_LEADERBOARD_V1 = "get_best_workouts_leaderboard_v1"
         const val GET_CALORIES_LEADERBOARD_V1 = "get_calories_leaderboard_v1"
+        const val GET_DUELS_WON_LEADERBOARD_V1 = "get_duels_won_leaderboard_v1"
         const val GET_EXERCISES_USAGE = "get_exercises_usage"
         const val GET_GOAL_STATS = "get_goal_stats"
+        const val GET_GOALS_COMPLETED_LEADERBOARD_V1 = "get_goals_completed_leaderboard_v1"
+        const val GET_PERIOD_TRAINING_COMPARE_V1 = "get_period_training_compare_v1"
         const val GET_LEADERBOARD_V1 = "get_leaderboard_v1"
         const val GET_LEVEL_LEADERBOARD_V1 = "get_level_leaderboard_v1"
         const val GET_USER_ACHIEVEMENTS = "get_user_achievements"

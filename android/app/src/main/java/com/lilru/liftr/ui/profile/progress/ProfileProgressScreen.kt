@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
 import androidx.compose.material3.LinearProgressIndicator
@@ -72,7 +73,9 @@ fun ProfileProgressScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /** Pestaña *Progress* del perfil: sin barra Atrás ni título duplicado. */
-    embedded: Boolean = false
+    embedded: Boolean = false,
+    /** Solo perfil propio: abre comparación de períodos (ventanas A/B). */
+    onPeriodCompare: (() -> Unit)? = null
 ) {
     val app = LocalContext.current.applicationContext as Application
     val vm: ProfileProgressViewModel = viewModel(
@@ -105,6 +108,14 @@ fun ProfileProgressScreen(
                 stringResource(R.string.profile_progress_title),
                 style = MaterialTheme.typography.titleLarge
             )
+        }
+        if (embedded && onPeriodCompare != null) {
+            TextButton(
+                onClick = onPeriodCompare,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.profile_progress_period_compare))
+            }
         }
         // Selectores compactos (paridad visual con iOS: menos altura y tipografía label).
         CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {

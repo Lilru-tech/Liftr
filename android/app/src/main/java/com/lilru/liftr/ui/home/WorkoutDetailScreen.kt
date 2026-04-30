@@ -32,6 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -54,6 +55,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -106,6 +110,7 @@ fun WorkoutDetailScreen(
     var showLikersSheet by rememberSaveable(workoutId) { mutableStateOf(false) }
     var showCompare by rememberSaveable(workoutId) { mutableStateOf(false) }
     var showComparePicker by rememberSaveable(workoutId) { mutableStateOf(false) }
+    var compareSearchQuery by remember { mutableStateOf("") }
     var compareOtherId by rememberSaveable(workoutId) { mutableStateOf<Int?>(null) }
     var showDualStart by rememberSaveable(workoutId) { mutableStateOf(false) }
     var dualLinkedGuestWid by rememberSaveable(workoutId) { mutableStateOf<Int?>(null) }
@@ -207,6 +212,12 @@ fun WorkoutDetailScreen(
             modifier = modifier
         )
         return
+    }
+
+    LaunchedEffect(showComparePicker) {
+        if (!showComparePicker) {
+            compareSearchQuery = ""
+        }
     }
 
     if (ui.loading) {
@@ -1383,6 +1394,18 @@ fun WorkoutDetailScreen(
         }
     }
     if (showComparePicker) {
+        val filteredCompare = remember(ui.compareCandidates, compareSearchQuery) {
+            val q = compareSearchQuery.trim()
+            if (q.isEmpty()) {
+                ui.compareCandidates
+            } else {
+                ui.compareCandidates.filter { c ->
+                    c.displayTitle.contains(q, ignoreCase = true) ||
+                        c.ownerUsername?.contains(q, ignoreCase = true) == true ||
+                        c.startedAtIso.contains(q, ignoreCase = true)
+                }
+            }
+        }
         ModalBottomSheet(
             onDismissRequest = { showComparePicker = false }
         ) {
@@ -1396,32 +1419,56 @@ fun WorkoutDetailScreen(
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(ui.compareCandidates, key = { it.id }) { c ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    compareOtherId = c.id
-                                    showComparePicker = false
-                                    showCompare = true
-                                }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    c.displayTitle,
-                                    style = MaterialTheme.typography.bodyLarge
-                                )
-                                val sub = c.ownerUsername?.let { "@$it" }
-                                if (sub != null) {
+                OutlinedTextField(
+                    value = compareSearchQuery,
+                    onValueChange = { compareSearchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    singleLine = true,
+                    label = { Text(stringResource(R.string.home_detail_compare_search_hint)) },
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.None,
+                        imeAction = ImeAction.Search
+                    )
+                )
+                if (filteredCompare.isEmpty() && compareSearchQuery.isNotBlank()) {
+                    Text(
+                        stringResource(R.string.home_detail_compare_search_no_matches),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp)
+                    )
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(filteredCompare, key = { it.id }) { c ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        compareOtherId = c.id
+                                        showComparePicker = false
+                                        showCompare = true
+                                    }
+                                    .padding(vertical = 8.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Column(Modifier.weight(1f)) {
                                     Text(
-                                        sub,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        c.displayTitle,
+                                        style = MaterialTheme.typography.bodyLarge
                                     )
+                                    val sub = c.ownerUsername?.let { "@$it" }
+                                    if (sub != null) {
+                                        Text(
+                                            sub,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }

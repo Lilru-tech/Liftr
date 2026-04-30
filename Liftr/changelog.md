@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.10.1] - 2026-04-30
+
+### Added
+- **Achievements (sports expansion)** — Added more achievement milestones and unlock paths for additional sports (including ski and handball-related coverage).
+- **Ranking** — Added **two new leaderboard categories**: **Goals completed** and **Duels won**.
+- **Compare workouts** — Added **search** in workout comparison so it is faster to find the session you want to compare.
+- **Period comparison** — Added support to compare **you vs yourself** (two windows) and **you vs another user**.
+
+### Changed
+- **Achievements icons** — Updated achievement icon mapping for entries that were not rendering a specific icon, improving visual consistency in the grid.
+
+[1.10.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.10.1
+
 ## [1.10.0] - 2026-04-29
 
 ### Added

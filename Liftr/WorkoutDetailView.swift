@@ -3131,32 +3131,55 @@ private struct CompareCandidatePicker: View {
     let items: [WorkoutDetailView.CompareCandidate]
     let onPick: (Int) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filteredItems: [WorkoutDetailView.CompareCandidate] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return items }
+        let n = q.lowercased()
+        return items.filter { c in
+            if c.displayTitle.lowercased().contains(n) { return true }
+            if let u = c.owner_username, !u.isEmpty, u.lowercased().contains(n) { return true }
+            if c.started_at.formatted(date: .abbreviated, time: .shortened).lowercased().contains(n) { return true }
+            return false
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            List(items) { c in
-                Button {
-                    onPick(c.id)
-                    dismiss()
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(c.displayTitle)
-                            .font(.headline)
-                            .lineLimit(1)
-                        if let u = c.owner_username, !u.isEmpty {
-                            Text("@\(u)")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.secondary)
+            Group {
+                if filteredItems.isEmpty, !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("No matches")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    List(filteredItems) { c in
+                        Button {
+                            onPick(c.id)
+                            dismiss()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.displayTitle)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                if let u = c.owner_username, !u.isEmpty {
+                                    Text("@\(u)")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(c.started_at.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
-                        Text(c.started_at.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                        .listRowBackground(Color.clear)
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
-                .listRowBackground(Color.clear)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .searchable(text: $searchText, prompt: "Search")
             .navigationTitle("Choose workout")
             .navigationBarTitleDisplayMode(.inline)
         }

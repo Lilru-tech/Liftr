@@ -113,6 +113,7 @@ import com.lilru.liftr.ui.goals.GoalsScreen
 import com.lilru.liftr.ui.notifications.NotificationsScreen
 import com.lilru.liftr.ui.competition.CreateCompetitionScreen
 import com.lilru.liftr.ui.competition.CompetitionsHubScreen
+import com.lilru.liftr.ui.profile.period.PeriodCompareScreen
 import com.lilru.liftr.ui.profile.progress.ProfileProgressScreen
 import com.lilru.liftr.ui.ranking.RankingInitial
 import com.lilru.liftr.ui.ranking.RankingMetric
@@ -601,6 +602,7 @@ fun ProfileTabScreen(
     val profileUserId = ui.userId
     var listMode by rememberSaveable { mutableStateOf<FollowListMode?>(null) }
     var showComparePrs by rememberSaveable(targetUserId) { mutableStateOf(false) }
+    var showPeriodCompare by rememberSaveable(targetUserId) { mutableStateOf(false) }
     var showLevelDetail by rememberSaveable(targetUserId) { mutableStateOf(false) }
     var showNotifications by rememberSaveable { mutableStateOf(false) }
     var showContactSupport by rememberSaveable { mutableStateOf(false) }
@@ -784,6 +786,16 @@ fun ProfileTabScreen(
         return
     }
 
+    if (showPeriodCompare && meId != null && profileUserId != null && meId == profileUserId) {
+        PeriodCompareScreen(
+            supabase = supabase,
+            viewerUserId = meId,
+            onBack = { showPeriodCompare = false },
+            modifier = modifier
+        )
+        return
+    }
+
     if (showLevelDetail && profileUserId != null) {
         UserLevelDetailScreen(
             supabase = supabase,
@@ -960,7 +972,12 @@ fun ProfileTabScreen(
                                 userId = profileUserId,
                                 onBack = {},
                                 modifier = Modifier.fillMaxSize(),
-                                embedded = true
+                                embedded = true,
+                                onPeriodCompare = if (meId != null && meId == profileUserId) {
+                                    { showPeriodCompare = true }
+                                } else {
+                                    null
+                                }
                             )
                         }
                     }

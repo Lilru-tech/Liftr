@@ -99,7 +99,6 @@ struct ActiveStrengthWorkoutView: View {
     
     private struct WorkoutEndPatch: Encodable {
         let ended_at: Date
-        /// Wall-clock session length; backend score for strength may depend on this (was never sent on finish before).
         let duration_min: Int?
     }
 

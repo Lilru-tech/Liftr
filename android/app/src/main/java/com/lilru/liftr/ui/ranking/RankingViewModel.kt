@@ -19,7 +19,7 @@ import org.json.JSONObject
 enum class RankingScope { GLOBAL, FRIENDS }
 enum class RankingPeriod { DAY, WEEK, MONTH, ALL }
 enum class RankingKind { ALL, STRENGTH, CARDIO, SPORT }
-enum class RankingMetric { SCORE, CALORIES, LEVEL, BEST_WORKOUT }
+enum class RankingMetric { SCORE, CALORIES, LEVEL, BEST_WORKOUT, GOALS_COMPLETED, DUELS_WON }
 
 /** Al abrir el ranking embebido (p. ej. desde Level y XP) con misma lógica que [RankingViewModel]. */
 data class RankingInitial(
@@ -113,6 +113,8 @@ class RankingViewModel(
                     RankingMetric.CALORIES -> fetchCalories(st)
                     RankingMetric.LEVEL -> fetchLevel(st)
                     RankingMetric.BEST_WORKOUT -> fetchBestWorkouts(st)
+                    RankingMetric.GOALS_COMPLETED -> fetchGoalsCompleted(st)
+                    RankingMetric.DUELS_WON -> fetchDuelsWon(st)
                 }
             }.onSuccess { (users, workouts) ->
                 _uiState.value = _uiState.value.copy(
@@ -235,6 +237,54 @@ class RankingViewModel(
             }
         }
         return emptyList<RankingUserRow>() to rows
+    }
+
+    private suspend fun fetchGoalsCompleted(st: RankingUiState): Pair<List<RankingUserRow>, List<RankingWorkoutRow>> {
+        val params = buildJsonObject {
+            put("p_scope", mapScope(st.scope))
+            put("p_limit", 100)
+            put("p_sex", JsonNull)
+            put("p_age_band", JsonNull)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_GOALS_COMPLETED_LEADERBOARD_V1, params) { }
+        val arr = parseArrayFlexible(res.data)
+        val rows = (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                RankingUserRow(
+                    rank = o.optInt("rank", idx + 1),
+                    userId = o.optString("user_id"),
+                    username = o.optNullableString("username"),
+                    avatarUrl = o.optNullableString("avatar_url"),
+                    primary = "Completed: ${o.optLong("completed_goals", 0)}",
+                    secondary = "Weeks: ${o.optLong("goal_weeks", 0)}"
+                )
+            }
+        }
+        return rows to emptyList()
+    }
+
+    private suspend fun fetchDuelsWon(st: RankingUiState): Pair<List<RankingUserRow>, List<RankingWorkoutRow>> {
+        val params = buildJsonObject {
+            put("p_scope", mapScope(st.scope))
+            put("p_limit", 100)
+            put("p_sex", JsonNull)
+            put("p_age_band", JsonNull)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_DUELS_WON_LEADERBOARD_V1, params) { }
+        val arr = parseArrayFlexible(res.data)
+        val rows = (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                RankingUserRow(
+                    rank = o.optInt("rank", idx + 1),
+                    userId = o.optString("user_id"),
+                    username = o.optNullableString("username"),
+                    avatarUrl = o.optNullableString("avatar_url"),
+                    primary = "Wins: ${o.optLong("wins", 0)}",
+                    secondary = "Duels: ${o.optLong("duels_finished", 0)}"
+                )
+            }
+        }
+        return rows to emptyList()
     }
 
     private fun parseArrayFlexible(raw: String): JSONArray {

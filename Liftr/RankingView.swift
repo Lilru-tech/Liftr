@@ -37,6 +37,26 @@ struct LevelRankRow: Decodable, Identifiable {
     let xp: Int64
 }
 
+struct GoalsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let completed_goals: Int64
+    let goal_weeks: Int64
+}
+
+struct DuelsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let wins: Int64
+    let duels_finished: Int64
+}
+
 struct WorkoutLeaderRow: Decodable, Identifiable {
     var id: String { "\(workout_id)-\(rank)" }
     let rank: Int
@@ -70,6 +90,8 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case calories = "Calories"
     case level = "Level"
     case bestWorkout = "Top workouts"
+    case goals = "Goals"
+    case duels = "Duels"
     var id: String { rawValue }
 }
 
@@ -97,6 +119,8 @@ final class RankingVM: ObservableObject {
     @Published var rows: [LeaderRow] = []
     @Published var levelRows: [LevelRankRow] = []
     @Published var workoutRows: [WorkoutLeaderRow] = []
+    @Published var goalsRows: [GoalsLeaderRow] = []
+    @Published var duelsRows: [DuelsLeaderRow] = []
     @Published var kcalRows: [CaloriesLeaderRow] = []
     @Published var loading = false
     @Published var error: String?
@@ -153,7 +177,10 @@ final class RankingVM: ObservableObject {
             await MainActor.run {
                 self.levelRows = decoded
                 self.rows = []
+                self.kcalRows = []
                 self.workoutRows = []
+                self.goalsRows = []
+                self.duelsRows = []
             }
         } catch {
             guard !shouldIgnoreLeaderboardFetchError(error) else { return }
@@ -183,6 +210,8 @@ final class RankingVM: ObservableObject {
                 self.workoutRows = decoded
                 self.rows = []
                 self.levelRows = []
+                self.goalsRows = []
+                self.duelsRows = []
             }
         } catch {
             guard !shouldIgnoreLeaderboardFetchError(error) else { return }
@@ -213,12 +242,74 @@ final class RankingVM: ObservableObject {
                 self.rows = []
                 self.levelRows = []
                 self.workoutRows = []
+                self.goalsRows = []
+                self.duelsRows = []
             }
         } catch {
             guard !shouldIgnoreLeaderboardFetchError(error) else { return }
             await MainActor.run {
                 self.error = error.localizedDescription
                 self.kcalRows = []
+            }
+        }
+    }
+    
+    private func fetchGoalsCompletedLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"]     = ajString(scope == .global ? "global" : "friends")
+            params["p_limit"]     = ajInt(100)
+            params["p_sex"]       = ajString(sexOpt?.rawValue)
+            params["p_age_band"]  = ajString(mapAge(age))
+            
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_goals_completed_leaderboard_v1", params: params)
+                .execute()
+            
+            let decoded = try JSONDecoder.supabase().decode([GoalsLeaderRow].self, from: res.data)
+            await MainActor.run {
+                self.goalsRows = decoded
+                self.rows = []
+                self.kcalRows = []
+                self.levelRows = []
+                self.workoutRows = []
+                self.duelsRows = []
+            }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.goalsRows = []
+            }
+        }
+    }
+    
+    private func fetchDuelsWonLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"]     = ajString(scope == .global ? "global" : "friends")
+            params["p_limit"]     = ajInt(100)
+            params["p_sex"]       = ajString(sexOpt?.rawValue)
+            params["p_age_band"]  = ajString(mapAge(age))
+            
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_duels_won_leaderboard_v1", params: params)
+                .execute()
+            
+            let decoded = try JSONDecoder.supabase().decode([DuelsLeaderRow].self, from: res.data)
+            await MainActor.run {
+                self.duelsRows = decoded
+                self.rows = []
+                self.kcalRows = []
+                self.levelRows = []
+                self.workoutRows = []
+                self.goalsRows = []
+            }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.duelsRows = []
             }
         }
     }
@@ -237,6 +328,14 @@ final class RankingVM: ObservableObject {
         }
         if metric == .bestWorkout {
             await fetchBestWorkoutsLeaderboard()
+            return
+        }
+        if metric == .goals {
+            await fetchGoalsCompletedLeaderboard()
+            return
+        }
+        if metric == .duels {
+            await fetchDuelsWonLeaderboard()
             return
         }
         
@@ -259,6 +358,8 @@ final class RankingVM: ObservableObject {
             self.kcalRows = []
             self.levelRows = []
             self.workoutRows = []
+            self.goalsRows = []
+            self.duelsRows = []
         } catch {
             guard !shouldIgnoreLeaderboardFetchError(error) else { return }
             self.error = error.localizedDescription
@@ -317,7 +418,7 @@ struct RankingView: View {
                     }
                     .pickerStyle(.segmented)
                     
-                    if vm.metric != .level {
+                    if !metricSkipsPeriodAndKind(vm.metric) {
                         Picker("Period", selection: $vm.period) {
                             ForEach(LBPeriod.allCases) {
                                 Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
@@ -334,7 +435,7 @@ struct RankingView: View {
                     }
                     .pickerStyle(.segmented)
                     
-                    if vm.metric != .level {
+                    if !metricSkipsPeriodAndKind(vm.metric) {
                         Picker("Period", selection: $vm.period) {
                             ForEach(LBPeriod.allCases) {
                                 Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
@@ -345,15 +446,23 @@ struct RankingView: View {
                 }
             }
             
-            HStack {
-                Picker("Metric", selection: $vm.metric) {
-                    ForEach(LBMetric.allCases) { Text($0.rawValue).tag($0) }
+            VStack(spacing: 8) {
+                Picker("Metric1", selection: $vm.metric) {
+                    ForEach([LBMetric.score, .calories, .level], id: \.self) { m in
+                        Text(m.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Picker("Metric2", selection: $vm.metric) {
+                    ForEach([LBMetric.bestWorkout, .goals, .duels], id: \.self) { m in
+                        Text(m.rawValue).lineLimit(1).minimumScaleFactor(0.75).tag(m)
+                    }
                 }
                 .pickerStyle(.segmented)
             }
             
             HStack(spacing: 10) {
-                if vm.metric != .level {
+                if !metricSkipsPeriodAndKind(vm.metric) {
                     Menu {
                         Picker("Type", selection: $vm.kind) {
                             ForEach(LBKind.allCases) {
@@ -386,6 +495,13 @@ struct RankingView: View {
                 }
             }
             .font(.subheadline)
+        }
+    }
+    
+    private func metricSkipsPeriodAndKind(_ m: LBMetric) -> Bool {
+        switch m {
+        case .level, .goals, .duels: return true
+        default: return false
         }
     }
     
@@ -470,6 +586,82 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
+            } else if vm.metric == .goals {
+                List(vm.goalsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
+                                Text("\(row.goal_weeks) weeks with completed goals")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.completed_goals) completed")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .duels {
+                List(vm.duelsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
+                                Text("\(row.duels_finished) duels finished")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.wins) wins")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             } else if vm.metric == .level {
                 List(vm.levelRows) { row in
                     Section {
@@ -509,7 +701,7 @@ struct RankingView: View {
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
 
-            } else {
+            } else if vm.metric == .bestWorkout {
                 List(vm.workoutRows) { row in
                     Section {
                         HStack(spacing: 12) {
@@ -568,7 +760,9 @@ struct RankingView: View {
                 (vm.metric == .score && vm.rows.isEmpty) ||
                 (vm.metric == .calories && vm.kcalRows.isEmpty) ||
                 (vm.metric == .level && vm.levelRows.isEmpty) ||
-                (vm.metric == .bestWorkout && vm.workoutRows.isEmpty)
+                (vm.metric == .bestWorkout && vm.workoutRows.isEmpty) ||
+                (vm.metric == .goals && vm.goalsRows.isEmpty) ||
+                (vm.metric == .duels && vm.duelsRows.isEmpty)
             {
                 VStack(spacing: 8) {
                     Image(systemName: "person.3.sequence")

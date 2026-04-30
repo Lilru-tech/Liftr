@@ -258,13 +258,12 @@ fun EditStrengthWorkoutMetaSheetContent(
                         )
                     }
                 }
-                val nextSetNum = (ex.sets.maxOfOrNull { it.setNumber } ?: 0).coerceIn(0, 98) + 1
                 TextButton(
                     onClick = {
                         if (ex.sets.size < 20) {
                             replaceAt(
                                 exIndex,
-                                ex.copy(sets = ex.sets + StrengthSetDraft(setNumber = nextSetNum))
+                                ex.copy(sets = ex.sets + StrengthSetDraft(setNumber = 1))
                             )
                         }
                     },

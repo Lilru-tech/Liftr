@@ -119,11 +119,11 @@ fun ActiveStrengthWorkoutScreen(
     ) {
         if (ui.exercises.isNotEmpty() && !ui.loading) {
             val ex = ui.exercises.getOrNull(ui.currentExerciseIndex)
-            val sn = ex?.sets?.getOrNull(ui.currentSetIndex)
             val t = formatElapsed(ui.sessionElapsedSec)
             val exLine = ex?.let { e ->
-                val sNum = sn?.setNumber?.coerceAtLeast(1) ?: 1
+                val clampedSetIndex = ui.currentSetIndex.coerceIn(0, e.sets.size)
                 val tSets = e.sets.size.coerceAtLeast(1)
+                val sNum = if (clampedSetIndex >= tSets) tSets else (clampedSetIndex + 1).coerceAtLeast(1)
                 "${e.displayName} · $sNum/$tSets"
             } ?: "—"
             val rest = if (ui.isResting) " · rest ${ui.restSecondsLeft}s" else ""
@@ -519,7 +519,14 @@ fun ActiveStrengthWorkoutScreen(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         if (!allSetsDoneCurrent && set != null) {
-                                            Text("Set ${set.setNumber} of ${ex?.sets?.size ?: 0}", style = MaterialTheme.typography.titleMedium)
+                                            Text(
+                                                text = stringResource(
+                                                    R.string.active_strength_set_progress,
+                                                    currentSetIndex + 1,
+                                                    ex?.sets?.size ?: 0
+                                                ),
+                                                style = MaterialTheme.typography.titleMedium
+                                            )
                                             Text("${set.reps ?: 0} reps", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 2.dp))
                                             Text(
                                                 "${set.weightKg?.let { String.format("%.1f", it) } ?: "0.0"} kg",
@@ -604,16 +611,7 @@ fun ActiveStrengthWorkoutScreen(
                                     onClick = {
                                         if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
                                             val exLocal = ex ?: return@OutlinedButton
-                                            val template = exLocal.sets.lastOrNull()
-                                            val nextSet = ActiveStrengthSetLine(
-                                                setId = -((exLocal.workoutExerciseId * 1000) + exLocal.sets.size + 1),
-                                                setNumber = exLocal.sets.size + 1,
-                                                reps = template?.reps,
-                                                weightKg = template?.weightKg,
-                                                rpe = template?.rpe,
-                                                restSec = template?.restSec
-                                            )
-                                            val nextEx = exLocal.copy(sets = exLocal.sets + nextSet)
+                                            val nextEx = exLocal.copy(sets = appendOneSetToExpandedSets(exLocal.sets))
                                             val idx = laneExerciseIndex
                                             guestExercisesUi = guestExercisesUi.toMutableList().apply {
                                                 if (idx in indices) this[idx] = nextEx
@@ -631,9 +629,7 @@ fun ActiveStrengthWorkoutScreen(
                                         if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
                                             val exLocal = ex ?: return@OutlinedButton
                                             if (exLocal.sets.size <= 1) return@OutlinedButton
-                                            val nextSets = exLocal.sets
-                                                .dropLast(1)
-                                                .mapIndexed { idx, line -> line.copy(setNumber = idx + 1) }
+                                            val nextSets = removeOneSetFromExpandedSets(exLocal.sets)
                                             val oldDone = guestSetProgress[exLocal.workoutExerciseId] ?: 0
                                             val nextDone = oldDone.coerceAtMost(nextSets.size)
                                             val nextEx = exLocal.copy(sets = nextSets)
@@ -757,18 +753,17 @@ fun ActiveStrengthWorkoutScreen(
                                     val exLocal = guestExercisesUi.getOrNull(guestCurrentExerciseIndex)
                                         ?: return@Button
                                     val setIndex = (guestSetProgress[exLocal.workoutExerciseId] ?: 0)
-                                    val oldSet = exLocal.sets.getOrNull(setIndex) ?: return@Button
                                     val reps = guestEditRepsText.trim().toIntOrNull()
                                     val weight = guestEditWeightText.trim().replace(',', '.').toDoubleOrNull()
                                     val rest = guestEditRestText.trim().toIntOrNull()?.coerceAtLeast(0)
-                                    val nextSet = oldSet.copy(
+                                    val nextSets = updateBlockForExpandedIndex(
+                                        sets = exLocal.sets,
+                                        expandedIndex = setIndex,
                                         reps = reps,
                                         weightKg = weight,
+                                        rpe = exLocal.sets.getOrNull(setIndex)?.rpe,
                                         restSec = rest
                                     )
-                                    val nextSets = exLocal.sets.mapIndexed { idx, line ->
-                                        if (idx == setIndex) nextSet else line
-                                    }
                                     val nextEx = exLocal.copy(sets = nextSets)
                                     guestExercisesUi = guestExercisesUi.toMutableList().apply {
                                         if (guestCurrentExerciseIndex in indices) {

@@ -198,6 +198,7 @@ struct ProfileView: View {
     
     enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
     @State private var tab: Tab = .calendar
+    @State private var showPeriodCompare = false
     
     var body: some View {
         profileRootView
@@ -313,6 +314,11 @@ struct ProfileView: View {
                 .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $showPeriodCompare) {
+            if let uid = app.userId {
+                PeriodCompareView(viewerUserId: uid)
+            }
+        }
     }
     
     private var prsView: some View {
@@ -325,6 +331,16 @@ struct ProfileView: View {
     
     private var progressView: some View {
         VStack(spacing: 12) {
+            if isOwnProfile {
+                Button {
+                    showPeriodCompare = true
+                } label: {
+                    Text("Compare periods")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal)
+            }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Period")
                     .font(.caption.weight(.semibold))

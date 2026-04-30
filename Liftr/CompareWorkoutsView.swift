@@ -67,7 +67,6 @@ struct CompareWorkoutsView: View {
              "hx_no_reps":
             return -1.0
         case "total_rest_sec", "avg_rest_sec", "rest_pct_of_session":
-            // Less planned rest / lower share of session = "better" for density in the bar UI.
             return -1.0
         default:
             return 1.0

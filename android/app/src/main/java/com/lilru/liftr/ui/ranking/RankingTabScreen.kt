@@ -70,6 +70,16 @@ private fun RankingSegmentLabel(text: String) {
     )
 }
 
+@Composable
+private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
+    RankingMetric.SCORE -> stringResource(R.string.ranking_metric_score)
+    RankingMetric.CALORIES -> stringResource(R.string.ranking_metric_calories)
+    RankingMetric.LEVEL -> stringResource(R.string.ranking_metric_level)
+    RankingMetric.BEST_WORKOUT -> stringResource(R.string.ranking_metric_top_workouts)
+    RankingMetric.GOALS_COMPLETED -> stringResource(R.string.ranking_metric_goals)
+    RankingMetric.DUELS_WON -> stringResource(R.string.ranking_metric_duels)
+}
+
 @OptIn(ExperimentalMaterialApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun RankingTabScreen(
@@ -161,10 +171,25 @@ fun RankingTabScreen(
         item {
             CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
                 val scopes = RankingScope.entries
-                val metrics = RankingMetric.entries
                 val periods = RankingPeriod.entries
                 val kinds = RankingKind.entries
                 Column(verticalArrangement = Arrangement.spacedBy(RankingSegmentRowSpacing)) {
+                    val metricsA = listOf(
+                        RankingMetric.SCORE,
+                        RankingMetric.CALORIES,
+                        RankingMetric.LEVEL
+                    )
+                    val metricsB = listOf(
+                        RankingMetric.BEST_WORKOUT,
+                        RankingMetric.GOALS_COMPLETED,
+                        RankingMetric.DUELS_WON
+                    )
+                    val showPeriodAndKind = when (ui.metric) {
+                        RankingMetric.SCORE,
+                        RankingMetric.CALORIES,
+                        RankingMetric.BEST_WORKOUT -> true
+                        else -> false
+                    }
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         scopes.forEachIndexed { i, scope ->
                             SegmentedButton(
@@ -186,65 +211,74 @@ fun RankingTabScreen(
                         }
                     }
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        metrics.forEachIndexed { i, metric ->
+                        metricsA.forEachIndexed { i, metric ->
                             SegmentedButton(
                                 selected = ui.metric == metric,
                                 onClick = { vm.setMetric(metric) },
-                                shape = SegmentedButtonDefaults.itemShape(i, metrics.size),
+                                shape = SegmentedButtonDefaults.itemShape(i, metricsA.size),
                                 modifier = Modifier
                                     .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
                                     .height(RankingSegmentButtonHeight)
                             ) {
-                                RankingSegmentLabel(
-                                    when (metric) {
-                                        RankingMetric.SCORE -> "Score"
-                                        RankingMetric.CALORIES -> "Calories"
-                                        RankingMetric.LEVEL -> "Level"
-                                        RankingMetric.BEST_WORKOUT -> "Top workouts"
-                                    }
-                                )
+                                RankingSegmentLabel(rankingMetricButtonLabel(metric))
                             }
                         }
                     }
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        periods.forEachIndexed { i, period ->
+                        metricsB.forEachIndexed { i, metric ->
                             SegmentedButton(
-                                selected = ui.period == period,
-                                onClick = { vm.setPeriod(period) },
-                                shape = SegmentedButtonDefaults.itemShape(i, periods.size),
+                                selected = ui.metric == metric,
+                                onClick = { vm.setMetric(metric) },
+                                shape = SegmentedButtonDefaults.itemShape(i, metricsB.size),
                                 modifier = Modifier
                                     .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
                                     .height(RankingSegmentButtonHeight)
                             ) {
-                                RankingSegmentLabel(
-                                    when (period) {
-                                        RankingPeriod.DAY -> "Today"
-                                        RankingPeriod.WEEK -> "This Week"
-                                        RankingPeriod.MONTH -> "This Month"
-                                        RankingPeriod.ALL -> "All-time"
-                                    }
-                                )
+                                RankingSegmentLabel(rankingMetricButtonLabel(metric))
                             }
                         }
                     }
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        kinds.forEachIndexed { i, kind ->
-                            SegmentedButton(
-                                selected = ui.kind == kind,
-                                onClick = { vm.setKind(kind) },
-                                shape = SegmentedButtonDefaults.itemShape(i, kinds.size),
-                                modifier = Modifier
-                                    .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
-                                    .height(RankingSegmentButtonHeight)
-                            ) {
-                                RankingSegmentLabel(
-                                    when (kind) {
-                                        RankingKind.ALL -> "All"
-                                        RankingKind.STRENGTH -> "Strength"
-                                        RankingKind.CARDIO -> "Cardio"
-                                        RankingKind.SPORT -> "Sport"
-                                    }
-                                )
+                    if (showPeriodAndKind) {
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            periods.forEachIndexed { i, period ->
+                                SegmentedButton(
+                                    selected = ui.period == period,
+                                    onClick = { vm.setPeriod(period) },
+                                    shape = SegmentedButtonDefaults.itemShape(i, periods.size),
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
+                                        .height(RankingSegmentButtonHeight)
+                                ) {
+                                    RankingSegmentLabel(
+                                        when (period) {
+                                            RankingPeriod.DAY -> "Today"
+                                            RankingPeriod.WEEK -> "This Week"
+                                            RankingPeriod.MONTH -> "This Month"
+                                            RankingPeriod.ALL -> "All-time"
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                            kinds.forEachIndexed { i, kind ->
+                                SegmentedButton(
+                                    selected = ui.kind == kind,
+                                    onClick = { vm.setKind(kind) },
+                                    shape = SegmentedButtonDefaults.itemShape(i, kinds.size),
+                                    modifier = Modifier
+                                        .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
+                                        .height(RankingSegmentButtonHeight)
+                                ) {
+                                    RankingSegmentLabel(
+                                        when (kind) {
+                                            RankingKind.ALL -> "All"
+                                            RankingKind.STRENGTH -> "Strength"
+                                            RankingKind.CARDIO -> "Cardio"
+                                            RankingKind.SPORT -> "Sport"
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
