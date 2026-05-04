@@ -2191,17 +2191,55 @@ private enum CardioRouteGeoJSONParser {
 private struct CardioRouteMapMini: View {
     let coordinates: [CLLocationCoordinate2D]
     @State private var position: MapCameraPosition = .automatic
+    @State private var showExpanded = false
 
     var body: some View {
-        Map(position: $position) {
-            MapPolyline(coordinates: coordinates)
-                .stroke(.blue.opacity(0.88), lineWidth: 4)
+        ZStack(alignment: .topTrailing) {
+            Map(position: $position) {
+                MapPolyline(coordinates: coordinates)
+                    .stroke(.blue.opacity(0.88), lineWidth: 4)
+            }
+            .mapStyle(.standard(elevation: .flat))
+            .frame(height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .onAppear { fitCamera() }
+            .onChange(of: coordinates.count) { _, _ in fitCamera() }
+            Button {
+                fitCamera()
+                showExpanded = true
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(8)
+            .accessibilityLabel("Expand map")
         }
-        .mapStyle(.standard(elevation: .flat))
-        .frame(height: 220)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onAppear { fitCamera() }
-        .onChange(of: coordinates.count) { _, _ in fitCamera() }
+        .fullScreenCover(isPresented: $showExpanded) {
+            NavigationStack {
+                ZStack {
+                    Map(position: $position) {
+                        MapPolyline(coordinates: coordinates)
+                            .stroke(.blue.opacity(0.88), lineWidth: 4)
+                    }
+                    .mapStyle(.standard(elevation: .flat))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Route")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showExpanded = false }
+                    }
+                }
+                .onAppear { fitCamera() }
+                .onChange(of: coordinates.count) { _, _ in fitCamera() }
+            }
+        }
     }
 
     private func fitCamera() {

@@ -654,7 +654,7 @@ struct ActiveStrengthWorkoutView: View {
 
         if let s = currentSet {
             VStack(spacing: 12) {
-                Text("Set \(displaySetIndex + 1) of \(totalSets)")
+                Text("Step \(displaySetIndex + 1) of \(totalSets)")
                     .font(.headline)
                     .foregroundStyle(isExtraCurrentSet ? .green : .primary)
 

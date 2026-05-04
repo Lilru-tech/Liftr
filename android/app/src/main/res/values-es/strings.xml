@@ -58,4 +58,18 @@
     <string name="period_compare_empty_both">Sin entrenos registrados en ningún periodo con este filtro.</string>
     <string name="period_compare_social_note">Solo entrenos guardados en Liftr en estas fechas. No es una comparación completa de “quién está más en forma”.</string>
     <string name="period_compare_cross_user_date_hint">Tus totales usan las fechas del periodo A; la otra persona, las del B. Los rangos rápidos aplican la misma ventana en ambos lados para comparar en igualdad.</string>
+    <string name="achievements_community_headline">Comunidad</string>
+    <string name="achievements_community_body">Aprox. el %1$.1f%% de usuarios de Liftr con al menos un entreno publicado tienen este logro.</string>
+    <string name="goals_pill_total">Total: %1$d</string>
+    <string name="goals_pill_completed">Completados: %1$d</string>
+    <string name="goals_pill_missed">Fallados: %1$d</string>
+    <string name="goals_pill_active">Activos: %1$d</string>
+    <string name="goals_pill_avg">Media: %1$d%%</string>
+    <string name="goals_pill_best">Mejor: %1$d%%</string>
+    <string name="goals_summary_completed_rate">Completados %1$s</string>
+    <string name="goals_summary_streak">Racha actual: %1$d semana(s) con al menos un objetivo cumplido</string>
+    <string name="goals_summary_by_metric_title">Por métrica</string>
+    <string name="goals_summary_by_metric_line">%1$s: %2$d/%3$d completados · media %4$d%%</string>
+    <string name="goals_summary_list_cap">La lista muestra tus últimas 100 metas; racha y por métrica usan esa muestra. Los totales usan todo el historial del servidor.</string>
+    <string name="goals_section_finished">Historial · media %1$d%% · %2$d</string>
 </resources>

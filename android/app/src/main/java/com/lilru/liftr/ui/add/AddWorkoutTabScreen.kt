@@ -70,6 +70,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -686,7 +687,7 @@ fun AddWorkoutTabScreen(
                                 minLines = 2,
                                 maxLines = 4
                             )
-                            ex.sets.forEach { set ->
+                            ex.sets.forEachIndexed { setIndex, set ->
                                 val errColor = MaterialTheme.colorScheme.error
                                 val sn = set.setNumber.coerceIn(1, 99)
                                 Row(
@@ -694,10 +695,18 @@ fun AddWorkoutTabScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(
-                                        stringResource(R.string.add_set_name_format, sn),
-                                        style = MaterialTheme.typography.titleSmall
-                                    )
+                                    Column(Modifier.weight(1f, fill = false)) {
+                                        Text(
+                                            stringResource(R.string.add_strength_set_slot_format, setIndex + 1),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            stringResource(R.string.add_strength_repeat_times_label),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Surface(
                                             shape = RoundedCornerShape(20.dp),
@@ -714,6 +723,12 @@ fun AddWorkoutTabScreen(
                                                         contentDescription = stringResource(R.string.add_set_stepper_minus)
                                                     )
                                                 }
+                                                VerticalDivider(Modifier.height(24.dp))
+                                                Text(
+                                                    stringResource(R.string.add_strength_repeat_times_format, sn),
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    modifier = Modifier.padding(horizontal = 6.dp)
+                                                )
                                                 VerticalDivider(Modifier.height(24.dp))
                                                 IconButton(
                                                     onClick = { vm.bumpSetNumber(ex.id, set.id, 1) },
@@ -777,11 +792,19 @@ fun AddWorkoutTabScreen(
                                     )
                                 }
                             }
-                            TextButton(
-                                onClick = { vm.addSet(ex.id) },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(stringResource(R.string.add_set_add))
+                            Column(Modifier.fillMaxWidth()) {
+                                TextButton(
+                                    onClick = { vm.addSet(ex.id) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(stringResource(R.string.add_set_add))
+                                }
+                                Text(
+                                    stringResource(R.string.add_strength_next_row_hint, ex.sets.size + 1),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                                )
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 if (canMoveUp) {

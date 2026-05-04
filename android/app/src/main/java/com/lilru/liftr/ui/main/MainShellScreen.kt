@@ -386,6 +386,7 @@ fun MainShellScreen(
                         homeRefreshNonce = homeRefreshNonce,
                         homeFeedSyncNonce = homeFeedSyncNonce,
                         homeFeedSyncWorkoutId = homeFeedSyncWorkoutId,
+                        onGoToProfileTab = { selected = MainTab.Profile },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)

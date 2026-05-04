@@ -71,10 +71,49 @@ data class GoalRowUi(
 data class GoalStatsUi(
     val totalGoals: Int,
     val finishedGoals: Int,
+    val missedGoals: Int = 0,
     val finishedPercent: Double,
     val avgProgressPercent: Double,
     val bestProgressPercent: Double
 )
+
+/** Consecutive ISO weeks (latest first) where the user had at least one completed goal. */
+fun goalStreakWeeks(goals: List<GoalRowUi>): Int {
+    val dates = goals.filter { it.isCompleted }
+        .mapNotNull { runCatching { LocalDate.parse(it.weekStartDate.take(10)) }.getOrNull() }
+        .distinct()
+        .sortedDescending()
+    if (dates.isEmpty()) return 0
+    var streak = 1
+    var cursor = dates[0]
+    for (i in 1 until dates.size) {
+        val d = dates[i]
+        val expected = cursor.minusDays(7)
+        if (d == expected) {
+            streak++
+            cursor = d
+        } else {
+            break
+        }
+    }
+    return streak
+}
+
+data class GoalMetricBreakdownRow(val label: String, val total: Int, val completed: Int, val avgPct: Int)
+
+fun goalMetricBreakdown(goals: List<GoalRowUi>): List<GoalMetricBreakdownRow> {
+    val m = linkedMapOf<String, Triple<Int, Int, Double>>()
+    for (g in goals) {
+        val label = GoalMetric.fromWire(g.metric).title
+        val t = m[label] ?: Triple(0, 0, 0.0)
+        m[label] = Triple(t.first + 1, t.second + if (g.isCompleted) 1 else 0, t.third + g.progressRatio)
+    }
+    return m.keys.map { k ->
+        val t = m.getValue(k)
+        val avg = if (t.first > 0) ((t.third / t.first) * 100.0).roundToInt() else 0
+        GoalMetricBreakdownRow(k, t.first, t.second, avg)
+    }.sortedBy { it.label }
+}
 
 /** Resumen semanal alineado con [GoalContributionsSummary] en iOS. */
 data class GoalContributionsSummaryUi(

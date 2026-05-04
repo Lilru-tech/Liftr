@@ -180,6 +180,7 @@ struct HomeView: View {
     @AppStorage("homeCollapseMonthly") private var collapseMonthly = false
     
     @State private var showScrollToTopButton = false
+    @State private var showGuestSignInAlert = false
     
     private let highlightsInsertIndex = 5
     private let scrollToTopThreshold: CGFloat = 120
@@ -197,6 +198,23 @@ struct HomeView: View {
         todayCount > 0
         || weekWorkouts > 0
         || (strongestWeekPtsMTD > 0 || bestSportScore > 0)
+    }
+    
+    @ViewBuilder
+    private var homeFeedEmptyMessage: some View {
+        Group {
+            if app.userId == nil {
+                Text("No workouts to show yet.")
+            } else if followees.isEmpty {
+                Text("Follow people to see their workouts here, or log your own.")
+            } else {
+                Text("No activity from people you follow yet. Log a workout to get started.")
+            }
+        }
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 8)
     }
     
     private var collapsedModulesPill: some View {
@@ -354,17 +372,23 @@ struct HomeView: View {
                     }
                 }
                     
-                    HStack(spacing: 10) {
-
-                        weeklyGoalsModule
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        competitionsModule
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                    if app.userId != nil {
+                        HStack(spacing: 10) {
+                            weeklyGoalsModule
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            competitionsModule
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .id(hasAnyModule ? "homeGoalsRow" : "homeScrollTop")
+                        .listRowInsets(EdgeInsets(top: hasAnyModule ? 6 : 8, leading: 16, bottom: 6, trailing: 16))
+                        .listRowBackground(Color.clear)
+                    } else if !hasAnyModule {
+                        Color.clear
+                            .frame(height: 1)
+                            .id("homeScrollTop")
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+                            .listRowBackground(Color.clear)
                     }
-                    .id(hasAnyModule ? "homeGoalsRow" : "homeScrollTop")
-                    .listRowInsets(EdgeInsets(top: hasAnyModule ? 6 : 8, leading: 16, bottom: 6, trailing: 16))
-                    .listRowBackground(Color.clear)
                     
                     ForEach(feed.indices, id: \.self) { i in
                         let item = feed[i]
@@ -375,7 +399,13 @@ struct HomeView: View {
                             dayGroupLabel: firstOfDay ? dateLabelCompact(item.workout.started_at) : nil
                         )
                             .contentShape(Rectangle())
-                            .onTapGesture { selectedItem = item }
+                            .onTapGesture {
+                                if app.userId == nil {
+                                    showGuestSignInAlert = true
+                                } else {
+                                    selectedItem = item
+                                }
+                            }
                             .listRowInsets(EdgeInsets(
                                 top: firstOfDay ? (i == 0 ? 6 : 4) : 6,
                                 leading: 16,
@@ -386,7 +416,13 @@ struct HomeView: View {
                             .onAppear {
                                 if i == feed.count - 1 {
                                     print("[Home.cell.onAppear] last cell reached → loadPage(reset:false)")
-                                    Task { await loadPage(reset: false) }
+                                    Task {
+                                        if app.userId == nil {
+                                            await loadGuestFeedPage(reset: false)
+                                        } else {
+                                            await loadPage(reset: false)
+                                        }
+                                    }
                                 }
                             }
                         
@@ -402,7 +438,7 @@ struct HomeView: View {
                     }
                     
                     if !initialLoading && feed.isEmpty {
-                        Text("Sin entrenos recientes").foregroundStyle(.secondary)
+                        homeFeedEmptyMessage
                     }
                     
                     if isLoadingPage && !feed.isEmpty {
@@ -454,6 +490,15 @@ struct HomeView: View {
         }
         .background(.clear)
         .task { await reloadAll() }
+        .onChange(of: app.isAuthenticated) { _, _ in
+            Task { await reloadAll() }
+        }
+        .alert("Sign in required", isPresented: $showGuestSignInAlert) {
+            Button("Go to Profile") { app.selectedTab = .profile }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sign in or create an account to view other people's workouts.")
+        }
         .navigationDestination(item: $selectedItem) { it in
             WorkoutDetailView(workoutId: it.id, ownerId: it.workout.user_id)
                 .onAppear {
@@ -576,7 +621,10 @@ struct HomeView: View {
             }
         }
         
-        guard let me = app.userId else { return }
+        guard let me = app.userId else {
+            await reloadGuestHome()
+            return
+        }
         
         await MainActor.run {
             initialLoading = true
@@ -615,6 +663,166 @@ struct HomeView: View {
         }
         
         await MainActor.run { initialLoading = false }
+    }
+    
+    private func reloadGuestHome() async {
+        await MainActor.run {
+            followees = []
+            initialLoading = true
+            error = nil
+            showGuestSignInAlert = false
+            page = 0
+            canLoadMore = true
+            isLoadingPage = false
+            feed.removeAll()
+            todayCount = 0
+            todayMinutes = 0
+            todayPoints = 0
+            todayKcal = 0
+            streakDays = 0
+            weekWorkouts = 0
+            weekPoints = 0
+            weekKcal = 0
+            recentPRs = []
+            weeklyTop = []
+            monthSummary = nil
+            strongestWeekPtsMTD = 0
+            strongestWeekKcalMTD = 0
+            bestSportScore = 0
+            bestSportLabel = ""
+        }
+        await loadGuestFeedPage(reset: true)
+        await MainActor.run { initialLoading = false }
+    }
+    
+    private func loadGuestFeedPage(reset: Bool) async {
+        if reset {
+            await MainActor.run {
+                page = 0
+                canLoadMore = true
+                feed.removeAll()
+            }
+        }
+        
+        guard canLoadMore, !isLoadingPage else { return }
+        
+        await MainActor.run {
+            isLoadingPage = true
+            print("[Home.loadGuestFeedPage] isLoadingPage=true reset=\(reset) page=\(page)")
+        }
+        
+        defer {
+            Task { await MainActor.run {
+                isLoadingPage = false
+                print("[Home.loadGuestFeedPage] isLoadingPage=false")
+            }}
+        }
+        
+        do {
+            print("[Home.loadGuestFeedPage] fetching page=\(page) pageSize=\(pageSize)")
+            
+            var q: PostgrestFilterBuilder = SupabaseManager.shared.client
+                .from("workouts")
+                .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
+                .eq("state", value: "published")
+            
+            if filter != .all {
+                q = q.eq("kind", value: filter.rawValue.lowercased())
+            }
+            
+            let from = page * pageSize
+            let to = from + pageSize - 1
+            
+            let wRes = try await q
+                .order("started_at", ascending: false)
+                .range(from: from, to: to)
+                .execute()
+            
+            let workouts = try JSONDecoder.supabase().decode([WorkoutRow].self, from: wRes.data)
+            print("[Home.loadGuestFeedPage] fetched workouts=\(workouts.count) from=\(from) to=\(to)")
+            
+            let ids = workouts.map { $0.id }
+            let uniqueUserIds = Array(Set(workouts.map { $0.user_id }))
+            try await ensureProfilesAvailable(for: uniqueUserIds)
+            
+            var scoresDict: [Int: Double] = [:]
+            if !ids.isEmpty {
+                let sRes = try await SupabaseManager.shared.client
+                    .from("workout_scores")
+                    .select("workout_id, score")
+                    .in("workout_id", values: ids)
+                    .execute()
+                let sRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: sRes.data)
+                var tmp: [Int: Double] = [:]
+                for row in sRows {
+                    let value = NSDecimalNumber(decimal: row.score).doubleValue
+                    tmp[row.workout_id, default: 0] += value
+                }
+                scoresDict = tmp
+            }
+            
+            var likeCountByWorkout: [Int: Int] = [:]
+            if !ids.isEmpty {
+                let lRes = try await SupabaseManager.shared.client
+                    .from("workout_likes")
+                    .select("workout_id,user_id")
+                    .in("workout_id", values: ids)
+                    .execute()
+                let lRows = try JSONDecoder.supabase().decode([LikeRow].self, from: lRes.data)
+                for row in lRows {
+                    likeCountByWorkout[row.workout_id, default: 0] += 1
+                }
+            }
+            
+            var participantIdsByWorkout: [Int: [UUID]] = [:]
+            if !ids.isEmpty {
+                let pRes = try await SupabaseManager.shared.client
+                    .from("workout_participants")
+                    .select("workout_id,user_id")
+                    .in("workout_id", values: ids)
+                    .execute()
+                let pRows = try JSONDecoder.supabase().decode([ParticipantRow].self, from: pRes.data)
+                for p in pRows {
+                    participantIdsByWorkout[p.workout_id, default: []].append(p.user_id)
+                }
+                let allParticipantUids = Array(Set(pRows.map { $0.user_id }))
+                try await ensureProfilesAvailable(for: allParticipantUids)
+            }
+            
+            let items: [FeedItem] = workouts.map { w in
+                let ownerProf = profiles[w.user_id]
+                let pIds = participantIdsByWorkout[w.id] ?? []
+                return FeedItem(
+                    id: w.id,
+                    workout: w,
+                    username: ownerProf?.username ?? "—",
+                    avatarURL: ownerProf?.avatar_url,
+                    score: scoresDict[w.id],
+                    caloriesKcal: w.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue },
+                    likeCount: likeCountByWorkout[w.id] ?? 0,
+                    isLiked: false,
+                    participantIds: pIds,
+                    coUserAvatarURLs: pIds
+                        .filter { $0 != w.user_id }
+                        .compactMap { profiles[$0]?.avatar_url }
+                )
+            }
+            
+            await MainActor.run {
+                self.feed.append(contentsOf: items)
+                self.feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
+                self.canLoadMore = workouts.count == pageSize
+                if self.canLoadMore { self.page += 1 }
+                print("[Home.loadGuestFeedPage] appended items=\(items.count) newFeedCount=\(self.feed.count) canLoadMore=\(self.canLoadMore) nextPage=\(self.page)")
+            }
+        } catch {
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.feed = []
+                self.canLoadMore = false
+                print("[Home.loadGuestFeedPage] error=\(error)")
+            }
+        }
     }
     
     private func loadPage(reset: Bool) async {

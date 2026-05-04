@@ -204,7 +204,14 @@ enum GoalsManager {
         if let one = try? JSONDecoder.supabase().decode(GoalStats.self, from: res.data) {
             return one
         }
-        return GoalStats(total_goals: 0, finished_goals: 0, finished_percent: 0, avg_progress_percent: 0, best_progress_percent: 0)
+        return GoalStats(
+            total_goals: 0,
+            finished_goals: 0,
+            missed_goals: nil,
+            finished_percent: 0,
+            avg_progress_percent: 0,
+            best_progress_percent: 0
+        )
     }
 
     static func fetchWorkoutsContributingToGoal(_ goal: GoalRowUI) async throws -> [WorkoutFeedCardItem] {

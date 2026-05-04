@@ -5,17 +5,27 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -26,6 +36,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
@@ -53,16 +65,22 @@ fun startGoogleMapsForRoute(context: Context, points: List<Pair<Double, Double>>
 fun CardioRoutePolylinePreview(
     routePoints: List<Pair<Double, Double>>,
     modifier: Modifier = Modifier,
-    mapHeightDp: Int = 220
+    mapHeightDp: Int = 220,
+    expandToFill: Boolean = false
 ) {
     if (routePoints.size < 2) return
     val bg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
     val lineColor = Color(0xE02196F3)
+    val sizeMod = if (expandToFill) {
+        Modifier.fillMaxWidth().fillMaxHeight()
+    } else {
+        Modifier.fillMaxWidth().height(mapHeightDp.dp)
+    }
+    val clipMod = if (expandToFill) Modifier else Modifier.clip(RoundedCornerShape(16.dp))
     Canvas(
         modifier = modifier
-            .fillMaxWidth()
-            .height(mapHeightDp.dp)
-            .clip(RoundedCornerShape(16.dp))
+            .then(sizeMod)
+            .then(clipMod)
             .background(bg)
     ) {
         val pad = 14.dp.toPx()
@@ -100,32 +118,42 @@ fun CardioRouteMapBox(
     /** Pares (lat, lon), al menos 2 para dibujar. */
     routePoints: List<Pair<Double, Double>>,
     modifier: Modifier = Modifier,
-    mapHeightDp: Int = 220
+    mapHeightDp: Int = 220,
+    expandToFill: Boolean = false,
+    useRichMapControls: Boolean = false
 ) {
     if (routePoints.size < 2) return
     if (BuildConfig.MAPS_API_KEY.isBlank()) {
-        CardioRoutePolylinePreview(routePoints, modifier = modifier, mapHeightDp = mapHeightDp)
+        CardioRoutePolylinePreview(
+            routePoints,
+            modifier = modifier,
+            mapHeightDp = mapHeightDp,
+            expandToFill = expandToFill
+        )
         return
     }
 
     val latLngs = CardioRouteGeoJson.toLatLngList(routePoints)
     val camera = rememberCameraPositionState()
-    LaunchedEffect(routePoints) {
+    val paddingPx = if (expandToFill) 96 else 64
+    LaunchedEffect(routePoints, expandToFill) {
         val b = CardioRouteGeoJson.latLngBoundsForRoute(routePoints) ?: return@LaunchedEffect
         runCatching {
-            camera.move(CameraUpdateFactory.newLatLngBounds(b, 64))
+            camera.move(CameraUpdateFactory.newLatLngBounds(b, paddingPx))
         }
     }
+    val mapModifier = if (expandToFill) {
+        modifier.fillMaxWidth().fillMaxHeight()
+    } else {
+        modifier.fillMaxWidth().height(mapHeightDp.dp).clip(RoundedCornerShape(16.dp))
+    }
     GoogleMap(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(mapHeightDp.dp)
-            .clip(RoundedCornerShape(16.dp)),
+        modifier = mapModifier,
         cameraPositionState = camera,
         properties = MapProperties(isMyLocationEnabled = false),
         uiSettings = MapUiSettings(
-            zoomControlsEnabled = false,
-            compassEnabled = false,
+            zoomControlsEnabled = useRichMapControls,
+            compassEnabled = useRichMapControls,
             myLocationButtonEnabled = false
         )
     ) {
@@ -134,6 +162,65 @@ fun CardioRouteMapBox(
             color = Color(0xE02196F3),
             width = 12f
         )
+    }
+}
+
+/**
+ * Mapa de ruta a pantalla completa con cierre y opción de abrir en Google Maps.
+ */
+@Composable
+fun CardioRouteFullscreenMapDialog(
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    routePoints: List<Pair<Double, Double>>,
+    showOpenInGoogleMaps: Boolean = false
+) {
+    if (!visible || routePoints.size < 2) return
+    val ctx = LocalContext.current
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text(stringResource(R.string.cardio_map_close))
+                    }
+                    Spacer(Modifier.weight(1f))
+                }
+                CardioRouteMapBox(
+                    routePoints = routePoints,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    expandToFill = true,
+                    useRichMapControls = true
+                )
+                if (showOpenInGoogleMaps) {
+                    TextButton(
+                        onClick = {
+                            startGoogleMapsForRoute(ctx, routePoints)
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(stringResource(R.string.home_detail_open_route_maps))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -146,8 +233,19 @@ fun CardioRouteMapFromGeoJson(
     val pts = remember(routeGeojson) { CardioRouteGeoJson.parseLineStringLatLng(routeGeojson) }
     if (pts.size < 2) return
     val ctx = LocalContext.current
+    var showFullscreen by remember { mutableStateOf(false) }
     Column(modifier = modifier.fillMaxWidth()) {
-        CardioRouteMapBox(pts, modifier = Modifier.fillMaxWidth(), mapHeightDp = mapHeightDp)
+        Box(modifier = Modifier.fillMaxWidth()) {
+            CardioRouteMapBox(pts, modifier = Modifier.fillMaxWidth(), mapHeightDp = mapHeightDp)
+            TextButton(
+                onClick = { showFullscreen = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+            ) {
+                Text(stringResource(R.string.cardio_map_expand))
+            }
+        }
         TextButton(
             onClick = { startGoogleMapsForRoute(ctx, pts) },
             modifier = Modifier.fillMaxWidth()
@@ -155,4 +253,10 @@ fun CardioRouteMapFromGeoJson(
             Text(stringResource(R.string.home_detail_open_route_maps))
         }
     }
+    CardioRouteFullscreenMapDialog(
+        visible = showFullscreen,
+        onDismiss = { showFullscreen = false },
+        routePoints = pts,
+        showOpenInGoogleMaps = true
+    )
 }

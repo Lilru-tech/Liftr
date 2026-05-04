@@ -6,13 +6,16 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
@@ -22,13 +25,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
@@ -190,24 +196,80 @@ fun EditStrengthWorkoutMetaSheetContent(
                             ex.copy(sets = ex.sets.mapIndexed { si, s -> if (si == setIndex) f(s) else s })
                         )
                     }
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            stringResource(R.string.add_set_name_format, st.setNumber.coerceIn(1, 99)),
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.weight(0.4f)
-                        )
-                        if (ex.sets.size > 1) {
-                            IconButton(
-                                onClick = {
-                                    val next = ex.sets.filterIndexed { i, _ -> i != setIndex }
-                                    replaceAt(exIndex, ex.copy(sets = coalesceSets(next)))
-                                }
+                    val sn = st.setNumber.coerceIn(1, 99)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(Modifier.weight(1f, fill = false)) {
+                            Text(
+                                stringResource(R.string.add_strength_set_slot_format, setIndex + 1),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                stringResource(R.string.add_strength_repeat_times_label),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant
                             ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Delete,
-                                    contentDescription = stringResource(R.string.add_set_remove_content_description),
-                                    tint = MaterialTheme.colorScheme.error
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        onClick = {
+                                            patchSet { s ->
+                                                s.copy(setNumber = (s.setNumber - 1).coerceIn(1, 99))
+                                            }
+                                        },
+                                        enabled = sn > 1,
+                                        modifier = Modifier.heightIn(max = 40.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Remove,
+                                            contentDescription = stringResource(R.string.add_set_stepper_minus)
+                                        )
+                                    }
+                                    VerticalDivider(Modifier.height(24.dp))
+                                    Text(
+                                        stringResource(R.string.add_strength_repeat_times_format, sn),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.padding(horizontal = 6.dp)
+                                    )
+                                    VerticalDivider(Modifier.height(24.dp))
+                                    IconButton(
+                                        onClick = {
+                                            patchSet { s ->
+                                                s.copy(setNumber = (s.setNumber + 1).coerceIn(1, 99))
+                                            }
+                                        },
+                                        enabled = sn < 99,
+                                        modifier = Modifier.heightIn(max = 40.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Add,
+                                            contentDescription = stringResource(R.string.add_set_stepper_plus)
+                                        )
+                                    }
+                                }
+                            }
+                            if (ex.sets.size > 1) {
+                                IconButton(
+                                    onClick = {
+                                        val next = ex.sets.filterIndexed { i, _ -> i != setIndex }
+                                        replaceAt(exIndex, ex.copy(sets = coalesceSets(next)))
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Delete,
+                                        contentDescription = stringResource(R.string.add_set_remove_content_description),
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
                             }
                         }
                     }
@@ -258,19 +320,27 @@ fun EditStrengthWorkoutMetaSheetContent(
                         )
                     }
                 }
-                TextButton(
-                    onClick = {
-                        if (ex.sets.size < 20) {
-                            replaceAt(
-                                exIndex,
-                                ex.copy(sets = ex.sets + StrengthSetDraft(setNumber = 1))
-                            )
-                        }
-                    },
-                    enabled = ex.sets.size < 20
-                ) {
-                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
-                    Text(stringResource(R.string.add_set_add))
+                Column(Modifier.fillMaxWidth()) {
+                    TextButton(
+                        onClick = {
+                            if (ex.sets.size < 20) {
+                                replaceAt(
+                                    exIndex,
+                                    ex.copy(sets = ex.sets + StrengthSetDraft(setNumber = 1))
+                                )
+                            }
+                        },
+                        enabled = ex.sets.size < 20
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.padding(end = 4.dp))
+                        Text(stringResource(R.string.add_set_add))
+                    }
+                    Text(
+                        stringResource(R.string.add_strength_next_row_hint, ex.sets.size + 1),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                    )
                 }
             }
         }

@@ -6,6 +6,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -44,6 +45,7 @@ import com.lilru.liftr.R
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
 import com.lilru.liftr.prefs.CardioGpsProfile
+import com.lilru.liftr.ui.map.CardioRouteFullscreenMapDialog
 import com.lilru.liftr.ui.map.CardioRouteMapBox
 import io.github.jan.supabase.SupabaseClient
 import kotlin.math.roundToInt
@@ -197,6 +199,10 @@ fun ActiveCardioWorkoutScreen(
             }
 
             else -> {
+                var showFullRouteMap by remember(workoutId) { mutableStateOf(false) }
+                LaunchedEffect(ui.routePoints.size) {
+                    if (ui.routePoints.size < 2) showFullRouteMap = false
+                }
                 val mainSec = primaryCardioDisplaySec(
                     mode = ui.timerMode,
                     target = ui.targetDurationSec,
@@ -316,13 +322,31 @@ fun ActiveCardioWorkoutScreen(
                                 .padding(horizontal = 12.dp)
                                 .padding(top = 8.dp)
                         )
-                        CardioRouteMapBox(
-                            routePoints = ui.routePoints,
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 12.dp, vertical = 4.dp)
-                        )
+                        ) {
+                            CardioRouteMapBox(
+                                routePoints = ui.routePoints,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            TextButton(
+                                onClick = { showFullRouteMap = true },
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                            ) {
+                                Text(stringResource(R.string.cardio_map_expand))
+                            }
+                        }
                     }
+                    CardioRouteFullscreenMapDialog(
+                        visible = showFullRouteMap && ui.routePoints.size >= 2,
+                        onDismiss = { showFullRouteMap = false },
+                        routePoints = ui.routePoints,
+                        showOpenInGoogleMaps = false
+                    )
                     Text(
                         text = mainFormatted,
                         style = MaterialTheme.typography.displayLarge,

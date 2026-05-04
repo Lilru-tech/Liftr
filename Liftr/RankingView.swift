@@ -70,6 +70,186 @@ struct WorkoutLeaderRow: Decodable, Identifiable {
     let score: Decimal
 }
 
+struct StrengthVolumeLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_volume_kg: Decimal
+    let workouts_cnt: Int
+}
+
+struct CardioDistanceLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_distance_km: Decimal
+    let workouts_cnt: Int
+}
+
+struct SportWinsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let wins: Int64
+    let matches_played: Int64
+}
+
+struct CardioElevationLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_elevation_m: Int64
+    let workouts_cnt: Int
+}
+
+struct CardioDurationLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_duration_sec: Int64
+    let workouts_cnt: Int
+}
+
+struct CardioBestPaceLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let best_pace_sec_per_km: Int
+    let qualifying_workouts_cnt: Int
+}
+
+struct StrengthRepsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_reps: Int64
+    let workouts_cnt: Int
+}
+
+struct StrengthSetsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_sets: Int64
+    let workouts_cnt: Int
+}
+
+struct StrengthMaxWeightLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let max_weight_kg: Decimal
+    let workouts_cnt: Int
+}
+
+struct SportDurationLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_duration_sec: Int64
+    let workouts_cnt: Int
+}
+
+struct SportWinRateLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let wins: Int64
+    let matches_played: Int64
+    let win_rate: Decimal
+}
+
+struct LikesReceivedLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let likes_received: Int64
+    let published_workouts_cnt: Int
+}
+
+struct CommentsReceivedLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let comments_received: Int64
+    let published_workouts_cnt: Int
+}
+
+struct GroupSessionsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let group_sessions_cnt: Int
+    let published_workouts_cnt: Int
+}
+
+struct AchievementsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let unlocked_cnt: Int64
+}
+
+struct HyroxBestTimeLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let best_official_time_sec: Int
+    let hyrox_sessions_cnt: Int
+}
+
+struct FootballGoalsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_goals: Int64
+    let sessions_cnt: Int
+}
+
+struct SkiDistanceKpiLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_distance_km: Decimal
+    let sessions_cnt: Int
+}
+
 enum LBScope: String, CaseIterable, Identifiable {
     case global = "Global", friends = "Friends"
     var id: String { rawValue }
@@ -85,6 +265,35 @@ enum LBKind: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+enum LBMetricSection: String, CaseIterable, Identifiable {
+    case general = "General"
+    case social = "Social"
+    case strength = "Strength"
+    case cardio = "Cardio"
+    case sport = "Sport"
+    var id: String { rawValue }
+    
+    func metrics(for kind: LBKind) -> [LBMetric] {
+        let base: [LBMetric]
+        switch self {
+        case .general:
+            base = [.score, .calories, .level, .bestWorkout, .goals, .duels]
+        case .social:
+            base = [.likesReceived, .commentsReceived, .groupSessions, .achievements]
+        case .strength:
+            base = [.strengthVolume, .strengthReps, .strengthSets, .strengthMaxSetWeight]
+        case .cardio:
+            base = [.cardioDistance, .cardioElevation, .cardioDuration, .cardioBestPace]
+        case .sport:
+            base = [
+                .sportWins, .sportWinRate, .sportDuration,
+                .hyroxBestTime, .footballGoals, .skiDistanceKpi
+            ]
+        }
+        return base.filter { $0.isVisible(for: kind) }
+    }
+}
+
 enum LBMetric: String, CaseIterable, Identifiable {
     case score = "Score"
     case calories = "Calories"
@@ -92,7 +301,43 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case bestWorkout = "Top workouts"
     case goals = "Goals"
     case duels = "Duels"
+    case strengthVolume = "Strength vol"
+    case strengthReps = "Strength reps"
+    case strengthSets = "Strength sets"
+    case strengthMaxSetWeight = "Max set (kg)"
+    case cardioDistance = "Cardio km"
+    case cardioElevation = "Cardio ascent (m)"
+    case cardioDuration = "Cardio time"
+    case cardioBestPace = "Cardio best pace"
+    case sportWins = "Sport wins"
+    case sportWinRate = "Sport win %"
+    case sportDuration = "Sport play time"
+    case likesReceived = "Likes received"
+    case commentsReceived = "Comments received"
+    case groupSessions = "Group sessions (2+)"
+    case achievements = "Achievements"
+    case hyroxBestTime = "Hyrox best time"
+    case footballGoals = "Football goals"
+    case skiDistanceKpi = "Ski km"
     var id: String { rawValue }
+    
+    func isVisible(for kind: LBKind) -> Bool {
+        switch self {
+        case .strengthVolume, .strengthReps, .strengthSets, .strengthMaxSetWeight:
+            return kind == .all || kind == .strength
+        case .cardioDistance, .cardioElevation, .cardioDuration, .cardioBestPace:
+            return kind == .all || kind == .cardio
+        case .sportWins, .sportWinRate, .sportDuration, .hyroxBestTime, .footballGoals, .skiDistanceKpi:
+            return kind == .all || kind == .sport
+        case .likesReceived, .commentsReceived, .groupSessions, .achievements:
+            return kind == .all
+        default: return true
+        }
+    }
+    
+    static func chipCases(for kind: LBKind) -> [LBMetric] {
+        LBMetric.allCases.filter { $0.isVisible(for: kind) }
+    }
 }
 
 enum LBAgeBand: String, CaseIterable, Identifiable {
@@ -114,6 +359,78 @@ private struct Section<Content: View>: View {
     }
 }
 
+private struct RankingMetricPickerSheet: View {
+    @Binding var metric: LBMetric
+    let kind: LBKind
+    @Binding var searchText: String
+    @Environment(\.dismiss) private var dismiss
+    
+    private func matchesSearch(_ m: LBMetric) -> Bool {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if q.isEmpty { return true }
+        return m.rawValue.lowercased().contains(q)
+    }
+    
+    private var metricRowBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.white.opacity(0.14))
+    }
+    
+    var body: some View {
+        ZStack {
+            GradientBackground()
+            NavigationStack {
+                List {
+                    ForEach(Array(LBMetricSection.allCases), id: \.rawValue) { section in
+                        let items = section.metrics(for: kind).filter(matchesSearch)
+                        if !items.isEmpty {
+                            SwiftUI.Section {
+                                ForEach(items, id: \.self) { m in
+                                    Button {
+                                        metric = m
+                                        dismiss()
+                                    } label: {
+                                        HStack {
+                                            Text(m.rawValue)
+                                                .foregroundStyle(.primary)
+                                            Spacer()
+                                            if metric == m {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(Color.accentColor)
+                                            }
+                                        }
+                                    }
+                                    .listRowBackground(
+                                        metricRowBackground
+                                            .padding(.vertical, 3)
+                                            .padding(.horizontal, 2)
+                                    )
+                                }
+                            } header: {
+                                Text(section.rawValue)
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .textCase(nil)
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .navigationTitle("Metric")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
+                .searchable(text: $searchText, prompt: "Search metrics")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @MainActor
 final class RankingVM: ObservableObject {
     @Published var rows: [LeaderRow] = []
@@ -122,6 +439,24 @@ final class RankingVM: ObservableObject {
     @Published var goalsRows: [GoalsLeaderRow] = []
     @Published var duelsRows: [DuelsLeaderRow] = []
     @Published var kcalRows: [CaloriesLeaderRow] = []
+    @Published var strengthVolumeRows: [StrengthVolumeLeaderRow] = []
+    @Published var cardioDistanceRows: [CardioDistanceLeaderRow] = []
+    @Published var sportWinsRows: [SportWinsLeaderRow] = []
+    @Published var cardioElevationRows: [CardioElevationLeaderRow] = []
+    @Published var cardioDurationRows: [CardioDurationLeaderRow] = []
+    @Published var cardioBestPaceRows: [CardioBestPaceLeaderRow] = []
+    @Published var strengthRepsRows: [StrengthRepsLeaderRow] = []
+    @Published var strengthSetsRows: [StrengthSetsLeaderRow] = []
+    @Published var strengthMaxWeightRows: [StrengthMaxWeightLeaderRow] = []
+    @Published var sportDurationRows: [SportDurationLeaderRow] = []
+    @Published var sportWinRateRows: [SportWinRateLeaderRow] = []
+    @Published var likesReceivedRows: [LikesReceivedLeaderRow] = []
+    @Published var commentsReceivedRows: [CommentsReceivedLeaderRow] = []
+    @Published var groupSessionsRows: [GroupSessionsLeaderRow] = []
+    @Published var achievementsRows: [AchievementsLeaderRow] = []
+    @Published var hyroxBestTimeRows: [HyroxBestTimeLeaderRow] = []
+    @Published var footballGoalsRows: [FootballGoalsLeaderRow] = []
+    @Published var skiDistanceKpiRows: [SkiDistanceKpiLeaderRow] = []
     @Published var loading = false
     @Published var error: String?
     @Published var scope: LBScope = .global
@@ -161,6 +496,446 @@ final class RankingVM: ObservableObject {
         if let n, let j = try? AnyJSON(n) { return j } else { return .null }
     }
     
+    private func ajDouble(_ n: Double) -> AnyJSON {
+        if let j = try? AnyJSON(n) { return j } else { return .null }
+    }
+    
+    private func clearAllRowBuffers() {
+        rows = []
+        kcalRows = []
+        levelRows = []
+        workoutRows = []
+        goalsRows = []
+        duelsRows = []
+        strengthVolumeRows = []
+        cardioDistanceRows = []
+        sportWinsRows = []
+        cardioElevationRows = []
+        cardioDurationRows = []
+        cardioBestPaceRows = []
+        strengthRepsRows = []
+        strengthSetsRows = []
+        strengthMaxWeightRows = []
+        sportDurationRows = []
+        sportWinRateRows = []
+        likesReceivedRows = []
+        commentsReceivedRows = []
+        groupSessionsRows = []
+        achievementsRows = []
+        hyroxBestTimeRows = []
+        footballGoalsRows = []
+        skiDistanceKpiRows = []
+    }
+    
+    private func fetchStrengthVolumeLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_muscle_primary"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_strength_volume_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([StrengthVolumeLeaderRow].self, from: res.data)
+            await MainActor.run { self.strengthVolumeRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.strengthVolumeRows = []
+            }
+        }
+    }
+    
+    private func fetchCardioDistanceLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_activity_code"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_cardio_distance_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([CardioDistanceLeaderRow].self, from: res.data)
+            await MainActor.run { self.cardioDistanceRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.cardioDistanceRows = []
+            }
+        }
+    }
+    
+    private func fetchSportWinsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_sport"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_sport_match_wins_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([SportWinsLeaderRow].self, from: res.data)
+            await MainActor.run { self.sportWinsRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.sportWinsRows = []
+            }
+        }
+    }
+    
+    private func fetchCardioElevationLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_activity_code"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_cardio_elevation_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([CardioElevationLeaderRow].self, from: res.data)
+            await MainActor.run { self.cardioElevationRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.cardioElevationRows = []
+            }
+        }
+    }
+    
+    private func fetchCardioDurationLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_activity_code"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_cardio_duration_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([CardioDurationLeaderRow].self, from: res.data)
+            await MainActor.run { self.cardioDurationRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.cardioDurationRows = []
+            }
+        }
+    }
+    
+    private func fetchCardioBestPaceLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_activity_code"] = .null
+            params["p_min_distance_km"] = ajDouble(1.0)
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_cardio_best_pace_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([CardioBestPaceLeaderRow].self, from: res.data)
+            await MainActor.run { self.cardioBestPaceRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.cardioBestPaceRows = []
+            }
+        }
+    }
+    
+    private func fetchStrengthRepsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_muscle_primary"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_strength_total_reps_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([StrengthRepsLeaderRow].self, from: res.data)
+            await MainActor.run { self.strengthRepsRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.strengthRepsRows = []
+            }
+        }
+    }
+    
+    private func fetchStrengthSetsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_muscle_primary"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_strength_total_sets_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([StrengthSetsLeaderRow].self, from: res.data)
+            await MainActor.run { self.strengthSetsRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.strengthSetsRows = []
+            }
+        }
+    }
+    
+    private func fetchStrengthMaxWeightLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_muscle_primary"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_strength_max_set_weight_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([StrengthMaxWeightLeaderRow].self, from: res.data)
+            await MainActor.run { self.strengthMaxWeightRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.strengthMaxWeightRows = []
+            }
+        }
+    }
+    
+    private func fetchSportDurationLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_sport"] = .null
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_sport_duration_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([SportDurationLeaderRow].self, from: res.data)
+            await MainActor.run { self.sportDurationRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.sportDurationRows = []
+            }
+        }
+    }
+    
+    private func fetchSportWinRateLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            params["p_sport"] = .null
+            params["p_min_matches"] = ajInt(3)
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_sport_win_rate_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([SportWinRateLeaderRow].self, from: res.data)
+            await MainActor.run { self.sportWinRateRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.sportWinRateRows = []
+            }
+        }
+    }
+    
+    private func fetchLikesReceivedLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_workout_likes_received_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([LikesReceivedLeaderRow].self, from: res.data)
+            await MainActor.run { self.likesReceivedRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.likesReceivedRows = []
+            }
+        }
+    }
+    
+    private func fetchCommentsReceivedLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_workout_comments_received_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([CommentsReceivedLeaderRow].self, from: res.data)
+            await MainActor.run { self.commentsReceivedRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.commentsReceivedRows = []
+            }
+        }
+    }
+    
+    private func fetchGroupSessionsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_group_workout_sessions_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([GroupSessionsLeaderRow].self, from: res.data)
+            await MainActor.run { self.groupSessionsRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.groupSessionsRows = []
+            }
+        }
+    }
+    
+    private func fetchAchievementsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_achievements_unlocked_period_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([AchievementsLeaderRow].self, from: res.data)
+            await MainActor.run { self.achievementsRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.achievementsRows = []
+            }
+        }
+    }
+    
+    private func fetchHyroxBestTimeLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_hyrox_best_official_time_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([HyroxBestTimeLeaderRow].self, from: res.data)
+            await MainActor.run { self.hyroxBestTimeRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.hyroxBestTimeRows = []
+            }
+        }
+    }
+    
+    private func fetchFootballGoalsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_football_goals_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([FootballGoalsLeaderRow].self, from: res.data)
+            await MainActor.run { self.footballGoalsRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.footballGoalsRows = []
+            }
+        }
+    }
+    
+    private func fetchSkiDistanceKpiLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_ski_distance_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([SkiDistanceKpiLeaderRow].self, from: res.data)
+            await MainActor.run { self.skiDistanceKpiRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.skiDistanceKpiRows = []
+            }
+        }
+    }
+
     private func fetchLevelLeaderboard() async {
         do {
             var params: [String: AnyJSON] = [:]
@@ -315,7 +1090,9 @@ final class RankingVM: ObservableObject {
     }
     
     private func fetch() async {
-        loading = true; error = nil
+        loading = true
+        error = nil
+        clearAllRowBuffers()
         defer { loading = false }
         
         if metric == .level {
@@ -336,6 +1113,78 @@ final class RankingVM: ObservableObject {
         }
         if metric == .duels {
             await fetchDuelsWonLeaderboard()
+            return
+        }
+        if metric == .strengthVolume {
+            await fetchStrengthVolumeLeaderboard()
+            return
+        }
+        if metric == .cardioDistance {
+            await fetchCardioDistanceLeaderboard()
+            return
+        }
+        if metric == .sportWins {
+            await fetchSportWinsLeaderboard()
+            return
+        }
+        if metric == .cardioElevation {
+            await fetchCardioElevationLeaderboard()
+            return
+        }
+        if metric == .cardioDuration {
+            await fetchCardioDurationLeaderboard()
+            return
+        }
+        if metric == .cardioBestPace {
+            await fetchCardioBestPaceLeaderboard()
+            return
+        }
+        if metric == .strengthReps {
+            await fetchStrengthRepsLeaderboard()
+            return
+        }
+        if metric == .strengthSets {
+            await fetchStrengthSetsLeaderboard()
+            return
+        }
+        if metric == .strengthMaxSetWeight {
+            await fetchStrengthMaxWeightLeaderboard()
+            return
+        }
+        if metric == .sportDuration {
+            await fetchSportDurationLeaderboard()
+            return
+        }
+        if metric == .sportWinRate {
+            await fetchSportWinRateLeaderboard()
+            return
+        }
+        if metric == .likesReceived {
+            await fetchLikesReceivedLeaderboard()
+            return
+        }
+        if metric == .commentsReceived {
+            await fetchCommentsReceivedLeaderboard()
+            return
+        }
+        if metric == .groupSessions {
+            await fetchGroupSessionsLeaderboard()
+            return
+        }
+        if metric == .achievements {
+            await fetchAchievementsLeaderboard()
+            return
+        }
+        if metric == .hyroxBestTime {
+            await fetchHyroxBestTimeLeaderboard()
+            return
+        }
+        if metric == .footballGoals {
+            await fetchFootballGoalsLeaderboard()
+            return
+        }
+        if metric == .skiDistanceKpi {
+            await fetchSkiDistanceKpiLeaderboard()
             return
         }
         
@@ -375,6 +1224,8 @@ struct RankingView: View {
 
     @StateObject private var vm = RankingVM()
     @State private var didApplyRankingPreset = false
+    @State private var metricPickerOpen = false
+    @State private var metricSearchText = ""
     @AppStorage("isPremium") private var isPremium: Bool = false
 
     var body: some View {
@@ -393,7 +1244,7 @@ struct RankingView: View {
         }
         .onAppear {
             if !didApplyRankingPreset {
-                if let m = presetMetric { vm.metric = m }
+                if let m = presetMetric, m.isVisible(for: vm.kind) { vm.metric = m }
                 if let s = presetScope { vm.scope = s }
                 didApplyRankingPreset = true
             }
@@ -401,10 +1252,26 @@ struct RankingView: View {
         }
         .onChange(of: vm.scope)  { _, _ in vm.load() }
         .onChange(of: vm.period) { _, _ in vm.load() }
-        .onChange(of: vm.kind)   { _, _ in vm.load() }
+        .onChange(of: vm.kind) { _, newKind in
+            if !vm.metric.isVisible(for: newKind) {
+                vm.metric = .score
+            }
+            vm.load()
+        }
         .onChange(of: vm.sexOpt) { _, _ in vm.load() }
         .onChange(of: vm.age)    { _, _ in vm.load() }
-        .onChange(of: vm.metric) { _, _ in vm.load() }
+        .onChange(of: vm.metric) { _, newMetric in
+            if newMetric == .groupSessions, vm.period != .all {
+                vm.period = .all
+                return
+            }
+            vm.load()
+        }
+        .sheet(isPresented: $metricPickerOpen) {
+            RankingMetricPickerSheet(metric: $vm.metric, kind: vm.kind, searchText: $metricSearchText)
+                .presentationDetents([.medium, .large])
+                .presentationBackground(.clear)
+        }
     }
     
     private var headerBars: some View {
@@ -446,20 +1313,40 @@ struct RankingView: View {
                 }
             }
             
-            VStack(spacing: 8) {
-                Picker("Metric1", selection: $vm.metric) {
-                    ForEach([LBMetric.score, .calories, .level], id: \.self) { m in
-                        Text(m.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag(m)
+            Button {
+                metricSearchText = ""
+                metricPickerOpen = true
+            } label: {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Metric")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(vm.metric.rawValue)
+                            .font(.subheadline.weight(.semibold))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
+                            .multilineTextAlignment(.leading)
                     }
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                 }
-                .pickerStyle(.segmented)
-                Picker("Metric2", selection: $vm.metric) {
-                    ForEach([LBMetric.bestWorkout, .goals, .duels], id: \.self) { m in
-                        Text(m.rawValue).lineLimit(1).minimumScaleFactor(0.75).tag(m)
-                    }
-                }
-                .pickerStyle(.segmented)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color.white.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.white.opacity(0.18), lineWidth: 0.8)
+                )
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Choose ranking metric")
             
             HStack(spacing: 10) {
                 if !metricSkipsPeriodAndKind(vm.metric) {
@@ -746,6 +1633,636 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
+            } else if vm.metric == .strengthVolume {
+                List(vm.strengthVolumeRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(volumeString(row.total_volume_kg))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .cardioDistance {
+                List(vm.cardioDistanceRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(distanceString(row.total_distance_km))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .sportWins {
+                List(vm.sportWinsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.matches_played) matches logged")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.wins) wins")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .cardioElevation {
+                List(vm.cardioElevationRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(elevationString(row.total_elevation_m))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .cardioDuration {
+                List(vm.cardioDurationRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(durationStringFromSeconds(row.total_duration_sec))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .cardioBestPace {
+                List(vm.cardioBestPaceRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.qualifying_workouts_cnt) sessions ≥1 km")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(pacePerKmString(row.best_pace_sec_per_km))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .strengthReps {
+                List(vm.strengthRepsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.total_reps) reps")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .strengthSets {
+                List(vm.strengthSetsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.total_sets) sets")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .strengthMaxSetWeight {
+                List(vm.strengthMaxWeightRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(maxWeightString(row.max_weight_kg))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .sportDuration {
+                List(vm.sportDurationRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.workouts_cnt) workouts")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(durationStringFromSeconds(row.total_duration_sec))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .sportWinRate {
+                List(vm.sportWinRateRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.wins)W / \(row.matches_played)M (min 3)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(winRateString(row.win_rate))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .likesReceived {
+                List(vm.likesReceivedRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.published_workouts_cnt) published")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.likes_received)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .commentsReceived {
+                List(vm.commentsReceivedRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.published_workouts_cnt) published")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.comments_received)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .groupSessions {
+                List(vm.groupSessionsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("of \(row.published_workouts_cnt) published in period")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.group_sessions_cnt)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .achievements {
+                List(vm.achievementsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("Unlocked \(periodLabel(vm.period))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.unlocked_cnt)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .hyroxBestTime {
+                List(vm.hyroxBestTimeRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.hyrox_sessions_cnt) sessions")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(durationStringFromSeconds(Int64(row.best_official_time_sec)))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .footballGoals {
+                List(vm.footballGoalsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.sessions_cnt) sessions")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.total_goals)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .skiDistanceKpi {
+                List(vm.skiDistanceKpiRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.sessions_cnt) sessions")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(distanceString(row.total_distance_km))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             }
         }
         .overlay {
@@ -756,13 +2273,7 @@ struct RankingView: View {
                 Text(e)
                     .foregroundStyle(.red)
                     .padding(.vertical, 24)
-            } else if
-                (vm.metric == .score && vm.rows.isEmpty) ||
-                (vm.metric == .calories && vm.kcalRows.isEmpty) ||
-                (vm.metric == .level && vm.levelRows.isEmpty) ||
-                (vm.metric == .bestWorkout && vm.workoutRows.isEmpty) ||
-                (vm.metric == .goals && vm.goalsRows.isEmpty) ||
-                (vm.metric == .duels && vm.duelsRows.isEmpty)
+            } else if rankingListIsEmpty(vm)
             {
                 VStack(spacing: 8) {
                     Image(systemName: "person.3.sequence")
@@ -791,6 +2302,90 @@ struct RankingView: View {
     private func kcalString(_ d: Decimal) -> String {
         let n = NSDecimalNumber(decimal: d).doubleValue
         return "\(Int(n.rounded())) kcal"
+    }
+    
+    private func volumeString(_ d: Decimal) -> String {
+        let n = NSDecimalNumber(decimal: d).doubleValue
+        if n >= 1000 {
+            return String(format: "%.1fk kg", n / 1000.0)
+        }
+        return String(format: "%.0f kg", n)
+    }
+    
+    private func distanceString(_ d: Decimal) -> String {
+        let n = NSDecimalNumber(decimal: d).doubleValue
+        if n >= 100 {
+            return String(format: "%.0f km", n)
+        }
+        return String(format: "%.1f km", n)
+    }
+    
+    private func elevationString(_ m: Int64) -> String {
+        let n = Int(m)
+        if n >= 1000 {
+            return String(format: "%.1fk m", Double(n) / 1000.0)
+        }
+        return "\(n) m"
+    }
+    
+    private func durationStringFromSeconds(_ sec: Int64) -> String {
+        let s = Int(sec)
+        if s < 3600 {
+            let m = s / 60
+            return "\(m)m"
+        }
+        let h = s / 3600
+        let m = (s % 3600) / 60
+        return "\(h)h \(m)m"
+    }
+    
+    private func pacePerKmString(_ secPerKm: Int) -> String {
+        let s = max(0, secPerKm)
+        let m = s / 60
+        let r = s % 60
+        return String(format: "%d:%02d /km", m, r)
+    }
+    
+    private func maxWeightString(_ kg: Decimal) -> String {
+        let n = NSDecimalNumber(decimal: kg).doubleValue
+        if n >= 1000 {
+            return String(format: "%.1f t", n / 1000.0)
+        }
+        return String(format: "%.1f kg", n)
+    }
+    
+    private func winRateString(_ rate: Decimal) -> String {
+        let n = NSDecimalNumber(decimal: rate).doubleValue * 100.0
+        return String(format: "%.0f%%", n)
+    }
+    
+    private func rankingListIsEmpty(_ vm: RankingVM) -> Bool {
+        switch vm.metric {
+        case .score: return vm.rows.isEmpty
+        case .calories: return vm.kcalRows.isEmpty
+        case .level: return vm.levelRows.isEmpty
+        case .bestWorkout: return vm.workoutRows.isEmpty
+        case .goals: return vm.goalsRows.isEmpty
+        case .duels: return vm.duelsRows.isEmpty
+        case .strengthVolume: return vm.strengthVolumeRows.isEmpty
+        case .cardioDistance: return vm.cardioDistanceRows.isEmpty
+        case .sportWins: return vm.sportWinsRows.isEmpty
+        case .cardioElevation: return vm.cardioElevationRows.isEmpty
+        case .cardioDuration: return vm.cardioDurationRows.isEmpty
+        case .cardioBestPace: return vm.cardioBestPaceRows.isEmpty
+        case .strengthReps: return vm.strengthRepsRows.isEmpty
+        case .strengthSets: return vm.strengthSetsRows.isEmpty
+        case .strengthMaxSetWeight: return vm.strengthMaxWeightRows.isEmpty
+        case .sportDuration: return vm.sportDurationRows.isEmpty
+        case .sportWinRate: return vm.sportWinRateRows.isEmpty
+        case .likesReceived: return vm.likesReceivedRows.isEmpty
+        case .commentsReceived: return vm.commentsReceivedRows.isEmpty
+        case .groupSessions: return vm.groupSessionsRows.isEmpty
+        case .achievements: return vm.achievementsRows.isEmpty
+        case .hyroxBestTime: return vm.hyroxBestTimeRows.isEmpty
+        case .footballGoals: return vm.footballGoalsRows.isEmpty
+        case .skiDistanceKpi: return vm.skiDistanceKpiRows.isEmpty
+        }
     }
     
     private func periodLabel(_ p: LBPeriod) -> String {

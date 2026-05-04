@@ -1,5 +1,6 @@
 package com.lilru.liftr.ui.goals
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
@@ -235,15 +237,25 @@ private fun GoalsSummaryCard(ui: GoalsUiState) {
         GoalsSummaryScope.WEEK -> ui.totalGoals
         GoalsSummaryScope.ALL_TIME -> st?.totalGoals ?: 0
     }
-    val finished = when (ui.scope) {
-        GoalsSummaryScope.WEEK -> ui.finishedCount
-        GoalsSummaryScope.ALL_TIME -> st?.finishedGoals ?: 0
+    val completed = when (ui.scope) {
+        GoalsSummaryScope.WEEK -> ui.completedGoalsCount
+        GoalsSummaryScope.ALL_TIME -> st?.finishedGoals ?: ui.completedGoalsCount
+    }
+    val missed = when (ui.scope) {
+        GoalsSummaryScope.WEEK -> ui.missedGoalsCount
+        GoalsSummaryScope.ALL_TIME -> st?.missedGoals ?: ui.missedGoalsCount
     }
     val avg = when (ui.scope) {
         GoalsSummaryScope.WEEK -> ui.weekAvgProgressPercent
         GoalsSummaryScope.ALL_TIME -> st?.avgProgressPercent?.roundToInt() ?: 0
     }
-    val best = st?.bestProgressPercent?.roundToInt() ?: 0
+    val best = when (ui.scope) {
+        GoalsSummaryScope.WEEK -> ui.weekBestProgressPercent
+        GoalsSummaryScope.ALL_TIME -> st?.bestProgressPercent?.roundToInt() ?: 0
+    }
+    val scroll = rememberScrollState()
+    val streak = goalStreakWeeks(ui.goals)
+    val metricLines = goalMetricBreakdown(ui.goals)
     Card(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
         modifier = Modifier.fillMaxWidth()
@@ -257,14 +269,59 @@ private fun GoalsSummaryCard(ui: GoalsUiState) {
                     },
                     style = MaterialTheme.typography.titleSmall
                 )
-                Text(ui.summaryPercentText, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    stringResource(R.string.goals_summary_completed_rate, ui.summaryPercentText),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(scroll),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(stringResource(R.string.goals_pill_total, total), style = MaterialTheme.typography.labelMedium)
-                Text(stringResource(R.string.goals_pill_finished, finished), style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.goals_pill_completed, completed), style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.goals_pill_missed, missed), style = MaterialTheme.typography.labelMedium)
+                if (ui.scope == GoalsSummaryScope.WEEK && ui.activeGoals.isNotEmpty()) {
+                    Text(stringResource(R.string.goals_pill_active, ui.activeGoals.size), style = MaterialTheme.typography.labelMedium)
+                }
                 Text(stringResource(R.string.goals_pill_avg, avg), style = MaterialTheme.typography.labelMedium)
-                if (ui.scope == GoalsSummaryScope.ALL_TIME) {
-                    Text(stringResource(R.string.goals_pill_best, best), style = MaterialTheme.typography.labelMedium)
+                Text(stringResource(R.string.goals_pill_best, best), style = MaterialTheme.typography.labelMedium)
+            }
+            if (ui.scope == GoalsSummaryScope.ALL_TIME && ui.goals.size >= 100) {
+                Text(
+                    stringResource(R.string.goals_summary_list_cap),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+            if (streak > 0) {
+                Text(
+                    stringResource(R.string.goals_summary_streak, streak),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (metricLines.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.goals_summary_by_metric_title),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                metricLines.forEach { row ->
+                    Text(
+                        stringResource(
+                            R.string.goals_summary_by_metric_line,
+                            row.label,
+                            row.completed,
+                            row.total,
+                            row.avgPct
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -283,6 +340,7 @@ private fun GoalRow(
     val ratio = g.progressRatio.coerceIn(0.0, 2.0)
     val color = when {
         g.isCompleted -> MaterialTheme.colorScheme.outline
+        goalIsFinished(g) && !g.isCompleted -> MaterialTheme.colorScheme.error
         ratio >= 2.0 -> MaterialTheme.colorScheme.tertiary
         ratio >= 1.0 -> MaterialTheme.colorScheme.primary
         ratio >= 0.8 -> MaterialTheme.colorScheme.primaryContainer

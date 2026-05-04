@@ -117,7 +117,11 @@ data class HomeUiState(
     val bestSportScore: Int = 0,
     val bestSportLabel: String = "",
     val canLoadMore: Boolean = true,
-    val isLoadingMore: Boolean = false
+    val isLoadingMore: Boolean = false,
+    /** Signed-out home: public published feed only. */
+    val isGuestHomeFeed: Boolean = false,
+    /** Last refresh had at least one followee (signed-in empty states). */
+    val hasFollowees: Boolean = false
 )
 
 class HomeViewModel(
@@ -219,7 +223,35 @@ class HomeViewModel(
             _uiState.update { it.copy(isLoadingMore = true) }
             val me = supabase.auth.currentUserOrNull()?.id
             if (me == null) {
-                _uiState.update { it.copy(isLoadingMore = false) }
+                val from = nextFeedPage * PAGE_SIZE
+                if (from < 0) {
+                    _uiState.update { it.copy(isLoadingMore = false) }
+                    return@launch
+                }
+                runCatching {
+                    fetchGuestWorkoutPage(st.kindFilter, from)
+                }.onSuccess { (parsed, canMore) ->
+                    if (parsed.isNotEmpty()) {
+                        val merged = mergeOwnerProfiles(parsed)
+                        val enriched = enrichWithSocial(null, merged)
+                        _uiState.update { cur ->
+                            val combined = (cur.workouts + enriched)
+                                .distinctBy { it.id }
+                                .sortedByDescending { it.startedAt.orEmpty() }
+                            cur.copy(
+                                workouts = combined,
+                                isLoadingMore = false,
+                                canLoadMore = canMore
+                            )
+                        }
+                        if (canMore) nextFeedPage += 1
+                    } else {
+                        _uiState.update { it.copy(isLoadingMore = false, canLoadMore = false) }
+                    }
+                }.onFailure { e ->
+                    Log.w(TAG, "loadMore guest: ${e.message}")
+                    _uiState.update { it.copy(isLoadingMore = false, canLoadMore = false) }
+                }
                 return@launch
             }
             val from = nextFeedPage * PAGE_SIZE
@@ -266,24 +298,61 @@ class HomeViewModel(
             } else {
                 _uiState.value = st.copy(loading = true, error = null)
             }
-            runCatching {
-                val me = supabase.auth.currentUserOrNull()?.id
-                if (me == null) {
-                    nextFeedPage = 0
-                    cachedFolloweeIds = emptyList()
-                    _uiState.value = HomeUiState(
+            val me = supabase.auth.currentUserOrNull()?.id
+            if (me == null) {
+                nextFeedPage = 0
+                cachedFolloweeIds = emptyList()
+                try {
+                    val (pageRows, canLoadMore) = fetchGuestWorkoutPage(st.kindFilter, 0)
+                    if (canLoadMore) nextFeedPage = 1 else nextFeedPage = 0
+                    val merged = mergeOwnerProfiles(pageRows)
+                    val enriched = enrichWithSocial(null, merged)
+                    val premium = LiftrPreferences.isPremium(app)
+                    val emptyR = RecalcResult()
+                    _uiState.value = st.copy(
                         loading = false,
                         isRefreshing = false,
+                        workouts = enriched,
+                        monthSummary = null,
+                        recentPrs = emptyList(),
+                        isPremium = premium,
+                        canLoadMore = canLoadMore,
+                        isLoadingMore = false,
                         error = null,
-                        kindFilter = st.kindFilter,
+                        isGuestHomeFeed = true,
+                        hasFollowees = false,
+                        todayCount = emptyR.todayCount,
+                        todayMinutes = emptyR.todayMinutes,
+                        todayPoints = emptyR.todayPoints,
+                        todayKcal = emptyR.todayKcal,
+                        streakDays = emptyR.streakDays,
+                        weekWorkouts = emptyR.weekWorkouts,
+                        weekPoints = emptyR.weekPoints,
+                        weekKcal = emptyR.weekKcal,
+                        weeklyTop = emptyR.weeklyTop,
+                        strongestWeekPtsMtd = emptyR.strongestWeekPtsMtd,
+                        strongestWeekKcalMtd = emptyR.strongestWeekKcalMtd,
+                        bestSportScore = emptyR.bestSportScore,
+                        bestSportLabel = emptyR.bestSportLabel
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "HOME guest failure", e)
+                    _uiState.value = st.copy(
+                        loading = false,
+                        isRefreshing = false,
+                        isLoadingMore = false,
+                        error = "HOME: " + (e.message?.take(260) ?: e::class.java.simpleName),
                         workouts = emptyList(),
                         monthSummary = null,
                         recentPrs = emptyList(),
                         canLoadMore = false,
-                        isLoadingMore = false
+                        isGuestHomeFeed = true,
+                        hasFollowees = false
                     )
-                    return@launch
                 }
+                return@launch
+            }
+            runCatching {
                 val followees = fetchFolloweeIds(me)
                 cachedFolloweeIds = followees
                 val visibleUserIds = (listOf(me) + followees).distinct()
@@ -338,6 +407,8 @@ class HomeViewModel(
                     canLoadMore = h.canLoadMore,
                     isLoadingMore = false,
                     error = null,
+                    isGuestHomeFeed = false,
+                    hasFollowees = cachedFolloweeIds.isNotEmpty(),
                     todayCount = h.r.todayCount,
                     todayMinutes = h.r.todayMinutes,
                     todayPoints = h.r.todayPoints,
@@ -811,6 +882,28 @@ class HomeViewModel(
         return list to (list.size == PAGE_SIZE)
     }
 
+    /** Signed-out home: global published workouts only (paridad con iOS `loadGuestFeedPage`). */
+    private suspend fun fetchGuestWorkoutPage(kind: HomeKindFilter, from: Int): Pair<List<WorkoutSummary>, Boolean> {
+        val to = from + PAGE_SIZE - 1L
+        val res = supabase
+            .from(BackendContracts.Tables.WORKOUTS)
+            .select(
+                columns = Columns.raw(
+                    "id, user_id, kind, title, started_at, ended_at, state, calories_kcal, " +
+                        "cardio_sessions(activity_code), sport_sessions(sport)"
+                )
+            ) {
+                filter { eq("state", "published") }
+                if (kind != HomeKindFilter.ALL) {
+                    filter { eq("kind", kind.name.lowercase()) }
+                }
+                order("started_at", Order.DESCENDING)
+                range(from.toLong(), to)
+            }
+        val list = parseWorkoutRows(res.data)
+        return list to (list.size == PAGE_SIZE)
+    }
+
     private suspend fun refreshOneWorkoutAndRecalcHome(workoutId: Int) {
         val me = supabase.auth.currentUserOrNull()?.id ?: return
         val followees = cachedFolloweeIds
@@ -1047,7 +1140,7 @@ class HomeViewModel(
         return arr.optJSONObject(0)?.optString("sport", "")?.takeIf { it.isNotBlank() }
     }
 
-    private suspend fun enrichWithSocial(me: String, rows: List<WorkoutSummary>): List<WorkoutSummary> {
+    private suspend fun enrichWithSocial(me: String?, rows: List<WorkoutSummary>): List<WorkoutSummary> {
         if (rows.isEmpty()) return rows
         val ids = rows.map { it.id }
         val idStrs = ids.map { it.toString() }
@@ -1057,7 +1150,7 @@ class HomeViewModel(
             val likedByMe = mutableSetOf<Int>()
             for ((wid, uid) in likePairs) {
                 likesByW[wid] = (likesByW[wid] ?: 0) + 1
-                if (uid == me) likedByMe.add(wid)
+                if (me != null && uid == me) likedByMe.add(wid)
             }
             val scoreByW = fetchWorkoutScoresSum(idStrs)
             val coByW = fetchCoParticipantAvatars(idStrs, me)
@@ -1351,7 +1444,7 @@ class HomeViewModel(
 
     private suspend fun fetchCoParticipantAvatars(
         workoutIdStrings: List<String>,
-        me: String
+        me: String?
     ): Map<Int, List<String>> {
         if (workoutIdStrings.isEmpty()) return emptyMap()
         val rawP = supabase
@@ -1380,7 +1473,7 @@ class HomeViewModel(
             val o = arr.optJSONObject(i) ?: continue
             val w = o.optInt("workout_id", Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE } ?: continue
             val u = o.optString("user_id", "").takeIf { it.isNotBlank() } ?: continue
-            if (u == me) continue
+            if (me != null && u == me) continue
             byW.getOrPut(w) { mutableListOf() }.add(u)
         }
         val uids = byW.values.flatMap { it }.distinct()

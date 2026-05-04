@@ -82,13 +82,22 @@ Vistas:
 - `fetch_dual_linked_strength_workout_data`
 - `get_best_workouts_leaderboard_v1`
 - `get_calories_leaderboard_v1`
+- `get_cardio_distance_leaderboard_v1` (sum `cardio_sessions.distance_km` by user; see `docs/migrations/ranking_training_metrics_leaderboard_v1.sql`)
+- `get_strength_volume_leaderboard_v1` (sum `reps * weight_kg` from `exercise_sets`; optional `p_muscle_primary`)
+- `get_sport_match_wins_leaderboard_v1` (wins with `sport_sessions`; optional `p_sport` filter — **replaced 5-arg overload** in `docs/migrations/ranking_training_metrics_leaderboard_v2.sql`; clients should pass `p_sport: null` or omit)
+- `get_cardio_elevation_leaderboard_v1`, `get_cardio_duration_leaderboard_v1`, `get_cardio_best_pace_leaderboard_v1` (optional `p_min_distance_km`, default 1.0)
+- `get_strength_total_reps_leaderboard_v1`, `get_strength_total_sets_leaderboard_v1`, `get_strength_max_set_weight_leaderboard_v1`
+- `get_sport_duration_leaderboard_v1`, `get_sport_win_rate_leaderboard_v1` (optional `p_sport`, `p_min_matches` default 3)
 - `get_duels_won_leaderboard_v1`
 - `get_exercises_usage`
-- `get_goal_stats`
+- `get_goal_stats` (totales agregados; ver [`docs/migrations/get_goal_stats_semantics_v1.sql`](migrations/get_goal_stats_semantics_v1.sql): `finished_goals` = completados, `missed_goals` = semana pasada sin completar, `finished_percent` = tasa de completitud)
 - `get_goals_completed_leaderboard_v1`
 - `get_period_training_compare_v1` (helpers internas `_period_training_compare_summary`, `_period_training_compare_breakdown`; ver `docs/migrations/period_training_compare_v1.sql`)
 - `get_leaderboard_v1`
 - `get_level_leaderboard_v1`
+- `get_workout_likes_received_leaderboard_v1`, `get_workout_comments_received_leaderboard_v1`, `get_group_workout_sessions_leaderboard_v1` (social / feed quality; published workouts in period)
+- `get_achievements_unlocked_period_leaderboard_v1` (app metric **Achievements**; uses same workout-style period as other leaderboards). Optional in same migration file: `get_achievements_total_unlocked_leaderboard_v1` (no `p_period`) for ad-hoc / analytics, not wired in clients.
+- `get_hyrox_best_official_time_leaderboard_v1`, `get_football_goals_leaderboard_v1`, `get_ski_distance_leaderboard_v1`
 - `get_user_achievements`
 - `get_user_level`
 - `get_weekly_goal_recommendation`
@@ -107,7 +116,7 @@ Vistas:
 
 ### Uso en app
 
-- Los clientes **no** hacen `select` crudo al catálogo en el flujo de UI: llaman al RPC `get_user_achievements` con `p_user_id` (uuid) y reciben filas con al menos: `achievement_id`, `code`, `title`, `description`, `category`, `icon_url`, `user_id`, `unlocked_at`, `is_unlocked`.
+- Los clientes **no** hacen `select` crudo al catálogo en el flujo de UI: llaman al RPC `get_user_achievements` con `p_user_id` (uuid) y reciben filas con al menos: `achievement_id`, `code`, `title`, `description`, `category`, `icon_url`, `user_id`, `unlocked_at`, `is_unlocked`. Tras aplicar [get_user_achievements_extend_progress_v1.sql](migrations/get_user_achievements_extend_progress_v1.sql), el RPC puede incluir también `requirement_type`, `requirement_value`, `progress_current`, y agregados opcionales `community_pct_unlocked` / `community_sample_size` (% de usuarios con al menos un workout publicado que tienen el logro; `NULL` si el denominador es menor que el umbral definido en SQL).
 - `check_and_unlock_achievements_for` con el mismo `p_user_id` recalcula desbloqueos; también puede invocarse vía **triggers** al crear workouts, seguir, like, comentar, etc. (ver definición y triggers en el proyecto Supabase).
 - Mapeo de **icono por prefijo de `code` y categoría** (sustituto local si `icon_url` falla o es nulo): iOS en `Liftr/AchievementsGridView.swift` (`symbolForAchievement`, `prettySubtype`), Android en `ui/achievements/AchievementSymbol.kt`. Convención recomendable para códigos nuevos: `disciplina_umbral` (p. ej. `ski_distance_50k`) alineada con el resto de prefijos de catálogo.
 

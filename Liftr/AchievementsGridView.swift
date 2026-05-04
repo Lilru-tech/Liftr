@@ -397,7 +397,53 @@ struct AchievementRow: Decodable, Identifiable {
     let user_id: UUID?
     let unlocked_at: Date?
     let is_unlocked: Bool
+    /// From `achievements.requirement_type` when RPC returns it (e.g. count, streak).
+    let requirement_type: String?
+    /// Target threshold from catalog (e.g. 1000 for distance-style goals).
+    let requirement_value: Double?
+    /// Current progress toward the threshold; nil when locked unless backend fills it.
+    let progress_current: Double?
+    /// % of Liftr users (≥1 published workout) who unlocked this; nil if backend hides small samples.
+    let community_pct_unlocked: Double?
+    /// Denominator for `community_pct_unlocked` when present (distinct users with a published workout).
+    let community_sample_size: Int?
     var id: String { "\(achievement_id)|\(code)" }
+
+    enum CodingKeys: String, CodingKey {
+        case achievement_id, code, title, description, category, icon_url, user_id, unlocked_at, is_unlocked
+        case requirement_type, requirement_value, progress_current
+        case community_pct_unlocked, community_sample_size
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        achievement_id = try c.decode(Int.self, forKey: .achievement_id)
+        code = try c.decode(String.self, forKey: .code)
+        title = try c.decode(String.self, forKey: .title)
+        description = try c.decodeIfPresent(String.self, forKey: .description)
+        category = try c.decode(String.self, forKey: .category)
+        icon_url = try c.decodeIfPresent(String.self, forKey: .icon_url)
+        user_id = try c.decodeIfPresent(UUID.self, forKey: .user_id)
+        unlocked_at = try c.decodeIfPresent(Date.self, forKey: .unlocked_at)
+        is_unlocked = try c.decode(Bool.self, forKey: .is_unlocked)
+        requirement_type = try c.decodeIfPresent(String.self, forKey: .requirement_type)
+        requirement_value = try AchievementRow.decodeFlexibleDouble(c, key: .requirement_value)
+        progress_current = try AchievementRow.decodeFlexibleDouble(c, key: .progress_current)
+        community_pct_unlocked = try AchievementRow.decodeFlexibleDouble(c, key: .community_pct_unlocked)
+        community_sample_size = try AchievementRow.decodeFlexibleInt(c, key: .community_sample_size)
+    }
+
+    private static func decodeFlexibleDouble(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Double? {
+        if let d = try c.decodeIfPresent(Double.self, forKey: key) { return d }
+        if let i = try c.decodeIfPresent(Int.self, forKey: key) { return Double(i) }
+        return nil
+    }
+
+    private static func decodeFlexibleInt(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Int? {
+        if let i = try c.decodeIfPresent(Int.self, forKey: key) { return i }
+        if let d = try c.decodeIfPresent(Double.self, forKey: key) { return Int(d) }
+        return nil
+    }
 }
 
 private struct AchievementTile: View {
@@ -451,11 +497,26 @@ private struct AchievementTile: View {
 
 private struct AchievementDetailSheet: View {
     let row: AchievementRow
-    
+
+    private var progressFraction: Double {
+        if row.is_unlocked { return 1 }
+        guard let target = row.requirement_value, target > 0 else { return 0 }
+        guard let cur = row.progress_current, cur >= 0 else { return 0 }
+        return min(1, cur / target)
+    }
+
+    private var progressPercentInt: Int {
+        Int((progressFraction * 100).rounded(.down))
+    }
+
+    private var hasProgressBar: Bool {
+        row.requirement_value.map { $0 > 0 } ?? false
+    }
+
     var body: some View {
         VStack(spacing: 14) {
             Capsule().fill(.secondary.opacity(0.25)).frame(width: 40, height: 5).padding(.top, 8)
-            
+
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 14).fill(.ultraThinMaterial).frame(width: 64, height: 64)
@@ -479,18 +540,84 @@ private struct AchievementDetailSheet: View {
                 Spacer()
             }
             .padding(.horizontal)
-            
+
+            if hasProgressBar {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Progress")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Text("\(progressPercentInt)%")
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    ProgressView(value: progressFraction)
+                        .tint(row.is_unlocked ? .green : Color.accentColor)
+                        .accessibilityLabel("Achievement progress \(progressPercentInt) percent")
+                    if let cur = row.progress_current, let tgt = row.requirement_value, tgt > 0, !row.is_unlocked {
+                        Text("\(formatGoalNumber(cur)) / \(formatGoalNumber(tgt))")
+                            .font(.caption.weight(.medium))
+                            .monospacedDigit()
+                    }
+                    if let summary = requirementGoalSummary() {
+                        Text(summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !row.is_unlocked, row.progress_current == nil, row.requirement_value != nil {
+                        Text("Live progress toward this goal will appear here once the server reports it. Pull down on the achievements list to refresh.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal)
+            }
+
+            if let pct = row.community_pct_unlocked, let n = row.community_sample_size, n > 0 {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Community")
+                        .font(.subheadline.weight(.semibold))
+                    Text(String(format: "About %.1f%% of Liftr users with at least one published workout have this achievement.", pct))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal)
+            }
+
             ScrollView {
                 Text((row.description ?? "").isEmpty ? "No description." : (row.description ?? ""))
                     .font(.body)
                     .padding(.horizontal)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            
+
             Spacer(minLength: 10)
         }
     }
-    
+
+    private func requirementGoalSummary() -> String? {
+        guard let v = row.requirement_value, v > 0 else { return nil }
+        let t = (row.requirement_type ?? "").lowercased()
+        let n = formatGoalNumber(v)
+        switch t {
+        case "count":
+            return "Goal: \(n) (count)"
+        case "streak":
+            return "Goal: \(n) in a row"
+        default:
+            return "Goal: \(n)"
+        }
+    }
+
+    private func formatGoalNumber(_ v: Double) -> String {
+        if abs(v - Double(Int(v))) < 0.000_1 {
+            return String(Int(v))
+        }
+        return String(format: "%.1f", v)
+    }
+
     private func dateOnly(_ d: Date) -> String {
         let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none
         return f.string(from: d)

@@ -11,16 +11,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -78,6 +87,24 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.BEST_WORKOUT -> stringResource(R.string.ranking_metric_top_workouts)
     RankingMetric.GOALS_COMPLETED -> stringResource(R.string.ranking_metric_goals)
     RankingMetric.DUELS_WON -> stringResource(R.string.ranking_metric_duels)
+    RankingMetric.STRENGTH_VOLUME -> stringResource(R.string.ranking_metric_strength_volume)
+    RankingMetric.STRENGTH_REPS -> stringResource(R.string.ranking_metric_strength_reps)
+    RankingMetric.STRENGTH_SETS -> stringResource(R.string.ranking_metric_strength_sets)
+    RankingMetric.STRENGTH_MAX_SET_WEIGHT -> stringResource(R.string.ranking_metric_strength_max_weight)
+    RankingMetric.CARDIO_DISTANCE -> stringResource(R.string.ranking_metric_cardio_distance)
+    RankingMetric.CARDIO_ELEVATION -> stringResource(R.string.ranking_metric_cardio_elevation)
+    RankingMetric.CARDIO_DURATION -> stringResource(R.string.ranking_metric_cardio_duration)
+    RankingMetric.CARDIO_BEST_PACE -> stringResource(R.string.ranking_metric_cardio_best_pace)
+    RankingMetric.SPORT_MATCH_WINS -> stringResource(R.string.ranking_metric_sport_wins)
+    RankingMetric.SPORT_WIN_RATE -> stringResource(R.string.ranking_metric_sport_win_rate)
+    RankingMetric.SPORT_DURATION -> stringResource(R.string.ranking_metric_sport_duration)
+    RankingMetric.LIKES_RECEIVED -> stringResource(R.string.ranking_metric_likes_received)
+    RankingMetric.COMMENTS_RECEIVED -> stringResource(R.string.ranking_metric_comments_received)
+    RankingMetric.GROUP_SESSIONS -> stringResource(R.string.ranking_metric_group_sessions)
+    RankingMetric.ACHIEVEMENTS -> stringResource(R.string.ranking_metric_achievements)
+    RankingMetric.HYROX_BEST_TIME -> stringResource(R.string.ranking_metric_hyrox_best_time)
+    RankingMetric.FOOTBALL_GOALS -> stringResource(R.string.ranking_metric_football_goals)
+    RankingMetric.SKI_DISTANCE_KPI -> stringResource(R.string.ranking_metric_ski_km)
 }
 
 @OptIn(ExperimentalMaterialApi::class, ExperimentalMaterial3Api::class)
@@ -106,6 +133,8 @@ fun RankingTabScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var selectedWorkout by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedProfile by rememberSaveable { mutableStateOf<String?>(null) }
+    var metricSheetOpen by remember { mutableStateOf(false) }
+    val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     if (selectedWorkout != null) {
         WorkoutDetailScreen(
@@ -174,21 +203,11 @@ fun RankingTabScreen(
                 val periods = RankingPeriod.entries
                 val kinds = RankingKind.entries
                 Column(verticalArrangement = Arrangement.spacedBy(RankingSegmentRowSpacing)) {
-                    val metricsA = listOf(
-                        RankingMetric.SCORE,
-                        RankingMetric.CALORIES,
-                        RankingMetric.LEVEL
-                    )
-                    val metricsB = listOf(
-                        RankingMetric.BEST_WORKOUT,
-                        RankingMetric.GOALS_COMPLETED,
-                        RankingMetric.DUELS_WON
-                    )
                     val showPeriodAndKind = when (ui.metric) {
-                        RankingMetric.SCORE,
-                        RankingMetric.CALORIES,
-                        RankingMetric.BEST_WORKOUT -> true
-                        else -> false
+                        RankingMetric.LEVEL,
+                        RankingMetric.GOALS_COMPLETED,
+                        RankingMetric.DUELS_WON -> false
+                        else -> true
                     }
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         scopes.forEachIndexed { i, scope ->
@@ -210,32 +229,38 @@ fun RankingTabScreen(
                             }
                         }
                     }
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        metricsA.forEachIndexed { i, metric ->
-                            SegmentedButton(
-                                selected = ui.metric == metric,
-                                onClick = { vm.setMetric(metric) },
-                                shape = SegmentedButtonDefaults.itemShape(i, metricsA.size),
-                                modifier = Modifier
-                                    .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
-                                    .height(RankingSegmentButtonHeight)
+                    OutlinedButton(
+                        onClick = { metricSheetOpen = true },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.Center
                             ) {
-                                RankingSegmentLabel(rankingMetricButtonLabel(metric))
+                                Text(
+                                    text = stringResource(R.string.ranking_metric_picker_title),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = rankingMetricButtonLabel(ui.metric),
+                                    style = MaterialTheme.typography.titleSmall,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                        }
-                    }
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                        metricsB.forEachIndexed { i, metric ->
-                            SegmentedButton(
-                                selected = ui.metric == metric,
-                                onClick = { vm.setMetric(metric) },
-                                shape = SegmentedButtonDefaults.itemShape(i, metricsB.size),
-                                modifier = Modifier
-                                    .defaultMinSize(minWidth = 0.dp, minHeight = 0.dp)
-                                    .height(RankingSegmentButtonHeight)
-                            ) {
-                                RankingSegmentLabel(rankingMetricButtonLabel(metric))
-                            }
+                            Icon(
+                                imageVector = Icons.Filled.UnfoldMore,
+                                contentDescription = stringResource(R.string.ranking_metric_picker_hint)
+                            )
                         }
                     }
                     if (showPeriodAndKind) {
@@ -377,5 +402,50 @@ fun RankingTabScreen(
             state = pull,
             modifier = Modifier.align(Alignment.TopCenter)
         )
+        if (metricSheetOpen) {
+            ModalBottomSheet(
+                onDismissRequest = { metricSheetOpen = false },
+                sheetState = metricSheetState
+            ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 24.dp)
+                ) {
+                    rankingMetricSheetSections(ui.kind).forEach { section ->
+                        item(key = "h-${section.title}") {
+                            Text(
+                                text = section.title,
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+                        items(section.metrics, key = { it.name }) { metric ->
+                            ListItem(
+                                headlineContent = {
+                                    Text(
+                                        text = rankingMetricButtonLabel(metric),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
+                                trailingContent = {
+                                    if (ui.metric == metric) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Check,
+                                            contentDescription = null
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.clickable {
+                                    vm.setMetric(metric)
+                                    metricSheetOpen = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }

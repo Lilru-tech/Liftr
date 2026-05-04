@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.FilterChip
@@ -54,6 +55,9 @@ import coil.compose.AsyncImage
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.components.LiftrBackTopBar
 import io.github.jan.supabase.SupabaseClient
+import kotlin.math.abs
+import kotlin.math.min
+import kotlin.math.roundToInt
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -248,6 +252,86 @@ fun AchievementsScreen(
                 } else {
                     Text(stringResource(R.string.achievements_detail_locked), style = MaterialTheme.typography.bodySmall)
                 }
+                val target = row.requirementValue ?: 0.0
+                if (target > 0) {
+                    val cur = row.progressCurrent
+                    val frac = when {
+                        row.isUnlocked -> 1f
+                        cur == null -> 0f
+                        else -> min(1.0, cur / target).toFloat()
+                    }
+                    val pct = (frac * 100f).roundToInt().coerceIn(0, 100)
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                stringResource(R.string.achievements_progress_label),
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                stringResource(R.string.achievements_progress_percent, pct),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        LinearProgressIndicator(
+                            progress = { frac },
+                            modifier = Modifier.fillMaxWidth().height(8.dp),
+                        )
+                        if (!row.isUnlocked && cur != null && target > 0) {
+                            Text(
+                                "${formatAchievementGoalNumber(cur)} / ${formatAchievementGoalNumber(target)}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        val goalLine = when (row.requirementType?.lowercase()) {
+                            "count" -> stringResource(R.string.achievements_goal_count, formatAchievementGoalNumber(target))
+                            "streak" -> stringResource(R.string.achievements_goal_streak, formatAchievementGoalNumber(target))
+                            else -> stringResource(R.string.achievements_goal_generic, formatAchievementGoalNumber(target))
+                        }
+                        Text(
+                            goalLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (!row.isUnlocked && cur == null) {
+                            Text(
+                                stringResource(R.string.achievements_progress_live_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+                }
+                val pctComm = row.communityPctUnlocked
+                val nComm = row.communitySampleSize
+                if (pctComm != null && nComm != null && nComm > 0) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            stringResource(R.string.achievements_community_headline),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            stringResource(R.string.achievements_community_body, pctComm),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 Text(
                     (row.description?.trim()?.takeIf { it.isNotEmpty() }
                         ?: stringResource(R.string.achievements_detail_no_desc)),
@@ -322,3 +406,6 @@ private fun AchievementGridTile(
 
 private fun parseToInstant(s: String): Instant? =
     runCatching { Instant.parse(s) }.getOrNull()
+
+private fun formatAchievementGoalNumber(v: Double): String =
+    if (abs(v - v.toInt()) < 1e-6) v.toInt().toString() else String.format(java.util.Locale.US, "%.1f", v)
