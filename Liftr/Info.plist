@@ -16,5 +16,7 @@
     <string>ca-app-pub-7676731162362384~7023040089</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 </dict>
 </plist>
