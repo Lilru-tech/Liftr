@@ -47,13 +47,13 @@ data class GoalsUiState(
         get() = goals.filter { goalIsFinished(it) }
 
     val totalGoals: Int get() = goals.size
-    val finishedCount: Int get() = finishedGoals.size
+    val completedGoalsCount: Int get() = goals.count { it.isCompleted }
+    val missedGoalsCount: Int get() = goals.count { goalIsFinished(it) && !it.isCompleted }
 
-    val weekSummaryPercent: Int
+    val weekCompletionPercent: Int
         get() {
             if (goals.isEmpty()) return 0
-            val done = finishedGoals.size
-            return ((done.toDouble() / goals.size) * 100.0).roundToInt()
+            return ((completedGoalsCount.toDouble() / goals.size) * 100.0).roundToInt()
         }
 
     val weekAvgProgressPercent: Int
@@ -63,10 +63,16 @@ data class GoalsUiState(
             return ((sum / goals.size) * 100.0).roundToInt()
         }
 
+    val weekBestProgressPercent: Int
+        get() {
+            if (goals.isEmpty()) return 0
+            return ((goals.maxOfOrNull { it.progressRatio } ?: 0.0) * 100.0).roundToInt()
+        }
+
     val summaryPercentText: String
         get() {
             val v = when (scope) {
-                GoalsSummaryScope.WEEK -> weekSummaryPercent.toDouble()
+                GoalsSummaryScope.WEEK -> weekCompletionPercent.toDouble()
                 GoalsSummaryScope.ALL_TIME -> allTimeStats?.finishedPercent ?: 0.0
             }
             return "${v.roundToInt()}%"
@@ -96,6 +102,7 @@ private data class WeeklyGoalResultWire(
 private data class GoalStatsWire(
     @SerialName("total_goals") val totalGoals: Int = 0,
     @SerialName("finished_goals") val finishedGoals: Int = 0,
+    @SerialName("missed_goals") val missedGoals: Int = 0,
     @SerialName("finished_percent") val finishedPercent: Double = 0.0,
     @SerialName("avg_progress_percent") val avgProgressPercent: Double = 0.0,
     @SerialName("best_progress_percent") val bestProgressPercent: Double = 0.0
@@ -209,10 +216,11 @@ class GoalsViewModel(
             is JsonArray -> root.firstOrNull()?.let { json.decodeFromString<GoalStatsWire>(it.toString()) }
             is JsonObject -> runCatching { json.decodeFromString<GoalStatsWire>(root.toString()) }.getOrNull()
             else -> null
-        } ?: return GoalStatsUi(0, 0, 0.0, 0.0, 0.0)
+        } ?: return GoalStatsUi(0, 0, 0, 0.0, 0.0, 0.0)
         return GoalStatsUi(
             totalGoals = w.totalGoals,
             finishedGoals = w.finishedGoals,
+            missedGoals = w.missedGoals,
             finishedPercent = w.finishedPercent,
             avgProgressPercent = w.avgProgressPercent,
             bestProgressPercent = w.bestProgressPercent

@@ -171,7 +171,7 @@ private data class RoutineSetRow(
 
 data class StrengthSetDraft(
     val id: String = UUID.randomUUID().toString(),
-    /** Número de set mostrado y enviado al backend (1…99), como el stepper de iOS. No implica “filas” extra. */
+    /** Veces que cuenta esta fila al persistir / en UI activa (1…99); el ordinal de fila es el índice en la lista, no este valor. */
     val setNumber: Int = 1,
     val repsText: String = "8",
     val weightText: String = "",
@@ -429,7 +429,8 @@ class AddWorkoutViewModel(
     }
 
     /**
-     * Ajusta el número de set (1…99) de esta fila, sin añadir filas — como el stepper de [StrengthSetRowEditor] en iOS.
+     * Ajusta cuántas veces (1…99) cuenta esta **fila** de prescripción al guardar / expandir en el activo;
+     * no cambia el número de filas — paridad con el stepper “Times” de [StrengthSetRowEditor] en iOS.
      */
     fun bumpSetNumber(exerciseDraftId: String, setDraftId: String, delta: Int) {
         if (delta == 0) return

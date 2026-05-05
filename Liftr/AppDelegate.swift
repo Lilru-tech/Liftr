@@ -59,6 +59,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 if let ownerId = userInfo["owner_id"] as? String {
                     data["owner_id"] = ownerId
                 }
+                if let segmentId = userInfo["segment_id"] as? String {
+                    data["segment_id"] = segmentId
+                }
             }
             
             print("🚀 [AppDelegate] launch parsed data:", data)
@@ -168,6 +171,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             }
             if let ownerId = userInfo["owner_id"] as? String {
                 data["owner_id"] = ownerId
+            }
+            if let segmentId = userInfo["segment_id"] as? String {
+                data["segment_id"] = segmentId
             }
         }
         

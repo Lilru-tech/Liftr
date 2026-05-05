@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -75,6 +76,7 @@ fun HomeTabScreen(
     homeRefreshNonce: Int = 0,
     homeFeedSyncNonce: Int = 0,
     homeFeedSyncWorkoutId: Int = 0,
+    onGoToProfileTab: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val homeContext = LocalContext.current
@@ -82,6 +84,7 @@ fun HomeTabScreen(
     val vm: HomeViewModel = viewModel(factory = HomeViewModelFactory(app, supabase))
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var selected by rememberSaveable { mutableStateOf<Int?>(null) }
+    var guestDetailGate by remember { mutableStateOf(false) }
 
     LaunchedEffect(homeRefreshNonce) {
         if (homeRefreshNonce > 0) {
@@ -115,6 +118,9 @@ fun HomeTabScreen(
     }
 
     val me = supabase.auth.currentUserOrNull()?.id
+    LaunchedEffect(me) {
+        guestDetailGate = false
+    }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val pull = rememberPullRefreshState(
@@ -189,33 +195,63 @@ fun HomeTabScreen(
             }
         }
         else -> {
-            HomeContentColumn(
-                modifier = modifier,
-                listState = listState,
-                pull = pull,
-                showScrollTop = showScrollTop,
-                onScrollTop = {
-                    scope.launch {
-                        listState.scrollToItem(0)
+            Box(modifier.fillMaxSize()) {
+                HomeContentColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    listState = listState,
+                    pull = pull,
+                    showScrollTop = showScrollTop,
+                    onScrollTop = {
+                        scope.launch {
+                            listState.scrollToItem(0)
+                        }
+                    },
+                    vm = vm,
+                    ui = ui,
+                    homeContext = homeContext,
+                    collapse = collapse,
+                    hasDataModule = hasDataModule,
+                    onSelectWorkout = { id ->
+                        if (me == null) {
+                            guestDetailGate = true
+                        } else {
+                            selected = id
+                        }
+                    },
+                    me = me,
+                    onOpenGoals = {
+                        me?.let { u -> AppNavEvents.send(MainOverlay.Goals(u)) }
+                    },
+                    onOpenCompetitions = { AppNavEvents.send(MainOverlay.CompetitionsHub) },
+                    onSetCollapse = { c ->
+                        scope.launch {
+                            HomeUiPreferences.setAllCollapsed(homeContext, c)
+                        }
                     }
-                },
-                vm = vm,
-                ui = ui,
-                homeContext = homeContext,
-                collapse = collapse,
-                hasDataModule = hasDataModule,
-                onSelectWorkout = { selected = it },
-                me = me,
-                onOpenGoals = {
-                    me?.let { u -> AppNavEvents.send(MainOverlay.Goals(u)) }
-                },
-                onOpenCompetitions = { AppNavEvents.send(MainOverlay.CompetitionsHub) },
-                onSetCollapse = { c ->
-                    scope.launch {
-                        HomeUiPreferences.setAllCollapsed(homeContext, c)
-                    }
+                )
+                if (guestDetailGate) {
+                    AlertDialog(
+                        onDismissRequest = { guestDetailGate = false },
+                        title = { Text(stringResource(R.string.home_guest_detail_title)) },
+                        text = { Text(stringResource(R.string.home_guest_detail_message)) },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    guestDetailGate = false
+                                    onGoToProfileTab()
+                                }
+                            ) {
+                                Text(stringResource(R.string.home_guest_detail_go_profile))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { guestDetailGate = false }) {
+                                Text(stringResource(R.string.home_guest_detail_cancel))
+                            }
+                        }
+                    )
                 }
-            )
+            }
         }
     }
 }
@@ -416,17 +452,25 @@ private fun HomeContentColumn(
                         }
                     }
                 }
-                item {
-                    HomeGoalsCompetitionsRow(
-                        compact = collapse.collapseModules,
-                        onGoals = onOpenGoals,
-                        onCompetitions = onOpenCompetitions
-                    )
+                if (me != null) {
+                    item {
+                        HomeGoalsCompetitionsRow(
+                            compact = collapse.collapseModules,
+                            onGoals = onOpenGoals,
+                            onCompetitions = onOpenCompetitions
+                        )
+                    }
                 }
                 if (ui.workouts.isEmpty()) {
                     item {
+                        val emptyMsg = when {
+                            ui.isGuestHomeFeed -> stringResource(R.string.home_empty_guest)
+                            me != null && !ui.hasFollowees -> stringResource(R.string.home_empty_no_follows)
+                            me != null && ui.hasFollowees -> stringResource(R.string.home_empty_follows_quiet)
+                            else -> stringResource(R.string.home_empty)
+                        }
                         Text(
-                            stringResource(R.string.home_empty),
+                            emptyMsg,
                             textAlign = TextAlign.Center,
                             modifier = Modifier
                                 .fillMaxWidth()

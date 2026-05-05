@@ -703,6 +703,7 @@ struct EditWorkoutMetaSheet: View {
                         ForEach(s_items[i].sets.indices, id: \.self) { s in
                             Divider()
                             StrengthSetRowEditor(
+                                lineOrdinal: s + 1,
                                 setNumber: $s_items[i].sets[s].setNumber,
                                 reps: $s_items[i].sets[s].reps,
                                 weightKg: $s_items[i].sets[s].weightKg,
@@ -714,30 +715,35 @@ struct EditWorkoutMetaSheet: View {
                         }
                         
                         Divider().padding(.vertical, 4)
-                        HStack {
-                            Button {
-                                s_items[i].sets.append(
-                                    SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)
-                                )
-                            } label: { Label("Add set", systemImage: "plus.circle") }
-                                .buttonStyle(.borderless)
-                            
-                            Spacer()
-                            
-                            if s_items.count > 1 {
-                                Button(role: .destructive) {
-                                    Task {
-                                        await deleteExercise(s_items[i].workoutExerciseId)
-                                        s_items.remove(at: i)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                Button {
+                                    s_items[i].sets.append(
+                                        SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)
+                                    )
+                                } label: { Label("Add set", systemImage: "plus.circle") }
+                                    .buttonStyle(.borderless)
+                                
+                                Spacer()
+                                
+                                if s_items.count > 1 {
+                                    Button(role: .destructive) {
+                                        Task {
+                                            await deleteExercise(s_items[i].workoutExerciseId)
+                                            s_items.remove(at: i)
+                                        }
+                                    } label: {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "trash")
+                                            Text("Remove exercise")
+                                        }
                                     }
-                                } label: {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "trash")
-                                        Text("Remove exercise")
-                                    }
+                                    .buttonStyle(.borderless)
                                 }
-                                .buttonStyle(.borderless)
                             }
+                            Text("Next prescription row: #\(s_items[i].sets.count + 1)")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
                         }
                     }
                     Divider().padding(.vertical, 6)

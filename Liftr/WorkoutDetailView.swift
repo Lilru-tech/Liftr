@@ -466,7 +466,12 @@ struct WorkoutDetailView: View {
         case "strength":
             StrengthDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
         case "cardio":
-            CardioDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
+            CardioDetailBlock(
+                workoutId: workoutId,
+                reloadKey: reloadKey,
+                canEdit: canEdit,
+                workoutState: workout?.state
+            )
         case "sport":
             SportDetailBlock(workoutId: workoutId, reloadKey: reloadKey, canEdit: canEdit)
         default:
@@ -2191,17 +2196,55 @@ private enum CardioRouteGeoJSONParser {
 private struct CardioRouteMapMini: View {
     let coordinates: [CLLocationCoordinate2D]
     @State private var position: MapCameraPosition = .automatic
+    @State private var showExpanded = false
 
     var body: some View {
-        Map(position: $position) {
-            MapPolyline(coordinates: coordinates)
-                .stroke(.blue.opacity(0.88), lineWidth: 4)
+        ZStack(alignment: .topTrailing) {
+            Map(position: $position) {
+                MapPolyline(coordinates: coordinates)
+                    .stroke(.blue.opacity(0.88), lineWidth: 4)
+            }
+            .mapStyle(.standard(elevation: .flat))
+            .frame(height: 220)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .onAppear { fitCamera() }
+            .onChange(of: coordinates.count) { _, _ in fitCamera() }
+            Button {
+                fitCamera()
+                showExpanded = true
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .padding(8)
+            .accessibilityLabel("Expand map")
         }
-        .mapStyle(.standard(elevation: .flat))
-        .frame(height: 220)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .onAppear { fitCamera() }
-        .onChange(of: coordinates.count) { _, _ in fitCamera() }
+        .fullScreenCover(isPresented: $showExpanded) {
+            NavigationStack {
+                ZStack {
+                    Map(position: $position) {
+                        MapPolyline(coordinates: coordinates)
+                            .stroke(.blue.opacity(0.88), lineWidth: 4)
+                    }
+                    .mapStyle(.standard(elevation: .flat))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Route")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showExpanded = false }
+                    }
+                }
+                .onAppear { fitCamera() }
+                .onChange(of: coordinates.count) { _, _ in fitCamera() }
+            }
+        }
     }
 
     private func fitCamera() {
@@ -2231,7 +2274,16 @@ private struct CardioRouteMapMini: View {
 private struct CardioDetailBlock: View {
     let workoutId: Int
     let reloadKey: UUID
-    
+    let canEdit: Bool
+    let workoutState: String?
+
+    @State private var showCreateSegment = false
+    @State private var segmentNav: SegmentNavSheet?
+
+    private struct SegmentNavSheet: Identifiable {
+        let id: UUID
+    }
+
     private struct CardioRow: Decodable {
         let id: Int
         let activity_code: String?
@@ -2285,6 +2337,17 @@ private struct CardioDetailBlock: View {
                         .font(.subheadline.weight(.semibold))
                         .padding(.top, 2)
                     CardioRouteMapMini(coordinates: routeCoordinates)
+                    if canEdit && workoutState == "published" {
+                        Button {
+                            showCreateSegment = true
+                        } label: {
+                            Text("Create segment")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 8)
+                    }
                 }
                 if let n = r.notes, !n.isEmpty { info("Notes", n) }
                 if showsCadence(for: r.activity_code), let cad = extras?.cadence_rpm {
@@ -2315,6 +2378,29 @@ private struct CardioDetailBlock: View {
         .onChange(of: reloadKey) { _, _ in
             kmPaceSplitsExpanded = false
             Task { await load() }
+        }
+        .sheet(isPresented: $showCreateSegment) {
+            CreateSegmentFromWorkoutSheet(
+                workoutId: workoutId,
+                routeCoordinates: routeCoordinates,
+                onCreated: { id in
+                    showCreateSegment = false
+                    segmentNav = SegmentNavSheet(id: id)
+                },
+                onOpenExistingSegment: { id in
+                    showCreateSegment = false
+                    segmentNav = SegmentNavSheet(id: id)
+                },
+                onCancel: { showCreateSegment = false }
+            )
+            .presentationBackground(.clear)
+        }
+        .sheet(item: $segmentNav) { nav in
+            NavigationStack {
+                SegmentDetailView(segmentId: nav.id, onClose: { segmentNav = nil })
+            }
+            .gradientBG()
+            .presentationBackground(.clear)
         }
     }
     
@@ -3131,32 +3217,55 @@ private struct CompareCandidatePicker: View {
     let items: [WorkoutDetailView.CompareCandidate]
     let onPick: (Int) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filteredItems: [WorkoutDetailView.CompareCandidate] {
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return items }
+        let n = q.lowercased()
+        return items.filter { c in
+            if c.displayTitle.lowercased().contains(n) { return true }
+            if let u = c.owner_username, !u.isEmpty, u.lowercased().contains(n) { return true }
+            if c.started_at.formatted(date: .abbreviated, time: .shortened).lowercased().contains(n) { return true }
+            return false
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            List(items) { c in
-                Button {
-                    onPick(c.id)
-                    dismiss()
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(c.displayTitle)
-                            .font(.headline)
-                            .lineLimit(1)
-                        if let u = c.owner_username, !u.isEmpty {
-                            Text("@\(u)")
-                                .font(.subheadline.weight(.medium))
-                                .foregroundStyle(.secondary)
+            Group {
+                if filteredItems.isEmpty, !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("No matches")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 120)
+                } else {
+                    List(filteredItems) { c in
+                        Button {
+                            onPick(c.id)
+                            dismiss()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.displayTitle)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                if let u = c.owner_username, !u.isEmpty {
+                                    Text("@\(u)")
+                                        .font(.subheadline.weight(.medium))
+                                        .foregroundStyle(.secondary)
+                                }
+                                Text(c.started_at.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
                         }
-                        Text(c.started_at.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                        .listRowBackground(Color.clear)
                     }
+                    .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
                 }
-                .listRowBackground(Color.clear)
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
+            .searchable(text: $searchText, prompt: "Search")
             .navigationTitle("Choose workout")
             .navigationBarTitleDisplayMode(.inline)
         }

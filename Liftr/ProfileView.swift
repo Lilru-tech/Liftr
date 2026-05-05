@@ -28,6 +28,14 @@ private struct DayActivity: Decodable, Identifiable {
     var id: String { day }
 }
 
+private struct MySegmentListRow: Decodable, Identifiable {
+    let id: UUID
+    let name: String
+    let buffer_m: Double
+    let status: String
+    let created_at: Date?
+}
+
 private struct WorkoutRow: Decodable, Identifiable {
     let id: Int
     let user_id: UUID
@@ -196,8 +204,18 @@ struct ProfileView: View {
     
     private var consistencyPeriodUnitLabel: String { "days" }
     
-    enum Tab: String { case calendar = "Calendar", prs = "PRs", progress = "Progress", settings = "Settings" }
+    enum Tab: String {
+        case calendar = "Calendar"
+        case prs = "PRs"
+        case progress = "Progress"
+        case segments = "Segments"
+        case settings = "Settings"
+    }
     @State private var tab: Tab = .calendar
+    @State private var showPeriodCompare = false
+    @State private var mySegments: [MySegmentListRow] = []
+    @State private var mySegmentsLoading = false
+    @State private var mySegmentsError: String?
     
     var body: some View {
         profileRootView
@@ -269,6 +287,7 @@ struct ProfileView: View {
                 Text("PRs").tag(Tab.prs)
                 Text("Progress").tag(Tab.progress)
                 if isOwnProfile {
+                    Text("Segments").tag(Tab.segments)
                     Text("Settings").tag(Tab.settings)
                 }
             }
@@ -280,6 +299,7 @@ struct ProfileView: View {
                 case .calendar: calendarTabContent
                 case .prs: prsTabContent
                 case .progress: progressTabContent
+                case .segments: mySegmentsTabContent
                 case .settings: settingsView
                 }
             }
@@ -313,6 +333,87 @@ struct ProfileView: View {
                 .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .sheet(isPresented: $showPeriodCompare) {
+            if let uid = app.userId {
+                PeriodCompareView(viewerUserId: uid)
+            }
+        }
+    }
+
+    private var mySegmentsTabContent: some View {
+        Group {
+            if mySegmentsLoading && mySegments.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let err = mySegmentsError {
+                Text(err)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else if mySegments.isEmpty {
+                Text("You have not created any segments yet.")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            } else {
+                List(mySegments) { row in
+                    NavigationLink {
+                        SegmentDetailView(segmentId: row.id, onClose: nil)
+                            .gradientBG()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(row.name)
+                                .font(.body.weight(.semibold))
+                            HStack(spacing: 6) {
+                                Text(row.status.capitalized)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                Text("·")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                                Text("Buffer \(Int(row.buffer_m)) m")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: tab) {
+            guard isOwnProfile, tab == .segments else { return }
+            await loadMySegments()
+        }
+    }
+
+    private func loadMySegments() async {
+        await MainActor.run {
+            mySegmentsLoading = true
+            mySegmentsError = nil
+        }
+        struct Params: Encodable { let p_limit: Int }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("list_my_segments_v1", params: Params(p_limit: 100))
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([MySegmentListRow].self, from: res.data)
+            await MainActor.run {
+                mySegments = rows
+                mySegmentsLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                mySegments = []
+                mySegmentsLoading = false
+                mySegmentsError = error.localizedDescription
+            }
+        }
     }
     
     private var prsView: some View {
@@ -325,6 +426,16 @@ struct ProfileView: View {
     
     private var progressView: some View {
         VStack(spacing: 12) {
+            if isOwnProfile {
+                Button {
+                    showPeriodCompare = true
+                } label: {
+                    Text("Compare periods")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .padding(.horizontal)
+            }
             VStack(alignment: .leading, spacing: 10) {
                 Text("Period")
                     .font(.caption.weight(.semibold))

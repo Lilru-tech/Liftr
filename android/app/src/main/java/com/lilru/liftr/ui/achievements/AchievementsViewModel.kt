@@ -27,7 +27,13 @@ data class AchievementRowUi(
     val category: String,
     val iconUrl: String?,
     val unlockedAt: String?,
-    val isUnlocked: Boolean
+    val isUnlocked: Boolean,
+    val requirementType: String? = null,
+    val requirementValue: Double? = null,
+    val progressCurrent: Double? = null,
+    /** % of users with ≥1 published workout who unlocked this; null if backend hides small samples. */
+    val communityPctUnlocked: Double? = null,
+    val communitySampleSize: Int? = null
 ) {
     val idKey: String get() = "$achievementId|$code"
 }
@@ -99,7 +105,12 @@ private data class AchievementWire(
     @SerialName("icon_url") val iconUrl: String? = null,
     @SerialName("user_id") val userId: String? = null,
     @SerialName("unlocked_at") val unlockedAt: String? = null,
-    @SerialName("is_unlocked") val isUnlocked: Boolean = false
+    @SerialName("is_unlocked") val isUnlocked: Boolean = false,
+    @SerialName("requirement_type") val requirementType: String? = null,
+    @SerialName("requirement_value") val requirementValue: Double? = null,
+    @SerialName("progress_current") val progressCurrent: Double? = null,
+    @SerialName("community_pct_unlocked") val communityPctUnlocked: Double? = null,
+    @SerialName("community_sample_size") val communitySampleSize: Int? = null
 )
 
 class AchievementsViewModel(
@@ -146,7 +157,12 @@ class AchievementsViewModel(
                         category = w.category,
                         iconUrl = w.iconUrl,
                         unlockedAt = w.unlockedAt,
-                        isUnlocked = w.isUnlocked
+                        isUnlocked = w.isUnlocked,
+                        requirementType = w.requirementType,
+                        requirementValue = w.requirementValue,
+                        progressCurrent = w.progressCurrent,
+                        communityPctUnlocked = w.communityPctUnlocked,
+                        communitySampleSize = w.communitySampleSize
                     )
                 }
                 _uiState.update { it.copy(loading = false, items = rows) }

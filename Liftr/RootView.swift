@@ -89,10 +89,14 @@ struct RootView: View {
                 app.selectedTab = .search
             case .workout:
                 app.selectedTab = .home
+            case .segmentDetail:
+                app.selectedTab = .search
             case .achievements:
                 app.selectedTab = .profile
             case .goals:
                 app.selectedTab = .profile
+            case .challengeWeekly:
+                app.selectedTab = .ranking
 
             case .competitionsHub, .competitionDetail, .competitionReviews:
                 app.selectedTab = .home
@@ -144,6 +148,24 @@ struct RootView: View {
             case .goals(let userId):
                 GoalsView(userId: userId, viewedUsername: "")
                     .gradientBG()
+
+            case .segmentDetail(let segmentId):
+                NavigationStack {
+                    SegmentDetailView(segmentId: segmentId, onClose: {
+                        app.notificationDestination = .none
+                    })
+                    .environmentObject(app)
+                    .gradientBG()
+                }
+
+            case .challengeWeekly(let instanceId):
+                NavigationStack {
+                    WeeklyChallengeDetailView(instanceId: instanceId, onClose: {
+                        app.notificationDestination = .none
+                    })
+                    .environmentObject(app)
+                    .gradientBG()
+                }
                 
             case .competitionsHub:
                 NavigationStack {
