@@ -52,6 +52,7 @@ object NotificationRouter {
         map["follower_id"]?.let { merged["follower_id"] = it }
         map["competition_id"]?.let { merged["competition_id"] = it }
         map["segment_id"]?.let { merged["segment_id"] = it }
+        map["challenge_instance_id"]?.let { merged["challenge_instance_id"] = it }
         return overlayFromStringMap(type, merged, myUserId)
     }
 
@@ -129,6 +130,13 @@ object NotificationRouter {
                     ?: return null
                 val u = runCatching { UUID.fromString(sid) }.getOrNull() ?: return null
                 MainOverlay.SegmentDetail(u)
+            }
+            "challenge_won",
+            "challenge_won_weekly" -> {
+                val cid = map["challenge_instance_id"]?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: return null
+                val u = runCatching { UUID.fromString(cid) }.getOrNull() ?: return null
+                MainOverlay.ChallengeWeeklyDetail(u)
             }
             "legacy" -> {
                 if (map["workout_id"] != null) {

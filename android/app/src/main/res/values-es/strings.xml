@@ -81,4 +81,9 @@
     <string name="segment_your_best_title">Tu mejor marca en este segmento</string>
     <string name="segment_time_disclaimer">Los tiempos son estimaciones por cobertura de ruta hasta que haya marcas de tiempo por punto para el matching.</string>
     <string name="segment_match_quality_row">Calidad del match ~%1$d%%</string>
+    <string name="ranking_metric_challenge_podiums">Podios en retos</string>
+    <string name="ranking_challenges_filter_you">Tú</string>
+    <string name="ranking_challenges_participation_all">Todos</string>
+    <string name="ranking_challenges_participation_on_podium">En el podio</string>
+    <string name="ranking_challenges_you_on_podium">Estás #%1$d en el podio</string>
 </resources>

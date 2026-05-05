@@ -15,4 +15,5 @@ sealed class MainOverlay {
     data class CompetitionDetailById(val competitionId: Int) : MainOverlay()
     data object CompetitionReviews : MainOverlay()
     data class AddWorkoutDraftKind(val kind: String) : MainOverlay()
+    data class ChallengeWeeklyDetail(val instanceId: UUID) : MainOverlay()
 }

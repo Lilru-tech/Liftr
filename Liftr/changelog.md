@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [1.11.0] - 2026-05-03
 
 ### Added
+- **Challenges (MVP + hub polish)** — **FAB** on Ranking opens a **Challenges hub** with **search**, filters by **type** (cardio / strength / sport) and **cadence** (weekly / monthly / open), plus a **You** filter (**All** / **On podium**) using `viewer_claimed` from the list RPC. Rows can show **your podium rank** when applicable. iOS: translucent list styling; Android: **surfaceVariant** cards and chip row for **You**. **Open** (`once`) challenges show **“Does not expire”** instead of a far-future end date.
+- **Challenges (backend)** — `list_active_challenges_v1` returns **`viewer_rank`** and **`viewer_claimed`** for the signed-in user per instance. **`get_challenge_podiums_period_leaderboard_v1`** (`p_scope`, `p_period`, demographics): ranks users by **challenge podium claims** in the selected window (`adjudication_ts`). If upgrading an existing deploy, **`DROP FUNCTION public.list_active_challenges_v1();`** then re-apply `docs/migrations/challenges_mvp_v1.sql` so the return shape can change. Templates support optional scopes (`scope_activity_code`, `scope_sport`, `scope_muscle_primary`), extended **`metric_kind`** (reps, sets, volume, max-rep set, muscle-touching counts, etc.), **`challenge_category`** + seeds (cardio by activity, sport, strength variety). Notifications / deeplink **`challenge_won`** (legacy **`challenge_won_weekly`**). Reference: `docs/migrations/challenges_mvp_v1.sql`, `docs/backend-contracts.md`.
+- **Ranking** — New leaderboard metric **Challenge podiums** (global/friends, same period control as other time-based boards), wired to `get_challenge_podiums_period_leaderboard_v1` (iOS + Android + `BackendContracts`).
+- **Achievements (challenges)** — New **`challenge_*`** milestones (total podium claims and **1st-place** counts), **`unlock_challenge_achievements`**, **AFTER INSERT** trigger on **`challenge_claims`**, and **retroactive backfill** in `docs/migrations/achievements_challenges_deploy.sql`. Wire **`PERFORM public.unlock_challenge_achievements(p_user_id)`** inside **`check_and_unlock_achievements_for`** in Supabase so in-app recomputation stays in sync. iOS / Android: achievement codes prefixed with **`challenge_`** mapped in the achievements grid (icon + subtype label).
 - **Cardio map** — Full-screen / large map for the route in **ActiveCardioWorkout** and **WorkoutDetailView** (cardio).
 - **Achievements** — Progress toward unlocking each achievement (current vs requirement).
 - **Achievements** — Optional **community percentage** (share of users with a published workout who have unlocked the achievement) and sample size when the backend provides it.
@@ -23,13 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Orientation** — App locked to **portrait** on iPhone and iPad (iOS supported orientations + Android `screenOrientation`) to avoid layout breakage after rotation.
 
 ### Fixed
+- **Weekly challenges** — `list_active_challenges_v1` / `get_challenge_instance_detail_v1` must be **VOLATILE** (not `STABLE`) so `_challenge_ensure_weekly_instances()` can run without *read-only transaction* errors on Supabase. Ranking “Weekly challenges” copy on iOS aligned to English; user-facing load errors no longer show raw Postgres text when possible.
 - **Profiles / XP** — Edge cases where **other users’ XP events** did not show reliably.
 - **Goals (history)** — **Unfinished** goals show the completion bar in **red** for quick scanning.
 - **Goals (finished)** — **Completed** state and counts display correctly.
 - **Goals** — **Summary** shows more useful aggregate data.
 
 ### Notes (database / ops)
-- **Segments, home anon feed, ranking RPCs, achievements progress** — SQL migrations and grants are maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
+- **Challenges** — Apply `docs/migrations/challenges_mvp_v1.sql` (and `docs/migrations/challenges_v2_upgrade_from_title_es.sql` only if migrating from the older `title_es` schema). Apply **`docs/migrations/achievements_challenges_deploy.sql`** for challenge achievements; run the **backfill** block if `challenge_claims` already had rows before the trigger.
+- **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
 [1.11.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.11.0

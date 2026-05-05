@@ -220,6 +220,15 @@ struct AchievementsLeaderRow: Decodable, Identifiable {
     let unlocked_cnt: Int64
 }
 
+struct ChallengePodiumsLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let podium_count: Int64
+}
+
 struct HyroxBestTimeLeaderRow: Decodable, Identifiable {
     var id: UUID { user_id }
     let rank: Int
@@ -287,7 +296,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
         let base: [LBMetric]
         switch self {
         case .general:
-            base = [.score, .calories, .level, .bestWorkout, .goals, .duels]
+            base = [.score, .calories, .level, .bestWorkout, .goals, .duels, .challengePodiums]
         case .social:
             base = [.likesReceived, .commentsReceived, .groupSessions, .achievements]
         case .strength:
@@ -313,6 +322,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case bestWorkout = "Top workouts"
     case goals = "Goals"
     case duels = "Duels"
+    case challengePodiums = "Challenge podiums"
     case strengthVolume = "Strength vol"
     case strengthReps = "Strength reps"
     case strengthSets = "Strength sets"
@@ -343,6 +353,8 @@ enum LBMetric: String, CaseIterable, Identifiable {
         case .sportWins, .sportWinRate, .sportDuration, .hyroxBestTime, .footballGoals, .skiDistanceKpi:
             return kind == .all || kind == .sport
         case .likesReceived, .commentsReceived, .groupSessions, .achievements:
+            return kind == .all
+        case .challengePodiums:
             return kind == .all
         case .segmentPopularity:
             return kind == .all
@@ -469,6 +481,7 @@ final class RankingVM: ObservableObject {
     @Published var commentsReceivedRows: [CommentsReceivedLeaderRow] = []
     @Published var groupSessionsRows: [GroupSessionsLeaderRow] = []
     @Published var achievementsRows: [AchievementsLeaderRow] = []
+    @Published var challengePodiumsRows: [ChallengePodiumsLeaderRow] = []
     @Published var hyroxBestTimeRows: [HyroxBestTimeLeaderRow] = []
     @Published var footballGoalsRows: [FootballGoalsLeaderRow] = []
     @Published var skiDistanceKpiRows: [SkiDistanceKpiLeaderRow] = []
@@ -538,6 +551,7 @@ final class RankingVM: ObservableObject {
         commentsReceivedRows = []
         groupSessionsRows = []
         achievementsRows = []
+        challengePodiumsRows = []
         hyroxBestTimeRows = []
         footballGoalsRows = []
         skiDistanceKpiRows = []
@@ -886,6 +900,28 @@ final class RankingVM: ObservableObject {
             }
         }
     }
+
+    private func fetchChallengePodiumsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_challenge_podiums_period_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([ChallengePodiumsLeaderRow].self, from: res.data)
+            await MainActor.run { self.challengePodiumsRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.challengePodiumsRows = []
+            }
+        }
+    }
     
     private func fetchHyroxBestTimeLeaderboard() async {
         do {
@@ -1211,6 +1247,10 @@ final class RankingVM: ObservableObject {
             await fetchAchievementsLeaderboard()
             return
         }
+        if metric == .challengePodiums {
+            await fetchChallengePodiumsLeaderboard()
+            return
+        }
         if metric == .hyroxBestTime {
             await fetchHyroxBestTimeLeaderboard()
             return
@@ -1263,6 +1303,8 @@ struct RankingView: View {
     var presetScope: LBScope? = nil
 
     @StateObject private var vm = RankingVM()
+    @StateObject private var weeklyChallengesLoader = WeeklyChallengesLoader()
+    @State private var challengesHubPresented = false
     @State private var didApplyRankingPreset = false
     @State private var metricPickerOpen = false
     @State private var metricSearchText = ""
@@ -1270,17 +1312,52 @@ struct RankingView: View {
 
     var body: some View {
         GradientBackground {
-            VStack(spacing: 12) {
-                headerBars
-                listContent
-                if !isPremium {
-                    BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
-                        .frame(height: 50)
-                        .padding(.horizontal)
-                        .padding(.bottom, 8)
+            ZStack(alignment: .bottomTrailing) {
+                VStack(spacing: 12) {
+                    headerBars
+                    listContent
+                    if !isPremium {
+                        BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                            .frame(height: 50)
+                            .padding(.horizontal)
+                            .padding(.bottom, 8)
+                    }
                 }
+                .padding(.horizontal, 12)
+
+                Button {
+                    challengesHubPresented = true
+                } label: {
+                    ZStack(alignment: .topTrailing) {
+                        Image(systemName: "flag.checkered")
+                            .font(.title2)
+                            .foregroundStyle(.primary)
+                            .frame(width: 52, height: 52)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.25), lineWidth: 0.8))
+                        if weeklyChallengesLoader.loading == false, !weeklyChallengesLoader.items.isEmpty {
+                            Text("\(weeklyChallengesLoader.items.count)")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(.white)
+                                .padding(5)
+                                .background(Color.red.opacity(0.9), in: Circle())
+                                .offset(x: 6, y: -6)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Challenges")
+                .padding(.trailing, 4)
+                .padding(.bottom, isPremium ? 12 : 64)
             }
-            .padding(.horizontal, 12)
+        }
+        .sheet(isPresented: $challengesHubPresented) {
+            NavigationStack {
+                WeeklyChallengesHubView(loader: weeklyChallengesLoader) {
+                    challengesHubPresented = false
+                }
+                .gradientBG()
+            }
         }
         .onAppear {
             if !didApplyRankingPreset {
@@ -1289,6 +1366,7 @@ struct RankingView: View {
                 didApplyRankingPreset = true
             }
             vm.load()
+            Task { await weeklyChallengesLoader.refresh() }
         }
         .onChange(of: vm.scope)  { _, _ in vm.load() }
         .onChange(of: vm.period) { _, _ in vm.load() }
@@ -1440,7 +1518,7 @@ struct RankingView: View {
     
     private func metricSkipsKind(_ m: LBMetric) -> Bool {
         switch m {
-        case .level, .goals, .duels, .segmentPopularity: return true
+        case .level, .goals, .duels, .challengePodiums, .segmentPopularity: return true
         default: return false
         }
     }
@@ -2211,6 +2289,41 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
+            } else if vm.metric == .challengePodiums {
+                List(vm.challengePodiumsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("Podium finishes \(periodLabel(vm.period))")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.podium_count)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             } else if vm.metric == .hyroxBestTime {
                 List(vm.hyroxBestTimeRows) { row in
                     Section {
@@ -2469,6 +2582,7 @@ struct RankingView: View {
         case .commentsReceived: return vm.commentsReceivedRows.isEmpty
         case .groupSessions: return vm.groupSessionsRows.isEmpty
         case .achievements: return vm.achievementsRows.isEmpty
+        case .challengePodiums: return vm.challengePodiumsRows.isEmpty
         case .hyroxBestTime: return vm.hyroxBestTimeRows.isEmpty
         case .footballGoals: return vm.footballGoalsRows.isEmpty
         case .skiDistanceKpi: return vm.skiDistanceKpiRows.isEmpty

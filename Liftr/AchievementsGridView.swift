@@ -88,6 +88,9 @@ func symbolForAchievement(code: String, category: String) -> String {
     case c.hasPrefix("ranking_"):
         return "trophy.fill"
 
+    case c.hasPrefix("challenge_"):
+        return "flag.checkered"
+
     case c.hasPrefix("streak_"),
          c.hasPrefix("multi_streak_"):
         return "flame.fill"
@@ -148,6 +151,7 @@ func prettySubtype(from code: String, fallbackCategory: String) -> String {
     case c.hasPrefix("rugby_"): return "Rugby"
     case c.hasPrefix("racket_"): return "Racket"
     case c.hasPrefix("ski_"): return "Ski"
+    case c.hasPrefix("challenge_"): return "Challenges"
     default:
         return fallbackCategory.capitalized
     }

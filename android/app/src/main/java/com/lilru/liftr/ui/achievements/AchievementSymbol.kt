@@ -53,6 +53,7 @@ fun imageVectorForAchievement(code: String, category: String): ImageVector {
             c.startsWith("first_follow") || c.startsWith("first_comment") || c.startsWith("comments_") ||
             c.startsWith("follows_") -> Icons.Filled.Group
         c.startsWith("ranking_") -> Icons.Filled.EmojiEvents
+        c.startsWith("challenge_") -> Icons.Filled.MilitaryTech
         c.startsWith("streak_") || c.startsWith("multi_streak_") -> Icons.Filled.Bolt
         c.startsWith("first_workout") || c.startsWith("workouts_") || c.startsWith("achievements_") ||
             c.startsWith("first_fail") || c.startsWith("night_workout") || c.startsWith("morning_workout") ||
@@ -96,6 +97,7 @@ fun prettySubtypeFromCode(code: String, fallbackCategory: String): String {
         c.startsWith("rugby_") -> "Rugby"
         c.startsWith("racket_") -> "Racket"
         c.startsWith("ski_") -> "Ski"
+        c.startsWith("challenge_") -> "Challenges"
         else -> fallbackCategory.replaceFirstChar { it.titlecase() }
     }
 }

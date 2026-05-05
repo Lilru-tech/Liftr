@@ -304,6 +304,18 @@ struct NotificationsListView: View {
             } else {
                 Text("Segment not found")
             }
+
+        case "challenge_won", "challenge_won_weekly":
+            if let raw = n.data?["challenge_instance_id"]?.stringValue,
+               let iid = UUID(uuidString: raw) {
+                NavigationStack {
+                    WeeklyChallengeDetailView(instanceId: iid, onClose: nil)
+                        .environmentObject(app)
+                        .gradientBG()
+                }
+            } else {
+                Text("Challenge not found")
+            }
             
         default:
             VStack(spacing: 12) {
@@ -462,6 +474,7 @@ struct NotificationsListView: View {
         case "workout_kind_inactive":             return "Reminder"
         case "segment_you_are_first":             return "Segment"
         case "segment_lost_first":                return "Segment"
+        case "challenge_won", "challenge_won_weekly": return "Challenge"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

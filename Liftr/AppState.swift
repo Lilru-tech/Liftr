@@ -18,6 +18,7 @@ final class AppState: ObservableObject {
         case competitionsHub
         case competitionDetail(competitionId: Int)
         case competitionReviews
+        case challengeWeekly(instanceId: UUID)
     }
     
     @Published var notificationDestination: NotificationDestination = .none
@@ -360,6 +361,13 @@ final class AppState: ObservableObject {
         case "segment_you_are_first", "segment_lost_first":
             if let sidStr = data["segment_id"] as? String, let sid = UUID(uuidString: sidStr) {
                 notificationDestination = .segmentDetail(segmentId: sid)
+            } else {
+                notificationDestination = .none
+            }
+
+        case "challenge_won", "challenge_won_weekly":
+            if let raw = data["challenge_instance_id"] as? String, let iid = UUID(uuidString: raw) {
+                notificationDestination = .challengeWeekly(instanceId: iid)
             } else {
                 notificationDestination = .none
             }

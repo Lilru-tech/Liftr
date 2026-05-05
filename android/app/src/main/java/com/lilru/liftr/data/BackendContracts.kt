@@ -12,6 +12,9 @@ object BackendContracts {
         const val BASKETBALL_SESSION_STATS = "basketball_session_stats"
         const val CARDIO_SESSIONS = "cardio_sessions"
         const val CARDIO_SESSION_STATS = "cardio_session_stats"
+        const val CHALLENGE_TEMPLATES = "challenge_templates"
+        const val CHALLENGE_INSTANCES = "challenge_instances"
+        const val CHALLENGE_CLAIMS = "challenge_claims"
         const val COMPETITIONS = "competitions"
         const val COMPETITION_BLOCKS = "competition_blocks"
         const val COMPETITION_GOALS = "competition_goals"
@@ -100,6 +103,7 @@ object BackendContracts {
         const val GET_WORKOUT_COMMENTS_RECEIVED_LEADERBOARD_V1 = "get_workout_comments_received_leaderboard_v1"
         const val GET_GROUP_WORKOUT_SESSIONS_LEADERBOARD_V1 = "get_group_workout_sessions_leaderboard_v1"
         const val GET_ACHIEVEMENTS_UNLOCKED_PERIOD_LEADERBOARD_V1 = "get_achievements_unlocked_period_leaderboard_v1"
+        const val GET_CHALLENGE_PODIUMS_PERIOD_LEADERBOARD_V1 = "get_challenge_podiums_period_leaderboard_v1"
         const val GET_HYROX_BEST_OFFICIAL_TIME_LEADERBOARD_V1 = "get_hyrox_best_official_time_leaderboard_v1"
         const val GET_FOOTBALL_GOALS_LEADERBOARD_V1 = "get_football_goals_leaderboard_v1"
         const val GET_SKI_DISTANCE_LEADERBOARD_V1 = "get_ski_distance_leaderboard_v1"
@@ -126,6 +130,10 @@ object BackendContracts {
         const val LIST_SEGMENTS_POPULARITY_LEADERBOARD_V1 = "list_segments_popularity_leaderboard_v1"
         const val SEARCH_SEGMENTS_V1 = "search_segments_v1"
         const val MATCH_SEGMENT_EFFORTS_FOR_WORKOUT_V1 = "match_segment_efforts_for_workout_v1"
+        const val LIST_ACTIVE_CHALLENGES_V1 = "list_active_challenges_v1"
+        const val GET_CHALLENGE_INSTANCE_DETAIL_V1 = "get_challenge_instance_detail_v1"
+        const val GET_CHALLENGE_INSTANCE_LEADERBOARD_V1 = "get_challenge_instance_leaderboard_v1"
+        const val GET_CHALLENGE_MY_PROGRESS_V1 = "get_challenge_my_progress_v1"
     }
 
     /** Supabase Edge Functions (invoke con JWT de sesión), alineado con [Liftr/ProfileView.swift]. */

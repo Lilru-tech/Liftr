@@ -41,6 +41,7 @@ enum class RankingMetric {
     COMMENTS_RECEIVED,
     GROUP_SESSIONS,
     ACHIEVEMENTS,
+    CHALLENGE_PODIUMS,
     HYROX_BEST_TIME,
     FOOTBALL_GOALS,
     SKI_DISTANCE_KPI,
@@ -66,6 +67,7 @@ private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this)
     RankingMetric.COMMENTS_RECEIVED,
     RankingMetric.GROUP_SESSIONS,
     RankingMetric.ACHIEVEMENTS,
+    RankingMetric.CHALLENGE_PODIUMS,
     RankingMetric.SEGMENT_POPULARITY -> kind == RankingKind.ALL
     else -> true
 }
@@ -82,7 +84,8 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetric.LEVEL,
         RankingMetric.BEST_WORKOUT,
         RankingMetric.GOALS_COMPLETED,
-        RankingMetric.DUELS_WON
+        RankingMetric.DUELS_WON,
+        RankingMetric.CHALLENGE_PODIUMS
     )
     val strength = listOf(
         RankingMetric.STRENGTH_VOLUME,
@@ -252,6 +255,7 @@ class RankingViewModel(
                     RankingMetric.COMMENTS_RECEIVED -> fetchCommentsReceived(st)
                     RankingMetric.GROUP_SESSIONS -> fetchGroupSessions(st)
                     RankingMetric.ACHIEVEMENTS -> fetchAchievements(st)
+                    RankingMetric.CHALLENGE_PODIUMS -> fetchChallengePodiums(st)
                     RankingMetric.HYROX_BEST_TIME -> fetchHyroxBestTime(st)
                     RankingMetric.FOOTBALL_GOALS -> fetchFootballGoals(st)
                     RankingMetric.SKI_DISTANCE_KPI -> fetchSkiDistanceKpi(st)
@@ -847,6 +851,31 @@ class RankingViewModel(
                     avatarUrl = o.optNullableString("avatar_url"),
                     primary = "Unlocked: ${o.optLong("unlocked_cnt", 0)}",
                     secondary = "Uses period selector above"
+                )
+            }
+        }
+        return rows to emptyList()
+    }
+
+    private suspend fun fetchChallengePodiums(st: RankingUiState): Pair<List<RankingUserRow>, List<RankingWorkoutRow>> {
+        val params = buildJsonObject {
+            put("p_scope", mapScope(st.scope))
+            put("p_period", mapPeriod(st.period))
+            put("p_limit", 100)
+            put("p_sex", JsonNull)
+            put("p_age_band", JsonNull)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_CHALLENGE_PODIUMS_PERIOD_LEADERBOARD_V1, params) { }
+        val arr = parseArrayFlexible(res.data)
+        val rows = (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                RankingUserRow(
+                    rank = o.optInt("rank", idx + 1),
+                    userId = o.optString("user_id"),
+                    username = o.optNullableString("username"),
+                    avatarUrl = o.optNullableString("avatar_url"),
+                    primary = "Podiums: ${o.optLong("podium_count", 0)}",
+                    secondary = "Challenge claims in period"
                 )
             }
         }

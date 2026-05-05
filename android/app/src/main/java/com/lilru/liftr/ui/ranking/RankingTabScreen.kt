@@ -8,14 +8,18 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.ExperimentalMaterialApi
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ModalBottomSheet
@@ -29,6 +33,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -104,6 +109,7 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.COMMENTS_RECEIVED -> stringResource(R.string.ranking_metric_comments_received)
     RankingMetric.GROUP_SESSIONS -> stringResource(R.string.ranking_metric_group_sessions)
     RankingMetric.ACHIEVEMENTS -> stringResource(R.string.ranking_metric_achievements)
+    RankingMetric.CHALLENGE_PODIUMS -> stringResource(R.string.ranking_metric_challenge_podiums)
     RankingMetric.HYROX_BEST_TIME -> stringResource(R.string.ranking_metric_hyrox_best_time)
     RankingMetric.FOOTBALL_GOALS -> stringResource(R.string.ranking_metric_football_goals)
     RankingMetric.SKI_DISTANCE_KPI -> stringResource(R.string.ranking_metric_ski_km)
@@ -133,12 +139,43 @@ fun RankingTabScreen(
         key = vmKey,
         factory = RankingViewModelFactory(supabase, rankingInitial)
     )
+    val challengesVm: WeeklyChallengesViewModel = viewModel(
+        key = "weekly-challenges-$vmKey",
+        factory = WeeklyChallengesViewModelFactory(supabase)
+    )
     val ui by vm.uiState.collectAsStateWithLifecycle()
+    val chUi by challengesVm.state.collectAsStateWithLifecycle()
     var selectedWorkout by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedProfile by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedSegmentId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedChallengeInstanceId by rememberSaveable { mutableStateOf<String?>(null) }
+    var challengesHubOpen by rememberSaveable { mutableStateOf(false) }
     var metricSheetOpen by remember { mutableStateOf(false) }
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    val openChallengeId = remember(selectedChallengeInstanceId) {
+        selectedChallengeInstanceId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    }
+    if (openChallengeId != null) {
+        ChallengeWeeklyDetailScreen(
+            supabase = supabase,
+            instanceId = openChallengeId,
+            onBack = { selectedChallengeInstanceId = null },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (challengesHubOpen) {
+        WeeklyChallengesHubScreen(
+            supabase = supabase,
+            viewModelKey = vmKey,
+            onOpenChallenge = { selectedChallengeInstanceId = it },
+            onClose = { challengesHubOpen = false },
+            modifier = modifier
+        )
+        return
+    }
 
     val openSegmentId = remember(selectedSegmentId) {
         selectedSegmentId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
@@ -182,6 +219,10 @@ fun RankingTabScreen(
         refreshing = ui.isRefreshing,
         onRefresh = { vm.refresh(false) }
     )
+
+    LaunchedEffect(vmKey, supabase) {
+        challengesVm.refresh()
+    }
     val columnBase = if (embedBack != null) {
         Modifier
             .fillMaxSize()
@@ -231,6 +272,7 @@ fun RankingTabScreen(
                         RankingMetric.LEVEL,
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON,
+                        RankingMetric.CHALLENGE_PODIUMS,
                         RankingMetric.SEGMENT_POPULARITY -> false
                         else -> true
                     }
@@ -451,6 +493,31 @@ fun RankingTabScreen(
                             loadAd(AdRequest.Builder().build())
                         }
                     }
+                )
+            }
+        }
+        FloatingActionButton(
+            onClick = { challengesHubOpen = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 12.dp, bottom = if (isPremium) 8.dp else 64.dp)
+        ) {
+            BadgedBox(
+                badge = {
+                    if (!chUi.loading && chUi.items.isNotEmpty()) {
+                        Badge {
+                            Text(
+                                text = "${chUi.items.size}",
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                    }
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Flag,
+                    contentDescription = stringResource(R.string.ranking_challenges_fab_a11y)
                 )
             }
         }

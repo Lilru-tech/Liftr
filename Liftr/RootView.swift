@@ -95,6 +95,8 @@ struct RootView: View {
                 app.selectedTab = .profile
             case .goals:
                 app.selectedTab = .profile
+            case .challengeWeekly:
+                app.selectedTab = .ranking
 
             case .competitionsHub, .competitionDetail, .competitionReviews:
                 app.selectedTab = .home
@@ -150,6 +152,15 @@ struct RootView: View {
             case .segmentDetail(let segmentId):
                 NavigationStack {
                     SegmentDetailView(segmentId: segmentId, onClose: {
+                        app.notificationDestination = .none
+                    })
+                    .environmentObject(app)
+                    .gradientBG()
+                }
+
+            case .challengeWeekly(let instanceId):
+                NavigationStack {
+                    WeeklyChallengeDetailView(instanceId: instanceId, onClose: {
                         app.notificationDestination = .none
                     })
                     .environmentObject(app)
