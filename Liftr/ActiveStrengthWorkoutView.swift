@@ -97,9 +97,11 @@ struct ActiveStrengthWorkoutView: View {
         let rest_sec: Int?
     }
     
+    /// Solo `ended_at`: `duration_min` en BD es columna generada (no se puede escribir desde el cliente).
     private struct WorkoutEndPatch: Encodable {
         let ended_at: Date
     }
+
     
     private struct WorkoutSanitizePatch: Encodable {
         let ended_at: Date?
@@ -438,6 +440,11 @@ struct ActiveStrengthWorkoutView: View {
                 TextField("Rest (sec)", text: $editRestText)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
+
+                Text("Edits update this workout flow now and are written when you finish the workout.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
                 
                 HStack {
                     Button("Cancel") {
@@ -457,7 +464,7 @@ struct ActiveStrengthWorkoutView: View {
             .presentationDetents([.medium])
         }
         .onReceive(restTimer) { _ in
-            if isResting || gIsResting || g2IsResting {
+            if isResting || gIsResting || g2IsResting || hasActiveRestInExerciseTimerDictionaries() {
                 syncRestCountdownFromEndDate()
             }
             if strengthWorkoutSessionStart != nil, !showCountdown {
@@ -627,7 +634,7 @@ struct ActiveStrengthWorkoutView: View {
 
         if let s = currentSet {
             VStack(spacing: 12) {
-                Text("Set \(displaySetIndex + 1) of \(totalSets)")
+                Text("Step \(displaySetIndex + 1) of \(totalSets)")
                     .font(.headline)
                     .foregroundStyle(isExtraCurrentSet ? .green : .primary)
 
@@ -1101,77 +1108,128 @@ struct ActiveStrengthWorkoutView: View {
         }
     }
     
+    private func hasActiveRestInExerciseTimerDictionaries() -> Bool {
+        if restEndDateByExercise.values.contains(where: { $0.timeIntervalSinceNow > 0 }) { return true }
+        if gRestEndDateByExercise.values.contains(where: { $0.timeIntervalSinceNow > 0 }) { return true }
+        if g2RestEndDateByExercise.values.contains(where: { $0.timeIntervalSinceNow > 0 }) { return true }
+        return false
+    }
+
+    /// Actualiza todos los temporizadores de descanso guardados por `exerciseId` (la burbuja sigue mostrando el tiempo aunque cambies de ejercicio).
     private func syncRestCountdownFromEndDate() {
-        if isResting, let end = restEndDate {
-            let newRemaining = max(0, Int(ceil(end.timeIntervalSinceNow)))
-            remainingRest = newRemaining
+        syncHostRestTimersFromDictionaries()
+        syncGuestRestTimersFromDictionaries()
+        syncGuest2RestTimersFromDictionaries()
+    }
 
-            if remainingRest <= 0 {
-                isResting = false
-                remainingRest = 0
-                restEndDate = nil
-                if !didFireRestFinishedFeedback {
-                    didFireRestFinishedFeedback = true
-                    restFinishedFeedback()
+    private func syncHostRestTimersFromDictionaries() {
+        for id in Array(restEndDateByExercise.keys) {
+            guard let end = restEndDateByExercise[id] else {
+                restEndDateByExercise.removeValue(forKey: id)
+                continue
+            }
+            let newR = max(0, Int(ceil(end.timeIntervalSinceNow)))
+            if newR <= 0 {
+                isRestingByExercise[id] = false
+                remainingRestByExercise[id] = 0
+                restEndDateByExercise[id] = nil
+                if id == currentExercise?.id {
+                    isResting = false
+                    remainingRest = 0
+                    restEndDate = nil
+                    if !didFireRestFinishedFeedback {
+                        didFireRestFinishedFeedback = true
+                        restFinishedFeedback()
+                    }
                 }
-                if let ex = currentExercise {
-                    isRestingByExercise[ex.id] = false
-                    remainingRestByExercise[ex.id] = 0
-                    restEndDateByExercise[ex.id] = nil
+            } else {
+                remainingRestByExercise[id] = newR
+                isRestingByExercise[id] = true
+                if id == currentExercise?.id {
+                    isResting = true
+                    remainingRest = newR
+                    restEndDate = end
                 }
-            } else if let ex = currentExercise {
-                isRestingByExercise[ex.id] = true
-                remainingRestByExercise[ex.id] = remainingRest
-                restEndDateByExercise[ex.id] = end
             }
         }
+        if let cur = currentExercise?.id, restEndDateByExercise[cur] == nil, isResting {
+            isResting = false
+            remainingRest = 0
+            restEndDate = nil
+        }
+    }
 
-        if gIsResting, let gEnd = gRestEndDate {
-            let newGR = max(0, Int(ceil(gEnd.timeIntervalSinceNow)))
-            gRemainingRest = newGR
-
-            if gRemainingRest <= 0 {
-                gIsResting = false
-                gRemainingRest = 0
-                gRestEndDate = nil
-                if !gDidFireRestFinishedFeedback {
-                    gDidFireRestFinishedFeedback = true
-                    restFinishedFeedback()
+    private func syncGuestRestTimersFromDictionaries() {
+        for id in Array(gRestEndDateByExercise.keys) {
+            guard let end = gRestEndDateByExercise[id] else {
+                gRestEndDateByExercise.removeValue(forKey: id)
+                continue
+            }
+            let newR = max(0, Int(ceil(end.timeIntervalSinceNow)))
+            if newR <= 0 {
+                gIsRestingByExercise[id] = false
+                gRemainingRestByExercise[id] = 0
+                gRestEndDateByExercise[id] = nil
+                if id == currentGuestExercise?.id {
+                    gIsResting = false
+                    gRemainingRest = 0
+                    gRestEndDate = nil
+                    if !gDidFireRestFinishedFeedback {
+                        gDidFireRestFinishedFeedback = true
+                        restFinishedFeedback()
+                    }
                 }
-                if let ex = currentGuestExercise {
-                    gIsRestingByExercise[ex.id] = false
-                    gRemainingRestByExercise[ex.id] = 0
-                    gRestEndDateByExercise[ex.id] = nil
+            } else {
+                gRemainingRestByExercise[id] = newR
+                gIsRestingByExercise[id] = true
+                if id == currentGuestExercise?.id {
+                    gIsResting = true
+                    gRemainingRest = newR
+                    gRestEndDate = end
                 }
-            } else if let ex = currentGuestExercise {
-                gIsRestingByExercise[ex.id] = true
-                gRemainingRestByExercise[ex.id] = gRemainingRest
-                gRestEndDateByExercise[ex.id] = gEnd
             }
         }
+        if let cur = currentGuestExercise?.id, gRestEndDateByExercise[cur] == nil, gIsResting {
+            gIsResting = false
+            gRemainingRest = 0
+            gRestEndDate = nil
+        }
+    }
 
-        if g2IsResting, let g2End = g2RestEndDate {
-            let newG2 = max(0, Int(ceil(g2End.timeIntervalSinceNow)))
-            g2RemainingRest = newG2
-
-            if g2RemainingRest <= 0 {
-                g2IsResting = false
-                g2RemainingRest = 0
-                g2RestEndDate = nil
-                if !g2DidFireRestFinishedFeedback {
-                    g2DidFireRestFinishedFeedback = true
-                    restFinishedFeedback()
-                }
-                if let ex = currentGuest2Exercise {
-                    g2IsRestingByExercise[ex.id] = false
-                    g2RemainingRestByExercise[ex.id] = 0
-                    g2RestEndDateByExercise[ex.id] = nil
-                }
-            } else if let ex = currentGuest2Exercise {
-                g2IsRestingByExercise[ex.id] = true
-                g2RemainingRestByExercise[ex.id] = g2RemainingRest
-                g2RestEndDateByExercise[ex.id] = g2End
+    private func syncGuest2RestTimersFromDictionaries() {
+        for id in Array(g2RestEndDateByExercise.keys) {
+            guard let end = g2RestEndDateByExercise[id] else {
+                g2RestEndDateByExercise.removeValue(forKey: id)
+                continue
             }
+            let newR = max(0, Int(ceil(end.timeIntervalSinceNow)))
+            if newR <= 0 {
+                g2IsRestingByExercise[id] = false
+                g2RemainingRestByExercise[id] = 0
+                g2RestEndDateByExercise[id] = nil
+                if id == currentGuest2Exercise?.id {
+                    g2IsResting = false
+                    g2RemainingRest = 0
+                    g2RestEndDate = nil
+                    if !g2DidFireRestFinishedFeedback {
+                        g2DidFireRestFinishedFeedback = true
+                        restFinishedFeedback()
+                    }
+                }
+            } else {
+                g2RemainingRestByExercise[id] = newR
+                g2IsRestingByExercise[id] = true
+                if id == currentGuest2Exercise?.id {
+                    g2IsResting = true
+                    g2RemainingRest = newR
+                    g2RestEndDate = end
+                }
+            }
+        }
+        if let cur = currentGuest2Exercise?.id, g2RestEndDateByExercise[cur] == nil, g2IsResting {
+            g2IsResting = false
+            g2RemainingRest = 0
+            g2RestEndDate = nil
         }
     }
     
@@ -2115,6 +2173,17 @@ struct ActiveStrengthWorkoutView: View {
                 }
             }
         )
+        let restBubbleSeconds: Int? = {
+            let end: Date?
+            switch lane {
+            case .host: end = restEndDateByExercise[ex.id]
+            case .guest: end = gRestEndDateByExercise[ex.id]
+            case .guest2: end = g2RestEndDateByExercise[ex.id]
+            }
+            guard let end else { return nil }
+            let sec = max(0, Int(ceil(end.timeIntervalSinceNow)))
+            return sec > 0 ? sec : nil
+        }()
         StrengthExerciseNavColumn(
             displayNumber: idx + 1,
             exerciseTitle: title,
@@ -2127,6 +2196,7 @@ struct ActiveStrengthWorkoutView: View {
             isWavePulsing: strengthNavStripWaveIndex == idx,
             jumpOK: jumpOK,
             navAnimationIndex: currentIdx,
+            restOverlaySeconds: restBubbleSeconds,
             popoverPresented: popBinding,
             onShortTap: { jumpToExercise(lane: lane, index: idx) },
             onLongPress: { navExercisePopoverIndex = popId }
@@ -2616,9 +2686,11 @@ struct ActiveStrengthWorkoutView: View {
         do {
             try await persistExerciseRows(exList, performedMap: performedMap)
 
+            let endTime = Date()
+
             _ = try await client
                 .from("workouts")
-                .update(WorkoutEndPatch(ended_at: Date()))
+                .update(WorkoutEndPatch(ended_at: endTime))
                 .eq("id", value: workoutId)
                 .execute()
 
@@ -2628,7 +2700,7 @@ struct ActiveStrengthWorkoutView: View {
                 try await persistExerciseRows(guestExList, performedMap: guestPerformedMap)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: Date()))
+                    .update(WorkoutEndPatch(ended_at: endTime))
                     .eq("id", value: gid)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: gid)
@@ -2638,7 +2710,7 @@ struct ActiveStrengthWorkoutView: View {
                 try await persistExerciseRows(guest2ExList, performedMap: guest2PerformedMap)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: Date()))
+                    .update(WorkoutEndPatch(ended_at: endTime))
                     .eq("id", value: g2id)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: g2id)
@@ -3012,6 +3084,8 @@ private struct StrengthExerciseNavColumn: View {
     let isWavePulsing: Bool
     let jumpOK: Bool
     let navAnimationIndex: Int
+    /// Segundos de descanso restantes en la burbuja del ejercicio actual (mismo tratamiento visual que avatares en grupo).
+    let restOverlaySeconds: Int?
     @Binding var popoverPresented: Bool
     let onShortTap: () -> Void
     let onLongPress: () -> Void
@@ -3033,6 +3107,9 @@ private struct StrengthExerciseNavColumn: View {
         parts.append("progress \(pct) percent")
         if completed { parts.append("completed") }
         if isLast { parts.append("last in workout") }
+        if let r = restOverlaySeconds, r > 0 {
+            parts.append("rest \(r) seconds remaining")
+        }
         return parts.joined(separator: ", ")
     }
 
@@ -3094,10 +3171,32 @@ private struct StrengthExerciseNavColumn: View {
                 Circle()
                     .strokeBorder(Color.white.opacity(0.95), lineWidth: 2.5)
             }
-            Text(verbatim: numberLabel)
-                .font(.callout.weight(isCurrent ? .bold : .semibold))
-                .monospacedDigit()
-                .foregroundStyle(foregroundColor)
+            if (restOverlaySeconds ?? 0) <= 0 {
+                Text(verbatim: numberLabel)
+                    .font(.callout.weight(isCurrent ? .bold : .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(foregroundColor)
+            }
+            if let restSec = restOverlaySeconds, restSec > 0 {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.black.opacity(0.35),
+                                Color.black.opacity(0.62)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                Text("\(restSec)s")
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                    .minimumScaleFactor(0.75)
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+                    .zIndex(1)
+            }
             burstOverlay
                 .zIndex(2)
                 .allowsHitTesting(false)

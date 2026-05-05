@@ -19,6 +19,58 @@ struct Exercise: Identifiable, Decodable {
             return name_en ?? name
         }
     }
+
+    func localizedMusclePrimary(for language: ExerciseLanguage) -> String? {
+        guard let raw = muscle_primary?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        let key = raw.normalizedLookupKey
+        guard let pair = Self.muscleTranslations[key] else {
+            return raw
+        }
+        switch language {
+        case .spanish: return pair.es
+        case .english: return pair.en
+        }
+    }
+
+    private static let muscleTranslations: [String: (es: String, en: String)] = {
+        let pairs: [(String, String)] = [
+            ("abductores", "abductors"),
+            ("aductores", "adductors"),
+            ("antebrazos", "forearms"),
+            ("bíceps", "biceps"),
+            ("cardio", "cardio"),
+            ("core", "core"),
+            ("cuádriceps", "quadriceps"),
+            ("espalda", "back"),
+            ("gemelos", "calves"),
+            ("glúteos", "glutes"),
+            ("hombros", "shoulders"),
+            ("isquiotibiales", "hamstrings"),
+            ("lumbares", "lower back"),
+            ("pecho", "chest"),
+            ("piernas", "legs"),
+            ("trapecios", "traps"),
+            ("tríceps", "triceps")
+        ]
+
+        var map: [String: (es: String, en: String)] = [:]
+        for pair in pairs {
+            map[pair.0.normalizedLookupKey] = (es: pair.0, en: pair.1)
+            map[pair.1.normalizedLookupKey] = (es: pair.0, en: pair.1)
+        }
+        return map
+    }()
+}
+
+private extension String {
+    var normalizedLookupKey: String {
+        self
+            .folding(options: .diacriticInsensitive, locale: .current)
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 }
 
 struct PickerHandle: Identifiable {
@@ -88,7 +140,7 @@ struct ExercisePickerSheet: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(ex.localizedName(for: exerciseLanguage))
                                         Text(
-                                            [ex.category, ex.muscle_primary, ex.equipment]
+                                            [ex.category, ex.localizedMusclePrimary(for: exerciseLanguage), ex.equipment]
                                                 .compactMap { $0 }
                                                 .filter { $0.lowercased() != "strength" }
                                                 .joined(separator: " · ")

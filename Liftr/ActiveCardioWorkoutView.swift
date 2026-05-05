@@ -26,6 +26,7 @@ struct ActiveCardioWorkoutView: View {
     @State private var hasTargetTime: Bool = false
     @State private var mode: TimerMode = .stopwatch
     @State private var mapCameraPosition: MapCameraPosition = .automatic
+    @State private var showExpandedRouteMap = false
     @State private var splitEndElapsedSec: [Int] = []
     @State private var lastSplitDistanceKm: Double = 0
     @State private var lastSplitElapsedSec: Int = 0
@@ -189,15 +190,30 @@ struct ActiveCardioWorkoutView: View {
                             Text("Route")
                                 .font(.subheadline.weight(.semibold))
                             if gpsTracker.routeCoordinates.count >= 2 {
-                                Map(position: $mapCameraPosition) {
-                                    MapPolyline(coordinates: gpsTracker.routeCoordinates)
-                                        .stroke(.blue.opacity(0.88), lineWidth: 4)
-                                }
-                                .mapStyle(.standard(elevation: .flat))
-                                .frame(height: 200)
-                                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                                .onChange(of: gpsTracker.routeCoordinates.count) { _, _ in
-                                    fitMapToRouteIfNeeded()
+                                ZStack(alignment: .topTrailing) {
+                                    Map(position: $mapCameraPosition) {
+                                        MapPolyline(coordinates: gpsTracker.routeCoordinates)
+                                            .stroke(.blue.opacity(0.88), lineWidth: 4)
+                                    }
+                                    .mapStyle(.standard(elevation: .flat))
+                                    .frame(height: 200)
+                                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                                    .onChange(of: gpsTracker.routeCoordinates.count) { _, _ in
+                                        fitMapToRouteIfNeeded()
+                                    }
+                                    Button {
+                                        fitMapToRouteIfNeeded()
+                                        showExpandedRouteMap = true
+                                    } label: {
+                                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                            .font(.body.weight(.semibold))
+                                            .foregroundStyle(.primary)
+                                            .padding(8)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(8)
+                                    .accessibilityLabel("Expand map")
                                 }
                             } else {
                                 Text("The map will draw your path while you move with GPS on.")
@@ -411,6 +427,30 @@ struct ActiveCardioWorkoutView: View {
             guard usesGPSTracking, !distanceFieldUserEdited else { return }
             distanceText = String(format: "%.2f", gpsTracker.distanceKm)
             syncKmSplitMarkersWithDistance()
+        }
+        .fullScreenCover(isPresented: $showExpandedRouteMap) {
+            NavigationStack {
+                ZStack {
+                    Map(position: $mapCameraPosition) {
+                        MapPolyline(coordinates: gpsTracker.routeCoordinates)
+                            .stroke(.blue.opacity(0.88), lineWidth: 4)
+                    }
+                    .mapStyle(.standard(elevation: .flat))
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Route")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showExpandedRouteMap = false }
+                    }
+                }
+                .onAppear { fitMapToRouteIfNeeded() }
+                .onChange(of: gpsTracker.routeCoordinates.count) { _, _ in
+                    fitMapToRouteIfNeeded()
+                }
+            }
         }
     }
 

@@ -20,8 +20,8 @@ struct AppleHealthImportView: View {
                             .foregroundStyle(.primary)
 
                         Text(
-                            "Reads compatible workouts from the Health app and copies them into Liftr as cardio. "
-                                + "Nothing is written back to Health. Tap the info button for the full guide."
+                            "Manually imports compatible cardio workouts (run, walk, hike, cycling, swimming, rowing) from Apple Health. "
+                                + "Nothing is written back to Health, and already imported sessions are skipped."
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -209,7 +209,7 @@ struct AppleHealthImportView: View {
             importing = false
             summary = result
             if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0 {
-                banner = "No matching workouts found in this range."
+                banner = "No compatible cardio workouts found in this date range."
             }
         }
     }

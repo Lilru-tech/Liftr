@@ -18,29 +18,49 @@ struct GoalsView: View {
     private var effectiveUserId: UUID? { userId ?? app.userId }
     private var isOwnProfile: Bool { effectiveUserId != nil && effectiveUserId == app.userId }
     private var currentWeekStart: Date { GoalsManager.currentWeekStart() }
+    /// Week ended or target met (same as goal rows “Expired / Completed”).
     private var finishedGoalsUI: [GoalRowUI] { goals.filter { isFinished($0) } }
     private var activeGoals: [GoalRowUI] { goals.filter { !isFinished($0) } }
     private var activeGoalIds: [Int64] { activeGoals.map(\.id) }
     private var totalGoals: Int { goals.count }
-    private var finishedGoals: Int { finishedGoalsUI.count }
-    private var finishedPercent: Int { totalGoals == 0 ? 0 : Int((Double(finishedGoals) / Double(totalGoals) * 100.0).rounded()) }
+    private var completedGoalsCount: Int { goals.filter(\.isCompleted).count }
+    private var missedGoalsCount: Int { goals.filter { isFinished($0) && !$0.isCompleted }.count }
     private var avgProgressPercent: Int { totalGoals == 0 ? 0 : Int((goals.map(\.progressRatio).reduce(0,+) / Double(totalGoals) * 100.0).rounded()) }
+    private var weekBestProgressPercent: Int {
+        guard !goals.isEmpty else { return 0 }
+        return Int(((goals.map(\.progressRatio).max() ?? 0) * 100.0).rounded())
+    }
+    private var completionRatePercent: Int {
+        switch summaryScope {
+        case .week:
+            guard totalGoals > 0 else { return 0 }
+            return Int((Double(completedGoalsCount) / Double(totalGoals) * 100.0).rounded())
+        case .allTime:
+            return Int((allTimeStats?.finished_percent ?? 0).rounded())
+        }
+    }
     private var summaryTotal: Int {
         summaryScope == .week ? totalGoals : (allTimeStats?.total_goals ?? 0)
     }
-    private var summaryFinished: Int {
-        summaryScope == .week ? finishedGoals : (allTimeStats?.finished_goals ?? 0)
+    private var summaryCompleted: Int {
+        switch summaryScope {
+        case .week: return completedGoalsCount
+        case .allTime: return allTimeStats?.finished_goals ?? completedGoalsCount
+        }
+    }
+    private var summaryMissed: Int {
+        switch summaryScope {
+        case .week: return missedGoalsCount
+        case .allTime: return allTimeStats?.missed_goals ?? missedGoalsCount
+        }
     }
     private var summaryAvg: Int {
         summaryScope == .week ? avgProgressPercent : Int((allTimeStats?.avg_progress_percent ?? 0).rounded())
     }
     private var summaryBest: Int {
-        Int((allTimeStats?.best_progress_percent ?? 0).rounded())
+        summaryScope == .week ? weekBestProgressPercent : Int((allTimeStats?.best_progress_percent ?? 0).rounded())
     }
-    private var summaryPercentText: String {
-        let v = summaryScope == .week ? Double(finishedPercent) : (allTimeStats?.finished_percent ?? 0)
-        return "\(Int(v.rounded()))%"
-    }
+    private var summaryPercentText: String { "\(completionRatePercent)%" }
 
     private var finishedAvgPercent: Int {
         guard !finishedGoalsUI.isEmpty else { return 0 }
@@ -167,7 +187,7 @@ struct GoalsView: View {
                                         )
 
                                     HStack(spacing: 10) {
-                                        Text("Finished")
+                                        Text("History")
                                             .font(.caption.weight(.semibold))
                                             .foregroundStyle(.primary.opacity(0.75))
 
@@ -256,17 +276,49 @@ struct GoalsView: View {
                 Text(summaryScope == .week ? "This week summary" : "All time summary")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("\(summaryPercentText)")
+                Text("Completed \(summaryPercentText)")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
 
-            HStack(spacing: 12) {
-                summaryPill(title: "Total", value: "\(summaryTotal)")
-                summaryPill(title: "Finished", value: "\(summaryFinished)")
-                summaryPill(title: "Avg", value: "\(summaryAvg)%")
-                if summaryScope == .allTime {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    summaryPill(title: "Total", value: "\(summaryTotal)")
+                    summaryPill(title: "Completed", value: "\(summaryCompleted)")
+                    summaryPill(title: "Missed", value: "\(summaryMissed)")
+                    if summaryScope == .week, activeGoals.count > 0 {
+                        summaryPill(title: "Active", value: "\(activeGoals.count)")
+                    }
+                    summaryPill(title: "Avg", value: "\(summaryAvg)%")
                     summaryPill(title: "Best", value: "\(summaryBest)%")
+                }
+            }
+
+            if summaryScope == .allTime, let cap = goalsAllTimeListCapNote {
+                Text(cap)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            let streak = goalsCurrentStreakWeeks()
+            if streak > 0 {
+                Text("Current streak: \(streak) week\(streak == 1 ? "" : "s") with a completed goal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            let lines = goalsMetricBreakdownLines()
+            if !lines.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("By metric")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(0..<lines.count, id: \.self) { i in
+                        let row = lines[i]
+                        Text("\(row.label): \(row.completed)/\(row.total) completed · avg \(row.avgPct)%")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -277,6 +329,53 @@ struct GoalsView: View {
                 .stroke(.white.opacity(0.18))
         )
         .padding(.horizontal)
+    }
+
+    private var goalsAllTimeListCapNote: String? {
+        guard summaryScope == .allTime, goals.count >= 100 else { return nil }
+        return "List shows your latest 100 goals; streak and by-metric use this sample. Totals use full history from the server."
+    }
+
+    private func goalsMetricBreakdownLines() -> [(label: String, total: Int, completed: Int, avgPct: Int)] {
+        var acc: [String: (Int, Int, Double)] = [:]
+        for g in goals {
+            let label = GoalMetric(rawValue: g.metric)?.title ?? g.metric
+            var t = acc[label, default: (0, 0, 0)]
+            t.0 += 1
+            if g.isCompleted { t.1 += 1 }
+            t.2 += g.progressRatio
+            acc[label] = t
+        }
+        return acc.keys.sorted().map { k in
+            let v = acc[k]!
+            let avg = v.0 > 0 ? Int((v.2 / Double(v.0) * 100.0).rounded()) : 0
+            return (label: k, total: v.0, completed: v.1, avgPct: avg)
+        }
+    }
+
+    private func goalsCurrentStreakWeeks() -> Int {
+        let dates: [Date] = goals.filter(\.isCompleted).map(\.weekStart)
+        let uniqueKeys = Set(dates.map { GoalsManager.dateOnlyString($0) })
+        guard !uniqueKeys.isEmpty else { return 0 }
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(identifier: "Europe/Madrid")
+        df.dateFormat = "yyyy-MM-dd"
+        let sortedDesc = uniqueKeys.compactMap { df.date(from: $0) }.sorted(by: >)
+        guard let first = sortedDesc.first else { return 0 }
+        let cal = Calendar.current
+        var streak = 1
+        var cursor = first
+        for d in sortedDesc.dropFirst() {
+            guard let expected = cal.date(byAdding: .day, value: -7, to: cursor) else { break }
+            if cal.isDate(d, inSameDayAs: expected) {
+                streak += 1
+                cursor = d
+            } else {
+                break
+            }
+        }
+        return streak
     }
 
     private func summaryPill(title: String, value: String) -> some View {
@@ -324,6 +423,13 @@ struct GoalsView: View {
         if ratio >= 0.4 { return .orange }
         if ratio >= 0.2 { return .red.opacity(0.8) }
         return .red
+    }
+
+    /// Active goals: tint by progress %. Finished week without completion (history / expired): always red.
+    private func progressBarTint(for g: GoalRowUI) -> Color {
+        if g.isCompleted { return progressColor(for: g.progressRatio, isCompleted: true) }
+        if isFinished(g), !g.isCompleted { return .red }
+        return progressColor(for: g.progressRatio, isCompleted: false)
     }
     
     private func progressSummaryView(for g: GoalRowUI) -> some View {
@@ -388,7 +494,7 @@ struct GoalsView: View {
 
                 ProgressView(value: g.progress)
                     .progressViewStyle(.linear)
-                    .tint(progressColor(for: g.progressRatio, isCompleted: g.isCompleted))
+                    .tint(progressBarTint(for: g))
 
                 HStack(spacing: 10) {
                     HStack(spacing: 6) {
@@ -515,7 +621,10 @@ private enum SummaryScope: String, CaseIterable, Identifiable {
 
 struct GoalStats: Decodable {
     let total_goals: Int
+    /// Count of goals with `is_completed` (RPC name kept for compatibility).
     let finished_goals: Int
+    /// Goals whose week ended without completion (`missed_goals` in RPC). Nil if older API.
+    let missed_goals: Int?
     let finished_percent: Double
     let avg_progress_percent: Double
     let best_progress_percent: Double

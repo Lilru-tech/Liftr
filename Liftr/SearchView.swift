@@ -8,17 +8,20 @@ struct SearchView: View {
     private enum SearchTab: String, CaseIterable, Identifiable {
         case users
         case workouts
+        case segments
         var id: String { rawValue }
         var label: String {
             switch self {
             case .users: "Users"
             case .workouts: "Workouts"
+            case .segments: "Segments"
             }
         }
         var rpcScope: String {
             switch self {
             case .users: "users"
             case .workouts: "workouts"
+            case .segments: "segments"
             }
         }
     }
@@ -27,6 +30,7 @@ struct SearchView: View {
     @State private var query = ""
     @State private var userResults: [UserRow] = []
     @State private var workoutResults: [WorkoutSearchRow] = []
+    @State private var segmentResults: [SegmentSearchRow] = []
     @State private var usernamesByUserId: [UUID: String] = [:]
     @State private var loading = false
     @State private var searchTask: Task<Void, Never>? = nil
@@ -69,6 +73,12 @@ struct SearchView: View {
         let started_at: Date?
     }
 
+    private struct SegmentSearchRow: Decodable, Identifiable {
+        let id: UUID
+        let name: String
+        let buffer_m: Double?
+    }
+
     private struct WorkoutOwnerRow: Decodable {
         let user_id: UUID
         let username: String
@@ -90,7 +100,10 @@ struct SearchView: View {
 
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                TextField(tab == .users ? "Search users…" : "Search workouts…", text: $query)
+                TextField(
+                    tab == .users ? "Search users…" : (tab == .workouts ? "Search workouts…" : "Search segments…"),
+                    text: $query
+                )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
             }
@@ -204,6 +217,7 @@ struct SearchView: View {
                                         await MainActor.run {
                                             if row.scope == "workouts" { tab = .workouts }
                                             else if row.scope == "users" { tab = .users }
+                                            else if row.scope == "segments" { tab = .segments }
                                             query = q
                                         }
                                         await runSearch(q: q)
@@ -238,7 +252,9 @@ struct SearchView: View {
                 Text(row.normalized_query)
                     .font(.subheadline)
                     .foregroundStyle(.primary)
-                Text(row.scope == "workouts" ? "Workouts" : "Users")
+                Text(
+                    row.scope == "workouts" ? "Workouts" : (row.scope == "segments" ? "Segments" : "Users")
+                )
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
             }
@@ -265,7 +281,30 @@ struct SearchView: View {
                     .listRowBackground(Color.clear)
             }
 
-            if tab == .users {
+            if tab == .segments {
+                ForEach(segmentResults) { row in
+                    NavigationLink {
+                        SegmentDetailView(segmentId: row.id, onClose: nil)
+                            .gradientBG()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(row.name)
+                                .font(.body.weight(.medium))
+                            if let b = row.buffer_m {
+                                Text("Buffer \(Int(b)) m")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                if !loading && segmentResults.isEmpty {
+                    Text("No segments found")
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                }
+            } else if tab == .users {
                 ForEach(userResults, id: \.user_id) { row in
                     NavigationLink {
                         ProfileView(userId: row.user_id)
@@ -399,6 +438,7 @@ struct SearchView: View {
             await MainActor.run {
                 userResults = []
                 workoutResults = []
+                segmentResults = []
                 usernamesByUserId = [:]
                 loading = false
             }
@@ -411,11 +451,31 @@ struct SearchView: View {
 
         if scopeTab == .users {
             await searchUsers(term: term, recordScope: recordScope)
+        } else if scopeTab == .segments {
+            await searchSegments(term: term)
         } else {
             await searchWorkouts(term: term, recordScope: recordScope)
         }
 
         await MainActor.run { loading = false }
+    }
+
+    private struct SearchSegmentsParams: Encodable {
+        let p_query: String
+        let p_limit: Int
+    }
+
+    private func searchSegments(term: String) async {
+        do {
+            let params = SearchSegmentsParams(p_query: term, p_limit: 50)
+            let res = try await SupabaseManager.shared.client
+                .rpc("search_segments_v1", params: params)
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([SegmentSearchRow].self, from: res.data)
+            await MainActor.run { self.segmentResults = rows }
+        } catch {
+            await MainActor.run { self.segmentResults = [] }
+        }
     }
 
     private func searchUsers(term: String, recordScope: String) async {

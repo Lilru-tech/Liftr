@@ -4,6 +4,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+## [1.11.0] - 2026-05-03
+
+### Added
+- **Challenges (MVP + hub polish)** — **FAB** on Ranking opens a **Challenges hub** with **search**, filters by **type** (cardio / strength / sport) and **cadence** (weekly / monthly / open), plus a **You** filter (**All** / **On podium**) using `viewer_claimed` from the list RPC. Rows can show **your podium rank** when applicable. iOS: translucent list styling; Android: **surfaceVariant** cards and chip row for **You**. **Open** (`once`) challenges show **“Does not expire”** instead of a far-future end date.
+- **Challenges (backend)** — `list_active_challenges_v1` returns **`viewer_rank`** and **`viewer_claimed`** for the signed-in user per instance. **`get_challenge_podiums_period_leaderboard_v1`** (`p_scope`, `p_period`, demographics): ranks users by **challenge podium claims** in the selected window (`adjudication_ts`). If upgrading an existing deploy, **`DROP FUNCTION public.list_active_challenges_v1();`** then re-apply `docs/migrations/challenges_mvp_v1.sql` so the return shape can change. Templates support optional scopes (`scope_activity_code`, `scope_sport`, `scope_muscle_primary`), extended **`metric_kind`** (reps, sets, volume, max-rep set, muscle-touching counts, etc.), **`challenge_category`** + seeds (cardio by activity, sport, strength variety). Notifications / deeplink **`challenge_won`** (legacy **`challenge_won_weekly`**). Reference: `docs/migrations/challenges_mvp_v1.sql`, `docs/backend-contracts.md`.
+- **Ranking** — New leaderboard metric **Challenge podiums** (global/friends, same period control as other time-based boards), wired to `get_challenge_podiums_period_leaderboard_v1` (iOS + Android + `BackendContracts`).
+- **Achievements (challenges)** — New **`challenge_*`** milestones (total podium claims and **1st-place** counts), **`unlock_challenge_achievements`**, **AFTER INSERT** trigger on **`challenge_claims`**, and **retroactive backfill** in `docs/migrations/achievements_challenges_deploy.sql`. Wire **`PERFORM public.unlock_challenge_achievements(p_user_id)`** inside **`check_and_unlock_achievements_for`** in Supabase so in-app recomputation stays in sync. iOS / Android: achievement codes prefixed with **`challenge_`** mapped in the achievements grid (icon + subtype label).
+- **Cardio map** — Full-screen / large map for the route in **ActiveCardioWorkout** and **WorkoutDetailView** (cardio).
+- **Achievements** — Progress toward unlocking each achievement (current vs requirement).
+- **Achievements** — Optional **community percentage** (share of users with a published workout who have unlocked the achievement) and sample size when the backend provides it.
+- **Segments (cardio)** — Users can **create segments** from a published cardio route: detail + leaderboard, matching on publish, search / my segments / popularity leaderboard, owner rename/delete rules, notifications when you take or lose #1 on a segment (English copy). iOS and Android parity (create flow, map tap for start/end, segment detail, links from notifications).
+- **Ranking** — Broader **metric catalog**: **Social**, **Sport**, **Strength**, and **Cardio** buckets (grouped picker / bottom sheet, search on iOS) with extended training and KPI leaderboards where deployed.
+- **Home (signed out)** — **Public feed** of published workouts (same pagination pattern as signed-in); tapping a workout asks the user to **sign in** to open it.
+
+### Changed
+- **Active strength** — Clearer **set display** so repeat / grouped sets are easier to understand.
+- **Active strength** — **Rest countdown** on the **exercise bubble** for the exercise that is resting (stays visible when you switch to another exercise); iOS/Android aligned with group-workout style overlay.
+- **Home (signed in)** — Clearer **English** empty states when you follow no one vs when the feed has no activity yet.
+- **Orientation** — App locked to **portrait** on iPhone and iPad (iOS supported orientations + Android `screenOrientation`) to avoid layout breakage after rotation.
+
+### Fixed
+- **Weekly challenges** — `list_active_challenges_v1` / `get_challenge_instance_detail_v1` must be **VOLATILE** (not `STABLE`) so `_challenge_ensure_weekly_instances()` can run without *read-only transaction* errors on Supabase. Ranking “Weekly challenges” copy on iOS aligned to English; user-facing load errors no longer show raw Postgres text when possible.
+- **Profiles / XP** — Edge cases where **other users’ XP events** did not show reliably.
+- **Goals (history)** — **Unfinished** goals show the completion bar in **red** for quick scanning.
+- **Goals (finished)** — **Completed** state and counts display correctly.
+- **Goals** — **Summary** shows more useful aggregate data.
+
+### Notes (database / ops)
+- **Challenges** — Apply `docs/migrations/challenges_mvp_v1.sql` (and `docs/migrations/challenges_v2_upgrade_from_title_es.sql` only if migrating from the older `title_es` schema). Apply **`docs/migrations/achievements_challenges_deploy.sql`** for challenge achievements; run the **backfill** block if `challenge_claims` already had rows before the trigger.
+- **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
+- Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
+
+[1.11.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.11.0
+
+## [1.10.1] - 2026-04-30
+
+### Added
+- **Achievements (sports expansion)** — Added more achievement milestones and unlock paths for additional sports (including ski and handball-related coverage).
+- **Ranking** — Added **two new leaderboard categories**: **Goals completed** and **Duels won**.
+- **Compare workouts** — Added **search** in workout comparison so it is faster to find the session you want to compare.
+- **Period comparison** — Added support to compare **you vs yourself** (two windows) and **you vs another user**.
+
+### Changed
+- **Achievements icons** — Updated achievement icon mapping for entries that were not rendering a specific icon, improving visual consistency in the grid.
+
+[1.10.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.10.1
+
+## [1.10.0] - 2026-04-29
+
+### Added
+- **FAQs** — Updated questions and answers in the in-app FAQ.
+- **Muscle group labels** — Primary muscle display names use **English** labels (aligned with the catalog / `muscle_primary` usage in the app).
+- **App update notice** — Warns when the installed build is **not the latest** (prompts the user to update).
+- **Progress — Weekday chart** — New chart showing how training **varies by day of the week** (Mon–Sun).
+- **Profile & related views** — More at-a-glance data: **active goals**, **achievements** progress (e.g. **unlocked / 298**), and additional summary lines in other relevant screens.
+- **Add workout (Strength) — Clear all** — **Clear all exercises** for the current list (with confirmation), leaving a single empty exercise block instead of deleting one by one.
+- **Compare workouts (Strength) — Rest metrics** — Compare **planned rest** from logged sets: **total rest (sec)**, **average rest per set** (among sets with non-zero rest), and **planned rest as % of session duration** (when session length is available).
+
+### Fixed
+- **Strength scoring (server)** — Strength **v2** scores were **capped at 200** in some paths; the cap is corrected in database scoring logic (see Notes).
+
+### Notes (database / ops)
+- **Exercise catalog** — e.g. **Dumbbell Overhead Triceps Extension** and any related rows are **data / catalog** updates in Supabase, not app-only changes.
+- **Score cap** — Apply the **`score_strength_v2` / `LEAST(200, …)`** (or equivalent) fix in your Supabase project so published scores no longer flatline at 200 when the true score is higher. See project SQL notes (e.g. `docs/fix_score_strength_v2_cap.sql`) if present.
+
+[1.10.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.10.0
+
 ## [1.9.1] - 2026-04-26
 
 ### Added
@@ -16,6 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 - **Hyrox active workout** — Exercises can now be moved up and down directly in the list.
 - **Workout notes inputs** — Replaced compact note inputs with text areas to make writing longer notes easier.
+
+[1.9.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.9.1
 
 ## [1.9.0] - 2026-04-22
 
@@ -41,7 +112,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - If a migration was already applied remotely, re-running the same SQL manually can show **already exists** errors; this is expected for non-idempotent statements.
 
 [1.9.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.9.0
-[1.9.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.9.1
 
 ## [1.8.0] - 2026-04-18
 

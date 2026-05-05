@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.Liftr" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>

@@ -78,3 +78,19 @@ Liftr/docs/
 supabase/migrations/
 supabase/debug*.sql
 supabase/audit/
+
+# Android — caché de Gradle y archivos locales / secretos (nunca subir)
+android/.gradle/
+android/local.properties
+android/keystore.properties
+android/**/*.jks
+
+# Android local logs / diagnostics
+android-logcat*.txt
+
+# SQL suelto en docs/ (raíz del repo); depuración / parches manuales
+docs/*.sql
+
+# Migraciones SQL (esquema, RPCs, RLS): no subir en remoto público — conservar solo en local o repo privado.
+# Si ya estaban trackeadas: git rm -r --cached docs/migrations
+docs/migrations/
