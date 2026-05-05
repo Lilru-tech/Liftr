@@ -2,6 +2,7 @@ package com.lilru.liftr.ui.map
 
 import android.content.Context
 import android.content.Intent
+import android.location.Location
 import android.net.Uri
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
@@ -55,6 +57,21 @@ fun startGoogleMapsForRoute(context: Context, points: List<Pair<Double, Double>>
     if (points.size < 2) return
     val path = points.joinToString("/") { "${it.first},${it.second}" }
     val uri = Uri.parse("https://www.google.com/maps/dir/$path")
+    val gms = Intent(Intent.ACTION_VIEW, uri).apply { setPackage("com.google.android.apps.maps") }
+    runCatching { context.startActivity(gms) }.onFailure {
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+    }
+}
+
+/** Centra Google Maps en un punto (p. ej. mitad de un segmento). */
+fun startGoogleMapsAtPoint(context: Context, lat: Double, lon: Double, label: String? = null) {
+    if (!lat.isFinite() || !lon.isFinite()) return
+    val q = if (label.isNullOrBlank()) {
+        "$lat,$lon"
+    } else {
+        Uri.encode("$lat,$lon ($label)")
+    }
+    val uri = Uri.parse("https://www.google.com/maps/search/?api=1&query=$q")
     val gms = Intent(Intent.ACTION_VIEW, uri).apply { setPackage("com.google.android.apps.maps") }
     runCatching { context.startActivity(gms) }.onFailure {
         context.startActivity(Intent(Intent.ACTION_VIEW, uri))
@@ -163,6 +180,122 @@ fun CardioRouteMapBox(
             width = 12f
         )
     }
+}
+
+private fun fractionAlongRouteForNearestVertex(
+    routePoints: List<Pair<Double, Double>>,
+    tap: LatLng
+): Double {
+    if (routePoints.size < 2) return 0.0
+    val res = FloatArray(1)
+    var bestI = 0
+    var bestD = Float.MAX_VALUE
+    for (i in routePoints.indices) {
+        val p = routePoints[i]
+        Location.distanceBetween(p.first, p.second, tap.latitude, tap.longitude, res)
+        if (res[0] < bestD) {
+            bestD = res[0]
+            bestI = i
+        }
+    }
+    var total = 0.0
+    var cum = 0.0
+    for (k in 1 until routePoints.size) {
+        val a = routePoints[k - 1]
+        val b = routePoints[k]
+        Location.distanceBetween(a.first, a.second, b.first, b.second, res)
+        val seg = res[0].toDouble()
+        if (k <= bestI) cum += seg
+        total += seg
+    }
+    if (total <= 0.0) {
+        return (bestI.toDouble() / (routePoints.size - 1).coerceAtLeast(1)).coerceIn(0.0, 1.0)
+    }
+    return (cum / total).coerceIn(0.0, 1.0)
+}
+
+/**
+ * Mapa compacto: toque → fracción 0…1 por longitud acumulada hasta el vértice más cercano (paridad iOS / PostGIS).
+ */
+@Composable
+fun CardioRouteSegmentTapMap(
+    routePoints: List<Pair<Double, Double>>,
+    onPickFraction: (Double) -> Unit,
+    modifier: Modifier = Modifier,
+    mapHeightDp: Int = 200
+) {
+    if (routePoints.size < 2) return
+    if (BuildConfig.MAPS_API_KEY.isBlank()) {
+        var showFullscreen by remember { mutableStateOf(false) }
+        Column(modifier = modifier.fillMaxWidth()) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                CardioRoutePolylinePreview(
+                    routePoints,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(mapHeightDp.dp)
+                )
+                TextButton(
+                    onClick = { showFullscreen = true },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                ) {
+                    Text(stringResource(R.string.cardio_map_expand))
+                }
+            }
+        }
+        CardioRouteFullscreenMapDialog(
+            visible = showFullscreen,
+            onDismiss = { showFullscreen = false },
+            routePoints = routePoints,
+            showOpenInGoogleMaps = true
+        )
+        return
+    }
+    val latLngs = CardioRouteGeoJson.toLatLngList(routePoints)
+    val camera = rememberCameraPositionState()
+    LaunchedEffect(routePoints) {
+        val b = CardioRouteGeoJson.latLngBoundsForRoute(routePoints) ?: return@LaunchedEffect
+        runCatching { camera.move(CameraUpdateFactory.newLatLngBounds(b, 64)) }
+    }
+    var showFullscreen by remember { mutableStateOf(false) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            GoogleMap(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(mapHeightDp.dp)
+                    .clip(RoundedCornerShape(16.dp)),
+                cameraPositionState = camera,
+                properties = MapProperties(isMyLocationEnabled = false),
+                uiSettings = MapUiSettings(zoomControlsEnabled = false, compassEnabled = false),
+                onMapClick = { latLng ->
+                    onPickFraction(fractionAlongRouteForNearestVertex(routePoints, latLng))
+                }
+            ) {
+                Polyline(
+                    points = latLngs,
+                    color = Color(0xE02196F3),
+                    width = 12f
+                )
+            }
+            TextButton(
+                onClick = { showFullscreen = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(4.dp)
+            ) {
+                Text(stringResource(R.string.cardio_map_expand))
+            }
+        }
+    }
+    CardioRouteFullscreenMapDialog(
+        visible = showFullscreen,
+        onDismiss = { showFullscreen = false },
+        routePoints = routePoints,
+        showOpenInGoogleMaps = true
+    )
 }
 
 /**

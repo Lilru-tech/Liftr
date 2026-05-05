@@ -50,7 +50,14 @@ data class RecentQueryRow(
     @SerialName("normalized_query") val query: String
 )
 
-enum class SearchScope { USERS, WORKOUTS }
+enum class SearchScope { USERS, WORKOUTS, SEGMENTS }
+
+@Serializable
+data class SearchSegmentRow(
+    val id: String,
+    val name: String,
+    val buffer_m: Double? = null
+)
 
 data class SearchUiState(
     val query: String = "",
@@ -62,12 +69,14 @@ data class SearchUiState(
     val trendingQueries: List<String> = emptyList(),
     val profiles: List<SearchProfileRow> = emptyList(),
     val workouts: List<SearchWorkoutRow> = emptyList(),
+    val segments: List<SearchSegmentRow> = emptyList(),
     val ownerUsernames: Map<String, String> = emptyMap()
 )
 
 private data class SearchResult(
     val profiles: List<SearchProfileRow> = emptyList(),
     val workouts: List<SearchWorkoutRow> = emptyList(),
+    val segments: List<SearchSegmentRow> = emptyList(),
     val ownerUsernames: Map<String, String> = emptyMap()
 )
 
@@ -130,6 +139,7 @@ class SearchViewModel(
                     error = null,
                     profiles = emptyList(),
                     workouts = emptyList(),
+                    segments = emptyList(),
                     ownerUsernames = emptyMap()
                 )
                 return
@@ -155,6 +165,16 @@ class SearchViewModel(
 
                     recordSearch(term, "users")
                     SearchResult(profiles = profiles)
+                } else if (scope == SearchScope.SEGMENTS) {
+                    val rows = supabase.postgrest.rpc(
+                        BackendContracts.Rpc.SEARCH_SEGMENTS_V1,
+                        buildJsonObject {
+                            put("p_query", term)
+                            put("p_limit", 50)
+                        }
+                    ) { }
+                        .let { decodeFlexibleList<SearchSegmentRow>(it.data) }
+                    SearchResult(segments = rows)
                 } else {
                     val workouts = supabase
                         .from(BackendContracts.Tables.WORKOUTS)
@@ -197,12 +217,14 @@ class SearchViewModel(
                     isRefreshing = false,
                     profiles = result.profiles,
                     workouts = result.workouts,
+                    segments = result.segments,
                     ownerUsernames = result.ownerUsernames
                 )
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     loading = false,
                     isRefreshing = false,
+                    segments = emptyList(),
                     error = e.message?.take(300) ?: e::class.java.simpleName
                 )
             }

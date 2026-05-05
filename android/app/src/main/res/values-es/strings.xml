@@ -72,4 +72,13 @@
     <string name="goals_summary_by_metric_line">%1$s: %2$d/%3$d completados · media %4$d%%</string>
     <string name="goals_summary_list_cap">La lista muestra tus últimas 100 metas; racha y por métrica usan esa muestra. Los totales usan todo el historial del servidor.</string>
     <string name="goals_section_finished">Historial · media %1$d%% · %2$d</string>
+    <string name="segment_about_title">Sobre este segmento</string>
+    <string name="segment_stats_length_buffer">Longitud %1$s · buffer %2$d m</string>
+    <string name="segment_stats_athletes_efforts">%1$d atletas · %2$d esfuerzos en el ranking (cardio publicado)</string>
+    <string name="segment_stats_confidence_avg">Calidad media del match ~%1$d%%</string>
+    <string name="segment_stats_confidence_range">Calidad media del match ~%1$d%% (rango %2$d–%3$d%%)</string>
+    <string name="segment_open_maps">Abrir en Maps</string>
+    <string name="segment_your_best_title">Tu mejor marca en este segmento</string>
+    <string name="segment_time_disclaimer">Los tiempos son estimaciones por cobertura de ruta hasta que haya marcas de tiempo por punto para el matching.</string>
+    <string name="segment_match_quality_row">Calidad del match ~%1$d%%</string>
 </resources>

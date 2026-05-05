@@ -16,8 +16,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
+import kotlin.math.ceil
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -75,6 +77,8 @@ data class ActiveStrengthUiState(
     val currentSetIndexByExerciseId: Map<Int, Int> = emptyMap(),
     val isResting: Boolean = false,
     val restSecondsLeft: Int = 0,
+    /** Descanso activo por ejercicio (burbuja) aunque el índice actual sea otro. */
+    val restSecondsLeftByExerciseId: Map<Int, Int> = emptyMap(),
     val sessionElapsedSec: Int = 0,
     val finishing: Boolean = false,
     val completedEntirely: Boolean = false,
@@ -107,6 +111,8 @@ class ActiveStrengthWorkoutViewModel(
 
     private var restJob: Job? = null
     private var sessionJob: Job? = null
+    /** epoch ms fin de descanso por workout_exercise_id */
+    private val restDeadlineMsByExerciseId: MutableMap<Int, Long> = mutableMapOf()
     private val completedSetLines: MutableList<CompletedSetLine> = mutableListOf()
 
     init {
@@ -201,6 +207,9 @@ class ActiveStrengthWorkoutViewModel(
                     r.onFailure { e -> g2Err = e.message?.take(220) ?: e::class.java.simpleName }
                 }
                 val setIndexMap = lines.associate { it.workoutExerciseId to 0 }
+                restJob?.cancel()
+                restJob = null
+                restDeadlineMsByExerciseId.clear()
                 _ui.value = withSyncedEditFields(
                     _ui.value.copy(
                         loading = false,
@@ -212,7 +221,10 @@ class ActiveStrengthWorkoutViewModel(
                         guestExercises = guestLines,
                         guestDataError = guestErr,
                         guest2Exercises = g2Lines,
-                        guest2DataError = g2Err
+                        guest2DataError = g2Err,
+                        isResting = false,
+                        restSecondsLeft = 0,
+                        restSecondsLeftByExerciseId = emptyMap()
                     )
                 )
             }.onFailure { e ->
@@ -380,9 +392,13 @@ class ActiveStrengthWorkoutViewModel(
     }
 
     fun skipRest() {
+        val s = _ui.value
+        val cur = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        restDeadlineMsByExerciseId.remove(cur.workoutExerciseId)
         restJob?.cancel()
         restJob = null
-        _ui.value = _ui.value.copy(isResting = false, restSecondsLeft = 0)
+        _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(s))
+        if (restDeadlineMsByExerciseId.isNotEmpty()) startRestTicker()
     }
 
     /**
@@ -423,17 +439,10 @@ class ActiveStrengthWorkoutViewModel(
         )
         val rest = set.restSec?.takeIf { it > 0 } ?: 0
         if (rest > 0) {
-            _ui.value = baseState.copy(isResting = true, restSecondsLeft = rest)
-            restJob?.cancel()
-            restJob = viewModelScope.launch {
-                var left = rest
-                while (left > 0) {
-                    delay(1000)
-                    left--
-                    _ui.value = _ui.value.copy(restSecondsLeft = left)
-                }
-                _ui.value = _ui.value.copy(isResting = false, restSecondsLeft = 0)
-            }
+            val end = System.currentTimeMillis() + rest * 1000L
+            restDeadlineMsByExerciseId[ex.workoutExerciseId] = end
+            _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(baseState))
+            startRestTicker()
         } else {
             _ui.value = baseState
         }
@@ -447,11 +456,11 @@ class ActiveStrengthWorkoutViewModel(
         val setIdx = (s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: 0)
             .coerceIn(0, ex.sets.size)
         _ui.value = withSyncedEditFields(
-            s.copy(
-                currentExerciseIndex = clamped,
-                currentSetIndex = setIdx,
-                isResting = false,
-                restSecondsLeft = 0
+            syncRestDeadlinesToUi(
+                s.copy(
+                    currentExerciseIndex = clamped,
+                    currentSetIndex = setIdx
+                )
             )
         )
     }
@@ -477,6 +486,7 @@ class ActiveStrengthWorkoutViewModel(
     fun resetSessionProgress() {
         restJob?.cancel()
         restJob = null
+        restDeadlineMsByExerciseId.clear()
         completedSetLines.clear()
         val s = _ui.value
         val map = s.exercises.associate { it.workoutExerciseId to 0 }
@@ -487,9 +497,39 @@ class ActiveStrengthWorkoutViewModel(
                 currentSetIndexByExerciseId = map,
                 isResting = false,
                 restSecondsLeft = 0,
+                restSecondsLeftByExerciseId = emptyMap(),
                 completedEntirely = false
             )
         )
+    }
+
+    private fun syncRestDeadlinesToUi(s: ActiveStrengthUiState): ActiveStrengthUiState {
+        val now = System.currentTimeMillis()
+        restDeadlineMsByExerciseId.keys.toList().forEach { id ->
+            val end = restDeadlineMsByExerciseId[id] ?: return@forEach
+            if (end <= now) restDeadlineMsByExerciseId.remove(id)
+        }
+        val secMap = restDeadlineMsByExerciseId.mapValues { (_, endMs) ->
+            kotlin.math.max(0, ceil((endMs - now) / 1000.0).toInt())
+        }.filterValues { it > 0 }
+        val cur = s.exercises.getOrNull(s.currentExerciseIndex)
+        val curId = cur?.workoutExerciseId
+        val left = curId?.let { secMap[it] } ?: 0
+        return s.copy(
+            restSecondsLeftByExerciseId = secMap,
+            isResting = left > 0,
+            restSecondsLeft = left
+        )
+    }
+
+    private fun startRestTicker() {
+        restJob?.cancel()
+        restJob = viewModelScope.launch {
+            while (isActive && restDeadlineMsByExerciseId.isNotEmpty()) {
+                delay(1000)
+                _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(_ui.value))
+            }
+        }
     }
 
     private fun withSyncedEditFields(s: ActiveStrengthUiState): ActiveStrengthUiState {

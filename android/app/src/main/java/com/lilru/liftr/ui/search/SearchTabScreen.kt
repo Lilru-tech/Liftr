@@ -59,8 +59,10 @@ import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
+import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
 import kotlinx.coroutines.delay
+import java.util.UUID
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterialApi::class)
 @Composable
@@ -78,6 +80,20 @@ fun SearchTabScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var selectedWorkout by rememberSaveable { mutableStateOf<Int?>(null) }
     var selectedProfileUserId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedSegmentId by rememberSaveable { mutableStateOf<String?>(null) }
+
+    val openSegmentUuid = remember(selectedSegmentId) {
+        selectedSegmentId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    }
+    if (openSegmentUuid != null) {
+        SegmentDetailScreen(
+            supabase = supabase,
+            segmentId = openSegmentUuid,
+            onBack = { selectedSegmentId = null },
+            modifier = modifier
+        )
+        return
+    }
 
     val selected = ui.workouts.firstOrNull { it.id == selectedWorkout }
     if (selected != null) {
@@ -142,6 +158,11 @@ fun SearchTabScreen(
                             selected = ui.scope == SearchScope.WORKOUTS,
                             onClick = { vm.setScope(SearchScope.WORKOUTS) },
                             label = { Text(stringResource(R.string.search_scope_workouts)) }
+                        )
+                        FilterChip(
+                            selected = ui.scope == SearchScope.SEGMENTS,
+                            onClick = { vm.setScope(SearchScope.SEGMENTS) },
+                            label = { Text(stringResource(R.string.search_scope_segments)) }
                         )
                     }
                 }
@@ -320,7 +341,7 @@ fun SearchTabScreen(
                             }
                         }
                     }
-                } else {
+                } else if (ui.scope == SearchScope.WORKOUTS) {
                     item {
                         Text(
                             text = stringResource(R.string.search_workouts_title),
@@ -359,6 +380,48 @@ fun SearchTabScreen(
                                     if (!owner.isNullOrBlank()) {
                                         Text(
                                             text = "@$owner",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    item {
+                        Text(
+                            text = stringResource(R.string.search_segments_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                    }
+                    if (ui.segments.isEmpty()) {
+                        item {
+                            Text(
+                                text = stringResource(R.string.search_segments_empty),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    } else {
+                        items(ui.segments, key = { it.id }) { s ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedSegmentId = s.id }
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = s.name,
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                    val buf = s.buffer_m
+                                    if (buf != null) {
+                                        Text(
+                                            text = stringResource(R.string.search_segment_buffer_m, buf.toInt()),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )

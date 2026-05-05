@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -35,11 +36,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -63,8 +65,9 @@ import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
 import com.lilru.liftr.ui.components.LiftrAvatar
 import io.github.jan.supabase.SupabaseClient
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.max
 import java.util.Locale
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -136,13 +139,11 @@ fun ActiveStrengthWorkoutScreen(
         }
     }
 
-    val scope = rememberCoroutineScope()
     var guestSetProgress by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     var guestExercisesUi by remember { mutableStateOf<List<ActiveStrengthExerciseLine>>(emptyList()) }
     var guestCurrentExerciseIndex by rememberSaveable { mutableStateOf(0) }
-    var guestIsResting by remember { mutableStateOf(false) }
-    var guestRestSecondsLeft by remember { mutableStateOf(0) }
-    var guestRestJob by remember { mutableStateOf<Job?>(null) }
+    /** Fin de descanso (epoch ms) por workout_exercise_id del invitado; la burbuja sigue al día al cambiar de ejercicio. */
+    var guestRestEndMsByExerciseId by remember { mutableStateOf(mapOf<Int, Long>()) }
     var activeLane by rememberSaveable { mutableStateOf(0) } // 0 host, 1 guest
     var didAutoSwitchFromHostRest by remember { mutableStateOf(false) }
     LaunchedEffect(ui.guestExercises) {
@@ -155,10 +156,7 @@ fun ActiveStrengthWorkoutScreen(
             guestExercisesUi = emptyList()
             guestSetProgress = emptyMap()
             guestCurrentExerciseIndex = 0
-            guestIsResting = false
-            guestRestSecondsLeft = 0
-            guestRestJob?.cancel()
-            guestRestJob = null
+            guestRestEndMsByExerciseId = emptyMap()
         }
     }
     LaunchedEffect(ui.isResting, ui.guestExercises.size) {
@@ -186,8 +184,31 @@ fun ActiveStrengthWorkoutScreen(
     val ex = laneExercises.getOrNull(laneExerciseIndex)
     val currentSetIndex = ex?.let { laneProgressMap[it.workoutExerciseId] ?: 0 } ?: 0
     val set = ex?.sets?.getOrNull(currentSetIndex)
-    val laneIsResting = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) guestIsResting else ui.isResting
-    val laneRestSec = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) guestRestSecondsLeft else ui.restSecondsLeft
+    val guestRestSecByExerciseId = remember(ui.sessionElapsedSec, guestRestEndMsByExerciseId) {
+        val n = System.currentTimeMillis()
+        guestRestEndMsByExerciseId.mapValues { (_, endMs) ->
+            max(0, ceil((endMs - n) / 1000.0).toInt())
+        }.filterValues { it > 0 }
+    }
+    LaunchedEffect(ui.sessionElapsedSec) {
+        val n = System.currentTimeMillis()
+        if (guestRestEndMsByExerciseId.isNotEmpty()) {
+            val pruned = guestRestEndMsByExerciseId.filterValues { it > n }
+            if (pruned.size != guestRestEndMsByExerciseId.size) {
+                guestRestEndMsByExerciseId = pruned
+            }
+        }
+    }
+    val laneIsResting = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+        ex?.workoutExerciseId?.let { (guestRestSecByExerciseId[it] ?: 0) > 0 } == true
+    } else {
+        ui.isResting
+    }
+    val laneRestSec = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+        ex?.workoutExerciseId?.let { guestRestSecByExerciseId[it] } ?: 0
+    } else {
+        ui.restSecondsLeft
+    }
     val isGuestLaneActive = activeLane == 1 && ui.guestExercises.isNotEmpty()
     val allSetsDoneCurrent = ex != null && currentSetIndex >= ex.sets.size
     val isLastExercise = laneExerciseIndex == laneExercises.lastIndex
@@ -353,13 +374,17 @@ fun ActiveStrengthWorkoutScreen(
                                         displayName = "G",
                                         size = if (activeLane == 1) 42.dp else 34.dp
                                     )
-                                    if (guestIsResting) {
+                                    val guestAvatarRestSec =
+                                        guestExercisesUi.getOrNull(guestCurrentExerciseIndex)?.workoutExerciseId?.let { gid ->
+                                            guestRestSecByExerciseId[gid]
+                                        } ?: 0
+                                    if (guestAvatarRestSec > 0) {
                                         Card(
                                             modifier = Modifier.align(Alignment.TopStart),
                                             colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.65f))
                                         ) {
                                             Text(
-                                                text = "${guestRestSecondsLeft}s",
+                                                text = "${guestAvatarRestSec}s",
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
                                                 color = Color.White,
                                                 style = MaterialTheme.typography.labelSmall
@@ -383,6 +408,13 @@ fun ActiveStrengthWorkoutScreen(
                             val progress = done.toFloat() / total.toFloat()
                             val completed = done >= total
                             val isCurrent = index == laneExerciseIndex
+                            val bubbleRestSec =
+                                if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+                                    guestRestSecByExerciseId[bubbleEx.workoutExerciseId] ?: 0
+                                } else {
+                                    ui.restSecondsLeftByExerciseId[bubbleEx.workoutExerciseId] ?: 0
+                                }
+                            val showRestOnBubble = bubbleRestSec > 0
                             val bubbleScale by animateFloatAsState(
                                 targetValue = when {
                                     allExercisesDone && waveIndex == index -> 1.22f
@@ -400,15 +432,15 @@ fun ActiveStrengthWorkoutScreen(
                                         color = when {
                                             allExercisesDone -> Color(0xFFFFD54F)
                                             completed -> Color(0xFF49A9FF)
-                                            index == ui.exercises.lastIndex -> Color(0xFF6CE78D)
+                                            index == laneExercises.lastIndex -> Color(0xFF6CE78D)
                                             else -> Color.White.copy(alpha = 0.58f)
                                         },
-                                        shape = androidx.compose.foundation.shape.CircleShape
+                                        shape = CircleShape
                                     )
                                     .padding(if (isCurrent) 0.dp else 2.dp)
                                     .background(
                                         color = if (isCurrent) Color.White else Color.Transparent,
-                                        shape = androidx.compose.foundation.shape.CircleShape
+                                        shape = CircleShape
                                     )
                                     .padding(if (isCurrent) 2.dp else 0.dp)
                                     .clickable {
@@ -428,12 +460,38 @@ fun ActiveStrengthWorkoutScreen(
                                     trackColor = Color.Transparent,
                                     strokeWidth = 2.dp
                                 )
-                                Text(
-                                    text = "${index + 1}",
-                                    modifier = Modifier.align(Alignment.Center),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Color.Black
-                                )
+                                if (!showRestOnBubble) {
+                                    Text(
+                                        text = "${index + 1}",
+                                        modifier = Modifier.align(Alignment.Center),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.Black
+                                    )
+                                }
+                                if (showRestOnBubble) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(2.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.verticalGradient(
+                                                    colors = listOf(
+                                                        Color.Black.copy(alpha = 0.35f),
+                                                        Color.Black.copy(alpha = 0.62f)
+                                                    )
+                                                )
+                                            )
+                                    )
+                                    Text(
+                                        text = "${bubbleRestSec}s",
+                                        modifier = Modifier.align(Alignment.Center),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        color = Color.White
+                                    )
+                                }
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()
@@ -557,10 +615,10 @@ fun ActiveStrengthWorkoutScreen(
                                         Button(
                                             onClick = {
                                                 if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
-                                                    guestRestJob?.cancel()
-                                                    guestRestJob = null
-                                                    guestIsResting = false
-                                                    guestRestSecondsLeft = 0
+                                                    ex?.workoutExerciseId?.let { wid ->
+                                                        guestRestEndMsByExerciseId =
+                                                            guestRestEndMsByExerciseId.filterKeys { it != wid }
+                                                    }
                                                 } else {
                                                     vm.skipRest()
                                                 }
@@ -579,19 +637,11 @@ fun ActiveStrengthWorkoutScreen(
                                                     }
                                                     val rest = setLocal.restSec?.takeIf { it > 0 } ?: 0
                                                     if (rest > 0) {
-                                                        guestIsResting = true
-                                                        guestRestSecondsLeft = rest
-                                                        guestRestJob?.cancel()
-                                                        guestRestJob = scope.launch {
-                                                            var left = rest
-                                                            while (left > 0) {
-                                                                delay(1000)
-                                                                left--
-                                                                guestRestSecondsLeft = left
+                                                        val endMs = System.currentTimeMillis() + rest * 1000L
+                                                        guestRestEndMsByExerciseId =
+                                                            guestRestEndMsByExerciseId.toMutableMap().apply {
+                                                                put(exLocal.workoutExerciseId, endMs)
                                                             }
-                                                            guestIsResting = false
-                                                            guestRestSecondsLeft = 0
-                                                        }
                                                         activeLane = 0
                                                     }
                                                 } else {

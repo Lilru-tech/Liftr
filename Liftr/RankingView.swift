@@ -250,6 +250,15 @@ struct SkiDistanceKpiLeaderRow: Decodable, Identifiable {
     let sessions_cnt: Int
 }
 
+struct SegmentPopularityLeaderRow: Decodable, Identifiable {
+    var id: UUID { segment_id }
+    let rank: Int
+    let segment_id: UUID
+    let name: String
+    let efforts_count: Int64
+    let buffer_m: Double?
+}
+
 enum LBScope: String, CaseIterable, Identifiable {
     case global = "Global", friends = "Friends"
     var id: String { rawValue }
@@ -271,6 +280,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
     case strength = "Strength"
     case cardio = "Cardio"
     case sport = "Sport"
+    case segments = "Segments"
     var id: String { rawValue }
     
     func metrics(for kind: LBKind) -> [LBMetric] {
@@ -289,6 +299,8 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
                 .sportWins, .sportWinRate, .sportDuration,
                 .hyroxBestTime, .footballGoals, .skiDistanceKpi
             ]
+        case .segments:
+            base = [.segmentPopularity]
         }
         return base.filter { $0.isVisible(for: kind) }
     }
@@ -319,6 +331,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case hyroxBestTime = "Hyrox best time"
     case footballGoals = "Football goals"
     case skiDistanceKpi = "Ski km"
+    case segmentPopularity = "Segment efforts"
     var id: String { rawValue }
     
     func isVisible(for kind: LBKind) -> Bool {
@@ -330,6 +343,8 @@ enum LBMetric: String, CaseIterable, Identifiable {
         case .sportWins, .sportWinRate, .sportDuration, .hyroxBestTime, .footballGoals, .skiDistanceKpi:
             return kind == .all || kind == .sport
         case .likesReceived, .commentsReceived, .groupSessions, .achievements:
+            return kind == .all
+        case .segmentPopularity:
             return kind == .all
         default: return true
         }
@@ -457,6 +472,7 @@ final class RankingVM: ObservableObject {
     @Published var hyroxBestTimeRows: [HyroxBestTimeLeaderRow] = []
     @Published var footballGoalsRows: [FootballGoalsLeaderRow] = []
     @Published var skiDistanceKpiRows: [SkiDistanceKpiLeaderRow] = []
+    @Published var segmentPopularityRows: [SegmentPopularityLeaderRow] = []
     @Published var loading = false
     @Published var error: String?
     @Published var scope: LBScope = .global
@@ -525,6 +541,7 @@ final class RankingVM: ObservableObject {
         hyroxBestTimeRows = []
         footballGoalsRows = []
         skiDistanceKpiRows = []
+        segmentPopularityRows = []
     }
     
     private func fetchStrengthVolumeLeaderboard() async {
@@ -936,6 +953,25 @@ final class RankingVM: ObservableObject {
         }
     }
 
+    private func fetchSegmentPopularityLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            let res = try await SupabaseManager.shared.client
+                .rpc("list_segments_popularity_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([SegmentPopularityLeaderRow].self, from: res.data)
+            await MainActor.run { self.segmentPopularityRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.segmentPopularityRows = []
+            }
+        }
+    }
+
     private func fetchLevelLeaderboard() async {
         do {
             var params: [String: AnyJSON] = [:]
@@ -1187,6 +1223,10 @@ final class RankingVM: ObservableObject {
             await fetchSkiDistanceKpiLeaderboard()
             return
         }
+        if metric == .segmentPopularity {
+            await fetchSegmentPopularityLeaderboard()
+            return
+        }
         
         do {
             var params: [String: AnyJSON] = [:]
@@ -1278,14 +1318,16 @@ struct RankingView: View {
         VStack(spacing: 10) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
-                    Picker("Scope", selection: $vm.scope) {
-                        ForEach(LBScope.allCases) {
-                            Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
+                    if vm.metric != .segmentPopularity {
+                        Picker("Scope", selection: $vm.scope) {
+                            ForEach(LBScope.allCases) {
+                                Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
+                            }
                         }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
                     
-                    if !metricSkipsPeriodAndKind(vm.metric) {
+                    if !metricSkipsPeriod(vm.metric) {
                         Picker("Period", selection: $vm.period) {
                             ForEach(LBPeriod.allCases) {
                                 Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
@@ -1295,14 +1337,16 @@ struct RankingView: View {
                     }
                 }
                 VStack(spacing: 8) {
-                    Picker("Scope", selection: $vm.scope) {
-                        ForEach(LBScope.allCases) {
-                            Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
+                    if vm.metric != .segmentPopularity {
+                        Picker("Scope", selection: $vm.scope) {
+                            ForEach(LBScope.allCases) {
+                                Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
+                            }
                         }
+                        .pickerStyle(.segmented)
                     }
-                    .pickerStyle(.segmented)
                     
-                    if !metricSkipsPeriodAndKind(vm.metric) {
+                    if !metricSkipsPeriod(vm.metric) {
                         Picker("Period", selection: $vm.period) {
                             ForEach(LBPeriod.allCases) {
                                 Text($0.rawValue).lineLimit(1).minimumScaleFactor(0.85).tag($0)
@@ -1349,7 +1393,7 @@ struct RankingView: View {
             .accessibilityLabel("Choose ranking metric")
             
             HStack(spacing: 10) {
-                if !metricSkipsPeriodAndKind(vm.metric) {
+                if !metricSkipsKind(vm.metric) {
                     Menu {
                         Picker("Type", selection: $vm.kind) {
                             ForEach(LBKind.allCases) {
@@ -1361,33 +1405,42 @@ struct RankingView: View {
                     }
                 }
                 
-                Menu {
-                    Picker("Sex", selection: Binding<Sex?>(
-                        get: { vm.sexOpt },
-                        set: { vm.sexOpt = $0 }
-                    )) {
-                        Text("All sexes").tag(Sex?.none)
-                        ForEach(Sex.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
+                if vm.metric != .segmentPopularity {
+                    Menu {
+                        Picker("Sex", selection: Binding<Sex?>(
+                            get: { vm.sexOpt },
+                            set: { vm.sexOpt = $0 }
+                        )) {
+                            Text("All sexes").tag(Sex?.none)
+                            ForEach(Sex.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
+                        }
+                    } label: {
+                        Text(vm.sexOpt.map(\.label) ?? "All sexes")
                     }
-                } label: {
-                    Text(vm.sexOpt.map(\.label) ?? "All sexes")
-                }
-                
-                Menu {
-                    Picker("Age", selection: $vm.age) {
-                        ForEach(LBAgeBand.allCases) { Text($0.rawValue).tag($0) }
+                    
+                    Menu {
+                        Picker("Age", selection: $vm.age) {
+                            ForEach(LBAgeBand.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                    } label: {
+                        Text(vm.age.rawValue)
                     }
-                } label: {
-                    Text(vm.age.rawValue)
                 }
             }
             .font(.subheadline)
         }
     }
     
-    private func metricSkipsPeriodAndKind(_ m: LBMetric) -> Bool {
+    private func metricSkipsPeriod(_ m: LBMetric) -> Bool {
         switch m {
         case .level, .goals, .duels: return true
+        default: return false
+        }
+    }
+    
+    private func metricSkipsKind(_ m: LBMetric) -> Bool {
+        switch m {
+        case .level, .goals, .duels, .segmentPopularity: return true
         default: return false
         }
     }
@@ -2263,6 +2316,40 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
+            } else if vm.metric == .segmentPopularity {
+                List(vm.segmentPopularityRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    SegmentDetailView(segmentId: row.segment_id, onClose: nil)
+                                        .gradientBG()
+                                } label: {
+                                    Text(row.name)
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(2)
+                                }
+                                .buttonStyle(.plain)
+                                Text("Matched efforts in period")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.efforts_count)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             }
         }
         .overlay {
@@ -2385,6 +2472,7 @@ struct RankingView: View {
         case .hyroxBestTime: return vm.hyroxBestTimeRows.isEmpty
         case .footballGoals: return vm.footballGoalsRows.isEmpty
         case .skiDistanceKpi: return vm.skiDistanceKpiRows.isEmpty
+        case .segmentPopularity: return vm.segmentPopularityRows.isEmpty
         }
     }
     

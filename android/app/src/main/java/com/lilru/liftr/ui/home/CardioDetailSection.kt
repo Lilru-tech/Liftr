@@ -5,15 +5,25 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -22,16 +32,51 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
+import com.lilru.liftr.cardio.CardioRouteGeoJson
 import com.lilru.liftr.ui.map.CardioRouteMapFromGeoJson
+import com.lilru.liftr.ui.map.CardioRouteSegmentTapMap
+import com.lilru.liftr.ui.segment.SegmentDuplicateException
+import com.lilru.liftr.ui.segment.createSegmentFromWorkoutRpc
+import io.github.jan.supabase.SupabaseClient
+import kotlinx.coroutines.launch
+import kotlin.math.max
+import kotlin.math.min
 import java.util.Locale
+import java.util.UUID
 
 @Composable
 fun CardioDetailSection(
     detail: CardioSessionDetail,
+    workoutId: Int? = null,
+    workoutState: String? = null,
+    isOwner: Boolean = false,
+    supabase: SupabaseClient? = null,
+    onSegmentCreated: ((UUID) -> Unit)? = null,
+    /** Si el servidor detecta un segmento ya muy similar, abrir ese detalle (p. ej. overlay en el detalle del workout). */
+    onDuplicateSegment: ((UUID) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val act = remember(detail) { effectiveCardioActivityCode(detail) }
     val ex = detail.extras
+    val scope = rememberCoroutineScope()
+    var showSegmentDialog by remember { mutableStateOf(false) }
+    var segmentName by remember { mutableStateOf("Segment") }
+    var startFrac by remember { mutableFloatStateOf(0f) }
+    var endFrac by remember { mutableFloatStateOf(1f) }
+    var segmentBusy by remember { mutableStateOf(false) }
+    var segmentErr by remember { mutableStateOf<String?>(null) }
+    var nextMapTapSetsStart by remember { mutableStateOf(true) }
+    val routePts = remember(detail.routeGeojson) {
+        CardioRouteGeoJson.parseLineStringLatLng(detail.routeGeojson)
+    }
+    val canOfferSegment =
+        isOwner &&
+            workoutState?.equals("published", ignoreCase = true) == true &&
+            workoutId != null &&
+            supabase != null &&
+            onSegmentCreated != null &&
+            !detail.routeGeojson.isNullOrBlank()
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -106,6 +151,19 @@ fun CardioDetailSection(
                     .fillMaxWidth()
                     .padding(top = 6.dp)
             )
+            if (canOfferSegment) {
+                Button(
+                    onClick = {
+                        segmentErr = null
+                        showSegmentDialog = true
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                ) {
+                    Text(stringResource(R.string.segment_create_button))
+                }
+            }
         }
         if (!detail.notes.isNullOrBlank()) {
             CardioInfoRow(
@@ -136,6 +194,144 @@ fun CardioDetailSection(
             CardioInfoRow(
                 stringResource(R.string.home_detail_cardio_label_split_500),
                 "${formatMmSs(ex.splitSecPer500m)} /500m"
+            )
+        }
+        if (showSegmentDialog && canOfferSegment && workoutId != null && supabase != null && onSegmentCreated != null) {
+            AlertDialog(
+                onDismissRequest = { if (!segmentBusy) showSegmentDialog = false },
+                title = { Text(stringResource(R.string.segment_create_dialog_title)) },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedTextField(
+                            value = segmentName,
+                            onValueChange = { segmentName = it },
+                            label = { Text(stringResource(R.string.segment_name_hint)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (routePts.size >= 2) {
+                            Text(
+                                stringResource(R.string.segment_map_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FilterChip(
+                                    selected = nextMapTapSetsStart,
+                                    onClick = { nextMapTapSetsStart = true },
+                                    label = { Text(stringResource(R.string.segment_map_pick_start)) }
+                                )
+                                FilterChip(
+                                    selected = !nextMapTapSetsStart,
+                                    onClick = { nextMapTapSetsStart = false },
+                                    label = { Text(stringResource(R.string.segment_map_pick_end)) }
+                                )
+                            }
+                            CardioRouteSegmentTapMap(
+                                routePoints = routePts,
+                                onPickFraction = { f ->
+                                    if (nextMapTapSetsStart) {
+                                        startFrac = min(f, 0.99).toFloat()
+                                        if (endFrac <= startFrac) {
+                                            endFrac = min(1f, startFrac + 0.02f)
+                                        }
+                                    } else {
+                                        endFrac = max(f, 0.01).toFloat()
+                                        if (endFrac <= startFrac) {
+                                            startFrac = max(0f, endFrac - 0.02f)
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                mapHeightDp = 200
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
+                        Text(
+                            stringResource(R.string.segment_start_pct, (startFrac * 100).toInt()),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        Slider(
+                            value = startFrac,
+                            onValueChange = { startFrac = it.coerceIn(0f, 0.95f) },
+                            valueRange = 0f..0.95f
+                        )
+                        Text(
+                            stringResource(R.string.segment_end_pct, (endFrac * 100).toInt()),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        Slider(
+                            value = endFrac,
+                            onValueChange = { endFrac = it.coerceIn(0.05f, 1f) },
+                            valueRange = 0.05f..1f
+                        )
+                        if (segmentErr != null) {
+                            Text(
+                                segmentErr!!,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Text(
+                            stringResource(R.string.segment_create_auto_match_footer),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (startFrac >= endFrac) {
+                                segmentErr = "Invalid range"
+                                return@Button
+                            }
+                            val nameTrim = segmentName.trim().ifEmpty { "Segment" }
+                            segmentBusy = true
+                            segmentErr = null
+                            scope.launch {
+                                runCatching {
+                                    createSegmentFromWorkoutRpc(
+                                        supabase = supabase,
+                                        workoutId = workoutId,
+                                        name = nameTrim,
+                                        startFraction = startFrac.toDouble(),
+                                        endFraction = endFrac.toDouble()
+                                    )
+                                }.onSuccess { id ->
+                                    segmentBusy = false
+                                    showSegmentDialog = false
+                                    onSegmentCreated(id)
+                                }.onFailure { e ->
+                                    segmentBusy = false
+                                    val dup = (e as? SegmentDuplicateException)?.existingSegmentId
+                                        ?: (e.cause as? SegmentDuplicateException)?.existingSegmentId
+                                    if (dup != null && onDuplicateSegment != null) {
+                                        showSegmentDialog = false
+                                        onDuplicateSegment.invoke(dup)
+                                        segmentErr = null
+                                    } else {
+                                        segmentErr = e.message ?: "Error"
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !segmentBusy
+                    ) {
+                        Text(stringResource(R.string.segment_create_confirm))
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showSegmentDialog = false },
+                        enabled = !segmentBusy
+                    ) {
+                        Text(stringResource(R.string.segment_create_cancel))
+                    }
+                }
             )
         }
         if (showsCardioSwimFieldsForActivity(act)) {

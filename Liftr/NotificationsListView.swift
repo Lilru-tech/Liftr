@@ -292,6 +292,18 @@ struct NotificationsListView: View {
                 workoutKindRaw: n.data?["workout_kind"]?.stringValue
             )
             .environmentObject(app)
+
+        case "segment_you_are_first", "segment_lost_first":
+            if let sidStr = n.data?["segment_id"]?.stringValue,
+               let sid = UUID(uuidString: sidStr) {
+                NavigationStack {
+                    SegmentDetailView(segmentId: sid, onClose: nil)
+                        .environmentObject(app)
+                        .gradientBG()
+                }
+            } else {
+                Text("Segment not found")
+            }
             
         default:
             VStack(spacing: 12) {
@@ -448,6 +460,8 @@ struct NotificationsListView: View {
         case "competition_result_win":            return "Result"
         case "competition_result_lose":           return "Result"
         case "workout_kind_inactive":             return "Reminder"
+        case "segment_you_are_first":             return "Segment"
+        case "segment_lost_first":                return "Segment"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

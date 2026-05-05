@@ -99,6 +99,7 @@ import android.app.Activity
 import android.widget.Toast
 import com.lilru.liftr.LiftrApplication
 import com.lilru.liftr.R
+import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -120,7 +121,9 @@ import com.lilru.liftr.ui.ranking.RankingMetric
 import com.lilru.liftr.ui.ranking.RankingScope
 import com.lilru.liftr.ui.ranking.RankingTabScreen
 import com.lilru.liftr.ui.health.HealthConnectImportScreen
+import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.auth.auth
 import java.text.DateFormat
 import java.time.Instant
@@ -129,12 +132,24 @@ import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import org.json.JSONArray
 
 /** Pestañas alineadas con [Liftr.ProfileView.Tab] en iOS. */
+private data class ProfileMySegmentRow(
+    val id: String,
+    val name: String,
+    val bufferM: Double,
+    val status: String
+)
+
 private enum class ProfileMainTab {
     Calendar,
     Prs,
     Progress,
+    Segments,
     Settings
 }
 
@@ -621,6 +636,7 @@ fun ProfileTabScreen(
     var showBioSheet by rememberSaveable { mutableStateOf(false) }
     var profileMenuExpanded by remember { mutableStateOf(false) }
     var tabIndex by rememberSaveable(profileUserId) { mutableIntStateOf(0) }
+    var segmentDetailId by rememberSaveable(profileUserId) { mutableStateOf<String?>(null) }
     LaunchedEffect(ui.bio) {
         bioDraft = ui.bio.orEmpty()
     }
@@ -654,6 +670,25 @@ fun ProfileTabScreen(
         refreshing = ui.isRefreshing,
         onRefresh = { vm.refresh(false) }
     )
+
+    val openMySegmentId = remember(segmentDetailId) {
+        segmentDetailId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    }
+    LaunchedEffect(segmentDetailId) {
+        val raw = segmentDetailId ?: return@LaunchedEffect
+        if (runCatching { UUID.fromString(raw) }.getOrNull() == null) {
+            segmentDetailId = null
+        }
+    }
+    if (openMySegmentId != null) {
+        SegmentDetailScreen(
+            supabase = supabase,
+            segmentId = openMySegmentId,
+            onBack = { segmentDetailId = null },
+            modifier = modifier
+        )
+        return
+    }
 
     if (showRanking) {
         RankingTabScreen(
@@ -823,6 +858,7 @@ fun ProfileTabScreen(
             add(ProfileMainTab.Calendar)
             add(ProfileMainTab.Prs)
             add(ProfileMainTab.Progress)
+            if (ui.isOwnProfile) add(ProfileMainTab.Segments)
             if (ui.isOwnProfile) add(ProfileMainTab.Settings)
         }
     }
@@ -912,6 +948,7 @@ fun ProfileTabScreen(
                                         ProfileMainTab.Calendar -> R.string.profile_tab_calendar
                                         ProfileMainTab.Prs -> R.string.profile_tab_prs
                                         ProfileMainTab.Progress -> R.string.profile_tab_progress
+                                        ProfileMainTab.Segments -> R.string.profile_tab_segments
                                         ProfileMainTab.Settings -> R.string.profile_tab_settings
                                     }
                                 ),
@@ -979,6 +1016,95 @@ fun ProfileTabScreen(
                                     null
                                 }
                             )
+                        }
+                    }
+                    ProfileMainTab.Segments -> {
+                        if (profileUserId != null && ui.isOwnProfile) {
+                            var rows by remember(profileUserId) { mutableStateOf<List<ProfileMySegmentRow>>(emptyList()) }
+                            var busy by remember { mutableStateOf(true) }
+                            var loadErr by remember { mutableStateOf<String?>(null) }
+                            LaunchedEffect(profileUserId) {
+                                busy = true
+                                loadErr = null
+                                runCatching {
+                                    val res = supabase.postgrest.rpc(
+                                        BackendContracts.Rpc.LIST_MY_SEGMENTS_V1,
+                                        buildJsonObject { put("p_limit", 100) }
+                                    ) { }
+                                    val arr = JSONArray(res.data)
+                                    val out = ArrayList<ProfileMySegmentRow>(arr.length())
+                                    for (i in 0 until arr.length()) {
+                                        val o = arr.optJSONObject(i) ?: continue
+                                        out.add(
+                                            ProfileMySegmentRow(
+                                                id = o.optString("id"),
+                                                name = o.optString("name"),
+                                                bufferM = o.optDouble("buffer_m"),
+                                                status = o.optString("status")
+                                            )
+                                        )
+                                    }
+                                    rows = out
+                                }.onFailure { loadErr = it.message }
+                                busy = false
+                            }
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (busy && rows.isEmpty()) {
+                                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                                }
+                                loadErr?.let { err ->
+                                    Text(
+                                        text = err,
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                if (!busy && rows.isEmpty() && loadErr == null) {
+                                    Text(
+                                        text = stringResource(R.string.profile_my_segments_empty),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                rows.forEach { row ->
+                                    Card(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { segmentDetailId = row.id }
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(14.dp),
+                                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text(
+                                                text = row.name,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                            Text(
+                                                text = buildString {
+                                                    append(row.status)
+                                                    append(" · ")
+                                                    append(
+                                                        context.getString(
+                                                            R.string.profile_my_segments_buffer,
+                                                            row.bufferM.toInt()
+                                                        )
+                                                    )
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     ProfileMainTab.Settings -> {

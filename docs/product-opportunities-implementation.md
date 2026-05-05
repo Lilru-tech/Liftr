@@ -127,9 +127,15 @@ Si en 12–24 meses el crecimiento dependiera **más** del descubrimiento outdoo
 
 **Import GPX** puede ser F2 si Health cubre la mayoría de usuarios iOS; valorar duplicados contra UUID/hash.
 
-### 2.5 Segmentos globales (explícitamente después)
+### 2.5 Segmentos (MVP técnico y alcance)
 
-Criterio de entrada sugerido: volumen de rutas públicas, necesidad legal de moderación y métrica de engagement en rutas guardadas/compartidas.
+**Decisión de alcance (MVP v1):** solo **segmentos creados explícitamente por el usuario** (p. ej. desde un cardio publicado con `route_geojson` o, más adelante, dibujo en mapa). **Queda fuera del MVP** la generación “automática” de candidatos por clustering de muchas rutas y su curación masiva (equivalente a sugerencias estilo Strava sin paso humano claro).
+
+**Criterio de entrada de producto** (sin cambiar el orden del §2.1): segmentos de comunidad siguen encajando **después** de dominar rutas guardadas, privacidad de mapa y export GPX cuando el volumen y moderación lo justifiquen.
+
+**Implementación en repo:** migración `docs/migrations/segments_mvp_v1.sql` (PostGIS, tablas `segments` / `segment_efforts`, RLS, RPCs y disparador de matching al publicar cardio). Si el cliente SQL parte el script por `;` (p. ej. DBVisualizer “execute statement”), usar en orden `docs/migrations/segments_mvp_v1_part01_schema.sql` … `segments_mvp_v1_part06_read_functions_and_grants.sql`, **cada archivo entero en una sola ejecución**. Contratos en [`docs/backend-contracts.md`](backend-contracts.md) y [`BackendContracts.kt`](../android/app/src/main/java/com/lilru/liftr/data/BackendContracts.kt).
+
+**Privacidad y §2.3:** la geometría pública de un segmento es una **polilínea de catálogo** (eje + buffer en servidor). Debe **respetar la misma política** que acabará aplicando el recorte de mapa público: al crear un segmento desde un entreno, el usuario asume que el tramo elegido puede mostrarse en leaderboards y mapas públicos; cuando exista `route_geojson_public` o recorte configurable, el flujo de creación deberá **partir de la geometría ya recortada** o advertir explícitamente (evitar filtrar domicilio vía segmentos antes de tener recorte en publicación).
 
 ---
 

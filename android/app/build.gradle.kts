@@ -47,8 +47,8 @@ android {
         applicationId = "com.lilru.liftr"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11003
-        versionName = "1.10.3"
+        versionCode = 11100
+        versionName = "1.11.0"
 
         buildConfigField("String", "SUPABASE_URL", "\"${requireQuoted(supabaseUrl)}\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"${requireQuoted(supabaseKey)}\"")

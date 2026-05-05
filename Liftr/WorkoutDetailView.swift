@@ -466,7 +466,12 @@ struct WorkoutDetailView: View {
         case "strength":
             StrengthDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
         case "cardio":
-            CardioDetailBlock(workoutId: workoutId, reloadKey: reloadKey)
+            CardioDetailBlock(
+                workoutId: workoutId,
+                reloadKey: reloadKey,
+                canEdit: canEdit,
+                workoutState: workout?.state
+            )
         case "sport":
             SportDetailBlock(workoutId: workoutId, reloadKey: reloadKey, canEdit: canEdit)
         default:
@@ -2269,7 +2274,16 @@ private struct CardioRouteMapMini: View {
 private struct CardioDetailBlock: View {
     let workoutId: Int
     let reloadKey: UUID
-    
+    let canEdit: Bool
+    let workoutState: String?
+
+    @State private var showCreateSegment = false
+    @State private var segmentNav: SegmentNavSheet?
+
+    private struct SegmentNavSheet: Identifiable {
+        let id: UUID
+    }
+
     private struct CardioRow: Decodable {
         let id: Int
         let activity_code: String?
@@ -2323,6 +2337,17 @@ private struct CardioDetailBlock: View {
                         .font(.subheadline.weight(.semibold))
                         .padding(.top, 2)
                     CardioRouteMapMini(coordinates: routeCoordinates)
+                    if canEdit && workoutState == "published" {
+                        Button {
+                            showCreateSegment = true
+                        } label: {
+                            Text("Create segment")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 8)
+                    }
                 }
                 if let n = r.notes, !n.isEmpty { info("Notes", n) }
                 if showsCadence(for: r.activity_code), let cad = extras?.cadence_rpm {
@@ -2353,6 +2378,29 @@ private struct CardioDetailBlock: View {
         .onChange(of: reloadKey) { _, _ in
             kmPaceSplitsExpanded = false
             Task { await load() }
+        }
+        .sheet(isPresented: $showCreateSegment) {
+            CreateSegmentFromWorkoutSheet(
+                workoutId: workoutId,
+                routeCoordinates: routeCoordinates,
+                onCreated: { id in
+                    showCreateSegment = false
+                    segmentNav = SegmentNavSheet(id: id)
+                },
+                onOpenExistingSegment: { id in
+                    showCreateSegment = false
+                    segmentNav = SegmentNavSheet(id: id)
+                },
+                onCancel: { showCreateSegment = false }
+            )
+            .presentationBackground(.clear)
+        }
+        .sheet(item: $segmentNav) { nav in
+            NavigationStack {
+                SegmentDetailView(segmentId: nav.id, onClose: { segmentNav = nil })
+            }
+            .gradientBG()
+            .presentationBackground(.clear)
         }
     }
     

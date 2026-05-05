@@ -6,17 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-05-03
+
 ### Added
-- **Home (signed out)** — Public feed of **published** workouts with the same pagination as the signed-in feed; opening a workout prompts **sign in** (Profile tab on iOS, Profile tab on Android).
-- **Ranking** — Leaderboards for **strength volume**, **cardio distance**, and **sport match wins** (same scope/period/sex/age pattern as other ranking RPCs). **Extended metrics**: cardio ascent (m), cardio time, best pace (sessions ≥1 km), strength total reps/sets, max single-set weight, sport play time, sport win rate (min 3 logged matches). **Social & sport KPIs**: likes and comments on published workouts, group sessions (≥2 people), **Achievements** (unlocks in selected period), Hyrox best official time, football goals sum, ski distance sum. **Group sessions** defaults the period control to **All-time** when that metric is selected (sparse weekly data). Metric selection uses a **sheet / bottom sheet** with grouped lists (General, Social, Strength, Cardio, Sport) and search on iOS; Android uses a metric button plus **ModalBottomSheet**.
+- **Cardio map** — Full-screen / large map for the route in **ActiveCardioWorkout** and **WorkoutDetailView** (cardio).
+- **Achievements** — Progress toward unlocking each achievement (current vs requirement).
+- **Achievements** — Optional **community percentage** (share of users with a published workout who have unlocked the achievement) and sample size when the backend provides it.
+- **Segments (cardio)** — Users can **create segments** from a published cardio route: detail + leaderboard, matching on publish, search / my segments / popularity leaderboard, owner rename/delete rules, notifications when you take or lose #1 on a segment (English copy). iOS and Android parity (create flow, map tap for start/end, segment detail, links from notifications).
+- **Ranking** — Broader **metric catalog**: **Social**, **Sport**, **Strength**, and **Cardio** buckets (grouped picker / bottom sheet, search on iOS) with extended training and KPI leaderboards where deployed.
+- **Home (signed out)** — **Public feed** of published workouts (same pagination pattern as signed-in); tapping a workout asks the user to **sign in** to open it.
 
 ### Changed
-- **Home (signed in)** — Clearer **English** empty states when you follow no one vs when your feed has no activity yet.
+- **Active strength** — Clearer **set display** so repeat / grouped sets are easier to understand.
+- **Active strength** — **Rest countdown** on the **exercise bubble** for the exercise that is resting (stays visible when you switch to another exercise); iOS/Android aligned with group-workout style overlay.
+- **Home (signed in)** — Clearer **English** empty states when you follow no one vs when the feed has no activity yet.
+- **Orientation** — App locked to **portrait** on iPhone and iPad (iOS supported orientations + Android `screenOrientation`) to avoid layout breakage after rotation.
+
+### Fixed
+- **Profiles / XP** — Edge cases where **other users’ XP events** did not show reliably.
+- **Goals (history)** — **Unfinished** goals show the completion bar in **red** for quick scanning.
+- **Goals (finished)** — **Completed** state and counts display correctly.
+- **Goals** — **Summary** shows more useful aggregate data.
 
 ### Notes (database / ops)
-- Apply `docs/migrations/home_public_feed_anon_rls_v1.sql` in Supabase so role `anon` can `SELECT` published workouts and related embed rows (`sport_sessions`, `cardio_sessions`, `workout_scores`, `workout_likes`, `workout_participants`). `profiles` already allows anonymous read where existing policies include `anon`.
-- Apply `docs/migrations/ranking_training_metrics_leaderboard_v1.sql` for `get_strength_volume_leaderboard_v1`, `get_cardio_distance_leaderboard_v1`, and `get_sport_match_wins_leaderboard_v1`, then **`docs/migrations/ranking_training_metrics_leaderboard_v2.sql`** (drops the 5-arg `get_sport_match_wins_leaderboard_v1`, adds `p_sport` + new RPCs + `GRANT`). Optional: run `docs/migrations/ranking_training_metrics_introspection.sql` queries in the SQL Editor to validate `match_result` values and data coverage.
-- Apply **`docs/migrations/ranking_social_achievements_sport_kpis_v1.sql`** for social, achievements, Hyrox, football, and ski ranking RPCs (`GRANT` included in file). Re-run the same file after updates if you already deployed an older copy: **group sessions** count owner + `workout_participants` (≥2 people); workout date windows use **`COALESCE(started_at, created_at)`**; achievements and sport-stat leaderboards use **`SECURITY DEFINER`** so RLS does not hide other users’ rows during aggregation. Debug queries: **`docs/migrations/ranking_leaderboards_debug_queries.sql`**.
+- **Segments, home anon feed, ranking RPCs, achievements progress** — SQL migrations and grants are maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
+- Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
+
+[1.11.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.11.0
 
 ## [1.10.1] - 2026-04-30
 

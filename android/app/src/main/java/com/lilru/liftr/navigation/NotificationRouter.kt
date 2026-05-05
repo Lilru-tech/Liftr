@@ -2,6 +2,7 @@ package com.lilru.liftr.navigation
 
 import com.lilru.liftr.data.BackendContracts
 import io.github.jan.supabase.SupabaseClient
+import java.util.UUID
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +51,7 @@ object NotificationRouter {
         map["owner_id"]?.let { merged["owner_id"] = it }
         map["follower_id"]?.let { merged["follower_id"] = it }
         map["competition_id"]?.let { merged["competition_id"] = it }
+        map["segment_id"]?.let { merged["segment_id"] = it }
         return overlayFromStringMap(type, merged, myUserId)
     }
 
@@ -120,6 +122,13 @@ object NotificationRouter {
             "competition_workout_rejected" -> {
                 val cid = map["competition_id"]?.toIntOrNull()
                 if (cid != null) MainOverlay.CompetitionDetailById(cid) else MainOverlay.CompetitionsHub
+            }
+            "segment_you_are_first",
+            "segment_lost_first" -> {
+                val sid = map["segment_id"]?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: return null
+                val u = runCatching { UUID.fromString(sid) }.getOrNull() ?: return null
+                MainOverlay.SegmentDetail(u)
             }
             "legacy" -> {
                 if (map["workout_id"] != null) {

@@ -34,6 +34,8 @@ object BackendContracts {
         const val RACKET_SESSION_STATS = "racket_session_stats"
         const val RUGBY_SESSION_STATS = "rugby_session_stats"
         const val SKI_SESSION_STATS = "ski_session_stats"
+        const val SEGMENTS = "segments"
+        const val SEGMENT_EFFORTS = "segment_efforts"
         const val SPORT_SESSIONS = "sport_sessions"
         const val STRENGTH_ROUTINES = "strength_routines"
         const val STRENGTH_ROUTINE_EXERCISES = "strength_routine_exercises"
@@ -114,6 +116,16 @@ object BackendContracts {
         const val TRENDING_SEARCH_QUERIES_24H = "trending_search_queries_24h"
         const val UPDATE_SPORT_WORKOUT_V2 = "update_sport_workout_v2"
         const val USER_SEARCH_RECENT_LIST = "user_search_recent_list"
+        const val CREATE_SEGMENT_FROM_WORKOUT_V1 = "create_segment_from_workout_v1"
+        const val UPDATE_MY_SEGMENT_NAME_V1 = "update_my_segment_name_v1"
+        const val DELETE_MY_SEGMENT_V1 = "delete_my_segment_v1"
+        const val GET_SEGMENT_DETAIL_V1 = "get_segment_detail_v1"
+        const val GET_SEGMENT_LEADERBOARD_V1 = "get_segment_leaderboard_v1"
+        const val LIST_SEGMENTS_NEAR_V1 = "list_segments_near_v1"
+        const val LIST_MY_SEGMENTS_V1 = "list_my_segments_v1"
+        const val LIST_SEGMENTS_POPULARITY_LEADERBOARD_V1 = "list_segments_popularity_leaderboard_v1"
+        const val SEARCH_SEGMENTS_V1 = "search_segments_v1"
+        const val MATCH_SEGMENT_EFFORTS_FOR_WORKOUT_V1 = "match_segment_efforts_for_workout_v1"
     }
 
     /** Supabase Edge Functions (invoke con JWT de sesión), alineado con [Liftr/ProfileView.swift]. */

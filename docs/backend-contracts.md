@@ -56,6 +56,8 @@ Tablas:
 - `workout_participants`
 - `workout_scores`
 - `xp_events`
+- `segments` (PostGIS `geography(LineString,4326)`; MVP solo creación por usuario; ver `docs/migrations/segments_mvp_v1.sql` o `segments_mvp_v1_part01_*.sql`–`part06_*.sql` si el cliente parte por `;`)
+- `segment_efforts` (match por buffer sobre `route_geojson` + tiempo estimado; ver misma migración)
 - `achievements` (catálogo; filas y reglas de desbloqueo principales vía `check_and_unlock_achievements_for` en la BD)
 - `user_achievements` (desbloqueos por `user_id`)
 
@@ -111,6 +113,17 @@ Vistas:
 - `trending_search_queries_24h`
 - `update_sport_workout_v2`
 - `user_search_recent_list`
+- `create_segment_from_workout_v1` (`p_workout_id`, `p_name`, `p_start_fraction`, `p_end_fraction`, `p_buffer_m` opcional) → `uuid` del segmento; requiere cardio publicado, dueño autenticado y `route_geojson` válido ([`segments_mvp_v1.sql`](migrations/segments_mvp_v1.sql)). Tras aplicar [`segments_mvp_v3_owner_dup_delete.sql`](migrations/segments_mvp_v3_owner_dup_delete.sql): si ya existe un segmento **publicado** geométricamente muy parecido, la función hace `RAISE EXCEPTION` con mensaje `duplicate_segment` y **`HINT`** = UUID del existente (el cliente puede abrir ese detalle). Tras [`segments_mvp_v4_segment_create_backfill_intersecting.sql`](migrations/segments_mvp_v4_segment_create_backfill_intersecting.sql): tras insertar el segmento, la BD re-matchea también otros **cardio publicados** cuya ruta está a distancia ≤ `greatest(buffer_m*3, 200)` m del nuevo segmento (`ST_DWithin`), llamando a la misma lógica que al publicar (`_match_segments_for_workout_internal` por `workout_id`).
+- `get_segment_detail_v1` (`p_segment_id`) → fila con `id`, `name`, `buffer_m`, `status`, `geojson` (LineString WGS84 como texto GeoJSON); con v3 también `created_by`, `foreign_efforts_count` (efforts con `user_id` distinto del creador). Tras [`segments_mvp_v6_segment_detail_stats.sql`](migrations/segments_mvp_v6_segment_detail_stats.sql): `segment_length_m`, `center_lat`, `center_lon` (punto medio del eje), `leaderboard_effort_count`, `leaderboard_athlete_count` (solo cardio publicado, mismo criterio que el ranking), `confidence_avg` / `confidence_min` / `confidence_max`, `viewer_best_elapsed_sec` y `viewer_best_workout_id` (mejor esfuerzo del `auth.uid()` actual, o `NULL` si anónimo / sin match).
+- `update_my_segment_name_v1` (`p_segment_id`, `p_name`) → solo el dueño (`created_by` = `auth.uid()`); renombra el segmento.
+- `delete_my_segment_v1` (`p_segment_id`) → solo el dueño y solo si **no** hay efforts de otros usuarios en ese segmento (equivalente a `foreign_efforts_count == 0`); borra segmento y efforts asociados según definición en SQL.
+- `get_segment_leaderboard_v1` (`p_segment_id`, `p_limit` opcional) → filas con `rank`, `user_id`, `username`, `avatar_url`, `elapsed_sec`, `workout_id`, `matched_at`, `effort_at` (fecha del entreno: `COALESCE(started_at, created_at)`), y con v6 también `confidence` del effort rankeado. Tras [`segments_mvp_v5_leaderboard_cap.sql`](migrations/segments_mvp_v5_leaderboard_cap.sql): como mucho **10 efforts por usuario** (los mejores tiempos de cada uno), luego ranking global por `elapsed_sec`; solo cardio `published`.
+- `list_segments_near_v1` (`p_lat`, `p_lon`, `p_radius_m` opcional, `p_limit` opcional) → segmentos publicados en radio
+- `search_segments_v1` (`p_query`, `p_limit` opcional) → `id`, `name`, `buffer_m` (solo `published`; `p_query` normalizado, mínimo 2 caracteres)
+- `list_my_segments_v1` (`p_limit` opcional) → segmentos creados por `auth.uid()` (`id`, `name`, `buffer_m`, `status`, `created_at`); solo `authenticated`
+- `list_segments_popularity_leaderboard_v1` (`p_period` como otros rankings: `day`/`week`/`month`/`all`, `p_limit` opcional) → `rank`, `segment_id`, `name`, `efforts_count`, `buffer_m` (conteo de `segment_efforts` con workout publicado en la ventana por `matched_at`)
+- `match_segment_efforts_for_workout_v1` (`p_workout_id`) → reprocesa matching para el dueño (misma lógica que el trigger al publicar)
+- Tras [`segments_mvp_v7_segment_rank_notifications.sql`](migrations/segments_mvp_v7_segment_rank_notifications.sql): el matching interno llama a **`create_notification`** existente (`_user_id`, `_type`, `_title`, `_body`, `_data`) para insertar en **`notifications`** (mismo pipeline `send-notifications` + FCM). Tipos: **`segment_you_are_first`**, **`segment_lost_first`** (solo pérdida del 1º cuando el nuevo líder es el effort del `workout_id` recién matcheado). `data` incluye al menos `segment_id`, `segment_name`; en `segment_lost_first` también `overtaker_user_id`, `overtaker_username` (y `notification_id` si lo añade vuestra `create_notification`).
 
 ## Achievements (contrato cliente y operación en BD)
 

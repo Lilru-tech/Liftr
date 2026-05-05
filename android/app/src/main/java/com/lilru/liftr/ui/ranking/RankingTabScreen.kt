@@ -61,7 +61,9 @@ import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
+import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
+import java.util.UUID
 
 /** Paridad con [com.lilru.liftr.ui.profile.progress.ProfileProgressScreen]: píldoras bajas estilo iOS. */
 private val RankingSegmentButtonHeight = 30.dp
@@ -105,6 +107,7 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.HYROX_BEST_TIME -> stringResource(R.string.ranking_metric_hyrox_best_time)
     RankingMetric.FOOTBALL_GOALS -> stringResource(R.string.ranking_metric_football_goals)
     RankingMetric.SKI_DISTANCE_KPI -> stringResource(R.string.ranking_metric_ski_km)
+    RankingMetric.SEGMENT_POPULARITY -> stringResource(R.string.ranking_metric_segment_popularity)
 }
 
 @OptIn(ExperimentalMaterialApi::class, ExperimentalMaterial3Api::class)
@@ -133,8 +136,22 @@ fun RankingTabScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var selectedWorkout by rememberSaveable { mutableStateOf<Long?>(null) }
     var selectedProfile by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedSegmentId by rememberSaveable { mutableStateOf<String?>(null) }
     var metricSheetOpen by remember { mutableStateOf(false) }
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+
+    val openSegmentId = remember(selectedSegmentId) {
+        selectedSegmentId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    }
+    if (openSegmentId != null) {
+        SegmentDetailScreen(
+            supabase = supabase,
+            segmentId = openSegmentId,
+            onBack = { selectedSegmentId = null },
+            modifier = modifier
+        )
+        return
+    }
 
     if (selectedWorkout != null) {
         WorkoutDetailScreen(
@@ -203,12 +220,21 @@ fun RankingTabScreen(
                 val periods = RankingPeriod.entries
                 val kinds = RankingKind.entries
                 Column(verticalArrangement = Arrangement.spacedBy(RankingSegmentRowSpacing)) {
-                    val showPeriodAndKind = when (ui.metric) {
+                    val showScope = ui.metric != RankingMetric.SEGMENT_POPULARITY
+                    val showPeriod = when (ui.metric) {
                         RankingMetric.LEVEL,
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON -> false
                         else -> true
                     }
+                    val showKind = when (ui.metric) {
+                        RankingMetric.LEVEL,
+                        RankingMetric.GOALS_COMPLETED,
+                        RankingMetric.DUELS_WON,
+                        RankingMetric.SEGMENT_POPULARITY -> false
+                        else -> true
+                    }
+                    if (showScope) {
                     SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                         scopes.forEachIndexed { i, scope ->
                             SegmentedButton(
@@ -228,6 +254,7 @@ fun RankingTabScreen(
                                 )
                             }
                         }
+                    }
                     }
                     OutlinedButton(
                         onClick = { metricSheetOpen = true },
@@ -263,7 +290,7 @@ fun RankingTabScreen(
                             )
                         }
                     }
-                    if (showPeriodAndKind) {
+                    if (showPeriod) {
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                             periods.forEachIndexed { i, period ->
                                 SegmentedButton(
@@ -285,6 +312,8 @@ fun RankingTabScreen(
                                 }
                             }
                         }
+                    }
+                    if (showKind) {
                         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                             kinds.forEachIndexed { i, kind ->
                                 SegmentedButton(
@@ -323,7 +352,35 @@ fun RankingTabScreen(
             }
         }
 
-        if (ui.workoutRows.isNotEmpty()) {
+        if (ui.segmentRows.isNotEmpty()) {
+            items(ui.segmentRows, key = { "${it.segmentId}-${it.rank}" }) { row ->
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { selectedSegmentId = row.segmentId }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                "#${row.rank}  ${row.name}",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                stringResource(
+                                    R.string.ranking_segment_efforts_in_period,
+                                    row.effortsCount.toString()
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        } else if (ui.workoutRows.isNotEmpty()) {
             items(ui.workoutRows, key = { "${it.workoutId}-${it.rank}" }) { row ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),

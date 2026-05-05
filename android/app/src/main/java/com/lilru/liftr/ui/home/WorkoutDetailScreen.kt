@@ -75,7 +75,9 @@ import com.lilru.liftr.ui.add.duplicate.AddWorkoutDuplicateStore
 import com.lilru.liftr.ui.add.duplicate.loadDuplicateForAdd
 import com.lilru.liftr.ui.compare.CompareWorkoutsScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
+import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
+import java.util.UUID
 
 private enum class PreActiveKind {
     Strength, Cardio, Sport
@@ -118,6 +120,7 @@ fun WorkoutDetailScreen(
     var dualGuestAvatarUrl by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
     var dualGuest2AvatarUrl by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
     var dualHostAvatarUrl by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
+    var segmentOverlayUuid by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
     var dualPrepareBusy by rememberSaveable(workoutId) { mutableStateOf(false) }
     var dualSheetSelectedIds by remember(workoutId) { mutableStateOf<Set<String>>(emptySet()) }
     var showCommentsSheet by rememberSaveable(workoutId) { mutableStateOf(false) }
@@ -128,6 +131,25 @@ fun WorkoutDetailScreen(
         if (showLikersSheet && !ui.likeBusy) {
             vm.loadLikers()
         }
+    }
+
+    val openSegmentId = remember(segmentOverlayUuid) {
+        segmentOverlayUuid?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    }
+    LaunchedEffect(segmentOverlayUuid) {
+        val raw = segmentOverlayUuid ?: return@LaunchedEffect
+        if (runCatching { UUID.fromString(raw) }.getOrNull() == null) {
+            segmentOverlayUuid = null
+        }
+    }
+    if (openSegmentId != null) {
+        SegmentDetailScreen(
+            supabase = supabase,
+            segmentId = openSegmentId,
+            onBack = { segmentOverlayUuid = null },
+            modifier = modifier
+        )
+        return
     }
 
     if (preActiveCountdown != null) {
@@ -519,7 +541,17 @@ fun WorkoutDetailScreen(
             "cardio" -> {
                 val cFull = ui.cardioSession
                 if (cFull != null) {
-                    item { CardioDetailSection(detail = cFull) }
+                    item {
+                        CardioDetailSection(
+                            detail = cFull,
+                            workoutId = workoutId,
+                            workoutState = workout.state,
+                            isOwner = isOwner,
+                            supabase = supabase,
+                            onSegmentCreated = { id -> segmentOverlayUuid = id.toString() },
+                            onDuplicateSegment = { id -> segmentOverlayUuid = id.toString() }
+                        )
+                    }
                 } else {
                     val c = workout.cardioSessions?.firstOrNull()
                     if (c != null) {

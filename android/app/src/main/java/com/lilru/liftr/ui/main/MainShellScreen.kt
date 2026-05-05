@@ -99,6 +99,7 @@ import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.ranking.RankingTabScreen
 import com.lilru.liftr.ui.search.SearchTabScreen
+import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 
@@ -121,6 +122,7 @@ private enum class MainTab(
  */
 private fun selectTabForRootOverlay(overlay: MainOverlay): MainTab? = when (overlay) {
     is MainOverlay.FollowerProfile -> MainTab.Search
+    is MainOverlay.SegmentDetail -> MainTab.Search
     else -> null
 }
 
@@ -544,6 +546,14 @@ fun MainShellScreen(
             is MainOverlay.CompetitionReviews -> {
                 CompetitionReviewsScreen(
                     supabase = supabase,
+                    onBack = { clearOverlay() },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            is MainOverlay.SegmentDetail -> {
+                SegmentDetailScreen(
+                    supabase = supabase,
+                    segmentId = overlayNonNull.segmentId,
                     onBack = { clearOverlay() },
                     modifier = Modifier.fillMaxSize()
                 )

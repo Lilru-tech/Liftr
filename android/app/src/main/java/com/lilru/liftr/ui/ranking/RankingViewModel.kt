@@ -43,7 +43,8 @@ enum class RankingMetric {
     ACHIEVEMENTS,
     HYROX_BEST_TIME,
     FOOTBALL_GOALS,
-    SKI_DISTANCE_KPI
+    SKI_DISTANCE_KPI,
+    SEGMENT_POPULARITY
 }
 
 private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this) {
@@ -64,7 +65,8 @@ private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this)
     RankingMetric.LIKES_RECEIVED,
     RankingMetric.COMMENTS_RECEIVED,
     RankingMetric.GROUP_SESSIONS,
-    RankingMetric.ACHIEVEMENTS -> kind == RankingKind.ALL
+    RankingMetric.ACHIEVEMENTS,
+    RankingMetric.SEGMENT_POPULARITY -> kind == RankingKind.ALL
     else -> true
 }
 
@@ -108,12 +110,14 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetric.FOOTBALL_GOALS,
         RankingMetric.SKI_DISTANCE_KPI
     ).filter { it.isVisibleFor(kind) }
+    val segments = listOf(RankingMetric.SEGMENT_POPULARITY).filter { it.isVisibleFor(kind) }
     return listOf(
         RankingMetricSheetSection("General", general),
         RankingMetricSheetSection("Social", social),
         RankingMetricSheetSection("Strength", strength),
         RankingMetricSheetSection("Cardio", cardio),
-        RankingMetricSheetSection("Sport", sport)
+        RankingMetricSheetSection("Sport", sport),
+        RankingMetricSheetSection("Segments", segments)
     ).filter { it.metrics.isNotEmpty() }
 }
 
@@ -144,6 +148,14 @@ data class RankingWorkoutRow(
     val score: String
 )
 
+data class RankingSegmentRow(
+    val rank: Int,
+    val segmentId: String,
+    val name: String,
+    val effortsCount: Long,
+    val bufferM: Double?
+)
+
 data class RankingUiState(
     val loading: Boolean = true,
     val isRefreshing: Boolean = false,
@@ -153,7 +165,8 @@ data class RankingUiState(
     val period: RankingPeriod = RankingPeriod.WEEK,
     val kind: RankingKind = RankingKind.ALL,
     val userRows: List<RankingUserRow> = emptyList(),
-    val workoutRows: List<RankingWorkoutRow> = emptyList()
+    val workoutRows: List<RankingWorkoutRow> = emptyList(),
+    val segmentRows: List<RankingSegmentRow> = emptyList()
 )
 
 class RankingViewModel(
@@ -215,6 +228,7 @@ class RankingViewModel(
             } else {
                 st.copy(isRefreshing = true, error = null)
             }
+            var segmentRowsBuffer: List<RankingSegmentRow> = emptyList()
             runCatching {
                 when (st.metric) {
                     RankingMetric.SCORE -> fetchScore(st)
@@ -241,19 +255,52 @@ class RankingViewModel(
                     RankingMetric.HYROX_BEST_TIME -> fetchHyroxBestTime(st)
                     RankingMetric.FOOTBALL_GOALS -> fetchFootballGoals(st)
                     RankingMetric.SKI_DISTANCE_KPI -> fetchSkiDistanceKpi(st)
+                    RankingMetric.SEGMENT_POPULARITY -> {
+                        segmentRowsBuffer = fetchSegmentPopularity(st)
+                        emptyList<RankingUserRow>() to emptyList()
+                    }
                 }
             }.onSuccess { (users, workouts) ->
                 _uiState.value = _uiState.value.copy(
                     loading = false,
                     isRefreshing = false,
                     userRows = users,
-                    workoutRows = workouts
+                    workoutRows = workouts,
+                    segmentRows = if (st.metric == RankingMetric.SEGMENT_POPULARITY) {
+                        segmentRowsBuffer
+                    } else {
+                        emptyList()
+                    }
                 )
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     loading = false,
                     isRefreshing = false,
+                    segmentRows = emptyList(),
                     error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    private suspend fun fetchSegmentPopularity(st: RankingUiState): List<RankingSegmentRow> {
+        val params = buildJsonObject {
+            put("p_period", mapPeriod(st.period))
+            put("p_limit", 100)
+        }
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.LIST_SEGMENTS_POPULARITY_LEADERBOARD_V1,
+            params
+        ) { }
+        val arr = parseArrayFlexible(res.data)
+        return (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                RankingSegmentRow(
+                    rank = o.optInt("rank", idx + 1),
+                    segmentId = o.optString("segment_id"),
+                    name = o.optNullableString("name") ?: "—",
+                    effortsCount = o.optLong("efforts_count", 0L),
+                    bufferM = if (o.has("buffer_m") && !o.isNull("buffer_m")) o.optDouble("buffer_m") else null
                 )
             }
         }
