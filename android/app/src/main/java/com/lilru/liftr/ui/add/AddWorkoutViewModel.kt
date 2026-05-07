@@ -23,6 +23,8 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,9 +34,11 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -64,10 +68,16 @@ enum class ExercisePickerSortMode {
     RECENT
 }
 
+data class HyroxRoutineApplyDraft(
+    val exercisesJson: String,
+    val sportStatsOverlay: Map<String, String>
+)
+
 data class AddWorkoutUiState(
     val loadingExercises: Boolean = true,
     val loadingFollowees: Boolean = true,
     val loadingRoutines: Boolean = true,
+    val loadingHyroxRoutines: Boolean = true,
     val creating: Boolean = false,
     val savingRoutine: Boolean = false,
     val applyingRoutine: Boolean = false,
@@ -76,6 +86,9 @@ data class AddWorkoutUiState(
     val followees: List<ProfileLite> = emptyList(),
     val routineFolders: List<RoutineFolderUi> = emptyList(),
     val routines: List<StrengthRoutineUi> = emptyList(),
+    val hyroxRoutineFolders: List<RoutineFolderUi> = emptyList(),
+    val hyroxRoutines: List<StrengthRoutineUi> = emptyList(),
+    val pendingHyroxApply: HyroxRoutineApplyDraft? = null,
     val selectedParticipantIds: Set<String> = emptySet(),
     val perPersonStrength: Boolean = false,
     val currentUserId: String? = null,
@@ -167,6 +180,37 @@ private data class RoutineSetRow(
     val rpe: Double? = null,
     @SerialName("rest_sec") val restSec: Int? = null,
     val notes: String? = null
+)
+
+@Serializable
+private data class HyroxRoutineExerciseDb(
+    @SerialName("exercise_code") val exerciseCode: String,
+    @SerialName("exercise_order") val exerciseOrder: Int,
+    @SerialName("distance_m") val distanceM: Int? = null,
+    val reps: Int? = null,
+    @SerialName("weight_kg") val weightKg: Double? = null,
+    @SerialName("duration_sec") val durationSec: Int? = null,
+    @SerialName("height_cm") val heightCm: Int? = null,
+    @SerialName("implement_count") val implementCount: Int? = null,
+    val notes: String? = null,
+    @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
+)
+
+@Serializable
+private data class HyroxRoutineHeaderDb(
+    val id: Long,
+    val name: String,
+    val division: String? = null,
+    val category: String? = null,
+    @SerialName("age_group") val ageGroup: String? = null,
+    @SerialName("official_time_sec") val officialTimeSec: Int? = null,
+    @SerialName("penalty_time_sec") val penaltyTimeSec: Int? = null,
+    @SerialName("no_reps") val noReps: Int? = null,
+    @SerialName("rank_overall") val rankOverall: Int? = null,
+    @SerialName("rank_category") val rankCategory: Int? = null,
+    @SerialName("avg_hr") val avgHr: Int? = null,
+    @SerialName("max_hr") val maxHr: Int? = null,
+    @SerialName("hyrox_routine_exercises") val exercises: List<HyroxRoutineExerciseDb>? = null
 )
 
 data class StrengthSetDraft(
@@ -548,6 +592,10 @@ class AddWorkoutViewModel(
 
     fun consumePendingOpenWorkout() {
         _uiState.value = _uiState.value.copy(pendingOpenWorkoutId = null)
+    }
+
+    fun consumePendingHyroxApply() {
+        _uiState.value = _uiState.value.copy(pendingHyroxApply = null)
     }
 
     /** Llamar desde [AddWorkoutTabScreen] tras [onWorkoutPublishedToHome], para no re-disparar al volver a Add. */
@@ -1311,6 +1359,622 @@ class AddWorkoutViewModel(
         }
     }
 
+    fun loadHyroxRoutines() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(loadingHyroxRoutines = true)
+            runCatching {
+                val folderRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS)
+                    .select(columns = Columns.raw("id, name, sort_order")) {
+                        order("sort_order", Order.ASCENDING)
+                        order("name", Order.ASCENDING)
+                    }
+                val folders = decodeFlexibleList<RoutineFolderRow>(folderRes.data)
+                    .map { RoutineFolderUi(id = it.id, name = it.name, sortOrder = it.sortOrder) }
+
+                val routineRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINES)
+                    .select(columns = Columns.raw("id, name, folder_id, sort_order, updated_at")) {
+                        order("sort_order", Order.ASCENDING)
+                        order("name", Order.ASCENDING)
+                    }
+                val routineRows = decodeFlexibleList<RoutineRow>(routineRes.data)
+                val routineIds = routineRows.map { it.id }
+                val exerciseRows = if (routineIds.isEmpty()) {
+                    emptyList()
+                } else {
+                    val exRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINE_EXERCISES)
+                        .select(columns = Columns.raw("id, routine_id")) {
+                            filter { isIn("routine_id", routineIds) }
+                        }
+                    decodeFlexibleList<RoutineExerciseIdRoutinePair>(exRes.data)
+                }
+                val exerciseCountByRoutine = exerciseRows.groupingBy { it.routineId }.eachCount()
+                val routines = routineRows.map { row ->
+                    StrengthRoutineUi(
+                        id = row.id,
+                        name = row.name,
+                        folderId = row.folderId,
+                        sortOrder = row.sortOrder,
+                        exerciseCount = exerciseCountByRoutine[row.id] ?: 0,
+                        updatedAtIso = row.updatedAt
+                    )
+                }
+                folders to routines
+            }.onSuccess { pair ->
+                val (folders, routines) = pair
+                _uiState.value = _uiState.value.copy(
+                    loadingHyroxRoutines = false,
+                    hyroxRoutineFolders = folders,
+                    hyroxRoutines = routines,
+                    error = null
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    loadingHyroxRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun applyHyroxRoutine(routineId: Long) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(applyingRoutine = true, error = null, message = null)
+            runCatching {
+                val detail = fetchHyroxRoutineDetail(routineId) ?: error("Routine not found.")
+                val exJson = hyroxExercisesJsonFromDetail(detail)
+                val overlay = hyroxSportStatsOverlayFromDetail(detail)
+                HyroxRoutineApplyDraft(exercisesJson = exJson, sportStatsOverlay = overlay)
+            }.onSuccess { draft ->
+                _uiState.value = _uiState.value.copy(
+                    applyingRoutine = false,
+                    pendingHyroxApply = draft,
+                    message = "Routine applied.",
+                    error = null
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    applyingRoutine = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun saveCurrentAsHyroxRoutine(
+        routineName: String,
+        folderId: Long?,
+        durationMinText: String,
+        sportStats: Map<String, String>,
+        hyroxExercisesText: String
+    ) {
+        val trimmedName = routineName.trim()
+        if (trimmedName.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Routine name is required.")
+            return
+        }
+        if (hyroxExercisesText.isBlank()) {
+            _uiState.value = _uiState.value.copy(error = "Add at least one Hyrox station before saving.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(savingRoutine = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val stats = SportStatsPayloadBuilder.build(
+                    sport = AddSportType.HYROX,
+                    durationMinText = durationMinText,
+                    footballPosition = AddFootballPosition.GOALKEEPER,
+                    racketMode = AddRacketMode.SINGLES,
+                    racketFormat = AddRacketFormat.BEST_OF_3,
+                    sportStats = sportStats,
+                    hyroxExercisesText = hyroxExercisesText
+                )
+                insertHyroxRoutineFromStats(me, trimmedName, folderId, stats, replaceRoutineId = null)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    savingRoutine = false,
+                    message = "Hyrox routine saved."
+                )
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    savingRoutine = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    private suspend fun fetchHyroxRoutineDetail(routineId: Long): HyroxRoutineHeaderDb? {
+        val res = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(
+            columns = Columns.raw(
+                "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
+                    "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+            )
+        ) {
+            filter { eq("id", routineId) }
+            limit(1)
+        }
+        val root = runCatching { Json.parseToJsonElement(res.data) }.getOrNull() ?: return null
+        val obj = when (root) {
+            is JsonArray -> root.firstOrNull()?.jsonObject
+            is JsonObject -> root
+            else -> null
+        } ?: return null
+        return runCatching { json.decodeFromJsonElement(HyroxRoutineHeaderDb.serializer(), obj) }.getOrNull()
+    }
+
+    private fun hyroxExercisesJsonFromDetail(d: HyroxRoutineHeaderDb): String {
+        val rows = (d.exercises ?: emptyList()).sortedBy { it.exerciseOrder }
+        val arr = buildJsonArray {
+            rows.forEach { r ->
+                val p = HyroxExerciseFormatting.persistedPayload(
+                    r.exerciseCode,
+                    r.exerciseDisplayName.orEmpty(),
+                    r.notes
+                )
+                add(
+                    buildJsonObject {
+                        put("exercise_code", p.code)
+                        p.displayName?.takeIf { it.isNotBlank() }?.let { put("custom_display_name", it) }
+                        r.distanceM?.let { put("distance_m", it) }
+                        r.reps?.let { put("reps", it) }
+                        r.weightKg?.let { put("weight_kg", it) }
+                        r.durationSec?.let { put("duration_sec", it) }
+                        r.heightCm?.let { put("height_cm", it) }
+                        r.implementCount?.let { put("implement_count", it) }
+                        r.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
+                    }
+                )
+            }
+        }
+        return arr.toString()
+    }
+
+    private fun hyroxSportStatsOverlayFromDetail(d: HyroxRoutineHeaderDb): Map<String, String> = buildMap {
+        put("division", d.division.orEmpty())
+        put("category", d.category.orEmpty())
+        put("age_group", d.ageGroup.orEmpty())
+        d.officialTimeSec?.let { put("official_time_sec", it.toString()) }
+        d.penaltyTimeSec?.let { put("penalty_time_sec", it.toString()) }
+        d.noReps?.let { put("no_reps", it.toString()) }
+        d.rankOverall?.let { put("rank_overall", it.toString()) }
+        d.rankCategory?.let { put("rank_category", it.toString()) }
+        d.avgHr?.let { put("avg_hr", it.toString()) }
+        d.maxHr?.let { put("max_hr", it.toString()) }
+    }
+
+    private fun hyroxStatsFingerprint(stats: JsonObject): String {
+        val exercises = stats["exercises"]?.jsonArray ?: JsonArray(emptyList())
+        val header = buildJsonObject {
+            stats.forEach { (k, v) ->
+                if (k != "exercises") put(k, v)
+            }
+        }
+        val canonical = header.toString() + "|" + exercises.toString()
+        val md = MessageDigest.getInstance("SHA-256")
+        return md.digest(canonical.toByteArray(StandardCharsets.UTF_8)).joinToString("") { b -> "%02x".format(b) }
+    }
+
+    private suspend fun insertHyroxRoutineFromStats(
+        userId: String,
+        name: String,
+        folderId: Long?,
+        stats: JsonObject,
+        replaceRoutineId: Long?
+    ): Long {
+        val exercises = stats["exercises"]?.jsonArray ?: error("Missing Hyrox exercises.")
+        if (exercises.isEmpty()) error("Hyrox exercises empty.")
+        val hash = hyroxStatsFingerprint(stats)
+        if (replaceRoutineId != null) {
+            supabase.from(BackendContracts.Tables.HYROX_ROUTINES).delete {
+                filter {
+                    eq("id", replaceRoutineId)
+                    eq("user_id", userId)
+                }
+            }
+        }
+        val sortOrder = System.currentTimeMillis().toInt()
+        val header = buildJsonObject {
+            put("user_id", userId)
+            put("name", name)
+            put("sort_order", sortOrder)
+            put("content_hash", hash)
+            if (folderId != null) put("folder_id", folderId)
+            stats["division"]?.let { put("division", it) }
+            stats["category"]?.let { put("category", it) }
+            stats["age_group"]?.let { put("age_group", it) }
+            stats["official_time_sec"]?.let { put("official_time_sec", it) }
+            stats["penalty_time_sec"]?.let { put("penalty_time_sec", it) }
+            stats["no_reps"]?.let { put("no_reps", it) }
+            stats["rank_overall"]?.let { put("rank_overall", it) }
+            stats["rank_category"]?.let { put("rank_category", it) }
+            stats["avg_hr"]?.let { put("avg_hr", it) }
+            stats["max_hr"]?.let { put("max_hr", it) }
+        }
+        val ins = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).insert(header) { }
+        val newRoutineId = parseSingleIdFromRpc(ins.data)
+            ?: lookupLastHyroxRoutineId(userId, name, folderId)
+            ?: error("Could not resolve Hyrox routine id after insert.")
+        var idx = 0
+        for (el in exercises) {
+            val o = el.jsonObject
+            idx += 1
+            val order = o["exercise_order"]?.jsonPrimitive?.content?.toIntOrNull() ?: idx
+            val exIns = buildJsonObject {
+                put("routine_id", newRoutineId)
+                put("exercise_code", o["exercise_code"]!!.jsonPrimitive.content)
+                put("exercise_order", order)
+                o["distance_m"]?.let { put("distance_m", it) }
+                o["reps"]?.let { put("reps", it) }
+                o["weight_kg"]?.let { put("weight_kg", it) }
+                o["duration_sec"]?.let { put("duration_sec", it) }
+                o["height_cm"]?.let { put("height_cm", it) }
+                o["implement_count"]?.let { put("implement_count", it) }
+                o["notes"]?.let { put("notes", it) }
+                o["exercise_display_name"]?.let { put("exercise_display_name", it) }
+            }
+            supabase.from(BackendContracts.Tables.HYROX_ROUTINE_EXERCISES).insert(exIns) { }
+        }
+        return newRoutineId
+    }
+
+    private suspend fun lookupLastHyroxRoutineId(userId: String, routineName: String, folderId: Long?): Long? {
+        val res = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(columns = Columns.raw("id")) {
+            filter {
+                eq("user_id", userId)
+                eq("name", routineName)
+                if (folderId != null) eq("folder_id", folderId)
+            }
+            order("id", Order.DESCENDING)
+            limit(1)
+        }
+        return Json.parseToJsonElement(res.data).jsonArray.firstOrNull()
+            ?.jsonObject?.get("id")?.toString()?.trim('"')?.toLongOrNull()
+    }
+
+    private suspend fun insertHyroxRoutineAfterWorkout(
+        userId: String,
+        name: String,
+        folderId: Long?,
+        durationMinText: String,
+        sportStats: Map<String, String>,
+        hyroxExercisesText: String
+    ) {
+        val stats = SportStatsPayloadBuilder.build(
+            sport = AddSportType.HYROX,
+            durationMinText = durationMinText,
+            footballPosition = AddFootballPosition.GOALKEEPER,
+            racketMode = AddRacketMode.SINGLES,
+            racketFormat = AddRacketFormat.BEST_OF_3,
+            sportStats = sportStats,
+            hyroxExercisesText = hyroxExercisesText
+        )
+        insertHyroxRoutineFromStats(userId, name, folderId, stats, replaceRoutineId = null)
+    }
+
+    fun createHyroxRoutineFolder(name: String) {
+        viewModelScope.launch {
+            val trimmed = name.trim()
+            if (trimmed.isEmpty()) {
+                _uiState.value = _uiState.value.copy(error = "Folder name is required.")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val payload = buildJsonObject {
+                    put("user_id", me)
+                    put("name", trimmed)
+                    put("sort_order", System.currentTimeMillis().toInt())
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).insert(payload) { }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder created successfully.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun renameHyroxRoutineFolder(folderId: Long, newName: String) {
+        viewModelScope.launch {
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) {
+                _uiState.value = _uiState.value.copy(error = "Folder name is required.")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).update(
+                    buildJsonObject { put("name", trimmed) }
+                ) {
+                    filter {
+                        eq("id", folderId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder renamed.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun moveHyroxRoutineFolder(folderId: Long, direction: Int) {
+        viewModelScope.launch {
+            val ordered = _uiState.value.hyroxRoutineFolders.sortedBy { it.sortOrder }
+            val index = ordered.indexOfFirst { it.id == folderId }
+            if (index == -1) return@launch
+            val targetIndex = index + direction
+            if (targetIndex !in ordered.indices) return@launch
+            val source = ordered[index]
+            val target = ordered[targetIndex]
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).update(
+                    buildJsonObject { put("sort_order", target.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", source.id)
+                        eq("user_id", me)
+                    }
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).update(
+                    buildJsonObject { put("sort_order", source.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", target.id)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder order updated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun deleteHyroxRoutineFolder(folderId: Long) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(
+                    buildJsonObject { put("folder_id", JsonNull) }
+                ) {
+                    filter {
+                        eq("user_id", me)
+                        eq("folder_id", folderId)
+                    }
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).delete {
+                    filter {
+                        eq("id", folderId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder deleted.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun renameHyroxRoutine(routineId: Long, newName: String) {
+        viewModelScope.launch {
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) {
+                _uiState.value = _uiState.value.copy(error = "Routine name is required.")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val payload = buildJsonObject { put("name", trimmed) }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(payload) {
+                    filter {
+                        eq("id", routineId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine renamed.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun moveHyroxRoutine(routineId: Long, direction: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value
+            val me = current.hyroxRoutines.firstOrNull { it.id == routineId } ?: return@launch
+            val sameFolder = current.hyroxRoutines
+                .filter { it.folderId == me.folderId }
+                .sortedWith(compareBy<StrengthRoutineUi> { it.sortOrder }.thenBy { it.id })
+            val index = sameFolder.indexOfFirst { it.id == routineId }
+            if (index == -1) return@launch
+            val targetIndex = index + direction
+            if (targetIndex !in sameFolder.indices) return@launch
+            val source = sameFolder[index]
+            val target = sameFolder[targetIndex]
+            _uiState.value = current.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val uid = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(
+                    buildJsonObject { put("sort_order", target.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", source.id)
+                        eq("user_id", uid)
+                    }
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(
+                    buildJsonObject { put("sort_order", source.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", target.id)
+                        eq("user_id", uid)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine order updated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun moveHyroxRoutineToFolder(routineId: Long, folderId: Long?) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val payload = buildJsonObject {
+                    if (folderId != null) put("folder_id", folderId) else put("folder_id", JsonNull)
+                    put("sort_order", System.currentTimeMillis().toInt())
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(payload) {
+                    filter {
+                        eq("id", routineId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine folder updated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun deleteHyroxRoutine(routineId: Long) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).delete {
+                    filter {
+                        eq("id", routineId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine deleted.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun duplicateHyroxRoutine(sourceRoutineId: Long, newName: String, targetFolderId: Long?) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Enter a routine name.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val detail = fetchHyroxRoutineDetail(sourceRoutineId)
+                    ?: error("Routine not found.")
+                val stats = hyroxStatsJsonObjectFromDetail(detail)
+                val taken = _uiState.value.hyroxRoutines.any {
+                    it.name.equals(trimmed, ignoreCase = true) &&
+                        (it.folderId == targetFolderId || (it.folderId == null && targetFolderId == null))
+                }
+                if (taken) error("A routine with this name already exists in this folder.")
+                insertHyroxRoutineFromStats(me, trimmed, targetFolderId, stats, replaceRoutineId = null)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine duplicated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    private fun hyroxStatsJsonObjectFromDetail(d: HyroxRoutineHeaderDb): JsonObject {
+        val exercises = buildJsonArray {
+            (d.exercises ?: emptyList()).sortedBy { it.exerciseOrder }.forEach { r ->
+                val p = HyroxExerciseFormatting.persistedPayload(
+                    r.exerciseCode,
+                    r.exerciseDisplayName.orEmpty(),
+                    r.notes
+                )
+                add(
+                    buildJsonObject {
+                        put("exercise_code", p.code)
+                        p.displayName?.takeIf { it.isNotBlank() }?.let { put("exercise_display_name", it) }
+                        put("exercise_order", r.exerciseOrder)
+                        r.distanceM?.let { put("distance_m", it) }
+                        r.reps?.let { put("reps", it) }
+                        r.weightKg?.let { put("weight_kg", it) }
+                        r.durationSec?.let { put("duration_sec", it) }
+                        r.heightCm?.let { put("height_cm", it) }
+                        r.implementCount?.let { put("implement_count", it) }
+                        r.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
+                    }
+                )
+            }
+        }
+        return buildJsonObject {
+            d.division?.takeIf { it.isNotBlank() }?.let { put("division", it) }
+            d.category?.takeIf { it.isNotBlank() }?.let { put("category", it) }
+            d.ageGroup?.takeIf { it.isNotBlank() }?.let { put("age_group", it) }
+            d.officialTimeSec?.let { put("official_time_sec", it) }
+            d.penaltyTimeSec?.let { put("penalty_time_sec", it) }
+            d.noReps?.let { put("no_reps", it) }
+            d.rankOverall?.let { put("rank_overall", it) }
+            d.rankCategory?.let { put("rank_category", it) }
+            d.avgHr?.let { put("avg_hr", it) }
+            d.maxHr?.let { put("max_hr", it) }
+            put("exercises", exercises)
+        }
+    }
+
     fun copyHostLaneToActiveLane() {
         val current = _uiState.value
         if (!current.perPersonStrength) return
@@ -1869,7 +2533,10 @@ class AddWorkoutViewModel(
         startedAtIso: String? = null,
         endedAtIso: String? = null,
         useCustomSchedule: Boolean = false,
-        scheduleEndedEnabled: Boolean = false
+        scheduleEndedEnabled: Boolean = false,
+        saveHyroxRoutineTemplate: Boolean = false,
+        hyroxRoutineName: String = "",
+        hyroxRoutineFolderId: Long? = null
     ) {
         viewModelScope.launch {
             val participantIds = _uiState.value.selectedParticipantIds.toList()
@@ -1936,6 +2603,23 @@ class AddWorkoutViewModel(
                     patchHyroxExerciseDisplayNamesIfNeeded(workoutId, hyroxExercisesText)
                 }
                 supabase.submitWorkoutToCompetitionIfActive(workoutId)
+                if (sport == AddSportType.HYROX && saveHyroxRoutineTemplate) {
+                    val rn = hyroxRoutineName.trim()
+                    if (rn.isNotEmpty()) {
+                        try {
+                            insertHyroxRoutineAfterWorkout(
+                                userId = userId.toString(),
+                                name = rn,
+                                folderId = hyroxRoutineFolderId,
+                                durationMinText = durationMinText,
+                                sportStats = sportStats,
+                                hyroxExercisesText = hyroxExercisesText
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Hyrox routine template save failed", e)
+                        }
+                    }
+                }
             }.onSuccess {
                 val r = getApplication<Application>().resources
                 val msg = if (state == AddWorkoutState.PUBLISHED) {

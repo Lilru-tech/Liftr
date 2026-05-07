@@ -9,6 +9,8 @@
     <string name="add_clear_all_exercises">Clear all exercises</string>
     <string name="add_clear_all_exercises_message">Remove every exercise and start with a single empty block?</string>
     <string name="add_clear_all_exercises_confirm">Clear all</string>
+    <string name="add_clear_all_hyrox_stations_title">Clear all Hyrox stations?</string>
+    <string name="add_clear_all_hyrox_stations_message">This removes every station from the Hyrox exercises list. You can add stations again before saving.</string>
     <string name="add_sign_in_title">Sign in to log a workout</string>
     <string name="add_sign_in_body">Sign in or create an account from the Profile tab to record and publish workouts.</string>
     <string name="add_sign_in_cta">Go to Profile</string>

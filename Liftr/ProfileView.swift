@@ -286,8 +286,8 @@ struct ProfileView: View {
                 Text("Calendar").tag(Tab.calendar)
                 Text("PRs").tag(Tab.prs)
                 Text("Progress").tag(Tab.progress)
+                Text("Segments").tag(Tab.segments)
                 if isOwnProfile {
-                    Text("Segments").tag(Tab.segments)
                     Text("Settings").tag(Tab.settings)
                 }
             }
@@ -352,7 +352,7 @@ struct ProfileView: View {
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else if mySegments.isEmpty {
-                Text("You have not created any segments yet.")
+                Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding()
@@ -386,23 +386,38 @@ struct ProfileView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task(id: tab) {
-            guard isOwnProfile, tab == .segments else { return }
-            await loadMySegments()
+        .task(id: "\(tab.rawValue)-\(viewingUserId?.uuidString ?? "none")") {
+            guard tab == .segments else { return }
+            await loadProfileSegments()
         }
     }
 
-    private func loadMySegments() async {
+    private func loadProfileSegments() async {
         await MainActor.run {
             mySegmentsLoading = true
             mySegmentsError = nil
         }
-        struct Params: Encodable { let p_limit: Int }
         do {
-            let res = try await SupabaseManager.shared.client
-                .rpc("list_my_segments_v1", params: Params(p_limit: 100))
-                .execute()
-            let rows = try JSONDecoder.supabase().decode([MySegmentListRow].self, from: res.data)
+            let rows: [MySegmentListRow]
+            if isOwnProfile {
+                struct Params: Encodable { let p_limit: Int }
+                let res = try await SupabaseManager.shared.client
+                    .rpc("list_my_segments_v1", params: Params(p_limit: 100))
+                    .execute()
+                rows = try JSONDecoder.supabase().decode([MySegmentListRow].self, from: res.data)
+            } else if let uid = viewingUserId {
+                let res = try await SupabaseManager.shared.client
+                    .from("segments")
+                    .select("id, name, buffer_m, status, created_at")
+                    .eq("created_by", value: uid.uuidString)
+                    .eq("status", value: "published")
+                    .order("created_at", ascending: false)
+                    .limit(100)
+                    .execute()
+                rows = try JSONDecoder.supabase().decode([MySegmentListRow].self, from: res.data)
+            } else {
+                rows = []
+            }
             await MainActor.run {
                 mySegments = rows
                 mySegmentsLoading = false

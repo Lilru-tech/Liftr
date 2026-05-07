@@ -601,10 +601,7 @@ class ActiveStrengthWorkoutViewModel(
                 val wRow = decodeFlexibleList<WorkoutNotesStateRow>(nRes.data).firstOrNull()
                 val mergedNotes = mergeWorkoutNotesForFinish(wRow?.notes, null)
                 supabase.from(BackendContracts.Tables.WORKOUTS).update(
-                    buildJsonObject {
-                        put("ended_at", ended)
-                        if (mergedNotes != null) put("notes", mergedNotes)
-                    }
+                    workoutFinishUpdateJson(ended, mergedNotes, wRow?.state)
                 ) {
                     filter { eq("id", workoutId) }
                 }

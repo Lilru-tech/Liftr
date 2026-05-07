@@ -43,6 +43,7 @@ struct ActiveCardioWorkoutView: View {
     private struct WorkoutFinishPayload: Encodable {
         let notes: String?
         let ended_at: Date
+        let state: String?
     }
 
     private struct WorkoutSanitizePatch: Encodable {
@@ -51,6 +52,10 @@ struct ActiveCardioWorkoutView: View {
 
     private struct WorkoutStartedAtPatch: Encodable {
         let started_at: Date
+    }
+
+    private struct WorkoutStateRow: Decodable {
+        let state: String?
     }
 
     private var usesGPSTracking: Bool {
@@ -853,10 +858,18 @@ struct ActiveCardioWorkoutView: View {
             let notesRow = try JSONDecoder.supabase().decode(NotesSelect.self, from: notesRes.data)
             let mergedNotes = mergeWorkoutNotes(existing: notesRow.notes, gpsLine: nil)
             let endTime = Date()
+            let stateRes = try await SupabaseManager.shared.client
+                .from("workouts")
+                .select("state")
+                .eq("id", value: workoutId)
+                .single()
+                .execute()
+            let stateRow = try JSONDecoder.supabase().decode(WorkoutStateRow.self, from: stateRes.data)
+            let stateToPublish = stateRow.state?.lowercased() == "planned" ? "published" : nil
 
             _ = try await SupabaseManager.shared.client
                 .from("workouts")
-                .update(WorkoutFinishPayload(notes: mergedNotes, ended_at: endTime))
+                .update(WorkoutFinishPayload(notes: mergedNotes, ended_at: endTime, state: stateToPublish))
                 .eq("id", value: workoutId)
                 .execute()
 

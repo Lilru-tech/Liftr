@@ -97,9 +97,14 @@ struct ActiveStrengthWorkoutView: View {
         let rest_sec: Int?
     }
     
-    /// Solo `ended_at`: `duration_min` en BD es columna generada (no se puede escribir desde el cliente).
+    private struct WorkoutStateRow: Decodable {
+        let state: String?
+    }
+
+    /// Cierra el workout y lo publica si estaba planificado.
     private struct WorkoutEndPatch: Encodable {
         let ended_at: Date
+        let state: String?
     }
 
     
@@ -974,12 +979,12 @@ struct ActiveStrengthWorkoutView: View {
         if !hostLaneFullyComplete() { s += "· You\n" }
         if !guestLaneFullyComplete() { s += "· Partner 1\n" }
         if !guest2LaneFullyComplete() { s += "· Partner 2\n" }
-        s += "\nThis will save and close all workouts on this phone. Continue?"
+        s += "\nThis will save, publish, and close all workouts on this phone. Continue?"
         return s
     }
 
     private func earlyFinishAlertMessage() -> String {
-        let base = "You haven't completed all planned sets. The workout will be saved with only the sets you actually performed."
+        let base = "You haven't completed all planned sets. The workout will be saved with only the sets you actually performed. If you finish now, it will be published automatically."
         if isDualMode, let extra = dualPartnerProgressNote(), !extra.isEmpty {
             return base + "\n\n" + extra
         }
@@ -2688,9 +2693,21 @@ struct ActiveStrengthWorkoutView: View {
 
             let endTime = Date()
 
+            func stateToPublishOnFinish(for workoutId: Int) async throws -> String? {
+                let res = try await client
+                    .from("workouts")
+                    .select("state")
+                    .eq("id", value: workoutId)
+                    .single()
+                    .execute()
+                let row = try JSONDecoder.supabase().decode(WorkoutStateRow.self, from: res.data)
+                guard row.state?.lowercased() == "planned" else { return nil }
+                return "published"
+            }
+
             _ = try await client
                 .from("workouts")
-                .update(WorkoutEndPatch(ended_at: endTime))
+                .update(WorkoutEndPatch(ended_at: endTime, state: try await stateToPublishOnFinish(for: workoutId)))
                 .eq("id", value: workoutId)
                 .execute()
 
@@ -2700,7 +2717,7 @@ struct ActiveStrengthWorkoutView: View {
                 try await persistExerciseRows(guestExList, performedMap: guestPerformedMap)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: endTime))
+                    .update(WorkoutEndPatch(ended_at: endTime, state: try await stateToPublishOnFinish(for: gid)))
                     .eq("id", value: gid)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: gid)
@@ -2710,7 +2727,7 @@ struct ActiveStrengthWorkoutView: View {
                 try await persistExerciseRows(guest2ExList, performedMap: guest2PerformedMap)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: endTime))
+                    .update(WorkoutEndPatch(ended_at: endTime, state: try await stateToPublishOnFinish(for: g2id)))
                     .eq("id", value: g2id)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: g2id)

@@ -204,6 +204,7 @@ struct AddWorkoutSheet: View {
     @State private var showParticipantsPicker = false
     @State private var confirmRemoveStrengthExercise: (lane: Int, index: Int)? = nil
     @State private var showClearAllStrengthExercisesConfirm = false
+    @State private var showClearAllHyroxExercisesConfirm = false
     @State private var publishMode: PublishMode = .add
     @State private var groupProgrammingMode: PlannedGroupStrengthProgramming = .sharedSessionTemplate
     @State private var strengthLaneItems: [[EditableExercise]] = [[EditableExercise()]]
@@ -229,114 +230,116 @@ struct AddWorkoutSheet: View {
     @State private var replaceRoutinePendingId: Int64?
     @State private var replacePendingIsRoutineOnly = false
     @State private var loadingRoutineOnly = false
+    @State private var saveNewHyroxRoutine = false
+    @State private var newHyroxRoutineName = ""
+    @State private var newHyroxRoutineFolderId: Int64? = nil
+    @State private var hyroxFoldersForPicker: [StrengthRoutineFolderRow] = []
+    @State private var showHyroxRoutinesSheet = false
+    @FocusState private var focusNewHyroxRoutineNameField: Bool
+    @State private var showReplaceHyroxRoutineConfirm = false
+    @State private var replaceHyroxRoutinePendingId: Int64?
+    @State private var replaceHyroxPendingIsRoutineOnly = false
+    @State private var loadingHyroxRoutineOnly = false
 
-    var body: some View {
+    var body: some View { addWorkoutRoot }
+
+    @ViewBuilder
+    private var addWorkoutGeneralFormSection: some View {
+        Section {
+            SectionCard {
+                FieldRowPlain("Type") {
+                    Picker("", selection: $kind) {
+                        Text("Strength").tag(WorkoutKind.strength)
+                        Text("Cardio").tag(WorkoutKind.cardio)
+                        Text("Sport").tag(WorkoutKind.sport)
+                    }
+                    .pickerStyle(.menu)
+                    .onChange(of: kind) { _, new in
+                        onKindChangedFromTypePicker(new)
+                    }
+                }
+                Divider()
+                FieldRowPlain("Mode") {
+                    Picker("", selection: $publishMode) {
+                        ForEach(PublishMode.allCases) { Text($0.label).tag($0) }
+                    }.pickerStyle(.segmented)
+                }
+                Divider()
+                FieldRowPlain("Title") { TextField("Title (optional)", text: $title).textFieldStyle(.plain) }
+                Divider()
+                FieldRowPlain("Started at") {
+                    DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
+                        .onChange(of: startedAt) { _, _ in
+                            onStartedAtChangedForDurationSync()
+                        }
+                }
+                Divider()
+                FieldRowPlain("Finished") {
+                    Toggle("", isOn: $endedAtEnabled)
+                        .onChange(of: endedAtEnabled) { _, isOn in
+                            onEndedAtEnabledChangedForDurationSync(isOn: isOn)
+                        }
+                }
+
+                if endedAtEnabled {
+                    Divider()
+                    FieldRowPlain("Ended at") {
+                        DatePicker("", selection: $endedAt, in: startedAt..., displayedComponents: [.date, .hourAndMinute])
+                            .onChange(of: endedAt) { _, _ in
+                                resetDurationEditFlagsAndSyncSchedule()
+                            }
+                    }
+                    if let dur = durationLabelMin {
+                        Divider()
+                        Text("Duration: \(dur) min")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 6)
+                    }
+                }
+
+                Divider()
+                FieldRowNotes(
+                    "Notes",
+                    text: $note,
+                    placeholder: "Notes",
+                    lineRange: 2...18
+                )
+                Divider()
+                FieldRowPlain("Intensity") {
+                    Picker("", selection: $perceived) {
+                        ForEach(WorkoutIntensity.allCases) { Text($0.label).tag($0) }
+                    }.pickerStyle(.menu)
+                }
+            }
+        } header: {
+            HStack {
+                Text("GENERAL")
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                Button {
+                    showHelp = true
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.primary)
+                .contentShape(Rectangle())
+                .padding(.vertical, 2)
+                .accessibilityLabel("How to start strength workout")
+            }
+        }
+        .listRowBackground(Color.clear)
+    }
+
+    private var addWorkoutRoot: some View {
         NavigationStack {
             GradientBackground {
                 Form {
-                    Section {
-                        SectionCard {
-                            FieldRowPlain("Type") {
-                                Picker("", selection: $kind) {
-                                    Text("Strength").tag(WorkoutKind.strength)
-                                    Text("Cardio").tag(WorkoutKind.cardio)
-                                    Text("Sport").tag(WorkoutKind.sport)
-                                }
-                                .pickerStyle(.menu)
-                                .onChange(of: kind) { _, new in
-                                    if new == .strength { Task { await loadCatalogIfNeeded() } }
-                                    didEditCardioDuration = false
-                                    didEditSportDuration  = false
-                                    recomputeDurationLabel()
-                                    syncDurationFromDates()
-                                }
-                            }
-                            Divider()
-                            FieldRowPlain("Mode") {
-                                Picker("", selection: $publishMode) {
-                                    ForEach(PublishMode.allCases) { Text($0.label).tag($0) }
-                                }.pickerStyle(.segmented)
-                            }
-                            Divider()
-                            FieldRowPlain("Title") { TextField("Title (optional)", text: $title).textFieldStyle(.plain) }
-                            Divider()
-                            FieldRowPlain("Started at") {
-                                DatePicker("", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
-                                    .onChange(of: startedAt) { _, _ in
-                                        if endedAtEnabled, endedAt < startedAt { endedAt = startedAt }
-                                        didEditCardioDuration = false
-                                        didEditSportDuration  = false
-                                        recomputeDurationLabel()
-                                        syncDurationFromDates()
-                                    }
-                            }
-                            Divider()
-                            FieldRowPlain("Finished") {
-                                Toggle("", isOn: $endedAtEnabled)
-                                    .onChange(of: endedAtEnabled) { _, isOn in
-                                        if isOn { endedAt = max(endedAt, startedAt) }
-                                        didEditCardioDuration = false
-                                        didEditSportDuration  = false
-                                        recomputeDurationLabel()
-                                        syncDurationFromDates()
-                                    }
-                            }
-                            
-                            if endedAtEnabled {
-                                Divider()
-                                FieldRowPlain("Ended at") {
-                                    DatePicker("", selection: $endedAt, in: startedAt..., displayedComponents: [.date, .hourAndMinute])
-                                        .onChange(of: endedAt) { _, _ in
-                                            didEditCardioDuration = false
-                                            didEditSportDuration  = false
-                                            recomputeDurationLabel()
-                                            syncDurationFromDates()
-                                        }
-                                }
-                                if let dur = durationLabelMin {
-                                    Divider()
-                                    Text("Duration: \(dur) min")
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                        .padding(.vertical, 6)
-                                }
-                            }
-                            
-                            Divider()
-                            FieldRowNotes(
-                                "Notes",
-                                text: $note,
-                                placeholder: "Notes",
-                                lineRange: 2...18
-                            )
-                            Divider()
-                            FieldRowPlain("Intensity") {
-                                Picker("", selection: $perceived) {
-                                    ForEach(WorkoutIntensity.allCases) { Text($0.label).tag($0) }
-                                }.pickerStyle(.menu)
-                            }
-                        }
-                    } header: {
-                        HStack {
-                            Text("GENERAL")
-                                .foregroundStyle(.secondary)
+                    addWorkoutGeneralFormSection
 
-                            Spacer()
-
-                            Button {
-                                showHelp = true
-                            } label: {
-                                Image(systemName: "info.circle")
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.primary)
-                            .contentShape(Rectangle())
-                            .padding(.vertical, 2)
-                            .accessibilityLabel("How to start strength workout")
-                        }
-                    }
-                    .listRowBackground(Color.clear)
-                    
                     Section {
                         SectionCard {
                             if participants.isEmpty {
@@ -459,6 +462,15 @@ struct AddWorkoutSheet: View {
                             }
                             .accessibilityLabel("Routines")
                         }
+                    } else if kind == .sport, sport.sport == .hyrox {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                showHyroxRoutinesSheet = true
+                            } label: {
+                                Image(systemName: "rectangle.stack")
+                            }
+                            .accessibilityLabel("Hyrox routines")
+                        }
                     }
                 }
             }
@@ -508,6 +520,21 @@ struct AddWorkoutSheet: View {
                 Task { await loadStrengthFoldersForPicker() }
             }
         }
+        .sheet(isPresented: $showHyroxRoutinesSheet) {
+            HyroxRoutinesPickerSheet(
+                onApply: { payload in
+                    sport.applyHyroxRoutineTemplate(payload)
+                }
+            )
+            .gradientBG()
+            .presentationDetents([.large])
+            .presentationBackground(.clear)
+        }
+        .onChange(of: showHyroxRoutinesSheet) { _, isPresented in
+            if !isPresented, kind == .sport, sport.sport == .hyrox {
+                Task { await loadHyroxFoldersForPicker() }
+            }
+        }
         .confirmationDialog(
             "Replace existing routine?",
             isPresented: $showReplaceRoutineConfirm,
@@ -530,6 +557,29 @@ struct AddWorkoutSheet: View {
             }
         } message: {
             Text("A routine with this name already exists in this folder. Replacing removes the old template and saves the program you have in the editor now.")
+        }
+        .confirmationDialog(
+            "Replace existing Hyrox routine?",
+            isPresented: $showReplaceHyroxRoutineConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Replace") {
+                let id = replaceHyroxRoutinePendingId
+                let routineOnly = replaceHyroxPendingIsRoutineOnly
+                replaceHyroxRoutinePendingId = nil
+                replaceHyroxPendingIsRoutineOnly = false
+                if routineOnly {
+                    Task { await saveHyroxRoutineOnlyWithReplace(replacingRoutineId: id) }
+                } else {
+                    Task { await saveWithReplaceHyroxConfirm(replacingRoutineId: id) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                replaceHyroxRoutinePendingId = nil
+                replaceHyroxPendingIsRoutineOnly = false
+            }
+        } message: {
+            Text("A routine with this name already exists in this folder. Replacing removes the old template and saves the Hyrox program you have in the editor now.")
         }
         .onChange(of: app.addDraftKey) { _, _ in
             if let d = app.addDraft {
@@ -563,6 +613,20 @@ struct AddWorkoutSheet: View {
                 newStrengthRoutineFolderId = nil
                 focusNewRoutineNameField = false
             }
+            if new != .sport {
+                saveNewHyroxRoutine = false
+                newHyroxRoutineName = ""
+                newHyroxRoutineFolderId = nil
+                focusNewHyroxRoutineNameField = false
+            }
+        }
+        .onChange(of: sport.sport) { _, new in
+            if new != .hyrox {
+                saveNewHyroxRoutine = false
+                newHyroxRoutineName = ""
+                newHyroxRoutineFolderId = nil
+                focusNewHyroxRoutineNameField = false
+            }
         }
         .onChange(of: saveNewStrengthRoutine) { _, isOn in
             if isOn {
@@ -577,6 +641,19 @@ struct AddWorkoutSheet: View {
                 focusNewRoutineNameField = false
             }
         }
+        .onChange(of: saveNewHyroxRoutine) { _, isOn in
+            if isOn {
+                Task { await loadHyroxFoldersForPicker() }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 220_000_000)
+                    focusNewHyroxRoutineNameField = true
+                }
+            } else {
+                newHyroxRoutineName = ""
+                newHyroxRoutineFolderId = nil
+                focusNewHyroxRoutineNameField = false
+            }
+        }
         .onChange(of: groupProgrammingMode) { _, new in
             if new == .individualPlans, kind == .strength, !participants.isEmpty {
                 syncStrengthLaneRowsWithParticipants()
@@ -589,10 +666,7 @@ struct AddWorkoutSheet: View {
         .banner($banner)
         .alert(
             "Are you sure you want to remove the exercise?",
-            isPresented: Binding(
-                get: { confirmRemoveStrengthExercise != nil },
-                set: { if !$0 { confirmRemoveStrengthExercise = nil } }
-            )
+            isPresented: removeStrengthExerciseAlertBinding
         ) {
             Button("Remove", role: .destructive) {
                 if let req = confirmRemoveStrengthExercise {
@@ -626,6 +700,15 @@ struct AddWorkoutSheet: View {
             Text("This removes every exercise in this list and leaves one empty row.")
         }
     }
+
+    private var removeStrengthExerciseAlertBinding: Binding<Bool> {
+        Binding(
+            get: { confirmRemoveStrengthExercise != nil },
+            set: { newVal in
+                if !newVal { confirmRemoveStrengthExercise = nil }
+            }
+        )
+    }
     
     private var saveButton: some View {
         Button {
@@ -642,7 +725,7 @@ struct AddWorkoutSheet: View {
                         in: RoundedRectangle(cornerRadius: 14))
             .foregroundStyle(.white)
         }
-        .disabled(loading || loadingRoutineOnly || !canSave)
+        .disabled(loading || loadingRoutineOnly || loadingHyroxRoutineOnly || !canSave)
     }
 
     private var saveRoutineOnlyButton: some View {
@@ -668,6 +751,31 @@ struct AddWorkoutSheet: View {
             .foregroundStyle(.white)
         }
         .disabled(loading || loadingRoutineOnly || !canSaveRoutineOnly)
+    }
+
+    private var saveHyroxRoutineOnlyButton: some View {
+        Button {
+            Task { await saveHyroxRoutineOnly() }
+        } label: {
+            HStack {
+                if loadingHyroxRoutineOnly { ProgressView().tint(.white) }
+                Text(loadingHyroxRoutineOnly ? "Saving…" : "Save without logging a workout")
+                    .fontWeight(.semibold)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(
+                (!loading && !loadingHyroxRoutineOnly && canSaveHyroxRoutineOnly)
+                    ? Color.cyan
+                    : Color.gray.opacity(0.5),
+                in: RoundedRectangle(cornerRadius: 14)
+            )
+            .foregroundStyle(.white)
+        }
+        .disabled(loading || loadingHyroxRoutineOnly || !canSaveHyroxRoutineOnly)
     }
 
     private var usePerPersonStrengthEditor: Bool {
@@ -1137,7 +1245,11 @@ struct AddWorkoutSheet: View {
                     lineRange: 2...14
                 )
             }
-            
+
+            if sport.sport == .hyrox {
+                hyroxRoutineTemplateSectionCard
+            }
+
             saveButton
                 .padding(.top, 8)
         } header: {
@@ -1166,10 +1278,22 @@ struct AddWorkoutSheet: View {
             return true
         case .sport:
             if sport.sport == .hyrox {
-                return !sport.hyExercises.isEmpty
+                if sport.hyExercises.isEmpty { return false }
+                if saveNewHyroxRoutine {
+                    let t = newHyroxRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if t.isEmpty { return false }
+                }
+                return true
             }
             return true
         }
+    }
+
+    private var canSaveHyroxRoutineOnly: Bool {
+        guard kind == .sport, sport.sport == .hyrox, saveNewHyroxRoutine else { return false }
+        guard !sport.hyExercises.isEmpty else { return false }
+        let t = newHyroxRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !t.isEmpty
     }
 
     private var canSaveRoutineOnly: Bool {
@@ -1322,6 +1446,274 @@ struct AddWorkoutSheet: View {
             }
         }
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var hyroxOptionalStatsDisclosureBlock: some View {
+        Group {
+            Divider()
+            DisclosureGroup(isExpanded: $hyroxStatsExpanded) {
+                FieldRowPlain {
+                    HStack {
+                        TextField("Division (Open/Pro…)", text: $sport.hyDivision)
+                            .textFieldStyle(.plain)
+                        TextField("Category (Men/Women…)", text: $sport.hyCategory)
+                            .textFieldStyle(.plain)
+                    }
+                }
+                Divider()
+                FieldRowPlain {
+                    TextField("Age group (e.g. 30–34)", text: $sport.hyAgeGroup)
+                        .textFieldStyle(.plain)
+                }
+                Divider()
+                FieldRowPlain {
+                    HStack {
+                        TextField("Official time (sec)", text: $sport.hyOfficialTimeSec).keyboardType(.numberPad)
+                        TextField("Penalty time (sec)", text: $sport.hyPenaltyTimeSec).keyboardType(.numberPad)
+                    }
+                }
+                Divider()
+                FieldRowPlain {
+                    HStack {
+                        TextField("No reps", text: $sport.hyNoReps).keyboardType(.numberPad)
+                        TextField("Rank overall", text: $sport.hyRankOverall).keyboardType(.numberPad)
+                        TextField("Rank category", text: $sport.hyRankCategory).keyboardType(.numberPad)
+                    }
+                }
+                Divider()
+                FieldRowPlain {
+                    HStack {
+                        TextField("Avg HR", text: $sport.hyAvgHR).keyboardType(.numberPad)
+                        TextField("Max HR", text: $sport.hyMaxHR).keyboardType(.numberPad)
+                    }
+                }
+            } label: {
+                Text("Stats (optional)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+            Divider()
+        }
+    }
+
+    private var hyroxExerciseProgramEditorStack: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Exercises")
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Text("Use the arrows on each exercise to change order.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, sport.hyExercises.count > 1 ? 2 : 4)
+
+            if sport.hyExercises.count > 1 {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("Clear all", role: .destructive) {
+                        showClearAllHyroxExercisesConfirm = true
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Clear all Hyrox stations")
+                }
+                .padding(.bottom, 2)
+            }
+
+            if sport.hyExercises.isEmpty {
+                Text("No Hyrox exercises added")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(sport.hyExercises.indices, id: \.self) { i in
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Exercise \(i + 1)")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+
+                    Picker("", selection: hyroxExercisePickerBinding(index: i)) {
+                        ForEach(HyroxExerciseCode.allCases) { ex in
+                            Text(ex.label).tag(ex.rawValue)
+                        }
+                        Text("Other").tag(HyroxExerciseFormatting.customExerciseCode)
+                    }
+                    .pickerStyle(.menu)
+
+                    if HyroxExerciseCode(rawValue: sport.hyExercises[i].exerciseCode) == nil {
+                        hyroxExerciseNameFieldWithSuggestions(index: i)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 6) {
+                            StrengthStyleMetricField(title: "Distance (m)") {
+                                TextField("—", text: $sport.hyExercises[i].distanceM)
+                                    .keyboardType(.numberPad)
+                            }
+                            StrengthStyleMetricField(title: "Reps") {
+                                TextField("—", text: $sport.hyExercises[i].reps)
+                                    .keyboardType(.numberPad)
+                            }
+                            StrengthStyleMetricField(title: "kg") {
+                                TextField("—", text: $sport.hyExercises[i].weightKg)
+                                    .keyboardType(.decimalPad)
+                            }
+                        }
+                        HStack(alignment: .top, spacing: 6) {
+                            StrengthStyleMetricField(title: "Duration (s)") {
+                                TextField("—", text: $sport.hyExercises[i].durationSec)
+                                    .keyboardType(.numberPad)
+                            }
+                            StrengthStyleMetricField(title: "Height (cm)") {
+                                TextField("—", text: $sport.hyExercises[i].heightCm)
+                                    .keyboardType(.numberPad)
+                            }
+                            StrengthStyleMetricField(title: "Implements") {
+                                TextField("—", text: $sport.hyExercises[i].implementCount)
+                                    .keyboardType(.numberPad)
+                            }
+                        }
+                    }
+
+                    FieldRowNotes(
+                        "Notes",
+                        text: $sport.hyExercises[i].notes,
+                        placeholder: "Notes",
+                        lineRange: 2...8
+                    )
+                    .padding(.top, 2)
+
+                    HStack {
+                        Spacer(minLength: 0)
+
+                        if sport.hyExercises.count > 1 {
+                            HStack(spacing: 2) {
+                                Button {
+                                    moveHyroxExercise(from: i, direction: -1)
+                                } label: {
+                                    Image(systemName: "chevron.up")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(width: 36, height: 32)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(i == 0)
+                                .opacity(i == 0 ? 0.35 : 1)
+
+                                Button {
+                                    moveHyroxExercise(from: i, direction: 1)
+                                } label: {
+                                    Image(systemName: "chevron.down")
+                                        .font(.subheadline.weight(.semibold))
+                                        .frame(width: 36, height: 32)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(i == sport.hyExercises.count - 1)
+                                .opacity(i == sport.hyExercises.count - 1 ? 0.35 : 1)
+                            }
+                            .foregroundStyle(.secondary)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Reorder exercise")
+                        }
+
+                        if sport.hyExercises.count > 1 {
+                            Button(role: .destructive) {
+                                sport.hyExercises.remove(at: i)
+                                for idx in sport.hyExercises.indices {
+                                    sport.hyExercises[idx].exerciseOrder = idx + 1
+                                }
+                            } label: {
+                                Image(systemName: "trash")
+                                    .font(.body)
+                                    .frame(width: 40, height: 36)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Remove exercise")
+                        }
+                    }
+                }
+            }
+
+            Divider().padding(.vertical, 6)
+            Button {
+                sport.hyExercises.append(
+                    HyroxExerciseForm(
+                        exerciseCode: HyroxExerciseCode.run.rawValue,
+                        exerciseOrder: sport.hyExercises.count + 1
+                    )
+                )
+            } label: {
+                Label("Add exercise", systemImage: "plus")
+            }
+            .buttonStyle(.borderless)
+            .padding(.top, 2)
+        }
+        .task(id: "\(kind.rawValue)-\(sport.sport.rawValue)") {
+            guard kind == .sport, sport.sport == .hyrox else { return }
+            await loadHyroxCustomDisplayNameSuggestionsFromServer()
+            await loadHyroxFoldersForPicker()
+        }
+        .alert("Clear all Hyrox stations?", isPresented: $showClearAllHyroxExercisesConfirm) {
+            Button("Clear all", role: .destructive) {
+                sport.hyExercises = []
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes every station from your Hyrox program.")
+        }
+    }
+
+    private var hyroxRoutineTemplateSectionCard: some View {
+        SectionCard {
+            Text("ROUTINE TEMPLATE")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            FieldRowPlain("Create routine") {
+                Toggle("", isOn: $saveNewHyroxRoutine)
+                    .labelsHidden()
+                    .accessibilityLabel("Create Hyrox routine")
+            }
+            if saveNewHyroxRoutine {
+                Group {
+                    Divider()
+                    FieldRowPlain("Routine name") {
+                        TextField("Routine name", text: $newHyroxRoutineName)
+                            .textFieldStyle(.plain)
+                            .focused($focusNewHyroxRoutineNameField)
+                    }
+                    if !hyroxFoldersForPicker.isEmpty {
+                        Divider()
+                        FieldRowPlain("Folder (optional)") {
+                            Picker("Folder (optional)", selection: $newHyroxRoutineFolderId) {
+                                Text("None").tag(Int64?.none)
+                                ForEach(hyroxFoldersForPicker) { f in
+                                    Text(f.name).tag(Int64?.some(f.id))
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                        }
+                    }
+                    Divider()
+                    saveHyroxRoutineOnlyButton
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var hyroxSportFieldsContent: some View {
+        hyroxOptionalStatsDisclosureBlock
+        hyroxExerciseProgramEditorStack
     }
     
     @ViewBuilder
@@ -1572,203 +1964,8 @@ struct AddWorkoutSheet: View {
             }
 
         case .hyrox:
-            Divider()
-            DisclosureGroup(isExpanded: $hyroxStatsExpanded) {
-                FieldRowPlain {
-                    HStack {
-                        TextField("Division (Open/Pro…)", text: $sport.hyDivision)
-                            .textFieldStyle(.plain)
-                        TextField("Category (Men/Women…)", text: $sport.hyCategory)
-                            .textFieldStyle(.plain)
-                    }
-                }
-                Divider()
-                FieldRowPlain {
-                    TextField("Age group (e.g. 30–34)", text: $sport.hyAgeGroup)
-                        .textFieldStyle(.plain)
-                }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("Official time (sec)", text: $sport.hyOfficialTimeSec).keyboardType(.numberPad)
-                        TextField("Penalty time (sec)", text: $sport.hyPenaltyTimeSec).keyboardType(.numberPad)
-                    }
-                }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("No reps", text: $sport.hyNoReps).keyboardType(.numberPad)
-                        TextField("Rank overall", text: $sport.hyRankOverall).keyboardType(.numberPad)
-                        TextField("Rank category", text: $sport.hyRankCategory).keyboardType(.numberPad)
-                    }
-                }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("Avg HR", text: $sport.hyAvgHR).keyboardType(.numberPad)
-                        TextField("Max HR", text: $sport.hyMaxHR).keyboardType(.numberPad)
-                    }
-                }
-            } label: {
-                Text("Stats (optional)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
+            hyroxSportFieldsContent
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Exercises")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if !sport.hyExercises.isEmpty {
-                    Text("Use the arrows on each exercise to change order.")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if sport.hyExercises.isEmpty {
-                    Text("No Hyrox exercises added")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                ForEach(sport.hyExercises.indices, id: \.self) { i in
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text("Exercise \(i + 1)")
-                                .font(.footnote.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-
-                        Picker("", selection: hyroxExercisePickerBinding(index: i)) {
-                            ForEach(HyroxExerciseCode.allCases) { ex in
-                                Text(ex.label).tag(ex.rawValue)
-                            }
-                            Text("Other").tag(HyroxExerciseFormatting.customExerciseCode)
-                        }
-                        .pickerStyle(.menu)
-
-                        if HyroxExerciseCode(rawValue: sport.hyExercises[i].exerciseCode) == nil {
-                            hyroxExerciseNameFieldWithSuggestions(index: i)
-                        }
-
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(alignment: .top, spacing: 6) {
-                                StrengthStyleMetricField(title: "Distance (m)") {
-                                    TextField("—", text: $sport.hyExercises[i].distanceM)
-                                        .keyboardType(.numberPad)
-                                }
-                                StrengthStyleMetricField(title: "Reps") {
-                                    TextField("—", text: $sport.hyExercises[i].reps)
-                                        .keyboardType(.numberPad)
-                                }
-                                StrengthStyleMetricField(title: "kg") {
-                                    TextField("—", text: $sport.hyExercises[i].weightKg)
-                                        .keyboardType(.decimalPad)
-                                }
-                            }
-                            HStack(alignment: .top, spacing: 6) {
-                                StrengthStyleMetricField(title: "Duration (s)") {
-                                    TextField("—", text: $sport.hyExercises[i].durationSec)
-                                        .keyboardType(.numberPad)
-                                }
-                                StrengthStyleMetricField(title: "Height (cm)") {
-                                    TextField("—", text: $sport.hyExercises[i].heightCm)
-                                        .keyboardType(.numberPad)
-                                }
-                                StrengthStyleMetricField(title: "Implements") {
-                                    TextField("—", text: $sport.hyExercises[i].implementCount)
-                                        .keyboardType(.numberPad)
-                                }
-                            }
-                        }
-
-                        FieldRowNotes(
-                            "Notes",
-                            text: $sport.hyExercises[i].notes,
-                            placeholder: "Notes",
-                            lineRange: 2...8
-                        )
-                        .padding(.top, 2)
-
-                        HStack {
-                            Spacer(minLength: 0)
-
-                            if sport.hyExercises.count > 1 {
-                                HStack(spacing: 2) {
-                                    Button {
-                                        moveHyroxExercise(from: i, direction: -1)
-                                    } label: {
-                                        Image(systemName: "chevron.up")
-                                            .font(.subheadline.weight(.semibold))
-                                            .frame(width: 36, height: 32)
-                                            .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(i == 0)
-                                    .opacity(i == 0 ? 0.35 : 1)
-
-                                    Button {
-                                        moveHyroxExercise(from: i, direction: 1)
-                                    } label: {
-                                        Image(systemName: "chevron.down")
-                                            .font(.subheadline.weight(.semibold))
-                                            .frame(width: 36, height: 32)
-                                            .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(i == sport.hyExercises.count - 1)
-                                    .opacity(i == sport.hyExercises.count - 1 ? 0.35 : 1)
-                                }
-                                .foregroundStyle(.secondary)
-                                .accessibilityElement(children: .combine)
-                                .accessibilityLabel("Reorder exercise")
-                            }
-
-                            if sport.hyExercises.count > 1 {
-                                Button(role: .destructive) {
-                                    sport.hyExercises.remove(at: i)
-                                    for idx in sport.hyExercises.indices {
-                                        sport.hyExercises[idx].exerciseOrder = idx + 1
-                                    }
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.body)
-                                        .frame(width: 40, height: 36)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.borderless)
-                                .accessibilityLabel("Remove exercise")
-                            }
-                        }
-                    }
-                }
-
-                Divider().padding(.vertical, 6)
-                Button {
-                    sport.hyExercises.append(
-                        HyroxExerciseForm(
-                            exerciseCode: HyroxExerciseCode.run.rawValue,
-                            exerciseOrder: sport.hyExercises.count + 1
-                        )
-                    )
-                } label: {
-                    Label("Add exercise", systemImage: "plus")
-                }
-                .buttonStyle(.borderless)
-                .padding(.top, 2)
-            }
-            .task(id: "\(kind.rawValue)-\(sport.sport.rawValue)") {
-                guard kind == .sport, sport.sport == .hyrox else { return }
-                await loadHyroxCustomDisplayNameSuggestionsFromServer()
-            }
-            
         case .ski:
             Divider()
             FieldRowPlain {
@@ -1890,6 +2087,22 @@ struct AddWorkoutSheet: View {
             await MainActor.run { strengthFoldersForPicker = [] }
         }
     }
+
+    private func loadHyroxFoldersForPicker() async {
+        do {
+            let client = SupabaseManager.shared.client
+            let res = try await client
+                .from("hyrox_routine_folders")
+                .select("id,name,updated_at,sort_order")
+                .order("sort_order", ascending: true)
+                .order("name", ascending: true)
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([StrengthRoutineFolderRow].self, from: res.data)
+            await MainActor.run { hyroxFoldersForPicker = rows }
+        } catch {
+            await MainActor.run { hyroxFoldersForPicker = [] }
+        }
+    }
     
     private func save() async {
         error = nil
@@ -1930,7 +2143,27 @@ struct AddWorkoutSheet: View {
                 }
             }
 
-            try await performSaveWorkoutAndRoutine(replacingRoutineId: nil)
+            if kind == .sport, sport.sport == .hyrox, saveNewHyroxRoutine {
+                let routineTitle = newHyroxRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !routineTitle.isEmpty {
+                    if let existingId = try await HyroxRoutineNameValidator.existingRoutineIdForName(
+                        client: client,
+                        userId: userId,
+                        trimmedName: routineTitle,
+                        excludingRoutineId: nil,
+                        folderId: newHyroxRoutineFolderId
+                    ) {
+                        await MainActor.run {
+                            replaceHyroxPendingIsRoutineOnly = false
+                            replaceHyroxRoutinePendingId = existingId
+                            showReplaceHyroxRoutineConfirm = true
+                        }
+                        return
+                    }
+                }
+            }
+
+            try await performSaveWorkoutAndRoutine(replacingStrengthRoutineId: nil, replacingHyroxRoutineId: nil)
         } catch {
             self.error = error.localizedDescription
         }
@@ -1942,7 +2175,19 @@ struct AddWorkoutSheet: View {
         loading = true
         defer { loading = false }
         do {
-            try await performSaveWorkoutAndRoutine(replacingRoutineId: rid)
+            try await performSaveWorkoutAndRoutine(replacingStrengthRoutineId: rid, replacingHyroxRoutineId: nil)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func saveWithReplaceHyroxConfirm(replacingRoutineId: Int64?) async {
+        guard let rid = replacingRoutineId else { return }
+        error = nil
+        loading = true
+        defer { loading = false }
+        do {
+            try await performSaveWorkoutAndRoutine(replacingStrengthRoutineId: nil, replacingHyroxRoutineId: rid)
         } catch {
             self.error = error.localizedDescription
         }
@@ -2018,7 +2263,79 @@ struct AddWorkoutSheet: View {
         }
     }
 
-    private func performSaveWorkoutAndRoutine(replacingRoutineId: Int64?) async throws {
+    private func saveHyroxRoutineOnly() async {
+        error = nil
+        guard kind == .sport, sport.sport == .hyrox, canSaveHyroxRoutineOnly else { return }
+        loadingHyroxRoutineOnly = true
+        defer { loadingHyroxRoutineOnly = false }
+        do {
+            let client = SupabaseManager.shared.client
+            let session = try await client.auth.session
+            let userId = session.user.id
+            let routineTitle = newHyroxRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let existingId = try await HyroxRoutineNameValidator.existingRoutineIdForName(
+                client: client,
+                userId: userId,
+                trimmedName: routineTitle,
+                excludingRoutineId: nil,
+                folderId: newHyroxRoutineFolderId
+            ) {
+                await MainActor.run {
+                    replaceHyroxPendingIsRoutineOnly = true
+                    replaceHyroxRoutinePendingId = existingId
+                    showReplaceHyroxRoutineConfirm = true
+                }
+                return
+            }
+            try await performSaveHyroxRoutineOnly(replacingRoutineId: nil)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func saveHyroxRoutineOnlyWithReplace(replacingRoutineId: Int64?) async {
+        guard let rid = replacingRoutineId else { return }
+        error = nil
+        loadingHyroxRoutineOnly = true
+        defer { loadingHyroxRoutineOnly = false }
+        do {
+            try await performSaveHyroxRoutineOnly(replacingRoutineId: rid)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func performSaveHyroxRoutineOnly(replacingRoutineId: Int64?) async throws {
+        let client = SupabaseManager.shared.client
+        let session = try await client.auth.session
+        let userId = session.user.id
+        let routineTitle = newHyroxRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !routineTitle.isEmpty else { return }
+        let outcome = try await insertHyroxRoutineTemplate(
+            client: client,
+            userId: userId,
+            name: routineTitle,
+            folderId: newHyroxRoutineFolderId,
+            sport: sport,
+            replaceRoutineId: replacingRoutineId
+        )
+        var message = "Hyrox routine saved."
+        if outcome.alsoHasAnotherRoutineWithSameProgram {
+            message += " You already have another saved routine with the same program in this folder."
+        }
+        await MainActor.run {
+            banner = Banner(message: message, type: .success)
+            newHyroxRoutineName = ""
+            newHyroxRoutineFolderId = nil
+            saveNewHyroxRoutine = false
+            focusNewHyroxRoutineNameField = false
+        }
+    }
+
+    private func performSaveWorkoutAndRoutine(
+        replacingStrengthRoutineId: Int64?,
+        replacingHyroxRoutineId: Int64? = nil
+    ) async throws {
         let client = SupabaseManager.shared.client
         let session = try await client.auth.session
         let userId = session.user.id
@@ -2200,7 +2517,7 @@ struct AddWorkoutSheet: View {
                             name: routineTitle,
                             folderId: newStrengthRoutineFolderId,
                             exercises: templateExercises,
-                            replaceRoutineId: replacingRoutineId
+                            replaceRoutineId: replacingStrengthRoutineId
                         )
                         routineSaveSuffix = " Routine saved."
                         if outcome.alsoHasAnotherRoutineWithSameProgram {
@@ -2209,6 +2526,28 @@ struct AddWorkoutSheet: View {
                     } catch {
                         routineSaveSuffix = " " + strengthRoutineUserFacingSaveError(error)
                         print("[StrengthRoutine][SAVE]", error.localizedDescription)
+                    }
+                }
+            }
+            if kind == .sport, sport.sport == .hyrox, saveNewHyroxRoutine {
+                let routineTitle = newHyroxRoutineName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !routineTitle.isEmpty {
+                    do {
+                        let outcome = try await insertHyroxRoutineTemplate(
+                            client: client,
+                            userId: userId,
+                            name: routineTitle,
+                            folderId: newHyroxRoutineFolderId,
+                            sport: sport,
+                            replaceRoutineId: replacingHyroxRoutineId
+                        )
+                        routineSaveSuffix += " Hyrox routine saved."
+                        if outcome.alsoHasAnotherRoutineWithSameProgram {
+                            routineSaveSuffix += " You already have another saved routine with the same program in this folder."
+                        }
+                    } catch {
+                        routineSaveSuffix += " " + hyroxRoutineUserFacingSaveError(error)
+                        print("[HyroxRoutine][SAVE]", error.localizedDescription)
                     }
                 }
             }
@@ -2238,6 +2577,13 @@ struct AddWorkoutSheet: View {
         replaceRoutinePendingId = nil
         showReplaceRoutineConfirm = false
         replacePendingIsRoutineOnly = false
+        saveNewHyroxRoutine = false
+        newHyroxRoutineName = ""
+        newHyroxRoutineFolderId = nil
+        focusNewHyroxRoutineNameField = false
+        replaceHyroxRoutinePendingId = nil
+        showReplaceHyroxRoutineConfirm = false
+        replaceHyroxPendingIsRoutineOnly = false
     }
     
     @MainActor
@@ -2696,7 +3042,35 @@ struct AddWorkoutSheet: View {
         cardio.paceM = String(m)
         cardio.paceS = String(s)
     }
-    
+
+    private func resetDurationEditFlagsAndSyncSchedule() {
+        didEditCardioDuration = false
+        didEditSportDuration = false
+        recomputeDurationLabel()
+        syncDurationFromDates()
+    }
+
+    private func onKindChangedFromTypePicker(_ new: WorkoutKind) {
+        if new == .strength {
+            Task { await loadCatalogIfNeeded() }
+        }
+        resetDurationEditFlagsAndSyncSchedule()
+    }
+
+    private func onStartedAtChangedForDurationSync() {
+        if endedAtEnabled, endedAt < startedAt {
+            endedAt = startedAt
+        }
+        resetDurationEditFlagsAndSyncSchedule()
+    }
+
+    private func onEndedAtEnabledChangedForDurationSync(isOn: Bool) {
+        if isOn {
+            endedAt = max(endedAt, startedAt)
+        }
+        resetDurationEditFlagsAndSyncSchedule()
+    }
+
     private func syncDurationFromDates() {
         guard endedAtEnabled, endedAt >= startedAt else { return }
         let totalSec = Int(endedAt.timeIntervalSince(startedAt))

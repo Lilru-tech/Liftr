@@ -208,6 +208,11 @@ fun AddWorkoutTabScreen(
     var createRoutineEnabled by rememberSaveable { mutableStateOf(false) }
     var newStrengthRoutineName by rememberSaveable { mutableStateOf("") }
     var newStrengthTemplateFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var createHyroxRoutineEnabled by rememberSaveable { mutableStateOf(false) }
+    var newHyroxRoutineName by rememberSaveable { mutableStateOf("") }
+    var newHyroxRoutineFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showHyroxRoutinesSheet by remember { mutableStateOf(false) }
+    var hyroxFolderMenuExpanded by remember { mutableStateOf(false) }
     val cardioStats = remember { mutableStateMapOf<String, String>() }
     val sportStats = remember { mutableStateMapOf<String, String>() }
     val strengthExercises = if (ui.perPersonStrength) {
@@ -235,9 +240,11 @@ fun AddWorkoutTabScreen(
     var participantsSearchQuery by remember { mutableStateOf("") }
     var showWorkoutHelp by rememberSaveable { mutableStateOf(false) }
     var showClearStrengthDialog by remember { mutableStateOf(false) }
+    var showClearHyroxDialog by remember { mutableStateOf(false) }
     var exerciseSearch by remember { mutableStateOf("") }
     var exercisePickerForDraftId by remember { mutableStateOf<String?>(null) }
     val routinesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val hyroxRoutinesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val participantsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val exerciseSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val workoutHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -264,7 +271,9 @@ fun AddWorkoutTabScreen(
         createRoutineEnabled,
         newStrengthRoutineName,
         sportType,
-        hyroxExercisesJson
+        hyroxExercisesJson,
+        createHyroxRoutineEnabled,
+        newHyroxRoutineName
     ) {
         canSaveAddWorkout(
             kind = selectedKind,
@@ -272,7 +281,9 @@ fun AddWorkoutTabScreen(
             createRoutineEnabled = createRoutineEnabled,
             newStrengthRoutineName = newStrengthRoutineName,
             sportType = sportType,
-            hyroxExercisesJson = hyroxExercisesJson
+            hyroxExercisesJson = hyroxExercisesJson,
+            createHyroxRoutineEnabled = createHyroxRoutineEnabled,
+            newHyroxRoutineName = newHyroxRoutineName
         )
     }
     val canSaveRoutineOnly = remember(
@@ -283,6 +294,15 @@ fun AddWorkoutTabScreen(
         createRoutineEnabled &&
             strengthExercisesFormValidForSave(strengthExercises) &&
             newStrengthRoutineName.trim().isNotEmpty()
+    }
+    val canSaveHyroxRoutineOnly = remember(
+        createHyroxRoutineEnabled,
+        hyroxExercisesJson,
+        newHyroxRoutineName
+    ) {
+        createHyroxRoutineEnabled &&
+            hyroxExercisesJsonValid(hyroxExercisesJson) &&
+            newHyroxRoutineName.trim().isNotEmpty()
     }
     LaunchedEffect(createRoutineEnabled) {
         if (!createRoutineEnabled) {
@@ -354,6 +374,30 @@ fun AddWorkoutTabScreen(
     LaunchedEffect(showRoutinesSheet) {
         if (showRoutinesSheet) vm.loadStrengthRoutines()
     }
+    LaunchedEffect(showHyroxRoutinesSheet) {
+        if (showHyroxRoutinesSheet) vm.loadHyroxRoutines()
+    }
+    LaunchedEffect(ui.pendingHyroxApply) {
+        val draft = ui.pendingHyroxApply ?: return@LaunchedEffect
+        hyroxExercisesJson = draft.exercisesJson
+        draft.sportStatsOverlay.forEach { (k, v) -> sportStats[k] = v }
+        vm.consumePendingHyroxApply()
+    }
+    LaunchedEffect(sportType) {
+        if (sportType != AddSportType.HYROX) {
+            createHyroxRoutineEnabled = false
+            newHyroxRoutineName = ""
+            newHyroxRoutineFolderId = null
+        }
+    }
+    LaunchedEffect(createHyroxRoutineEnabled) {
+        if (!createHyroxRoutineEnabled) {
+            newHyroxRoutineName = ""
+            newHyroxRoutineFolderId = null
+        } else {
+            vm.loadHyroxRoutines()
+        }
+    }
 
     val scheduleDurationMin: Int? = remember(startedAtIsoText, endedAtIsoText, scheduleEndedEnabled) {
         if (!scheduleEndedEnabled) return@remember null
@@ -400,10 +444,18 @@ fun AddWorkoutTabScreen(
         }
     }
 
+    val showRoutinesToolbarAction =
+        selectedKind == AddWorkoutKind.STRENGTH ||
+            (selectedKind == AddWorkoutKind.SPORT && sportType == AddSportType.HYROX)
     Box(modifier = modifier.fillMaxSize()) {
-    if (selectedKind == AddWorkoutKind.STRENGTH) {
+    if (showRoutinesToolbarAction) {
         IconButton(
-            onClick = { showRoutinesSheet = true },
+            onClick = {
+                when {
+                    selectedKind == AddWorkoutKind.STRENGTH -> showRoutinesSheet = true
+                    else -> showHyroxRoutinesSheet = true
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(4.dp)
@@ -419,7 +471,7 @@ fun AddWorkoutTabScreen(
             .fillMaxSize()
             .padding(horizontal = 12.dp)
             .padding(
-                top = if (selectedKind == AddWorkoutKind.STRENGTH) 44.dp else 8.dp
+                top = if (showRoutinesToolbarAction) 44.dp else 8.dp
             ),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -1377,7 +1429,101 @@ fun AddWorkoutTabScreen(
                         }
                     }
                 }
-                AddSportType.HANDBALL, AddSportType.HOCKEY, AddSportType.RUGBY, AddSportType.HYROX, AddSportType.SKI -> {
+                AddSportType.HYROX -> {
+                    item {
+                        Text(
+                            stringResource(R.string.workout_detail_hyrox_stats_title),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["division"] ?: "",
+                                onValueChange = { sportStats["division"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_division)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["category"] ?: "",
+                                onValueChange = { sportStats["category"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_category)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = sportStats["age_group"] ?: "",
+                            onValueChange = { sportStats["age_group"] = it; vm.clearStatus() },
+                            label = { Text(stringResource(R.string.workout_detail_hyrox_age_group)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["official_time_sec"] ?: "",
+                                onValueChange = { sportStats["official_time_sec"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_official_time)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["penalty_time_sec"] ?: "",
+                                onValueChange = { sportStats["penalty_time_sec"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_penalty_time)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["no_reps"] ?: "",
+                                onValueChange = { sportStats["no_reps"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_no_reps)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["rank_overall"] ?: "",
+                                onValueChange = { sportStats["rank_overall"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_rank_overall)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["rank_category"] ?: "",
+                                onValueChange = { sportStats["rank_category"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_rank_category)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["avg_hr"] ?: "",
+                                onValueChange = { sportStats["avg_hr"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_avg_hr)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["max_hr"] ?: "",
+                                onValueChange = { sportStats["max_hr"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_max_hr)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                     item {
                         OutlinedTextField(
                             value = sportStats["raw_stats_json"] ?: "",
@@ -1388,17 +1534,142 @@ fun AddWorkoutTabScreen(
                             maxLines = 8
                         )
                     }
-                    if (sportType == AddSportType.HYROX) {
-                        item {
-                            OutlinedTextField(
-                                value = hyroxExercisesJson,
-                                onValueChange = { hyroxExercisesJson = it },
-                                label = { Text(stringResource(R.string.add_sport_hyrox_exercises_json_label)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 4,
-                                maxLines = 8
-                            )
+                    item {
+                        OutlinedTextField(
+                            value = hyroxExercisesJson,
+                            onValueChange = { hyroxExercisesJson = it; vm.clearStatus() },
+                            label = { Text(stringResource(R.string.add_sport_hyrox_exercises_json_label)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 4,
+                            maxLines = 8
+                        )
+                    }
+                    item {
+                        val canClearAllHyrox =
+                            hyroxExercisesJsonValid(hyroxExercisesJson) ||
+                                hyroxExercisesJson.trim().isNotEmpty()
+                        if (canClearAllHyrox) {
+                            OutlinedButton(
+                                onClick = { showClearHyroxDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.add_clear_all_exercises))
+                            }
                         }
+                    }
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(12.dp)
+                            ) {
+                                Text(
+                                    stringResource(R.string.add_section_routine_template),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        stringResource(R.string.add_create_routine_toggle),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    Switch(
+                                        checked = createHyroxRoutineEnabled,
+                                        onCheckedChange = { createHyroxRoutineEnabled = it; vm.clearStatus() }
+                                    )
+                                }
+                                if (createHyroxRoutineEnabled) {
+                                    OutlinedTextField(
+                                        value = newHyroxRoutineName,
+                                        onValueChange = { newHyroxRoutineName = it; vm.clearStatus() },
+                                        label = { Text(stringResource(R.string.add_routine_name_create_label)) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    ExposedDropdownMenuBox(
+                                        expanded = hyroxFolderMenuExpanded,
+                                        onExpandedChange = { hyroxFolderMenuExpanded = it }
+                                    ) {
+                                        val hyroxFolderLabel = newHyroxRoutineFolderId?.let { id ->
+                                            ui.hyroxRoutineFolders.firstOrNull { it.id == id }?.name
+                                        } ?: stringResource(R.string.add_routine_folder_none)
+                                        OutlinedTextField(
+                                            value = hyroxFolderLabel,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text(stringResource(R.string.add_routine_folder_label)) },
+                                            trailingIcon = {
+                                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = hyroxFolderMenuExpanded)
+                                            },
+                                            modifier = Modifier
+                                                .menuAnchor(
+                                                    type = MenuAnchorType.PrimaryNotEditable,
+                                                    enabled = true
+                                                )
+                                                .fillMaxWidth()
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = hyroxFolderMenuExpanded,
+                                            onDismissRequest = { hyroxFolderMenuExpanded = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.add_routine_folder_none)) },
+                                                onClick = {
+                                                    newHyroxRoutineFolderId = null
+                                                    hyroxFolderMenuExpanded = false
+                                                }
+                                            )
+                                            ui.hyroxRoutineFolders.forEach { folder ->
+                                                DropdownMenuItem(
+                                                    text = { Text(folder.name) },
+                                                    onClick = {
+                                                        newHyroxRoutineFolderId = folder.id
+                                                        hyroxFolderMenuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Button(
+                                        onClick = {
+                                            vm.saveCurrentAsHyroxRoutine(
+                                                routineName = newHyroxRoutineName,
+                                                folderId = newHyroxRoutineFolderId,
+                                                durationMinText = sportDurationMin,
+                                                sportStats = sportStats.toMap(),
+                                                hyroxExercisesText = hyroxExercisesJson
+                                            )
+                                        },
+                                        enabled = canSaveHyroxRoutineOnly && !ui.savingRoutine,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            if (ui.savingRoutine) {
+                                                stringResource(R.string.add_routine_saving)
+                                            } else {
+                                                stringResource(R.string.add_routine_save_without_workout)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                AddSportType.HANDBALL, AddSportType.HOCKEY, AddSportType.RUGBY, AddSportType.SKI -> {
+                    item {
+                        OutlinedTextField(
+                            value = sportStats["raw_stats_json"] ?: "",
+                            onValueChange = { sportStats["raw_stats_json"] = it },
+                            label = { Text(stringResource(R.string.add_sport_raw_stats_json_label)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 4,
+                            maxLines = 8
+                        )
                     }
                 }
             }
@@ -1479,7 +1750,10 @@ fun AddWorkoutTabScreen(
                                 startedAtIso = scheduleStartIso,
                                 endedAtIso = scheduleEndIso,
                                 useCustomSchedule = true,
-                                scheduleEndedEnabled = scheduleEndedEnabled
+                                scheduleEndedEnabled = scheduleEndedEnabled,
+                                saveHyroxRoutineTemplate = sportType == AddSportType.HYROX && createHyroxRoutineEnabled,
+                                hyroxRoutineName = newHyroxRoutineName,
+                                hyroxRoutineFolderId = newHyroxRoutineFolderId
                             )
                         }
                     }
@@ -1522,6 +1796,29 @@ fun AddWorkoutTabScreen(
             }
         )
     }
+    if (showClearHyroxDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHyroxDialog = false },
+            title = { Text(stringResource(R.string.add_clear_all_hyrox_stations_title)) },
+            text = { Text(stringResource(R.string.add_clear_all_hyrox_stations_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearHyroxDialog = false
+                        hyroxExercisesJson = "[]"
+                        vm.clearStatus()
+                    }
+                ) {
+                    Text(stringResource(R.string.add_clear_all_exercises_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHyroxDialog = false }) {
+                    Text(stringResource(R.string.add_routine_dialog_cancel))
+                }
+            }
+        )
+    }
     if (showRoutinesSheet) {
         ModalBottomSheet(
             onDismissRequest = { showRoutinesSheet = false },
@@ -1545,6 +1842,33 @@ fun AddWorkoutTabScreen(
                 onApplyRoutine = { id ->
                     vm.applyRoutine(id)
                     showRoutinesSheet = false
+                }
+            )
+        }
+    }
+    if (showHyroxRoutinesSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showHyroxRoutinesSheet = false },
+            sheetState = hyroxRoutinesSheetState
+        ) {
+            AddHyroxRoutinesSheetContent(
+                ui = ui,
+                onClose = { showHyroxRoutinesSheet = false },
+                onReload = vm::loadHyroxRoutines,
+                onCreateFolder = { name -> vm.createHyroxRoutineFolder(name) },
+                onRenameFolder = { id, name -> vm.renameHyroxRoutineFolder(id, name) },
+                onMoveFolder = { id, d -> vm.moveHyroxRoutineFolder(id, d) },
+                onDeleteFolder = { id -> vm.deleteHyroxRoutineFolder(id) },
+                onRenameRoutine = { id, name -> vm.renameHyroxRoutine(id, name) },
+                onDuplicateRoutine = { sourceId, name, folderId ->
+                    vm.duplicateHyroxRoutine(sourceId, name, folderId)
+                },
+                onMoveRoutine = { id, d -> vm.moveHyroxRoutine(id, d) },
+                onMoveRoutineToFolder = { id, folderId -> vm.moveHyroxRoutineToFolder(id, folderId) },
+                onDeleteRoutine = { id -> vm.deleteHyroxRoutine(id) },
+                onApplyRoutine = { id ->
+                    vm.applyHyroxRoutine(id)
+                    showHyroxRoutinesSheet = false
                 }
             )
         }
@@ -1808,25 +2132,30 @@ private fun strengthExercisesFormValidForSave(exercises: List<StrengthExerciseDr
     return true
 }
 
+private fun hyroxExercisesJsonValid(hyroxExercisesJson: String): Boolean {
+    val arr = runCatching { Json.parseToJsonElement(hyroxExercisesJson.trim()).jsonArray }
+        .getOrNull()
+    return arr != null && !arr.isEmpty()
+}
+
 private fun canSaveAddWorkout(
     kind: AddWorkoutKind,
     strengthExercises: List<StrengthExerciseDraft>,
     createRoutineEnabled: Boolean,
     newStrengthRoutineName: String,
     sportType: AddSportType,
-    hyroxExercisesJson: String
+    hyroxExercisesJson: String,
+    createHyroxRoutineEnabled: Boolean = false,
+    newHyroxRoutineName: String = ""
 ): Boolean = when (kind) {
     AddWorkoutKind.STRENGTH -> strengthExercisesFormValidForSave(strengthExercises) &&
         (!createRoutineEnabled || newStrengthRoutineName.trim().isNotEmpty())
     AddWorkoutKind.CARDIO -> true
-    AddWorkoutKind.SPORT -> {
-        if (sportType == AddSportType.HYROX) {
-            val arr = runCatching { Json.parseToJsonElement(hyroxExercisesJson.trim()).jsonArray }
-                .getOrNull()
-            arr != null && !arr.isEmpty()
-        } else {
-            true
-        }
+    AddWorkoutKind.SPORT -> when (sportType) {
+        AddSportType.HYROX ->
+            hyroxExercisesJsonValid(hyroxExercisesJson) &&
+                (!createHyroxRoutineEnabled || newHyroxRoutineName.trim().isNotEmpty())
+        else -> true
     }
 }
 
