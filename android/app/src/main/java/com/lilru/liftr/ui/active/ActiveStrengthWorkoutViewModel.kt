@@ -79,6 +79,8 @@ data class ActiveStrengthUiState(
     val restSecondsLeft: Int = 0,
     /** Descanso activo por ejercicio (burbuja) aunque el índice actual sea otro. */
     val restSecondsLeftByExerciseId: Map<Int, Int> = emptyMap(),
+    /** Segundos totales planificados al iniciar cada descanso (sector “quesito” en burbujas). */
+    val restPlannedTotalSecByExerciseId: Map<Int, Int> = emptyMap(),
     val sessionElapsedSec: Int = 0,
     val finishing: Boolean = false,
     val completedEntirely: Boolean = false,
@@ -87,7 +89,9 @@ data class ActiveStrengthUiState(
     val editRpeText: String = "",
     val editRestText: String = "",
     /** Easter egg alineado con [Liftr/ActiveStrengthWorkoutView.swift] (usuario `elborbla`). */
-    val showElborblaCelebration: Boolean = false
+    val showElborblaCelebration: Boolean = false,
+    /** Burbuja de énfasis fijada al primer descanso / primera serie sin descanso hasta cambiar de ejercicio (host). */
+    val navEmphasisLockWorkoutExerciseId: Int? = null
 ) {
     val atEnd: Boolean
         get() {
@@ -113,6 +117,7 @@ class ActiveStrengthWorkoutViewModel(
     private var sessionJob: Job? = null
     /** epoch ms fin de descanso por workout_exercise_id */
     private val restDeadlineMsByExerciseId: MutableMap<Int, Long> = mutableMapOf()
+    private val restPlannedTotalSecByExerciseIdMutable: MutableMap<Int, Int> = mutableMapOf()
     private val completedSetLines: MutableList<CompletedSetLine> = mutableListOf()
 
     init {
@@ -210,6 +215,7 @@ class ActiveStrengthWorkoutViewModel(
                 restJob?.cancel()
                 restJob = null
                 restDeadlineMsByExerciseId.clear()
+                restPlannedTotalSecByExerciseIdMutable.clear()
                 _ui.value = withSyncedEditFields(
                     _ui.value.copy(
                         loading = false,
@@ -224,7 +230,9 @@ class ActiveStrengthWorkoutViewModel(
                         guest2DataError = g2Err,
                         isResting = false,
                         restSecondsLeft = 0,
-                        restSecondsLeftByExerciseId = emptyMap()
+                        restSecondsLeftByExerciseId = emptyMap(),
+                        restPlannedTotalSecByExerciseId = emptyMap(),
+                        navEmphasisLockWorkoutExerciseId = null
                     )
                 )
             }.onFailure { e ->
@@ -395,6 +403,7 @@ class ActiveStrengthWorkoutViewModel(
         val s = _ui.value
         val cur = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
         restDeadlineMsByExerciseId.remove(cur.workoutExerciseId)
+        restPlannedTotalSecByExerciseIdMutable.remove(cur.workoutExerciseId)
         restJob?.cancel()
         restJob = null
         _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(s))
@@ -430,17 +439,20 @@ class ActiveStrengthWorkoutViewModel(
             put(ex.workoutExerciseId, nextSetIndex)
         }
         val allDone = areAllExercisesCompleted(s.exercises, nextMap)
+        val newEmphasisLock = s.navEmphasisLockWorkoutExerciseId ?: ex.workoutExerciseId
         val baseState = withSyncedEditFields(
             s.copy(
                 currentSetIndex = nextSetIndex,
                 currentSetIndexByExerciseId = nextMap,
-                completedEntirely = allDone
+                completedEntirely = allDone,
+                navEmphasisLockWorkoutExerciseId = newEmphasisLock
             )
         )
         val rest = set.restSec?.takeIf { it > 0 } ?: 0
         if (rest > 0) {
             val end = System.currentTimeMillis() + rest * 1000L
             restDeadlineMsByExerciseId[ex.workoutExerciseId] = end
+            restPlannedTotalSecByExerciseIdMutable[ex.workoutExerciseId] = rest
             _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(baseState))
             startRestTicker()
         } else {
@@ -468,6 +480,7 @@ class ActiveStrengthWorkoutViewModel(
     fun goToNextExercise() {
         val s = _ui.value
         if (s.currentExerciseIndex < s.exercises.lastIndex) {
+            _ui.value = _ui.value.copy(navEmphasisLockWorkoutExerciseId = null)
             goToExercise(s.currentExerciseIndex + 1)
         }
     }
@@ -487,6 +500,7 @@ class ActiveStrengthWorkoutViewModel(
         restJob?.cancel()
         restJob = null
         restDeadlineMsByExerciseId.clear()
+        restPlannedTotalSecByExerciseIdMutable.clear()
         completedSetLines.clear()
         val s = _ui.value
         val map = s.exercises.associate { it.workoutExerciseId to 0 }
@@ -498,7 +512,9 @@ class ActiveStrengthWorkoutViewModel(
                 isResting = false,
                 restSecondsLeft = 0,
                 restSecondsLeftByExerciseId = emptyMap(),
-                completedEntirely = false
+                restPlannedTotalSecByExerciseId = emptyMap(),
+                completedEntirely = false,
+                navEmphasisLockWorkoutExerciseId = null
             )
         )
     }
@@ -507,16 +523,28 @@ class ActiveStrengthWorkoutViewModel(
         val now = System.currentTimeMillis()
         restDeadlineMsByExerciseId.keys.toList().forEach { id ->
             val end = restDeadlineMsByExerciseId[id] ?: return@forEach
-            if (end <= now) restDeadlineMsByExerciseId.remove(id)
+            if (end <= now) {
+                restDeadlineMsByExerciseId.remove(id)
+                restPlannedTotalSecByExerciseIdMutable.remove(id)
+            }
         }
         val secMap = restDeadlineMsByExerciseId.mapValues { (_, endMs) ->
             kotlin.math.max(0, ceil((endMs - now) / 1000.0).toInt())
         }.filterValues { it > 0 }
+        secMap.keys.forEach { id ->
+            if (restPlannedTotalSecByExerciseIdMutable[id] == null) {
+                restPlannedTotalSecByExerciseIdMutable[id] = kotlin.math.max(1, secMap[id] ?: 1)
+            }
+        }
+        restPlannedTotalSecByExerciseIdMutable.keys.toList().forEach { id ->
+            if (id !in secMap) restPlannedTotalSecByExerciseIdMutable.remove(id)
+        }
         val cur = s.exercises.getOrNull(s.currentExerciseIndex)
         val curId = cur?.workoutExerciseId
         val left = curId?.let { secMap[it] } ?: 0
         return s.copy(
             restSecondsLeftByExerciseId = secMap,
+            restPlannedTotalSecByExerciseId = restPlannedTotalSecByExerciseIdMutable.toMap(),
             isResting = left > 0,
             restSecondsLeft = left
         )

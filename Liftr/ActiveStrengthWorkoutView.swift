@@ -140,6 +140,9 @@ struct ActiveStrengthWorkoutView: View {
 
     @State private var restEndDate: Date? = nil
     @State private var restEndDateByExercise: [Int: Date] = [:]
+    @State private var restTotalPlannedByExercise: [Int: Int] = [:]
+    @State private var gRestTotalPlannedByExercise: [Int: Int] = [:]
+    @State private var g2RestTotalPlannedByExercise: [Int: Int] = [:]
     @State private var exercises: [ExerciseRow] = []
     @State private var setsByExercise: [Int: [SetRow]] = [:]
     @State private var loading = false
@@ -150,6 +153,12 @@ struct ActiveStrengthWorkoutView: View {
     @State private var strengthWorkoutSessionStart: Date? = nil
     @State private var strengthWorkoutElapsedTick: UInt32 = 0
     @State private var currentExerciseIndex: Int = 0
+    @State private var pagerDisplayIndexHost: Int = 0
+    @State private var pagerDisplayIndexGuest: Int = 0
+    @State private var pagerDisplayIndexGuest2: Int = 0
+    @State private var navEmphasisLockExerciseIdHost: Int? = nil
+    @State private var navEmphasisLockExerciseIdGuest: Int? = nil
+    @State private var navEmphasisLockExerciseIdGuest2: Int? = nil
     @State private var guestCurrentExerciseIndex: Int = 0
     @State private var currentSetIndex: Int = 0
     @State private var isResting = false
@@ -230,6 +239,28 @@ struct ActiveStrengthWorkoutView: View {
         }
     }
 
+    private func navEmphasisTargetExerciseId(lane: StrengthLaneKind) -> Int? {
+        let list = orderedExercises(lane: lane)
+        guard !list.isEmpty else { return nil }
+        switch lane {
+        case .host:
+            if let id = navEmphasisLockExerciseIdHost { return id }
+            let idx = pagerDisplayIndexHost
+            guard idx >= 0, idx < list.count else { return nil }
+            return list[idx].id
+        case .guest:
+            if let id = navEmphasisLockExerciseIdGuest { return id }
+            let idx = pagerDisplayIndexGuest
+            guard idx >= 0, idx < list.count else { return nil }
+            return list[idx].id
+        case .guest2:
+            if let id = navEmphasisLockExerciseIdGuest2 { return id }
+            let idx = pagerDisplayIndexGuest2
+            guard idx >= 0, idx < list.count else { return nil }
+            return list[idx].id
+        }
+    }
+
     private var currentExercise: ExerciseRow? {
         guard !orderedExercises.isEmpty,
               currentExerciseIndex >= 0,
@@ -262,11 +293,11 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     private var pagerExerciseIndex: Int {
-        if !isDualMode { return currentExerciseIndex }
+        if !isDualMode { return pagerDisplayIndexHost }
         switch mainDisplayLane {
-        case .host: return currentExerciseIndex
-        case .guest: return guestCurrentExerciseIndex
-        case .guest2: return g2CurrentExerciseIndex
+        case .host: return pagerDisplayIndexHost
+        case .guest: return pagerDisplayIndexGuest
+        case .guest2: return pagerDisplayIndexGuest2
         }
     }
 
@@ -1001,6 +1032,7 @@ struct ActiveStrengthWorkoutView: View {
             isRestingByExercise[exerciseId] = false
             remainingRestByExercise[exerciseId] = 0
             restEndDateByExercise[exerciseId] = nil
+            restTotalPlannedByExercise[exerciseId] = nil
         case .guest:
             gIsResting = false
             gRemainingRest = 0
@@ -1009,6 +1041,7 @@ struct ActiveStrengthWorkoutView: View {
             gIsRestingByExercise[exerciseId] = false
             gRemainingRestByExercise[exerciseId] = 0
             gRestEndDateByExercise[exerciseId] = nil
+            gRestTotalPlannedByExercise[exerciseId] = nil
         case .guest2:
             g2IsResting = false
             g2RemainingRest = 0
@@ -1017,6 +1050,7 @@ struct ActiveStrengthWorkoutView: View {
             g2IsRestingByExercise[exerciseId] = false
             g2RemainingRestByExercise[exerciseId] = 0
             g2RestEndDateByExercise[exerciseId] = nil
+            g2RestTotalPlannedByExercise[exerciseId] = nil
         }
     }
 
@@ -1058,6 +1092,22 @@ struct ActiveStrengthWorkoutView: View {
         let sec = set.rest_sec ?? 0
         guard sec > 0 else { return }
 
+        let restingExId: Int? = {
+            switch lane {
+            case .host: return currentExercise?.id
+            case .guest: return currentGuestExercise?.id
+            case .guest2: return currentGuest2Exercise?.id
+            }
+        }()
+        switch lane {
+        case .host:
+            if navEmphasisLockExerciseIdHost == nil, let id = restingExId { navEmphasisLockExerciseIdHost = id }
+        case .guest:
+            if navEmphasisLockExerciseIdGuest == nil, let id = restingExId { navEmphasisLockExerciseIdGuest = id }
+        case .guest2:
+            if navEmphasisLockExerciseIdGuest2 == nil, let id = restingExId { navEmphasisLockExerciseIdGuest2 = id }
+        }
+
         let end = Date().addingTimeInterval(TimeInterval(sec))
         switch lane {
         case .host:
@@ -1069,6 +1119,7 @@ struct ActiveStrengthWorkoutView: View {
                 isRestingByExercise[ex.id] = true
                 remainingRestByExercise[ex.id] = sec
                 restEndDateByExercise[ex.id] = end
+                restTotalPlannedByExercise[ex.id] = sec
             }
         case .guest:
             gRestEndDate = end
@@ -1079,6 +1130,7 @@ struct ActiveStrengthWorkoutView: View {
                 gIsRestingByExercise[ex.id] = true
                 gRemainingRestByExercise[ex.id] = sec
                 gRestEndDateByExercise[ex.id] = end
+                gRestTotalPlannedByExercise[ex.id] = sec
             }
         case .guest2:
             g2RestEndDate = end
@@ -1089,6 +1141,7 @@ struct ActiveStrengthWorkoutView: View {
                 g2IsRestingByExercise[ex.id] = true
                 g2RemainingRestByExercise[ex.id] = sec
                 g2RestEndDateByExercise[ex.id] = end
+                g2RestTotalPlannedByExercise[ex.id] = sec
             }
         }
 
@@ -1138,6 +1191,7 @@ struct ActiveStrengthWorkoutView: View {
                 isRestingByExercise[id] = false
                 remainingRestByExercise[id] = 0
                 restEndDateByExercise[id] = nil
+                restTotalPlannedByExercise[id] = nil
                 if id == currentExercise?.id {
                     isResting = false
                     remainingRest = 0
@@ -1150,6 +1204,9 @@ struct ActiveStrengthWorkoutView: View {
             } else {
                 remainingRestByExercise[id] = newR
                 isRestingByExercise[id] = true
+                if restTotalPlannedByExercise[id] == nil {
+                    restTotalPlannedByExercise[id] = max(1, newR)
+                }
                 if id == currentExercise?.id {
                     isResting = true
                     remainingRest = newR
@@ -1175,6 +1232,7 @@ struct ActiveStrengthWorkoutView: View {
                 gIsRestingByExercise[id] = false
                 gRemainingRestByExercise[id] = 0
                 gRestEndDateByExercise[id] = nil
+                gRestTotalPlannedByExercise[id] = nil
                 if id == currentGuestExercise?.id {
                     gIsResting = false
                     gRemainingRest = 0
@@ -1187,6 +1245,9 @@ struct ActiveStrengthWorkoutView: View {
             } else {
                 gRemainingRestByExercise[id] = newR
                 gIsRestingByExercise[id] = true
+                if gRestTotalPlannedByExercise[id] == nil {
+                    gRestTotalPlannedByExercise[id] = max(1, newR)
+                }
                 if id == currentGuestExercise?.id {
                     gIsResting = true
                     gRemainingRest = newR
@@ -1212,6 +1273,7 @@ struct ActiveStrengthWorkoutView: View {
                 g2IsRestingByExercise[id] = false
                 g2RemainingRestByExercise[id] = 0
                 g2RestEndDateByExercise[id] = nil
+                g2RestTotalPlannedByExercise[id] = nil
                 if id == currentGuest2Exercise?.id {
                     g2IsResting = false
                     g2RemainingRest = 0
@@ -1224,6 +1286,9 @@ struct ActiveStrengthWorkoutView: View {
             } else {
                 g2RemainingRestByExercise[id] = newR
                 g2IsRestingByExercise[id] = true
+                if g2RestTotalPlannedByExercise[id] == nil {
+                    g2RestTotalPlannedByExercise[id] = max(1, newR)
+                }
                 if id == currentGuest2Exercise?.id {
                     g2IsResting = true
                     g2RemainingRest = newR
@@ -1294,6 +1359,8 @@ struct ActiveStrengthWorkoutView: View {
                 if sets.isEmpty { return }
             }
 
+            let completedRestSec = currentSetFor(ex, setIndex: currentSetIndex, lane: .host).map { $0.rest_sec ?? 0 } ?? 0
+
             if let s = currentSetFor(ex, setIndex: currentSetIndex, lane: .host) {
                 var list = performedSetsByExercise[ex.id] ?? []
                 let performed = PerformedSet(
@@ -1318,6 +1385,10 @@ struct ActiveStrengthWorkoutView: View {
             isRestingByExercise[ex.id] = isResting
             remainingRestByExercise[ex.id] = remainingRest
 
+            if navEmphasisLockExerciseIdHost == nil, completedRestSec == 0 {
+                navEmphasisLockExerciseIdHost = ex.id
+            }
+
         case .guest:
             guard let ex = currentGuestExercise else { return }
             var sets = setsFor(ex, lane: .guest)
@@ -1326,6 +1397,8 @@ struct ActiveStrengthWorkoutView: View {
                 sets = setsFor(ex, lane: .guest)
                 if sets.isEmpty { return }
             }
+
+            let completedRestSec = currentSetFor(ex, setIndex: gCurrentSetIndex, lane: .guest).map { $0.rest_sec ?? 0 } ?? 0
 
             if let s = currentSetFor(ex, setIndex: gCurrentSetIndex, lane: .guest) {
                 var list = gPerformedSetsByExercise[ex.id] ?? []
@@ -1351,6 +1424,10 @@ struct ActiveStrengthWorkoutView: View {
             gIsRestingByExercise[ex.id] = gIsResting
             gRemainingRestByExercise[ex.id] = gRemainingRest
 
+            if navEmphasisLockExerciseIdGuest == nil, completedRestSec == 0 {
+                navEmphasisLockExerciseIdGuest = ex.id
+            }
+
         case .guest2:
             guard let ex = currentGuest2Exercise else { return }
             var sets = setsFor(ex, lane: .guest2)
@@ -1359,6 +1436,8 @@ struct ActiveStrengthWorkoutView: View {
                 sets = setsFor(ex, lane: .guest2)
                 if sets.isEmpty { return }
             }
+
+            let completedRestSec = currentSetFor(ex, setIndex: g2CurrentSetIndex, lane: .guest2).map { $0.rest_sec ?? 0 } ?? 0
 
             if let s = currentSetFor(ex, setIndex: g2CurrentSetIndex, lane: .guest2) {
                 var list = g2PerformedSetsByExercise[ex.id] ?? []
@@ -1383,6 +1462,10 @@ struct ActiveStrengthWorkoutView: View {
             g2CurrentSetIndexByExercise[ex.id] = g2CurrentSetIndex
             g2IsRestingByExercise[ex.id] = g2IsResting
             g2RemainingRestByExercise[ex.id] = g2RemainingRest
+
+            if navEmphasisLockExerciseIdGuest2 == nil, completedRestSec == 0 {
+                navEmphasisLockExerciseIdGuest2 = ex.id
+            }
         }
     }
 
@@ -1707,7 +1790,44 @@ struct ActiveStrengthWorkoutView: View {
         }
     }
     
+    /// Avanza el **trabajo** al siguiente ejercicio y alinea el pager (p. ej. botón “Next exercise”).
     private func goToNextExercise() {
+        let lane = mainDisplayLane
+        let ordered = orderedExercises(lane: lane)
+        let workIdx: Int = {
+            switch lane {
+            case .host: return currentExerciseIndex
+            case .guest: return guestCurrentExerciseIndex
+            case .guest2: return g2CurrentExerciseIndex
+            }
+        }()
+        guard !ordered.isEmpty, workIdx < ordered.count - 1 else { return }
+
+        persistStateForCurrentDualIndex()
+
+        switch lane {
+        case .host: navEmphasisLockExerciseIdHost = nil
+        case .guest: navEmphasisLockExerciseIdGuest = nil
+        case .guest2: navEmphasisLockExerciseIdGuest2 = nil
+        }
+
+        switch lane {
+        case .host:
+            currentExerciseIndex += 1
+            pagerDisplayIndexHost = currentExerciseIndex
+        case .guest:
+            guestCurrentExerciseIndex += 1
+            pagerDisplayIndexGuest = guestCurrentExerciseIndex
+        case .guest2:
+            g2CurrentExerciseIndex += 1
+            pagerDisplayIndexGuest2 = g2CurrentExerciseIndex
+        }
+
+        restoreStateForDualIndex()
+    }
+
+    /// Solo mueve el pager (preview) sin cambiar el ejercicio en el que se está trabajando.
+    private func pagerShiftForward() {
         let lane = mainDisplayLane
         let ordered = orderedExercises(lane: lane)
         let idx = pagerExerciseIndex
@@ -1716,15 +1836,15 @@ struct ActiveStrengthWorkoutView: View {
         persistStateForCurrentDualIndex()
 
         switch lane {
-        case .host: currentExerciseIndex += 1
-        case .guest: guestCurrentExerciseIndex += 1
-        case .guest2: g2CurrentExerciseIndex += 1
+        case .host: pagerDisplayIndexHost += 1
+        case .guest: pagerDisplayIndexGuest += 1
+        case .guest2: pagerDisplayIndexGuest2 += 1
         }
 
         restoreStateForDualIndex()
     }
     
-    private func goToPreviousExercise() {
+    private func pagerShiftBackward() {
         let lane = mainDisplayLane
         let ordered = orderedExercises(lane: lane)
         let idx = pagerExerciseIndex
@@ -1733,9 +1853,9 @@ struct ActiveStrengthWorkoutView: View {
         persistStateForCurrentDualIndex()
 
         switch lane {
-        case .host: currentExerciseIndex -= 1
-        case .guest: guestCurrentExerciseIndex -= 1
-        case .guest2: g2CurrentExerciseIndex -= 1
+        case .host: pagerDisplayIndexHost -= 1
+        case .guest: pagerDisplayIndexGuest -= 1
+        case .guest2: pagerDisplayIndexGuest2 -= 1
         }
 
         restoreStateForDualIndex()
@@ -1881,23 +2001,29 @@ struct ActiveStrengthWorkoutView: View {
             let n = orderedExercises.count
             guard n > 0 else {
                 currentExerciseIndex = 0
+                pagerDisplayIndexHost = 0
                 return
             }
             currentExerciseIndex = min(max(0, currentExerciseIndex), n - 1)
+            pagerDisplayIndexHost = min(max(0, pagerDisplayIndexHost), n - 1)
         case .guest:
             let n = orderedGuestExercises.count
             guard n > 0 else {
                 guestCurrentExerciseIndex = 0
+                pagerDisplayIndexGuest = 0
                 return
             }
             guestCurrentExerciseIndex = min(max(0, guestCurrentExerciseIndex), n - 1)
+            pagerDisplayIndexGuest = min(max(0, pagerDisplayIndexGuest), n - 1)
         case .guest2:
             let n = orderedGuest2Exercises.count
             guard n > 0 else {
                 g2CurrentExerciseIndex = 0
+                pagerDisplayIndexGuest2 = 0
                 return
             }
             g2CurrentExerciseIndex = min(max(0, g2CurrentExerciseIndex), n - 1)
+            pagerDisplayIndexGuest2 = min(max(0, pagerDisplayIndexGuest2), n - 1)
         }
     }
 
@@ -1929,9 +2055,15 @@ struct ActiveStrengthWorkoutView: View {
 
         if indexChanged {
             switch lane {
-            case .host: currentExerciseIndex = index
-            case .guest: guestCurrentExerciseIndex = index
-            case .guest2: g2CurrentExerciseIndex = index
+            case .host:
+                currentExerciseIndex = index
+                pagerDisplayIndexHost = index
+            case .guest:
+                guestCurrentExerciseIndex = index
+                pagerDisplayIndexGuest = index
+            case .guest2:
+                g2CurrentExerciseIndex = index
+                pagerDisplayIndexGuest2 = index
             }
         }
 
@@ -2155,14 +2287,16 @@ struct ActiveStrengthWorkoutView: View {
         let ex = list[idx]
         let completed = isExerciseCompleted(ex, lane: lane)
         let isLast = idx == list.count - 1
-        let currentIdx: Int = {
+        let workAnchorExerciseId: Int? = {
             switch lane {
-            case .host: return currentExerciseIndex
-            case .guest: return guestCurrentExerciseIndex
-            case .guest2: return g2CurrentExerciseIndex
+            case .host: return currentExercise?.id
+            case .guest: return currentGuestExercise?.id
+            case .guest2: return currentGuest2Exercise?.id
             }
         }()
-        let isCurrent = idx == currentIdx
+        let emphasisTargetId = navEmphasisTargetExerciseId(lane: lane)
+        let isEmphasized = (emphasisTargetId == ex.id)
+        let isWorkAnchor = (workAnchorExerciseId == ex.id)
         let jumpOK = canJumpBetweenExercises
         let title = exerciseTitle(ex)
         let plannedSets = setsFor(ex, lane: lane).count
@@ -2189,6 +2323,13 @@ struct ActiveStrengthWorkoutView: View {
             let sec = max(0, Int(ceil(end.timeIntervalSinceNow)))
             return sec > 0 ? sec : nil
         }()
+        let restPlannedTotal: Int? = {
+            switch lane {
+            case .host: return restTotalPlannedByExercise[ex.id]
+            case .guest: return gRestTotalPlannedByExercise[ex.id]
+            case .guest2: return g2RestTotalPlannedByExercise[ex.id]
+            }
+        }()
         StrengthExerciseNavColumn(
             displayNumber: idx + 1,
             exerciseTitle: title,
@@ -2196,12 +2337,15 @@ struct ActiveStrengthWorkoutView: View {
             completed: completed,
             completionProgress: completionProgress,
             isLast: isLast,
-            isCurrent: isCurrent,
+            isEmphasized: isEmphasized,
+            isWorkAnchor: isWorkAnchor,
             allWorkoutExercisesComplete: allExercisesCompleted(for: lane),
             isWavePulsing: strengthNavStripWaveIndex == idx,
             jumpOK: jumpOK,
-            navAnimationIndex: currentIdx,
+            workAnchorExerciseId: workAnchorExerciseId,
             restOverlaySeconds: restBubbleSeconds,
+            restPlannedTotalSeconds: restPlannedTotal,
+            enlargeActiveBubbleForSolo: !isDualMode,
             popoverPresented: popBinding,
             onShortTap: { jumpToExercise(lane: lane, index: idx) },
             onLongPress: { navExercisePopoverIndex = popId }
@@ -2259,6 +2403,9 @@ struct ActiveStrengthWorkoutView: View {
                 remainingRest = 0
                 restEndDate = nil
                 restEndDateByExercise[ex.id] = nil
+                restTotalPlannedByExercise[ex.id] = nil
+            } else if isResting, restTotalPlannedByExercise[ex.id] == nil {
+                restTotalPlannedByExercise[ex.id] = max(1, remainingRest)
             }
         } else {
             currentSetIndex = 0
@@ -2283,6 +2430,9 @@ struct ActiveStrengthWorkoutView: View {
                 gRemainingRest = 0
                 gRestEndDate = nil
                 gRestEndDateByExercise[gx.id] = nil
+                gRestTotalPlannedByExercise[gx.id] = nil
+            } else if gIsResting, gRestTotalPlannedByExercise[gx.id] == nil {
+                gRestTotalPlannedByExercise[gx.id] = max(1, gRemainingRest)
             }
         } else if isDualMode {
             gCurrentSetIndex = 0
@@ -2307,6 +2457,9 @@ struct ActiveStrengthWorkoutView: View {
                 g2RemainingRest = 0
                 g2RestEndDate = nil
                 g2RestEndDateByExercise[gx2.id] = nil
+                g2RestTotalPlannedByExercise[gx2.id] = nil
+            } else if g2IsResting, g2RestTotalPlannedByExercise[gx2.id] == nil {
+                g2RestTotalPlannedByExercise[gx2.id] = max(1, g2RemainingRest)
             }
         } else if isTripleMode {
             g2CurrentSetIndex = 0
@@ -2325,7 +2478,12 @@ struct ActiveStrengthWorkoutView: View {
                     dualFocusLane = .host
                 }
             } label: {
-                dualAvatarCell(lane: .host, url: dualHostAvatarURL, isFocused: mainDisplayLane == .host)
+                dualAvatarCell(
+                    lane: .host,
+                    url: dualHostAvatarURL,
+                    isFocused: mainDisplayLane == .host,
+                    restPlannedTotal: currentExercise.flatMap { restTotalPlannedByExercise[$0.id] }
+                )
             }
             .buttonStyle(.plain)
 
@@ -2340,7 +2498,12 @@ struct ActiveStrengthWorkoutView: View {
                     dualFocusLane = .guest
                 }
             } label: {
-                dualAvatarCell(lane: .guest, url: dualGuestAvatarURL, isFocused: mainDisplayLane == .guest)
+                dualAvatarCell(
+                    lane: .guest,
+                    url: dualGuestAvatarURL,
+                    isFocused: mainDisplayLane == .guest,
+                    restPlannedTotal: currentGuestExercise.flatMap { gRestTotalPlannedByExercise[$0.id] }
+                )
             }
             .buttonStyle(.plain)
 
@@ -2356,7 +2519,12 @@ struct ActiveStrengthWorkoutView: View {
                         dualFocusLane = .guest2
                     }
                 } label: {
-                    dualAvatarCell(lane: .guest2, url: dualGuest2AvatarURL, isFocused: mainDisplayLane == .guest2)
+                    dualAvatarCell(
+                        lane: .guest2,
+                        url: dualGuest2AvatarURL,
+                        isFocused: mainDisplayLane == .guest2,
+                        restPlannedTotal: currentGuest2Exercise.flatMap { g2RestTotalPlannedByExercise[$0.id] }
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -2378,7 +2546,7 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     @ViewBuilder
-    private func dualAvatarCell(lane: StrengthLaneKind, url: String?, isFocused: Bool) -> some View {
+    private func dualAvatarCell(lane: StrengthLaneKind, url: String?, isFocused: Bool, restPlannedTotal: Int?) -> some View {
         let resting: Bool = {
             switch lane {
             case .host: return isResting
@@ -2393,48 +2561,13 @@ struct ActiveStrengthWorkoutView: View {
             case .guest2: return g2RemainingRest
             }
         }()
-        let showRestOverlay = resting && secs > 0
-        let baseSize: CGFloat = 40
-        let scale: CGFloat = isFocused ? 1.18 : 0.88
-
-        ZStack {
-            Circle()
-                .fill(Color.secondary.opacity(isFocused ? 0.26 : 0.18))
-                .frame(width: baseSize, height: baseSize)
-            AvatarView(urlString: url)
-                .frame(width: baseSize, height: baseSize)
-                .clipped()
-                .clipShape(Circle())
-                .opacity(isFocused ? 1 : 0.88)
-
-            if showRestOverlay {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.black.opacity(0.35),
-                                Color.black.opacity(0.62)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: baseSize, height: baseSize)
-                Text("\(secs)s")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
-            }
-        }
-        .frame(width: baseSize, height: baseSize)
-        .clipShape(Circle())
-        .overlay(
-            Circle()
-                .stroke(isFocused ? Color.accentColor : Color.white.opacity(0.35), lineWidth: isFocused ? 3 : 1)
-                .frame(width: baseSize, height: baseSize)
+        DualLaneAvatarCell(
+            urlString: url,
+            isFocused: isFocused,
+            resting: resting,
+            restSeconds: secs,
+            restPlannedTotal: restPlannedTotal
         )
-        .scaleEffect(scale)
-        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: isFocused)
     }
 
     private func exerciseTitle(_ ex: ExerciseRow?) -> String {
@@ -2574,7 +2707,7 @@ struct ActiveStrengthWorkoutView: View {
                                 dragOffsetY = -step
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                                goToNextExercise()
+                                pagerShiftForward()
                                 dragOffsetY = 0
                                 isTransitioningExercise = false
                             }
@@ -2590,7 +2723,7 @@ struct ActiveStrengthWorkoutView: View {
                                 dragOffsetY = step
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                                goToPreviousExercise()
+                                pagerShiftBackward()
                                 dragOffsetY = 0
                                 isTransitioningExercise = false
                             }
@@ -3038,11 +3171,18 @@ struct ActiveStrengthWorkoutView: View {
                 self.guest2DataError = guest2Err
 
                 self.currentExerciseIndex = 0
+                self.pagerDisplayIndexHost = 0
+                self.pagerDisplayIndexGuest = 0
+                self.pagerDisplayIndexGuest2 = 0
                 self.guestCurrentExerciseIndex = 0
                 self.g2CurrentExerciseIndex = 0
                 self.currentSetIndex = 0
                 self.gCurrentSetIndex = 0
                 self.g2CurrentSetIndex = 0
+
+                self.navEmphasisLockExerciseIdHost = nil
+                self.navEmphasisLockExerciseIdGuest = nil
+                self.navEmphasisLockExerciseIdGuest2 = nil
 
                 self.isResting = false
                 self.remainingRest = 0
@@ -3085,6 +3225,112 @@ struct ActiveStrengthWorkoutView: View {
     }
 }
 
+/// Sector oscuro del tiempo de descanso **restante**, como reloj: vértice en el centro de la burbuja (no `trim` del círculo, que se desalinea).
+private struct RestDarkClockWedge: Shape {
+    /// Fracción ya transcurrida del descanso [0, 1].
+    var elapsedFraction: CGFloat
+    /// Fracción que queda por transcurrir [0, 1].
+    var restFraction: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
+        let e = min(max(elapsedFraction, 0), 1)
+        let rf = min(max(restFraction, 0), 1)
+        if rf < 0.001 { return Path() }
+        var p = Path()
+        p.move(to: c)
+        let startDeg = -90.0 + 360.0 * Double(e)
+        let endDeg = startDeg + 360.0 * Double(rf)
+        p.addArc(
+            center: c,
+            radius: r,
+            startAngle: .degrees(startDeg),
+            endAngle: .degrees(endDeg),
+            clockwise: false
+        )
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// Avatar del header en entreno dual: descanso en forma de sector (“quesito”) y pulso al terminar.
+private struct DualLaneAvatarCell: View {
+    let urlString: String?
+    let isFocused: Bool
+    let resting: Bool
+    let restSeconds: Int
+    let restPlannedTotal: Int?
+
+    @State private var restEndedPulse: CGFloat = 1
+
+    private var showRestOverlay: Bool { resting && restSeconds > 0 }
+
+    var body: some View {
+        let baseSize: CGFloat = 40
+        let focusScale: CGFloat = isFocused ? 1.18 : 0.88
+        let total = max(restPlannedTotal ?? max(restSeconds, 1), 1)
+        let elapsedFrac = CGFloat(Double(total - restSeconds) / Double(total))
+        let restFrac = CGFloat(Double(restSeconds) / Double(total))
+
+        ZStack {
+            Circle()
+                .fill(Color.secondary.opacity(isFocused ? 0.26 : 0.18))
+                .frame(width: baseSize, height: baseSize)
+            AvatarView(urlString: urlString)
+                .frame(width: baseSize, height: baseSize)
+                .clipped()
+                .clipShape(Circle())
+                .opacity(isFocused ? 1 : 0.88)
+
+            if showRestOverlay {
+                RestDarkClockWedge(elapsedFraction: elapsedFrac, restFraction: restFrac)
+                    .fill(Color.black.opacity(0.56))
+                    .frame(width: baseSize, height: baseSize)
+                Text("\(restSeconds)s")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+                    .zIndex(1)
+            }
+        }
+        .frame(width: baseSize, height: baseSize)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(isFocused ? Color.accentColor : Color.white.opacity(0.35), lineWidth: isFocused ? 3 : 1)
+                .frame(width: baseSize, height: baseSize)
+        )
+        .scaleEffect(focusScale * restEndedPulse)
+        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: isFocused)
+        .onChange(of: restSeconds) { old, new in
+            if old > 0 && new == 0 {
+                playRestEndedPulse()
+            }
+        }
+    }
+
+    private func playRestEndedPulse() {
+        Task { @MainActor in
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.52)) {
+                restEndedPulse = 1.11
+            }
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) {
+                restEndedPulse = 1.0
+            }
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.50)) {
+                restEndedPulse = 1.07
+            }
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.80)) {
+                restEndedPulse = 1.0
+            }
+        }
+    }
+}
+
 private struct StrengthExerciseNavColumn: View {
     private static let celebrationFill = Color(red: 0.99, green: 0.86, blue: 0.28)
     private static let celebrationProgress = Color(red: 0.90, green: 0.68, blue: 0.04)
@@ -3096,18 +3342,25 @@ private struct StrengthExerciseNavColumn: View {
     let completed: Bool
     let completionProgress: Double
     let isLast: Bool
-    let isCurrent: Bool
+    let isEmphasized: Bool
+    let isWorkAnchor: Bool
     let allWorkoutExercisesComplete: Bool
     let isWavePulsing: Bool
     let jumpOK: Bool
-    let navAnimationIndex: Int
+    /// Identidad del ejercicio en el que se está trabajando (animación coherente sin mezclar con el índice del pager).
+    let workAnchorExerciseId: Int?
     /// Segundos de descanso restantes en la burbuja del ejercicio actual (mismo tratamiento visual que avatares en grupo).
     let restOverlaySeconds: Int?
+    /// Duración total del descanso al iniciarlo (para el sector oscuro).
+    let restPlannedTotalSeconds: Int?
+    /// En modo solo, la burbuja del ejercicio activo se agranda un poco más.
+    let enlargeActiveBubbleForSolo: Bool
     @Binding var popoverPresented: Bool
     let onShortTap: () -> Void
     let onLongPress: () -> Void
     @State private var burstScale: CGFloat = 0.75
     @State private var burstOpacity: Double = 0
+    @State private var restEndedPulse: CGFloat = 1
 
     private var numberLabel: String { String(displayNumber) }
 
@@ -3119,7 +3372,7 @@ private struct StrengthExerciseNavColumn: View {
 
     private var accessibilityLine: String {
         var parts = ["Exercise \(displayNumber)"]
-        if isCurrent { parts.append("current") }
+        if isEmphasized { parts.append("current") }
         let pct = Int((min(max(completionProgress, 0), 1) * 100).rounded())
         parts.append("progress \(pct) percent")
         if completed { parts.append("completed") }
@@ -3131,7 +3384,10 @@ private struct StrengthExerciseNavColumn: View {
     }
 
     private var bubbleLayoutScale: CGFloat {
-        (isCurrent ? 1.09 : 1.0) * (isWavePulsing ? 1.18 : 1.0)
+        let currentBoost: CGFloat = isEmphasized
+            ? (enlargeActiveBubbleForSolo ? 1.14 : 1.09)
+            : 1.0
+        return currentBoost * (isWavePulsing ? 1.18 : 1.0)
     }
 
     var body: some View {
@@ -3139,8 +3395,9 @@ private struct StrengthExerciseNavColumn: View {
             pillStack
             progressDot
         }
-        .scaleEffect(bubbleLayoutScale)
-        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: navAnimationIndex)
+        .scaleEffect(bubbleLayoutScale * restEndedPulse)
+        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: workAnchorExerciseId)
+        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: isEmphasized)
         .animation(.spring(response: 0.24, dampingFraction: 0.75), value: isWavePulsing)
         .popover(isPresented: $popoverPresented) {
             VStack(alignment: .center, spacing: 8) {
@@ -3163,6 +3420,13 @@ private struct StrengthExerciseNavColumn: View {
             guard oldValue < 0.999, newValue >= 0.999 else { return }
             scheduleBurst()
         }
+        .onChange(of: restOverlaySeconds) { oldValue, newValue in
+            let oldS = oldValue ?? 0
+            let newS = newValue ?? 0
+            if oldS > 0 && newS == 0 {
+                playRestEndedPulse()
+            }
+        }
     }
 
     private var pillStack: some View {
@@ -3184,28 +3448,22 @@ private struct StrengthExerciseNavColumn: View {
                         lineWidth: 2
                     )
             }
-            if isCurrent {
+            if isEmphasized {
                 Circle()
                     .strokeBorder(Color.white.opacity(0.95), lineWidth: 2.5)
             }
             if (restOverlaySeconds ?? 0) <= 0 {
                 Text(verbatim: numberLabel)
-                    .font(.callout.weight(isCurrent ? .bold : .semibold))
+                    .font(.callout.weight(isEmphasized ? .bold : .semibold))
                     .monospacedDigit()
                     .foregroundStyle(foregroundColor)
             }
             if let restSec = restOverlaySeconds, restSec > 0 {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.black.opacity(0.35),
-                                Color.black.opacity(0.62)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                let total = max(max(restPlannedTotalSeconds ?? restSec, restSec), 1)
+                let eFrac = CGFloat(Double(total - restSec) / Double(total))
+                let rFrac = CGFloat(Double(restSec) / Double(total))
+                RestDarkClockWedge(elapsedFraction: eFrac, restFraction: rFrac)
+                    .fill(Color.black.opacity(0.56))
                 Text("\(restSec)s")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .minimumScaleFactor(0.75)
@@ -3219,16 +3477,16 @@ private struct StrengthExerciseNavColumn: View {
                 .allowsHitTesting(false)
         }
         .frame(width: 34, height: 34)
-        .shadow(color: isCurrent ? Color.black.opacity(0.25) : .clear, radius: isCurrent ? 3 : 0, y: 1)
+        .shadow(color: isEmphasized ? Color.black.opacity(0.25) : .clear, radius: isEmphasized ? 3 : 0, y: 1)
         .contentShape(Circle())
         .onTapGesture {
-            guard jumpOK, !isCurrent else { return }
+            guard jumpOK, !isWorkAnchor else { return }
             onShortTap()
         }
         .onLongPressGesture(minimumDuration: 0.45) {
             onLongPress()
         }
-        .opacity(jumpOK || isCurrent ? 1 : 0.55)
+        .opacity(jumpOK || isEmphasized ? 1 : 0.55)
     }
 
     private var progressDot: some View {
@@ -3257,7 +3515,7 @@ private struct StrengthExerciseNavColumn: View {
             if allWorkoutExercisesComplete { return Self.celebrationDot.opacity(0.95) }
             return Color.blue.opacity(0.9)
         }
-        if isCurrent { return Color.white }
+        if isEmphasized { return Color.white }
         if isLast { return Color.green.opacity(0.95) }
         return Color.primary.opacity(0.28)
     }
@@ -3298,6 +3556,26 @@ private struct StrengthExerciseNavColumn: View {
             withTransaction(t) {
                 burstScale = 1.55
                 burstOpacity = 0
+            }
+        }
+    }
+
+    private func playRestEndedPulse() {
+        Task { @MainActor in
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.52)) {
+                restEndedPulse = 1.11
+            }
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) {
+                restEndedPulse = 1.0
+            }
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.50)) {
+                restEndedPulse = 1.07
+            }
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.80)) {
+                restEndedPulse = 1.0
             }
         }
     }

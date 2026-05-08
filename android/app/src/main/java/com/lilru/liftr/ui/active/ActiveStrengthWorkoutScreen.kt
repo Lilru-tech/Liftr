@@ -1,5 +1,6 @@
 package com.lilru.liftr.ui.active
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -11,13 +12,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material3.Button
@@ -35,14 +39,17 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -69,7 +76,27 @@ import kotlin.math.ceil
 import kotlin.math.max
 import java.util.Locale
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+
+/** Sector de descanso con vértice en el centro (paridad con iOS `RestDarkClockWedge`). */
+private fun DrawScope.drawRestClockWedgeFromCenter(totalSec: Int, restSec: Int, color: Color) {
+    if (restSec <= 0) return
+    val total = max(totalSec, max(restSec, 1))
+    val elapsedFrac = (total - restSec).toFloat() / total.toFloat()
+    val restFrac = restSec.toFloat() / total.toFloat()
+    val path = Path()
+    val cx = size.width / 2f
+    val cy = size.height / 2f
+    path.moveTo(cx, cy)
+    val startDeg = -90f + 360f * elapsedFrac
+    path.arcTo(
+        rect = Rect(0f, 0f, size.width, size.height),
+        startAngleDegrees = startDeg,
+        sweepAngleDegrees = -360f * restFrac,
+        forceMoveTo = false
+    )
+    path.close()
+    drawPath(path, color)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,9 +128,6 @@ fun ActiveStrengthWorkoutScreen(
     LaunchedEffect(Unit) {
         showNavHint = !LiftrPreferences.activeStrengthNavHintSeen(appCtx)
         isPremium = LiftrPreferences.isPremium(appCtx)
-    }
-    LaunchedEffect(workoutId) {
-        vm.resetSessionProgress()
     }
     val ongoingSubtitle = stringResource(R.string.active_strength_title)
     DisposableEffect(ongoingSubtitle, workoutId) {
@@ -142,10 +166,17 @@ fun ActiveStrengthWorkoutScreen(
     var guestSetProgress by remember { mutableStateOf<Map<Int, Int>>(emptyMap()) }
     var guestExercisesUi by remember { mutableStateOf<List<ActiveStrengthExerciseLine>>(emptyList()) }
     var guestCurrentExerciseIndex by rememberSaveable { mutableStateOf(0) }
+    var guestNavEmphasisLockWeId by rememberSaveable { mutableStateOf<Int?>(null) }
     /** Fin de descanso (epoch ms) por workout_exercise_id del invitado; la burbuja sigue al día al cambiar de ejercicio. */
     var guestRestEndMsByExerciseId by remember { mutableStateOf(mapOf<Int, Long>()) }
+    /** Duración total del descanso del invitado al iniciarlo (sector en avatar/burbuja). */
+    var guestRestPlannedTotalSecByExerciseId by remember { mutableStateOf(mapOf<Int, Int>()) }
     var activeLane by rememberSaveable { mutableStateOf(0) } // 0 host, 1 guest
     var didAutoSwitchFromHostRest by remember { mutableStateOf(false) }
+    LaunchedEffect(workoutId) {
+        guestNavEmphasisLockWeId = null
+        vm.resetSessionProgress()
+    }
     LaunchedEffect(ui.guestExercises) {
         if (ui.guestExercises.isNotEmpty()) {
             guestExercisesUi = ui.guestExercises
@@ -157,6 +188,8 @@ fun ActiveStrengthWorkoutScreen(
             guestSetProgress = emptyMap()
             guestCurrentExerciseIndex = 0
             guestRestEndMsByExerciseId = emptyMap()
+            guestRestPlannedTotalSecByExerciseId = emptyMap()
+            guestNavEmphasisLockWeId = null
         }
     }
     LaunchedEffect(ui.isResting, ui.guestExercises.size) {
@@ -174,11 +207,29 @@ fun ActiveStrengthWorkoutScreen(
     var guestEditRepsText by remember { mutableStateOf("") }
     var guestEditWeightText by remember { mutableStateOf("") }
     var guestEditRestText by remember { mutableStateOf("") }
+    /** Pager del host: preview al deslizar sin cambiar el ejercicio de trabajo (VM). */
+    var hostPagerDisplayIndex by rememberSaveable(workoutId) { mutableIntStateOf(0) }
+    var lastSyncedHostWorkIndex by remember { mutableIntStateOf(-1) }
+    var prevWorkoutIdForPager by remember { mutableIntStateOf(workoutId) }
+    LaunchedEffect(workoutId, ui.currentExerciseIndex) {
+        if (prevWorkoutIdForPager != workoutId) {
+            prevWorkoutIdForPager = workoutId
+            lastSyncedHostWorkIndex = -1
+        }
+        if (lastSyncedHostWorkIndex == -1) {
+            lastSyncedHostWorkIndex = ui.currentExerciseIndex
+            return@LaunchedEffect
+        }
+        if (ui.currentExerciseIndex != lastSyncedHostWorkIndex) {
+            hostPagerDisplayIndex = ui.currentExerciseIndex
+            lastSyncedHostWorkIndex = ui.currentExerciseIndex
+        }
+    }
     val laneExercises = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) guestExercisesUi else ui.exercises
     val laneExerciseIndex = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
         guestCurrentExerciseIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
     } else {
-        ui.currentExerciseIndex
+        hostPagerDisplayIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
     }
     val laneProgressMap = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) guestSetProgress else ui.currentSetIndexByExerciseId
     val ex = laneExercises.getOrNull(laneExerciseIndex)
@@ -196,6 +247,8 @@ fun ActiveStrengthWorkoutScreen(
             val pruned = guestRestEndMsByExerciseId.filterValues { it > n }
             if (pruned.size != guestRestEndMsByExerciseId.size) {
                 guestRestEndMsByExerciseId = pruned
+                val keep = pruned.keys
+                guestRestPlannedTotalSecByExerciseId = guestRestPlannedTotalSecByExerciseId.filterKeys { it in keep }
             }
         }
     }
@@ -210,6 +263,14 @@ fun ActiveStrengthWorkoutScreen(
         ui.restSecondsLeft
     }
     val isGuestLaneActive = activeLane == 1 && ui.guestExercises.isNotEmpty()
+    val hostPagerPreviewWeId = ui.exercises.getOrNull(
+        hostPagerDisplayIndex.coerceIn(0, ui.exercises.lastIndex.coerceAtLeast(0))
+    )?.workoutExerciseId
+    val hostBubbleEmphasisWeId = ui.navEmphasisLockWorkoutExerciseId ?: hostPagerPreviewWeId
+    val guestPagerPreviewWeId = guestExercisesUi.getOrNull(
+        guestCurrentExerciseIndex.coerceIn(0, guestExercisesUi.lastIndex.coerceAtLeast(0))
+    )?.workoutExerciseId
+    val guestBubbleEmphasisWeId = guestNavEmphasisLockWeId ?: guestPagerPreviewWeId
     val allSetsDoneCurrent = ex != null && currentSetIndex >= ex.sets.size
     val isLastExercise = laneExerciseIndex == laneExercises.lastIndex
     val allExercisesDone = laneExercises.isNotEmpty() && laneExercises.all { line ->
@@ -336,6 +397,35 @@ fun ActiveStrengthWorkoutScreen(
                     }
 
                     if (ui.guestExercises.isNotEmpty()) {
+                        val hostAvatarRestPulse = remember { Animatable(1f) }
+                        var hostAvatarRestPrev by remember { mutableIntStateOf(0) }
+                        LaunchedEffect(ui.restSecondsLeft) {
+                            val was = hostAvatarRestPrev
+                            hostAvatarRestPrev = ui.restSecondsLeft
+                            if (was > 0 && ui.restSecondsLeft == 0) {
+                                hostAvatarRestPulse.snapTo(1f)
+                                hostAvatarRestPulse.animateTo(1.11f, spring(dampingRatio = 0.52f, stiffness = 420f))
+                                hostAvatarRestPulse.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 320f))
+                                hostAvatarRestPulse.animateTo(1.07f, spring(dampingRatio = 0.50f, stiffness = 440f))
+                                hostAvatarRestPulse.animateTo(1f, spring(dampingRatio = 0.80f, stiffness = 280f))
+                            }
+                        }
+                        val guestExIdForAvatar = guestExercisesUi.getOrNull(guestCurrentExerciseIndex)?.workoutExerciseId
+                        val guestAvatarRestSec =
+                            guestExIdForAvatar?.let { guestRestSecByExerciseId[it] } ?: 0
+                        val guestAvatarRestPulse = remember { Animatable(1f) }
+                        var guestAvatarRestPrev by remember { mutableIntStateOf(0) }
+                        LaunchedEffect(guestAvatarRestSec) {
+                            val was = guestAvatarRestPrev
+                            guestAvatarRestPrev = guestAvatarRestSec
+                            if (was > 0 && guestAvatarRestSec == 0) {
+                                guestAvatarRestPulse.snapTo(1f)
+                                guestAvatarRestPulse.animateTo(1.11f, spring(dampingRatio = 0.52f, stiffness = 420f))
+                                guestAvatarRestPulse.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 320f))
+                                guestAvatarRestPulse.animateTo(1.07f, spring(dampingRatio = 0.50f, stiffness = 440f))
+                                guestAvatarRestPulse.animateTo(1f, spring(dampingRatio = 0.80f, stiffness = 280f))
+                            }
+                        }
                         Card(
                             modifier = Modifier
                                 .padding(top = 8.dp)
@@ -347,47 +437,78 @@ fun ActiveStrengthWorkoutScreen(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(modifier = Modifier.clickable { activeLane = 0 }) {
-                                    LiftrAvatar(
-                                        imageUrl = dualHostAvatarUrl,
-                                        displayName = "H",
-                                        size = if (activeLane == 0) 42.dp else 34.dp
-                                    )
-                                    if (ui.isResting) {
-                                        Card(
-                                            modifier = Modifier.align(Alignment.TopStart),
-                                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.65f))
-                                        ) {
+                                val hostDp = if (activeLane == 0) 42.dp else 34.dp
+                                Box(
+                                    modifier = Modifier
+                                        .clickable { activeLane = 0 }
+                                        .scale(hostAvatarRestPulse.value)
+                                ) {
+                                    Box(Modifier.size(hostDp)) {
+                                        LiftrAvatar(
+                                            imageUrl = dualHostAvatarUrl,
+                                            displayName = "H",
+                                            size = hostDp
+                                        )
+                                        if (ui.isResting && ui.restSecondsLeft > 0) {
+                                            val hostWe = ui.exercises.getOrNull(ui.currentExerciseIndex)?.workoutExerciseId
+                                            val plannedHost = hostWe?.let { ui.restPlannedTotalSecByExerciseId[it] }
+                                                ?: ui.restSecondsLeft
+                                            val totalPie = max(plannedHost, ui.restSecondsLeft).coerceAtLeast(1)
+                                            Canvas(
+                                                Modifier
+                                                    .matchParentSize()
+                                                    .clip(CircleShape)
+                                            ) {
+                                                drawRestClockWedgeFromCenter(
+                                                    totalSec = totalPie,
+                                                    restSec = ui.restSecondsLeft,
+                                                    color = Color.Black.copy(alpha = 0.56f)
+                                                )
+                                            }
                                             Text(
                                                 text = "${ui.restSecondsLeft}s",
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                                modifier = Modifier.align(Alignment.Center),
                                                 color = Color.White,
-                                                style = MaterialTheme.typography.labelSmall
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold
                                             )
                                         }
                                     }
                                 }
                                 Spacer(Modifier.size(6.dp))
-                                Box(modifier = Modifier.clickable { activeLane = 1 }) {
-                                    LiftrAvatar(
-                                        imageUrl = dualGuestAvatarUrl,
-                                        displayName = "G",
-                                        size = if (activeLane == 1) 42.dp else 34.dp
-                                    )
-                                    val guestAvatarRestSec =
-                                        guestExercisesUi.getOrNull(guestCurrentExerciseIndex)?.workoutExerciseId?.let { gid ->
-                                            guestRestSecByExerciseId[gid]
-                                        } ?: 0
-                                    if (guestAvatarRestSec > 0) {
-                                        Card(
-                                            modifier = Modifier.align(Alignment.TopStart),
-                                            colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.65f))
-                                        ) {
+                                val guestDp = if (activeLane == 1) 42.dp else 34.dp
+                                Box(
+                                    modifier = Modifier
+                                        .clickable { activeLane = 1 }
+                                        .scale(guestAvatarRestPulse.value)
+                                ) {
+                                    Box(Modifier.size(guestDp)) {
+                                        LiftrAvatar(
+                                            imageUrl = dualGuestAvatarUrl,
+                                            displayName = "G",
+                                            size = guestDp
+                                        )
+                                        if (guestAvatarRestSec > 0) {
+                                            val plannedGuest = guestExIdForAvatar?.let { guestRestPlannedTotalSecByExerciseId[it] }
+                                                ?: guestAvatarRestSec
+                                            val totalPieG = max(plannedGuest, guestAvatarRestSec).coerceAtLeast(1)
+                                            Canvas(
+                                                Modifier
+                                                    .matchParentSize()
+                                                    .clip(CircleShape)
+                                            ) {
+                                                drawRestClockWedgeFromCenter(
+                                                    totalSec = totalPieG,
+                                                    restSec = guestAvatarRestSec,
+                                                    color = Color.Black.copy(alpha = 0.56f)
+                                                )
+                                            }
                                             Text(
                                                 text = "${guestAvatarRestSec}s",
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                                modifier = Modifier.align(Alignment.Center),
                                                 color = Color.White,
-                                                style = MaterialTheme.typography.labelSmall
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold
                                             )
                                         }
                                     }
@@ -402,23 +523,48 @@ fun ActiveStrengthWorkoutScreen(
                             .padding(top = 10.dp),
                         horizontalArrangement = Arrangement.Center
                     ) {
+                        val isSolo = ui.guestExercises.isEmpty()
                         laneExercises.forEachIndexed { index, bubbleEx ->
                             val total = bubbleEx.sets.size.coerceAtLeast(1)
                             val done = (laneProgressMap[bubbleEx.workoutExerciseId] ?: 0).coerceIn(0, total)
                             val progress = done.toFloat() / total.toFloat()
                             val completed = done >= total
-                            val isCurrent = index == laneExerciseIndex
+                            val bubbleEmphasisWeId =
+                                if (isGuestLaneActive) guestBubbleEmphasisWeId else hostBubbleEmphasisWeId
+                            val isEmphasized =
+                                bubbleEmphasisWeId != null && bubbleEx.workoutExerciseId == bubbleEmphasisWeId
                             val bubbleRestSec =
                                 if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
                                     guestRestSecByExerciseId[bubbleEx.workoutExerciseId] ?: 0
                                 } else {
                                     ui.restSecondsLeftByExerciseId[bubbleEx.workoutExerciseId] ?: 0
                                 }
+                            val bubblePlannedTotal = bubbleEx.workoutExerciseId.let { wid ->
+                                if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+                                    guestRestPlannedTotalSecByExerciseId[wid]
+                                } else {
+                                    ui.restPlannedTotalSecByExerciseId[wid]
+                                }
+                            }
                             val showRestOnBubble = bubbleRestSec > 0
+                            val restPulse = remember(bubbleEx.workoutExerciseId) { Animatable(1f) }
+                            var restSecPrev by remember(bubbleEx.workoutExerciseId) { mutableIntStateOf(0) }
+                            LaunchedEffect(bubbleRestSec) {
+                                val was = restSecPrev
+                                restSecPrev = bubbleRestSec
+                                if (was > 0 && bubbleRestSec == 0) {
+                                    restPulse.snapTo(1f)
+                                    restPulse.animateTo(1.11f, spring(dampingRatio = 0.52f, stiffness = 420f))
+                                    restPulse.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 320f))
+                                    restPulse.animateTo(1.07f, spring(dampingRatio = 0.50f, stiffness = 440f))
+                                    restPulse.animateTo(1f, spring(dampingRatio = 0.80f, stiffness = 280f))
+                                }
+                            }
                             val bubbleScale by animateFloatAsState(
                                 targetValue = when {
                                     allExercisesDone && waveIndex == index -> 1.22f
                                     completed -> 1.08f
+                                    isEmphasized && isSolo -> 1.12f
                                     else -> 1f
                                 },
                                 animationSpec = tween(durationMillis = 220),
@@ -428,6 +574,7 @@ fun ActiveStrengthWorkoutScreen(
                                 modifier = Modifier
                                     .padding(horizontal = 4.dp)
                                     .size(34.dp)
+                                    .scale(bubbleScale * restPulse.value)
                                     .background(
                                         color = when {
                                             allExercisesDone -> Color(0xFFFFD54F)
@@ -437,12 +584,12 @@ fun ActiveStrengthWorkoutScreen(
                                         },
                                         shape = CircleShape
                                     )
-                                    .padding(if (isCurrent) 0.dp else 2.dp)
+                                    .padding(if (isEmphasized) 0.dp else 2.dp)
                                     .background(
-                                        color = if (isCurrent) Color.White else Color.Transparent,
+                                        color = if (isEmphasized) Color.White else Color.Transparent,
                                         shape = CircleShape
                                     )
-                                    .padding(if (isCurrent) 2.dp else 0.dp)
+                                    .padding(if (isEmphasized) 2.dp else 0.dp)
                                     .clickable {
                                         if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
                                             guestCurrentExerciseIndex = index
@@ -469,20 +616,18 @@ fun ActiveStrengthWorkoutScreen(
                                     )
                                 }
                                 if (showRestOnBubble) {
-                                    Box(
+                                    val totalPie = max(bubblePlannedTotal ?: bubbleRestSec, bubbleRestSec).coerceAtLeast(1)
+                                    Canvas(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .padding(2.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                Brush.verticalGradient(
-                                                    colors = listOf(
-                                                        Color.Black.copy(alpha = 0.35f),
-                                                        Color.Black.copy(alpha = 0.62f)
-                                                    )
-                                                )
-                                            )
-                                    )
+                                    ) {
+                                        drawRestClockWedgeFromCenter(
+                                            totalSec = totalPie,
+                                            restSec = bubbleRestSec,
+                                            color = Color.Black.copy(alpha = 0.56f)
+                                        )
+                                    }
                                     Text(
                                         text = "${bubbleRestSec}s",
                                         modifier = Modifier.align(Alignment.Center),
@@ -492,11 +637,6 @@ fun ActiveStrengthWorkoutScreen(
                                         color = Color.White
                                     )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .scale(bubbleScale)
-                                )
                             }
                         }
                     }
@@ -544,7 +684,7 @@ fun ActiveStrengthWorkoutScreen(
                                 .align(Alignment.Center)
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp)
-                                .pointerInput(laneExerciseIndex, currentSetIndex, activeLane) {
+                                .pointerInput(laneExerciseIndex, currentSetIndex, activeLane, hostPagerDisplayIndex) {
                                     var totalDrag = 0f
                                     detectVerticalDragGestures(
                                         onVerticalDrag = { _, dragAmount -> totalDrag += dragAmount },
@@ -554,7 +694,12 @@ fun ActiveStrengthWorkoutScreen(
                                                     if (totalDrag < 0f && guestCurrentExerciseIndex < laneExercises.lastIndex) guestCurrentExerciseIndex++
                                                     if (totalDrag > 0f && guestCurrentExerciseIndex > 0) guestCurrentExerciseIndex--
                                                 } else {
-                                                    if (totalDrag < 0f) vm.goToNextExercise() else vm.goToPreviousExercise()
+                                                    if (totalDrag < 0f && hostPagerDisplayIndex < laneExercises.lastIndex) {
+                                                        hostPagerDisplayIndex++
+                                                    }
+                                                    if (totalDrag > 0f && hostPagerDisplayIndex > 0) {
+                                                        hostPagerDisplayIndex--
+                                                    }
                                                 }
                                             }
                                         }
@@ -618,6 +763,8 @@ fun ActiveStrengthWorkoutScreen(
                                                     ex?.workoutExerciseId?.let { wid ->
                                                         guestRestEndMsByExerciseId =
                                                             guestRestEndMsByExerciseId.filterKeys { it != wid }
+                                                        guestRestPlannedTotalSecByExerciseId =
+                                                            guestRestPlannedTotalSecByExerciseId.filterKeys { it != wid }
                                                     }
                                                 } else {
                                                     vm.skipRest()
@@ -632,6 +779,9 @@ fun ActiveStrengthWorkoutScreen(
                                                     val exLocal = ex ?: return@Button
                                                     val doneLocal = (guestSetProgress[exLocal.workoutExerciseId] ?: 0).coerceAtMost(exLocal.sets.size)
                                                     val setLocal = exLocal.sets.getOrNull(doneLocal) ?: return@Button
+                                                    if (guestNavEmphasisLockWeId == null) {
+                                                        guestNavEmphasisLockWeId = exLocal.workoutExerciseId
+                                                    }
                                                     guestSetProgress = guestSetProgress.toMutableMap().apply {
                                                         put(exLocal.workoutExerciseId, (doneLocal + 1).coerceAtMost(exLocal.sets.size))
                                                     }
@@ -641,6 +791,10 @@ fun ActiveStrengthWorkoutScreen(
                                                         guestRestEndMsByExerciseId =
                                                             guestRestEndMsByExerciseId.toMutableMap().apply {
                                                                 put(exLocal.workoutExerciseId, endMs)
+                                                            }
+                                                        guestRestPlannedTotalSecByExerciseId =
+                                                            guestRestPlannedTotalSecByExerciseId.toMutableMap().apply {
+                                                                put(exLocal.workoutExerciseId, rest)
                                                             }
                                                         activeLane = 0
                                                     }
@@ -702,7 +856,10 @@ fun ActiveStrengthWorkoutScreen(
                                     Button(
                                         onClick = {
                                             if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
-                                                if (guestCurrentExerciseIndex < laneExercises.lastIndex) guestCurrentExerciseIndex++
+                                                if (guestCurrentExerciseIndex < laneExercises.lastIndex) {
+                                                    guestNavEmphasisLockWeId = null
+                                                    guestCurrentExerciseIndex++
+                                                }
                                             } else {
                                                 vm.goToNextExercise()
                                             }
