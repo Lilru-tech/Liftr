@@ -213,7 +213,22 @@ struct ActiveStrengthWorkoutView: View {
     @State private var strengthNavStripWaveTask: Task<Void, Never>?
     @State private var navStripScrollEdgeFades = NavStripScrollEdgeFades(showLeading: false, showTrailing: false)
     @State private var showElborblaCelebration = false
+    @State private var strengthFinishDeferral: StrengthFinishDeferral?
     private let swipeThreshold: CGFloat = 110
+
+    private struct StrengthFinishDeferral: Identifiable {
+        let id = UUID()
+        let exList: [ExerciseRow]
+        let performedMap: [Int: [PerformedSet]]
+        let guestExList: [ExerciseRow]
+        let guestPerformedMap: [Int: [PerformedSet]]
+        let guestWorkoutId: Int?
+        let guest2ExList: [ExerciseRow]
+        let guest2PerformedMap: [Int: [PerformedSet]]
+        let guest2WorkoutId: Int?
+        let prompt: StrengthRoutineOverwritePrompt
+        let editableForRoutine: [EditableExercise]
+    }
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     private var isDualMode: Bool { dualGuestWorkoutId != nil }
@@ -376,11 +391,15 @@ struct ActiveStrengthWorkoutView: View {
                 }
                 
                 if isSaving {
-                    Color.black.opacity(0.4)
-                        .ignoresSafeArea()
-                    ProgressView("Saving workout…")
-                        .padding(24)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    ZStack {
+                        Color.black.opacity(0.4)
+                            .ignoresSafeArea()
+                        ProgressView("Saving workout…")
+                            .padding(24)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .allowsHitTesting(true)
+                    .zIndex(4)
                 }
                 
                 if let msg = toastMessage {
@@ -441,6 +460,7 @@ struct ActiveStrengthWorkoutView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
+                        .disabled(isSaving)
                 }
                 if !showCountdown, strengthWorkoutSessionStart != nil {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -526,6 +546,27 @@ struct ActiveStrengthWorkoutView: View {
         .task { await load() }
         .onDisappear {
             Task { await sanitizeEndDateIfNeededOnClose() }
+        }
+        .sheet(item: $strengthFinishDeferral) { def in
+            StrengthRoutineOverwriteConfirmSheet(
+                prompt: def.prompt,
+                onUpdate: {
+                    let d = def
+                    strengthFinishDeferral = nil
+                    isSaving = true
+                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: true) }
+                },
+                onNotNow: {
+                    let d = def
+                    strengthFinishDeferral = nil
+                    isSaving = true
+                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: false) }
+                }
+            )
+            .presentationSizing(.fitted)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.92)
         }
     }
     
@@ -2741,32 +2782,135 @@ struct ActiveStrengthWorkoutView: View {
         )
     }
     
-    private func saveAndFinishWorkout() async {
-        var exList: [ExerciseRow] = []
-        var performedMap: [Int: [PerformedSet]] = [:]
-        var guestExList: [ExerciseRow] = []
-        var guestPerformedMap: [Int: [PerformedSet]] = [:]
-        var guestWorkoutId: Int?
-        var guest2ExList: [ExerciseRow] = []
-        var guest2PerformedMap: [Int: [PerformedSet]] = [:]
-        var guest2WorkoutId: Int?
-
-        await MainActor.run {
-            exList = self.orderedExercises
-            performedMap = self.performedSetsByExercise
-            guestWorkoutId = self.dualGuestWorkoutId
-            guest2WorkoutId = self.dualGuest2WorkoutId
-            if guestWorkoutId != nil {
-                guestExList = self.orderedGuestExercises
-                guestPerformedMap = self.gPerformedSetsByExercise
+    /// Prescripción “actual” del host: primero el estado del editor (`setsByExercise`), que es lo que el usuario ve y edita;
+    /// si falta, series completadas (`performedMap`) como respaldo.
+    private func programItemsForRoutineOverwrite(
+        exList: [ExerciseRow],
+        setsMap: [Int: [SetRow]],
+        performedMap: [Int: [PerformedSet]]
+    ) -> [StrengthProgramItem]? {
+        var items: [StrengthProgramItem] = []
+        for ex in exList.sorted(by: { $0.order_index < $1.order_index }) {
+            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            let sets: [StrengthProgramSet]
+            if !templateSets.isEmpty {
+                sets = templateSets.map { s in
+                    StrengthProgramSet(
+                        setNumber: s.set_number,
+                        reps: s.reps,
+                        weightKg: s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        rpe: s.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        restSec: s.rest_sec,
+                        notes: nil
+                    )
+                }
+            } else {
+                let performed = performedMap[ex.id] ?? []
+                guard !performed.isEmpty else { return nil }
+                sets = performed.enumerated().map { idx, p in
+                    StrengthProgramSet(
+                        setNumber: idx + 1,
+                        reps: p.reps,
+                        weightKg: p.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        rpe: p.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        restSec: p.rest_sec,
+                        notes: nil
+                    )
+                }
             }
-            if guest2WorkoutId != nil {
-                guest2ExList = self.orderedGuest2Exercises
-                guest2PerformedMap = self.g2PerformedSetsByExercise
-            }
-            self.isSaving = true
+            items.append(
+                StrengthProgramItem(
+                    exerciseId: ex.exercise_id,
+                    orderIndex: ex.order_index,
+                    notes: ex.notes,
+                    customName: ex.custom_name,
+                    sets: sets
+                )
+            )
         }
+        return items.isEmpty ? nil : items
+    }
 
+    private func editableExercisesForRoutineUpdateFromHost(
+        exList: [ExerciseRow],
+        setsMap: [Int: [SetRow]],
+        performedMap: [Int: [PerformedSet]]
+    ) -> [EditableExercise] {
+        exList.sorted(by: { $0.order_index < $1.order_index }).map { ex in
+            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            var ee = EditableExercise()
+            ee.exerciseId = ex.exercise_id
+            ee.exerciseName = ex.custom_name ?? ""
+            ee.orderIndex = ex.order_index
+            ee.notes = ex.notes ?? ""
+            if !templateSets.isEmpty {
+                ee.sets = templateSets.map { s in
+                    EditableSet(
+                        setNumber: s.set_number,
+                        reps: s.reps,
+                        weightKg: activeDecimalToWeightField(s.weight_kg),
+                        rpe: activeDecimalToRpeField(s.rpe),
+                        restSec: s.rest_sec,
+                        notes: ""
+                    )
+                }
+            } else {
+                let performed = performedMap[ex.id] ?? []
+                ee.sets = performed.enumerated().map { i, p in
+                    EditableSet(
+                        setNumber: i + 1,
+                        reps: p.reps,
+                        weightKg: activeDecimalToWeightField(p.weight_kg),
+                        rpe: activeDecimalToRpeField(p.rpe),
+                        restSec: p.rest_sec,
+                        notes: ""
+                    )
+                }
+            }
+            return ee
+        }
+    }
+
+    private func activeDecimalToWeightField(_ d: Decimal?) -> String {
+        guard let d else { return "" }
+        return String(format: "%.1f", NSDecimalNumber(decimal: d).doubleValue)
+    }
+
+    private func activeDecimalToRpeField(_ d: Decimal?) -> String {
+        guard let d else { return "" }
+        let v = NSDecimalNumber(decimal: d).doubleValue
+        if v == floor(v) { return String(Int(v)) }
+        return String(format: "%.1f", v)
+    }
+
+    private func commitDeferredStrengthFinish(deferral: StrengthFinishDeferral, updateRoutine: Bool) async {
+        let extra: (Int64, [EditableExercise])? = updateRoutine
+            ? (deferral.prompt.routineId, deferral.editableForRoutine)
+            : nil
+        await runStrengthWorkoutPersistence(
+            exList: deferral.exList,
+            performedMap: deferral.performedMap,
+            guestExList: deferral.guestExList,
+            guestPerformedMap: deferral.guestPerformedMap,
+            guestWorkoutId: deferral.guestWorkoutId,
+            guest2ExList: deferral.guest2ExList,
+            guest2PerformedMap: deferral.guest2PerformedMap,
+            guest2WorkoutId: deferral.guest2WorkoutId,
+            routinePrescriptionOverwrite: extra
+        )
+    }
+
+    private func runStrengthWorkoutPersistence(
+        exList: [ExerciseRow],
+        performedMap: [Int: [PerformedSet]],
+        guestExList: [ExerciseRow],
+        guestPerformedMap: [Int: [PerformedSet]],
+        guestWorkoutId: Int?,
+        guest2ExList: [ExerciseRow],
+        guest2PerformedMap: [Int: [PerformedSet]],
+        guest2WorkoutId: Int?,
+        routinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])?
+    ) async {
         let client = SupabaseManager.shared.client
 
         func persistExerciseRows(_ rows: [ExerciseRow], performedMap: [Int: [PerformedSet]]) async throws {
@@ -2866,6 +3010,15 @@ struct ActiveStrengthWorkoutView: View {
                 NotificationCenter.default.post(name: .workoutDidChange, object: g2id)
             }
 
+            if let o = routinePrescriptionOverwrite, let uid = await MainActor.run(body: { app.userId }) {
+                try? await applyStrengthRoutinePrescriptionUpdate(
+                    client: client,
+                    userId: uid,
+                    routineId: o.routineId,
+                    exercises: o.exercises
+                )
+            }
+
             let celebrate = await shouldShowElborblaCelebration(using: client)
 
             await MainActor.run {
@@ -2884,6 +3037,82 @@ struct ActiveStrengthWorkoutView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func saveAndFinishWorkout() async {
+        var exList: [ExerciseRow] = []
+        var performedMap: [Int: [PerformedSet]] = [:]
+        var hostSetsMap: [Int: [SetRow]] = [:]
+        var guestExList: [ExerciseRow] = []
+        var guestPerformedMap: [Int: [PerformedSet]] = [:]
+        var guestWorkoutId: Int?
+        var guest2ExList: [ExerciseRow] = []
+        var guest2PerformedMap: [Int: [PerformedSet]] = [:]
+        var guest2WorkoutId: Int?
+
+        await MainActor.run {
+            exList = self.orderedExercises
+            performedMap = self.performedSetsByExercise
+            hostSetsMap = self.setsByExercise
+            guestWorkoutId = self.dualGuestWorkoutId
+            guest2WorkoutId = self.dualGuest2WorkoutId
+            if guestWorkoutId != nil {
+                guestExList = self.orderedGuestExercises
+                guestPerformedMap = self.gPerformedSetsByExercise
+            }
+            if guest2WorkoutId != nil {
+                guest2ExList = self.orderedGuest2Exercises
+                guest2PerformedMap = self.g2PerformedSetsByExercise
+            }
+            self.isSaving = true
+        }
+
+        let client = SupabaseManager.shared.client
+
+        if let proposed = programItemsForRoutineOverwrite(exList: exList, setsMap: hostSetsMap, performedMap: performedMap),
+           let session = try? await client.auth.session {
+            let candidate = (
+                try? await fetchStrengthRoutineOverwriteCandidate(
+                    client: client,
+                    userId: session.user.id,
+                    proposed: proposed,
+                    exerciseDisplayName: { eid in
+                        exList.first(where: { $0.exercise_id == eid })?.exercise_name ?? ""
+                    }
+                )
+            ) ?? .none
+            if case .prompt(let pr) = candidate {
+                let editable = editableExercisesForRoutineUpdateFromHost(exList: exList, setsMap: hostSetsMap, performedMap: performedMap)
+                await MainActor.run {
+                    self.isSaving = false
+                    self.strengthFinishDeferral = StrengthFinishDeferral(
+                        exList: exList,
+                        performedMap: performedMap,
+                        guestExList: guestExList,
+                        guestPerformedMap: guestPerformedMap,
+                        guestWorkoutId: guestWorkoutId,
+                        guest2ExList: guest2ExList,
+                        guest2PerformedMap: guest2PerformedMap,
+                        guest2WorkoutId: guest2WorkoutId,
+                        prompt: pr,
+                        editableForRoutine: editable
+                    )
+                }
+                return
+            }
+        }
+
+        await runStrengthWorkoutPersistence(
+            exList: exList,
+            performedMap: performedMap,
+            guestExList: guestExList,
+            guestPerformedMap: guestPerformedMap,
+            guestWorkoutId: guestWorkoutId,
+            guest2ExList: guest2ExList,
+            guest2PerformedMap: guest2PerformedMap,
+            guest2WorkoutId: guest2WorkoutId,
+            routinePrescriptionOverwrite: nil
+        )
     }
 
     private func shouldShowElborblaCelebration(using client: SupabaseClient) async -> Bool {

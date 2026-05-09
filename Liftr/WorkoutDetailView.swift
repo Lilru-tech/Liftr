@@ -2382,7 +2382,7 @@ private struct CardioDetailBlock: View {
         .sheet(isPresented: $showCreateSegment) {
             CreateSegmentFromWorkoutSheet(
                 workoutId: workoutId,
-                routeCoordinates: routeCoordinates,
+                initialRouteCoordinates: routeCoordinates,
                 onCreated: { id in
                     showCreateSegment = false
                     segmentNav = SegmentNavSheet(id: id)

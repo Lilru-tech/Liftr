@@ -172,6 +172,7 @@ private fun RoutineListRow(
     updatedLabel: String?,
     onApply: () -> Unit,
     neighbors: Pair<List<StrengthRoutineUi>, Int>?,
+    onEditRoutine: () -> Unit,
     onRenameRoutine: () -> Unit,
     onDuplicate: () -> Unit,
     onMoveUp: () -> Unit,
@@ -222,6 +223,10 @@ private fun RoutineListRow(
                     expanded = menu,
                     onDismissRequest = { menu = false }
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.add_routine_sheet_menu_edit)) },
+                        onClick = { menu = false; onEditRoutine() }
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.add_routine_sheet_menu_rename)) },
                         onClick = { menu = false; onRenameRoutine() }
@@ -284,7 +289,8 @@ fun AddStrengthRoutinesSheetContent(
     onMoveRoutine: (Long, Int) -> Unit,
     onMoveRoutineToFolder: (Long, Long?) -> Unit,
     onDeleteRoutine: (Long) -> Unit,
-    onApplyRoutine: (Long) -> Unit
+    onApplyRoutine: (Long) -> Unit,
+    onEditRoutine: (Long, String) -> Unit
 ) {
     val ctx = LocalContext.current.applicationContext
     val persistScope = rememberCoroutineScope()
@@ -709,10 +715,12 @@ fun AddStrengthRoutinesSheetContent(
                         val copyOf = stringResource(R.string.add_routine_copy_of_format, row.name)
                         RoutineListRow(
                             row = row,
-                            busy = ui.managingRoutines || ui.applyingRoutine,
+                            busy = ui.managingRoutines || ui.applyingRoutine ||
+                                ui.strengthRoutineTemplateEdit?.saving == true,
                             updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                             onApply = { onApplyRoutine(row.id) },
                             neighbors = groupNeighbors(row),
+                            onEditRoutine = { onEditRoutine(row.id, row.name) },
                             onRenameRoutine = {
                                 routineToRename = row
                                 routineRenameDraft = row.name
@@ -771,10 +779,12 @@ fun AddStrengthRoutinesSheetContent(
                             val copyOf = stringResource(R.string.add_routine_copy_of_format, row.name)
                             RoutineListRow(
                                 row = row,
-                                busy = ui.managingRoutines || ui.applyingRoutine,
+                                busy = ui.managingRoutines || ui.applyingRoutine ||
+                                    ui.strengthRoutineTemplateEdit?.saving == true,
                                 updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                                 onApply = { onApplyRoutine(row.id) },
                                 neighbors = groupNeighbors(row),
+                                onEditRoutine = { onEditRoutine(row.id, row.name) },
                                 onRenameRoutine = {
                                     routineToRename = row
                                     routineRenameDraft = row.name

@@ -1,6 +1,6 @@
 import SwiftUI
 import Supabase
-import CryptoKit
+import UIKit
 
 enum WorkoutIntensity: String, CaseIterable, Identifiable {
     case easy, moderate, hard, max
@@ -240,6 +240,8 @@ struct AddWorkoutSheet: View {
     @State private var replaceHyroxRoutinePendingId: Int64?
     @State private var replaceHyroxPendingIsRoutineOnly = false
     @State private var loadingHyroxRoutineOnly = false
+    @State private var strengthRoutineOverwritePrompt: StrengthRoutineOverwritePrompt?
+    @State private var pendingStrengthRoutineOverwriteExercises: [EditableExercise] = []
 
     var body: some View { addWorkoutRoot }
 
@@ -507,6 +509,9 @@ struct AddWorkoutSheet: View {
                 exerciseDisplayName: { exerciseId in
                     catalog.first(where: { $0.id == exerciseId })?.localizedName(for: exerciseLanguage) ?? ""
                 },
+                catalog: catalog,
+                loadingCatalog: loadingCatalog,
+                exerciseLanguage: exerciseLanguage,
                 onApply: { loaded in
                     applyLoadedStrengthRoutine(loaded)
                 }
@@ -557,6 +562,25 @@ struct AddWorkoutSheet: View {
             }
         } message: {
             Text("A routine with this name already exists in this folder. Replacing removes the old template and saves the program you have in the editor now.")
+        }
+        .sheet(item: $strengthRoutineOverwritePrompt) { prompt in
+            StrengthRoutineOverwriteConfirmSheet(
+                prompt: prompt,
+                onUpdate: {
+                    let p = prompt
+                    strengthRoutineOverwritePrompt = nil
+                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, updateRoutine: true) }
+                },
+                onNotNow: {
+                    let p = prompt
+                    strengthRoutineOverwritePrompt = nil
+                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, updateRoutine: false) }
+                }
+            )
+            .presentationSizing(.fitted)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.92)
         }
         .confirmationDialog(
             "Replace existing Hyrox routine?",
@@ -907,7 +931,7 @@ struct AddWorkoutSheet: View {
                     }
                     .pickerStyle(.segmented)
 
-                    StrengthExercisesEditorBlock(
+                    StrengthRoutineExercisesEditorBlock(
                         exercises: strengthItemsBinding(lane: strengthProgramPage),
                         laneIndex: strengthProgramPage,
                         headerTitle: strengthLaneHeaderTitle(lane: strengthProgramPage),
@@ -923,11 +947,12 @@ struct AddWorkoutSheet: View {
                             recommendKind = .strength
                             strengthRecommendTargetLane = strengthProgramPage
                             showWorkoutRecommend = true
-                        }
+                        },
+                        showSuggestQuickAction: true
                     )
                 }
             } else {
-                StrengthExercisesEditorBlock(
+                StrengthRoutineExercisesEditorBlock(
                     exercises: $items,
                     laneIndex: 0,
                     headerTitle: nil,
@@ -943,7 +968,8 @@ struct AddWorkoutSheet: View {
                         recommendKind = .strength
                         strengthRecommendTargetLane = nil
                         showWorkoutRecommend = true
-                    }
+                    },
+                    showSuggestQuickAction: true
                 )
             }
 
@@ -2163,6 +2189,31 @@ struct AddWorkoutSheet: View {
                 }
             }
 
+            if kind == .strength, !usePerPersonStrengthEditor {
+                let tpl = strengthExercisesForRoutineTemplate()
+                let items = strengthProgramItems(from: tpl)
+                if !items.isEmpty {
+                    let candidate = (
+                        try? await fetchStrengthRoutineOverwriteCandidate(
+                            client: client,
+                            userId: userId,
+                            proposed: items,
+                            exerciseDisplayName: { eid in
+                                catalog.first(where: { $0.id == eid })?.localizedName(for: exerciseLanguage) ?? ""
+                            }
+                        )
+                    ) ?? .none
+                    if case .prompt(let pr) = candidate {
+                        let copied = tpl.map { $0.deepCopied() }
+                        await MainActor.run {
+                            pendingStrengthRoutineOverwriteExercises = copied
+                            strengthRoutineOverwritePrompt = pr
+                        }
+                        return
+                    }
+                }
+            }
+
             try await performSaveWorkoutAndRoutine(replacingStrengthRoutineId: nil, replacingHyroxRoutineId: nil)
         } catch {
             self.error = error.localizedDescription
@@ -2175,7 +2226,11 @@ struct AddWorkoutSheet: View {
         loading = true
         defer { loading = false }
         do {
-            try await performSaveWorkoutAndRoutine(replacingStrengthRoutineId: rid, replacingHyroxRoutineId: nil)
+            try await performSaveWorkoutAndRoutine(
+                replacingStrengthRoutineId: rid,
+                replacingHyroxRoutineId: nil,
+                strengthRoutinePrescriptionOverwrite: nil
+            )
         } catch {
             self.error = error.localizedDescription
         }
@@ -2187,9 +2242,37 @@ struct AddWorkoutSheet: View {
         loading = true
         defer { loading = false }
         do {
-            try await performSaveWorkoutAndRoutine(replacingStrengthRoutineId: nil, replacingHyroxRoutineId: rid)
+            try await performSaveWorkoutAndRoutine(
+                replacingStrengthRoutineId: nil,
+                replacingHyroxRoutineId: rid,
+                strengthRoutinePrescriptionOverwrite: nil
+            )
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    private func saveAfterStrengthRoutineOverwriteDecision(
+        prompt: StrengthRoutineOverwritePrompt,
+        updateRoutine: Bool
+    ) async {
+        let exercisesCopy = pendingStrengthRoutineOverwriteExercises
+        await MainActor.run { pendingStrengthRoutineOverwriteExercises = [] }
+        guard !exercisesCopy.isEmpty else { return }
+        error = nil
+        loading = true
+        defer { loading = false }
+        do {
+            let overwrite: (routineId: Int64, exercises: [EditableExercise])? = updateRoutine
+                ? (prompt.routineId, exercisesCopy)
+                : nil
+            try await performSaveWorkoutAndRoutine(
+                replacingStrengthRoutineId: nil,
+                replacingHyroxRoutineId: nil,
+                strengthRoutinePrescriptionOverwrite: overwrite
+            )
+        } catch {
+            await MainActor.run { self.error = error.localizedDescription }
         }
     }
 
@@ -2334,7 +2417,8 @@ struct AddWorkoutSheet: View {
 
     private func performSaveWorkoutAndRoutine(
         replacingStrengthRoutineId: Int64?,
-        replacingHyroxRoutineId: Int64? = nil
+        replacingHyroxRoutineId: Int64? = nil,
+        strengthRoutinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])? = nil
     ) async throws {
         let client = SupabaseManager.shared.client
         let session = try await client.auth.session
@@ -2549,6 +2633,20 @@ struct AddWorkoutSheet: View {
                         routineSaveSuffix += " " + hyroxRoutineUserFacingSaveError(error)
                         print("[HyroxRoutine][SAVE]", error.localizedDescription)
                     }
+                }
+            }
+            if let o = strengthRoutinePrescriptionOverwrite {
+                do {
+                    try await applyStrengthRoutinePrescriptionUpdate(
+                        client: client,
+                        userId: userId,
+                        routineId: o.routineId,
+                        exercises: o.exercises
+                    )
+                    routineSaveSuffix += " Routine template updated."
+                } catch {
+                    routineSaveSuffix += " Could not update routine template: \(error.localizedDescription)"
+                    print("[StrengthRoutine][OVERWRITE]", error.localizedDescription)
                 }
             }
             await showSuccessAndGoHome(successMessage + routineSaveSuffix)
@@ -3616,343 +3714,6 @@ struct RPCSportV2Wrapper: Encodable {
     let p_stats: AnyJSON?
 }
 
-private struct StrengthExercisesEditorBlock: View {
-    @Binding var exercises: [EditableExercise]
-    let laneIndex: Int
-    let headerTitle: String?
-    @Binding var pickerHandle: PickerHandle?
-    @Binding var confirmRemoveStrengthExercise: (lane: Int, index: Int)?
-    @Binding var recentlyAddedExerciseId: UUID?
-    let catalog: [Exercise]
-    let loadingCatalog: Bool
-    let exerciseLabel: (EditableExercise) -> String
-    let exerciseSelected: (EditableExercise) -> Bool
-    let onRequestClearAll: () -> Void
-    let onSuggest: () -> Void
-
-    var body: some View {
-        SectionCard {
-            if let headerTitle {
-                Text(headerTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Divider().padding(.vertical, 4)
-            }
-
-            Text("QUICK ACTIONS")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Button(action: onSuggest) {
-                HStack(spacing: 10) {
-                    Image(systemName: "sparkles")
-                        .imageScale(.medium)
-                    Text("Suggest next session")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .foregroundStyle(.blue)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(loadingCatalog)
-            .padding(.vertical, 4)
-
-            Divider().padding(.vertical, 6)
-
-            Text("LIFTS")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 2)
-
-            Text("Use the arrows on each exercise to change order.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, exercises.count > 1 ? 2 : 4)
-
-            if exercises.count > 1 {
-                HStack {
-                    Spacer(minLength: 0)
-                    Button("Clear all", role: .destructive) {
-                        onRequestClearAll()
-                    }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Clear all exercises")
-                }
-                .padding(.bottom, 2)
-            }
-
-            VStack(spacing: 12) {
-                ForEach(Array(exercises.enumerated()), id: \.element.id) { i, _ in
-                    exerciseEditorBlock(index: i)
-                }
-            }
-
-            Divider().padding(.vertical, 6)
-            Button {
-                let nextOrder = (exercises.last?.orderIndex ?? 0) + 1
-                var new = EditableExercise()
-                new.orderIndex = nextOrder
-                exercises.append(new)
-                recentlyAddedExerciseId = new.id
-                Task {
-                    try? await Task.sleep(nanoseconds: 1_200_000_000)
-                    await MainActor.run {
-                        if recentlyAddedExerciseId == new.id { recentlyAddedExerciseId = nil }
-                    }
-                }
-            } label: {
-                Label("Add exercise", systemImage: "plus")
-            }
-            .buttonStyle(.borderless)
-            .padding(.top, 2)
-        }
-    }
-
-    @ViewBuilder
-    private func exerciseEditorBlock(index i: Int) -> some View {
-        VStack(spacing: 0) {
-            FieldRowPlain("Exercise") {
-                Button {
-                    pickerHandle = PickerHandle(id: exercises[i].id, strengthLaneIndex: laneIndex)
-                } label: {
-                    HStack {
-                        Image(systemName: "list.bullet.rectangle.portrait")
-                        Text(exerciseLabel(exercises[i]))
-                            .foregroundStyle(exerciseSelected(exercises[i]) ? .primary : .secondary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Spacer()
-                        if loadingCatalog { ProgressView() }
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(loadingCatalog || catalog.isEmpty)
-            }
-
-            Divider()
-
-            FieldRowPlain("Alias") {
-                TextField("Exercise name (optional)", text: nameBinding(i))
-                    .textFieldStyle(.plain)
-            }
-
-            Divider()
-
-            FieldRowNotes(
-                "Notes",
-                text: notesBinding(i),
-                placeholder: "Notes (exercise)",
-                lineRange: 2...8
-            )
-
-            ForEach(exercises[i].sets.indices, id: \.self) { s in
-                Divider()
-                StrengthSetRowEditor(
-                    lineOrdinal: s + 1,
-                    setNumber: setNumberBinding(i, s),
-                    reps: repsBinding(i, s),
-                    weightKg: weightBinding(i, s),
-                    rpe: rpeBinding(i, s),
-                    restSec: restBinding(i, s),
-                    showDelete: exercises[i].sets.count > 1,
-                    onDelete: { removeSet(exerciseIndex: i, setIndex: s) }
-                )
-            }
-
-            Divider().padding(.vertical, 4)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Button {
-                        appendSet(exerciseIndex: i)
-                    } label: { Label("Add set", systemImage: "plus.circle") }
-                        .buttonStyle(.borderless)
-
-                    Spacer()
-
-                    if exercises.count > 1 {
-                        HStack(spacing: 2) {
-                            Button {
-                                moveExercise(from: i, direction: -1)
-                            } label: {
-                                Image(systemName: "chevron.up")
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(width: 36, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(i == 0)
-                            .opacity(i == 0 ? 0.35 : 1)
-
-                            Button {
-                                moveExercise(from: i, direction: 1)
-                            } label: {
-                                Image(systemName: "chevron.down")
-                                    .font(.subheadline.weight(.semibold))
-                                    .frame(width: 36, height: 32)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(i == exercises.count - 1)
-                            .opacity(i == exercises.count - 1 ? 0.35 : 1)
-                        }
-                        .foregroundStyle(.secondary)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Reorder exercise")
-                    }
-
-                    if exercises.count > 1 {
-                        Button(role: .destructive) {
-                            confirmRemoveStrengthExercise = (laneIndex, i)
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.body)
-                                .frame(width: 40, height: 36)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("Remove exercise")
-                    }
-                }
-                Text("Next prescription row: #\(exercises[i].sets.count + 1)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(8)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(Color.white.opacity(0.07))
-                if exercises[i].id == recentlyAddedExerciseId {
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color.yellow.opacity(0.2))
-                }
-            }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(.white.opacity(0.16), lineWidth: 0.8)
-        )
-        .animation(.easeInOut(duration: 0.6), value: recentlyAddedExerciseId)
-    }
-
-    private func moveExercise(from index: Int, direction: Int) {
-        let newIndex = index + direction
-        guard exercises.indices.contains(index), exercises.indices.contains(newIndex) else { return }
-        var next = exercises
-        next.swapAt(index, newIndex)
-        for idx in next.indices {
-            next[idx].orderIndex = idx + 1
-        }
-        exercises = next
-    }
-
-    private func replaceExercise(_ index: Int, _ mutate: (inout EditableExercise) -> Void) {
-        var copy = exercises
-        guard copy.indices.contains(index) else { return }
-        mutate(&copy[index])
-        exercises = copy
-    }
-
-    private func nameBinding(_ i: Int) -> Binding<String> {
-        Binding(
-            get: { exercises[safe: i]?.exerciseName ?? "" },
-            set: { nv in replaceExercise(i) { $0.exerciseName = nv } }
-        )
-    }
-
-    private func notesBinding(_ i: Int) -> Binding<String> {
-        Binding(
-            get: { exercises[safe: i]?.notes ?? "" },
-            set: { nv in replaceExercise(i) { $0.notes = nv } }
-        )
-    }
-
-    private func setNumberBinding(_ i: Int, _ s: Int) -> Binding<Int> {
-        Binding(
-            get: { exercises[safe: i]?.sets[safe: s]?.setNumber ?? 1 },
-            set: { newVal in
-                replaceExercise(i) { ex in
-                    guard ex.sets.indices.contains(s) else { return }
-                    ex.sets[s].setNumber = newVal
-                }
-            }
-        )
-    }
-
-    private func repsBinding(_ i: Int, _ s: Int) -> Binding<Int?> {
-        Binding(
-            get: { exercises[safe: i]?.sets[safe: s]?.reps },
-            set: { newVal in
-                replaceExercise(i) { ex in
-                    guard ex.sets.indices.contains(s) else { return }
-                    ex.sets[s].reps = newVal
-                }
-            }
-        )
-    }
-
-    private func weightBinding(_ i: Int, _ s: Int) -> Binding<String> {
-        Binding(
-            get: { exercises[safe: i]?.sets[safe: s]?.weightKg ?? "" },
-            set: { newVal in
-                replaceExercise(i) { ex in
-                    guard ex.sets.indices.contains(s) else { return }
-                    ex.sets[s].weightKg = newVal
-                }
-            }
-        )
-    }
-
-    private func rpeBinding(_ i: Int, _ s: Int) -> Binding<String> {
-        Binding(
-            get: { exercises[safe: i]?.sets[safe: s]?.rpe ?? "" },
-            set: { newVal in
-                replaceExercise(i) { ex in
-                    guard ex.sets.indices.contains(s) else { return }
-                    ex.sets[s].rpe = newVal
-                }
-            }
-        )
-    }
-
-    private func restBinding(_ i: Int, _ s: Int) -> Binding<Int?> {
-        Binding(
-            get: { exercises[safe: i]?.sets[safe: s]?.restSec },
-            set: { newVal in
-                replaceExercise(i) { ex in
-                    guard ex.sets.indices.contains(s) else { return }
-                    ex.sets[s].restSec = newVal
-                }
-            }
-        )
-    }
-
-    private func appendSet(exerciseIndex i: Int) {
-        replaceExercise(i) { ex in
-            ex.sets.append(EditableSet(setNumber: 1))
-        }
-    }
-
-    private func removeSet(exerciseIndex i: Int, setIndex s: Int) {
-        replaceExercise(i) { ex in
-            guard ex.sets.indices.contains(s) else { return }
-            ex.sets.remove(at: s)
-        }
-    }
-}
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        guard indices.contains(index) else { return nil }
-        return self[index]
-    }
-}
-
 private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
     let H = Int(h.trimmingCharacters(in: .whitespaces)) ?? 0
     let M = Int(m.trimmingCharacters(in: .whitespaces)) ?? 0
@@ -3984,65 +3745,6 @@ private struct StrengthRoutineListRow: Identifiable, Decodable {
     let updated_at: Date?
     let folder_id: Int64?
     let sort_order: Int?
-}
-
-private struct StrengthRoutineDetailWire: Decodable {
-    let id: Int64
-    let name: String
-    let strength_routine_exercises: [StrengthRoutineExerciseWire]?
-}
-
-private struct StrengthRoutineExerciseWire: Decodable {
-    let exercise_id: Int64
-    let order_index: Int
-    let notes: String?
-    let custom_name: String?
-    let strength_routine_sets: [StrengthRoutineSetWire]?
-}
-
-private struct StrengthRoutineSetWire: Decodable {
-    let set_number: Int
-    let reps: Int?
-    let weight_kg: Double?
-    let rpe: Double?
-    let rest_sec: Int?
-    let notes: String?
-}
-
-private func strengthRoutineDetailSelect() -> String {
-    "id,name,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes))"
-}
-
-private func editableExercisesFromRoutineDetail(
-    _ detail: StrengthRoutineDetailWire,
-    exerciseDisplayName: (Int64) -> String
-) -> [EditableExercise] {
-    let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
-    return exs.map { ex in
-        let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
-        let mappedSets: [EditableSet] = setsSorted.map { s in
-            EditableSet(
-                setNumber: s.set_number,
-                reps: s.reps,
-                weightKg: s.weight_kg.map { String($0) } ?? "",
-                rpe: s.rpe.map { String($0) } ?? "",
-                restSec: s.rest_sec,
-                notes: s.notes ?? ""
-            )
-        }
-        let fallbackSets = mappedSets.isEmpty ? [EditableSet(setNumber: 1)] : mappedSets
-        let displayName: String = {
-            if let cn = ex.custom_name, !cn.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return cn }
-            return exerciseDisplayName(ex.exercise_id)
-        }()
-        return EditableExercise(
-            exerciseId: ex.exercise_id,
-            exerciseName: displayName,
-            orderIndex: ex.order_index,
-            notes: ex.notes ?? "",
-            sets: fallbackSets
-        )
-    }
 }
 
 enum StrengthRoutineNameValidator {
@@ -4105,26 +3807,6 @@ enum StrengthRoutineNameValidator {
 
 private struct StrengthRoutinePersistOutcome {
     let alsoHasAnotherRoutineWithSameProgram: Bool
-}
-
-private func strengthRoutineContentFingerprint(from exercises: [EditableExercise]) -> String {
-    let items = exercises.compactMap { $0.toStrengthItem() }.sorted { $0.order_index < $1.order_index }
-    var lines: [String] = []
-    for item in items {
-        let setParts = item.sets.sorted { $0.set_number < $1.set_number }.map { s in
-            let w = s.weight_kg.map { String($0) } ?? ""
-            let r = s.rpe.map { String($0) } ?? ""
-            let rest = s.rest_sec.map { String($0) } ?? ""
-            let rep = s.reps.map { String($0) } ?? ""
-            return "\(s.set_number)|\(rep)|\(w)|\(r)|\(rest)|\(s.notes ?? "")"
-        }
-        let cn = item.custom_name ?? ""
-        let note = item.notes ?? ""
-        lines.append("\(item.exercise_id)|\(item.order_index)|\(cn)|\(note)|" + setParts.joined(separator: ";"))
-    }
-    let joined = lines.joined(separator: "\n")
-    let digest = SHA256.hash(data: Data(joined.utf8))
-    return digest.map { String(format: "%02x", $0) }.joined()
 }
 
 private func nextRoutineSortOrderForInsert(
@@ -4350,6 +4032,9 @@ private func nextFolderSortOrderForInsert(client: SupabaseClient, userId: UUID) 
 private struct StrengthRoutinesPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let exerciseDisplayName: (Int64) -> String
+    let catalog: [Exercise]
+    let loadingCatalog: Bool
+    let exerciseLanguage: ExerciseLanguage
     let onApply: ([EditableExercise]) -> Void
 
     @State private var routines: [StrengthRoutineListRow] = []
@@ -4380,6 +4065,7 @@ private struct StrengthRoutinesPickerSheet: View {
     @State private var duplicateNameDraft: String = ""
     @State private var duplicateTargetFolderId: Int64? = nil
     @State private var duplicateError: String?
+    @State private var routinePendingEdit: StrengthRoutineListRow?
 
     private var sortedFolders: [StrengthRoutineFolderRow] {
         folders.sorted { a, b in
@@ -4695,6 +4381,23 @@ private struct StrengthRoutinesPickerSheet: View {
             }
             .presentationDetents([.medium])
         }
+        .sheet(item: $routinePendingEdit) { row in
+            EditSavedStrengthRoutineSheet(
+                routineId: row.id,
+                routineName: row.name,
+                catalog: catalog,
+                loadingCatalog: loadingCatalog,
+                exerciseLanguage: exerciseLanguage,
+                exerciseDisplayName: exerciseDisplayName,
+                onClose: { routinePendingEdit = nil },
+                onSaved: {
+                    routinePendingEdit = nil
+                    Task { await loadRoutines() }
+                }
+            )
+            .presentationDetents([.large])
+            .presentationBackground(.clear)
+        }
         .confirmationDialog(
             "Delete this routine?",
             isPresented: Binding(
@@ -4855,6 +4558,9 @@ private struct StrengthRoutinesPickerSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Menu {
+                    Button("Edit") {
+                        routinePendingEdit = row
+                    }
                     Button("Rename") {
                         renameRoutineId = row.id
                         renameRoutineFolderId = row.folder_id
@@ -5016,12 +4722,12 @@ private struct StrengthRoutinesPickerSheet: View {
             }
             let res = try await client
                 .from("strength_routines")
-                .select(strengthRoutineDetailSelect())
+                .select(strengthTemplateDetailSelect())
                 .eq("id", value: Int(src.id))
                 .single()
                 .execute()
-            let detail = try JSONDecoder.supabase().decode(StrengthRoutineDetailWire.self, from: res.data)
-            let built = editableExercisesFromRoutineDetail(detail, exerciseDisplayName: exerciseDisplayName)
+            let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+            let built = editableExercisesFromStrengthTemplateDetail(detail, exerciseDisplayName: exerciseDisplayName)
             guard !built.isEmpty else {
                 await MainActor.run { duplicateError = "This routine has no exercises to copy." }
                 return
@@ -5081,12 +4787,12 @@ private struct StrengthRoutinesPickerSheet: View {
             let client = SupabaseManager.shared.client
             let res = try await client
                 .from("strength_routines")
-                .select(strengthRoutineDetailSelect())
+                .select(strengthTemplateDetailSelect())
                 .eq("id", value: Int(id))
                 .single()
                 .execute()
-            let detail = try JSONDecoder.supabase().decode(StrengthRoutineDetailWire.self, from: res.data)
-            let built = editableExercisesFromRoutineDetail(detail, exerciseDisplayName: exerciseDisplayName)
+            let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+            let built = editableExercisesFromStrengthTemplateDetail(detail, exerciseDisplayName: exerciseDisplayName)
             guard !built.isEmpty else {
                 await MainActor.run { errorMessage = "This routine has no exercises." }
                 return

@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.cardio.CardioKmPaceSplits
+import com.lilru.liftr.cardio.CardioRouteGeoJson
 import com.lilru.liftr.cardio.KmPaceSplitCalculator
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ongoing.CardioLocationBridge
@@ -174,7 +175,8 @@ class ActiveCardioWorkoutViewModel(
     private fun routeGeoJsonLineString(): String? {
         val copy = synchronized(routePoints) { routePoints.toList() }
         if (copy.size < 2) return null
-        val coords = copy.joinToString(",") { "[${it.second},${it.first}]" }
+        val trimmed = CardioRouteGeoJson.decimateLatLngPairs(copy)
+        val coords = trimmed.joinToString(",") { "[${it.second},${it.first}]" }
         return """{"type":"LineString","coordinates":[$coords]}"""
     }
 

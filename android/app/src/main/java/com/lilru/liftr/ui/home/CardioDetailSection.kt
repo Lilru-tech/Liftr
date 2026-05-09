@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -202,12 +204,32 @@ fun CardioDetailSection(
                 title = { Text(stringResource(R.string.segment_create_dialog_title)) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (segmentBusy) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.dp
+                                )
+                                Spacer(Modifier.padding(start = 10.dp))
+                                Text(
+                                    stringResource(R.string.segment_creating),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
                         OutlinedTextField(
                             value = segmentName,
                             onValueChange = { segmentName = it },
                             label = { Text(stringResource(R.string.segment_name_hint)) },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !segmentBusy
                         )
                         if (routePts.size >= 2) {
                             Text(
@@ -222,11 +244,13 @@ fun CardioDetailSection(
                                 FilterChip(
                                     selected = nextMapTapSetsStart,
                                     onClick = { nextMapTapSetsStart = true },
+                                    enabled = !segmentBusy,
                                     label = { Text(stringResource(R.string.segment_map_pick_start)) }
                                 )
                                 FilterChip(
                                     selected = !nextMapTapSetsStart,
                                     onClick = { nextMapTapSetsStart = false },
+                                    enabled = !segmentBusy,
                                     label = { Text(stringResource(R.string.segment_map_pick_end)) }
                                 )
                             }
@@ -257,7 +281,8 @@ fun CardioDetailSection(
                         Slider(
                             value = startFrac,
                             onValueChange = { startFrac = it.coerceIn(0f, 0.95f) },
-                            valueRange = 0f..0.95f
+                            valueRange = 0f..0.95f,
+                            enabled = !segmentBusy
                         )
                         Text(
                             stringResource(R.string.segment_end_pct, (endFrac * 100).toInt()),
@@ -266,7 +291,8 @@ fun CardioDetailSection(
                         Slider(
                             value = endFrac,
                             onValueChange = { endFrac = it.coerceIn(0.05f, 1f) },
-                            valueRange = 0.05f..1f
+                            valueRange = 0.05f..1f,
+                            enabled = !segmentBusy
                         )
                         if (segmentErr != null) {
                             Text(

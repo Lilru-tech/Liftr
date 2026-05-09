@@ -108,7 +108,19 @@ data class AddWorkoutUiState(
      * Tras crear un entreno (publicado o planificado): [AddWorkoutTabScreen] pide al shell ir a Home
      * y refrescar el feed.
      */
-    val postPublishHomeNonce: Int = 0
+    val postPublishHomeNonce: Int = 0,
+    val strengthRoutineOverwritePending: StrengthRoutineOverwritePending? = null,
+    /** Edición in-place del contenido de una plantilla (menú ⋯ → Edit); el nombre sigue en Rename. */
+    val strengthRoutineTemplateEdit: StrengthRoutineTemplateEdit? = null
+)
+
+data class StrengthRoutineTemplateEdit(
+    val routineId: Long,
+    val routineName: String,
+    val drafts: List<StrengthExerciseDraft> = emptyList(),
+    val loading: Boolean = true,
+    val saving: Boolean = false,
+    val error: String? = null
 )
 
 data class RoutineFolderUi(
@@ -354,7 +366,8 @@ class AddWorkoutViewModel(
             message = null,
             error = null,
             pendingOpenWorkoutId = null,
-            postPublishHomeNonce = _uiState.value.postPublishHomeNonce + 1
+            postPublishHomeNonce = _uiState.value.postPublishHomeNonce + 1,
+            strengthRoutineOverwritePending = null
         )
     }
     private val json = Json { ignoreUnknownKeys = true }
@@ -584,6 +597,278 @@ class AddWorkoutViewModel(
                 )
             }
         }
+    }
+
+    private fun mutateTemplateEditDrafts(
+        mutator: (List<StrengthExerciseDraft>) -> List<StrengthExerciseDraft>
+    ) {
+        val cur = _uiState.value.strengthRoutineTemplateEdit ?: return
+        if (cur.loading) return
+        _uiState.value = _uiState.value.copy(
+            strengthRoutineTemplateEdit = cur.copy(
+                drafts = mutator(cur.drafts),
+                error = null
+            )
+        )
+    }
+
+    fun loadRoutineForEdit(routineId: Long, routineName: String) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            _uiState.value = _uiState.value.copy(
+                strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                    routineId = routineId,
+                    routineName = routineName,
+                    drafts = emptyList(),
+                    loading = true,
+                    error = null
+                ),
+                error = null,
+                message = null
+            )
+            runCatching { buildDraftsForRoutine(routineId) }
+                .onSuccess { drafts ->
+                    if (drafts.isEmpty()) {
+                        _uiState.value = _uiState.value.copy(
+                            strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                                routineId = routineId,
+                                routineName = routineName,
+                                drafts = emptyList(),
+                                loading = false,
+                                error = app.getString(R.string.add_routine_template_empty_load)
+                            )
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                                routineId = routineId,
+                                routineName = routineName,
+                                drafts = drafts,
+                                loading = false
+                            )
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    val msg = e.message?.take(300)?.ifBlank { e::class.java.simpleName }
+                        ?: app.getString(R.string.add_routine_template_load_error)
+                    _uiState.value = _uiState.value.copy(
+                        strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                            routineId = routineId,
+                            routineName = routineName,
+                            drafts = emptyList(),
+                            loading = false,
+                            error = msg
+                        )
+                    )
+                }
+        }
+    }
+
+    fun dismissRoutineTemplateEdit() {
+        _uiState.value = _uiState.value.copy(strengthRoutineTemplateEdit = null)
+    }
+
+    fun saveEditedRoutine() {
+        val edit = _uiState.value.strengthRoutineTemplateEdit ?: return
+        if (edit.loading || edit.saving) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                strengthRoutineTemplateEdit = edit.copy(saving = true, error = null)
+            )
+            val uid = supabase.auth.currentUserOrNull()?.id
+            if (uid == null) {
+                _uiState.value = _uiState.value.copy(
+                    strengthRoutineTemplateEdit = edit.copy(
+                        saving = false,
+                        error = "Sign in required."
+                    )
+                )
+                return@launch
+            }
+            runCatching {
+                applyStrengthRoutinePrescriptionUpdate(
+                    supabase,
+                    uid,
+                    edit.routineId,
+                    edit.drafts
+                )
+            }.onSuccess {
+                val msg = getApplication<Application>().getString(R.string.add_routine_template_updated)
+                _uiState.value = _uiState.value.copy(
+                    strengthRoutineTemplateEdit = null,
+                    message = msg,
+                    error = null
+                )
+                loadStrengthRoutines()
+            }.onFailure { e ->
+                val cur = _uiState.value.strengthRoutineTemplateEdit
+                val err = e.message?.take(300)?.ifBlank { e::class.java.simpleName }.orEmpty()
+                if (cur != null) {
+                    _uiState.value = _uiState.value.copy(
+                        strengthRoutineTemplateEdit = cur.copy(saving = false, error = err)
+                    )
+                }
+            }
+        }
+    }
+
+    fun templateEditSetExerciseOnDraft(draftId: String, ex: ExerciseLite, languageCode: String = "es") {
+        val name = when (languageCode) {
+            "en" -> ex.nameEn ?: ex.nameEs ?: ex.name
+            else -> ex.nameEs ?: ex.nameEn ?: ex.name
+        }
+        mutateTemplateEditDrafts { list ->
+            list.map { row ->
+                if (row.id == draftId) {
+                    row.copy(exerciseId = ex.id, exerciseName = name)
+                } else {
+                    row
+                }
+            }
+        }
+    }
+
+    fun templateEditAddBlankStrengthExercise() {
+        mutateTemplateEditDrafts { it + StrengthExerciseDraft() }
+    }
+
+    fun templateEditRemoveExercise(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            val next = list.filterNot { it.id == exerciseDraftId }
+            if (next.isEmpty()) listOf(StrengthExerciseDraft()) else next
+        }
+    }
+
+    fun templateEditMoveExerciseUp(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { current ->
+            val mutable = current.toMutableList()
+            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
+            if (index <= 0) return@mutateTemplateEditDrafts current
+            val item = mutable.removeAt(index)
+            mutable.add(index - 1, item)
+            mutable
+        }
+    }
+
+    fun templateEditMoveExerciseDown(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { current ->
+            val mutable = current.toMutableList()
+            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
+            if (index == -1 || index >= mutable.lastIndex) return@mutateTemplateEditDrafts current
+            val item = mutable.removeAt(index)
+            mutable.add(index + 1, item)
+            mutable
+        }
+    }
+
+    fun templateEditAddSet(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id == exerciseDraftId) {
+                    ex.copy(sets = ex.sets + StrengthSetDraft(setNumber = 1))
+                } else {
+                    ex
+                }
+            }
+        }
+    }
+
+    fun templateEditBumpSetNumber(exerciseDraftId: String, setDraftId: String, delta: Int) {
+        if (delta == 0) return
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id != setDraftId) return@map set
+                        set.copy(setNumber = (set.setNumber + delta).coerceIn(1, 99))
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditRemoveSet(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                val nextSets = ex.sets.filterNot { it.id == setDraftId }
+                ex.copy(sets = if (nextSets.isEmpty()) listOf(StrengthSetDraft()) else nextSets)
+            }
+        }
+    }
+
+    fun templateEditUpdateSetReps(exerciseDraftId: String, setDraftId: String, repsText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(repsText = repsText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateSetWeight(exerciseDraftId: String, setDraftId: String, weightText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(weightText = weightText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateExerciseCustomName(exerciseDraftId: String, customName: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id == exerciseDraftId) ex.copy(customName = customName) else ex
+            }
+        }
+    }
+
+    fun templateEditUpdateExerciseNotes(exerciseDraftId: String, notes: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id == exerciseDraftId) ex.copy(notes = notes) else ex
+            }
+        }
+    }
+
+    fun templateEditUpdateSetRpe(exerciseDraftId: String, setDraftId: String, rpeText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(rpeText = rpeText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateSetRestSec(exerciseDraftId: String, setDraftId: String, restSecText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(restSecText = restSecText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditClearAllStrengthExercises() {
+        mutateTemplateEditDrafts { listOf(StrengthExerciseDraft()) }
     }
 
     fun clearStatus() {
@@ -840,9 +1125,11 @@ class AddWorkoutViewModel(
         folderId: Long?,
         selected: List<StrengthExerciseDraft>
     ): Long {
+        val contentHash = strengthRoutineContentFingerprintFromDrafts(selected)
         val routinePayload = buildJsonObject {
             put("user_id", userId)
             put("name", routineName)
+            put("content_hash", contentHash)
             put("sort_order", System.currentTimeMillis().toInt())
             if (folderId != null) put("folder_id", folderId)
         }
@@ -2265,6 +2552,7 @@ class AddWorkoutViewModel(
     ) {
         viewModelScope.launch {
             val snap = _uiState.value
+            if (snap.strengthRoutineOverwritePending != null) return@launch
             val participantIds = snap.selectedParticipantIds.toList()
             val perPersonStrength = snap.perPersonStrength
             if (perPersonStrength && participantIds.size > 2) {
@@ -2273,6 +2561,103 @@ class AddWorkoutViewModel(
                 )
                 return@launch
             }
+            if (!perPersonStrength) {
+                val items = strengthProgramItemsFromDrafts(snap.selectedExercises)
+                if (items != null && items.isNotEmpty()) {
+                    val uid = supabase.auth.currentUserOrNull()?.id
+                    if (uid != null) {
+                        val candidate = runCatching {
+                            fetchStrengthRoutineOverwriteCandidate(
+                                supabase,
+                                uid,
+                                items
+                            ) { eid ->
+                                val ex = snap.exercises.firstOrNull { it.id == eid }
+                                ex?.nameEn?.takeIf { it.isNotBlank() }
+                                    ?: ex?.nameEs?.takeIf { it.isNotBlank() }
+                                    ?: ex?.name.orEmpty()
+                            }
+                        }.getOrNull() ?: StrengthRoutineOverwriteCandidate.None
+                        if (candidate is StrengthRoutineOverwriteCandidate.Prompt) {
+                            _uiState.value = snap.copy(
+                                strengthRoutineOverwritePending = StrengthRoutineOverwritePending(
+                                    prompt = candidate.value,
+                                    createParams = StrengthCreateWorkoutParams(
+                                        title = title,
+                                        notes = notes,
+                                        durationMin = durationMin,
+                                        intensity = intensity,
+                                        state = state,
+                                        startedAtIso = startedAtIso,
+                                        endedAtIso = endedAtIso,
+                                        useCustomSchedule = useCustomSchedule,
+                                        scheduleEndedEnabled = scheduleEndedEnabled
+                                    ),
+                                    exercisesSnapshot = snap.selectedExercises.map { it.deepCopy() }
+                                ),
+                                error = null,
+                                message = null
+                            )
+                            return@launch
+                        }
+                    }
+                }
+            }
+            beginCreateStrengthWorkout(
+                title = title,
+                notes = notes,
+                durationMin = durationMin,
+                intensity = intensity,
+                state = state,
+                startedAtIso = startedAtIso,
+                endedAtIso = endedAtIso,
+                useCustomSchedule = useCustomSchedule,
+                scheduleEndedEnabled = scheduleEndedEnabled,
+                routinePrescriptionOverwrite = null
+            )
+        }
+    }
+
+    fun dismissStrengthRoutineOverwrite() {
+        _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
+    }
+
+    fun confirmStrengthRoutineOverwrite(updateRoutine: Boolean) {
+        val pending = _uiState.value.strengthRoutineOverwritePending ?: return
+        val p = pending.createParams
+        _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
+        val overwrite: Pair<Long, List<StrengthExerciseDraft>>? =
+            if (updateRoutine) pending.prompt.routineId to pending.exercisesSnapshot else null
+        beginCreateStrengthWorkout(
+            title = p.title,
+            notes = p.notes,
+            durationMin = p.durationMin,
+            intensity = p.intensity,
+            state = p.state,
+            startedAtIso = p.startedAtIso,
+            endedAtIso = p.endedAtIso,
+            useCustomSchedule = p.useCustomSchedule,
+            scheduleEndedEnabled = p.scheduleEndedEnabled,
+            routinePrescriptionOverwrite = overwrite
+        )
+    }
+
+    private fun beginCreateStrengthWorkout(
+        title: String,
+        notes: String,
+        durationMin: Int?,
+        intensity: AddWorkoutIntensity,
+        state: AddWorkoutState,
+        startedAtIso: String?,
+        endedAtIso: String?,
+        useCustomSchedule: Boolean,
+        scheduleEndedEnabled: Boolean,
+        routinePrescriptionOverwrite: Pair<Long, List<StrengthExerciseDraft>>?
+    ) {
+        viewModelScope.launch {
+            val snap = _uiState.value
+            val participantIds = snap.selectedParticipantIds.toList()
+            val perPersonStrength = snap.perPersonStrength
             _uiState.value = _uiState.value.copy(creating = true, error = null, message = null)
             runCatching {
                 val userId = supabase.auth.currentUserOrNull()?.id
@@ -2380,7 +2765,7 @@ class AddWorkoutViewModel(
                     val firstWid = squadIds.firstOrNull()
                     supabase.submitWorkoutToCompetitionIfActive(firstWid)
                 } else {
-                    val selected = snap.selectedExercises
+                    val selected = routinePrescriptionOverwrite?.second ?: snap.selectedExercises
                     if (selected.isEmpty()) error("Add at least one exercise first.")
                     val params = paramsForState(targetState, buildStrengthPayloadItems(selected))
                     val res = supabase.postgrest.rpc(BackendContracts.Rpc.CREATE_STRENGTH_WORKOUT, params) { }
@@ -2391,8 +2776,20 @@ class AddWorkoutViewModel(
                     }
                     supabase.submitWorkoutToCompetitionIfActive(workoutId)
                 }
+                if (routinePrescriptionOverwrite != null) {
+                    applyStrengthRoutinePrescriptionUpdate(
+                        supabase,
+                        userId,
+                        routinePrescriptionOverwrite.first,
+                        routinePrescriptionOverwrite.second
+                    )
+                }
             }.onSuccess {
-                onWorkoutCreatedUi(strengthSuccessMessage(perPersonStrength, state))
+                var msg = strengthSuccessMessage(perPersonStrength, state)
+                if (routinePrescriptionOverwrite != null) {
+                    msg += " Routine template updated."
+                }
+                onWorkoutCreatedUi(msg)
             }.onFailure { e ->
                 Log.e(TAG, "createStrengthWorkout failed", e)
                 val raw = e.message.orEmpty()
@@ -2834,15 +3231,6 @@ class AddWorkoutViewModel(
         return null
     }
 }
-
-private data class StrengthSetPayload(
-    val setNumber: Int,
-    val reps: Int?,
-    val weightKg: Double?,
-    val rpe: Double?,
-    val restSec: Int?,
-    val notes: String?
-)
 
 private fun StrengthExerciseDraft.deepCopy(): StrengthExerciseDraft = copy(
     sets = sets.map { it.copy() }

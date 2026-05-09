@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -71,6 +73,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -242,11 +245,12 @@ fun AddWorkoutTabScreen(
     var showClearStrengthDialog by remember { mutableStateOf(false) }
     var showClearHyroxDialog by remember { mutableStateOf(false) }
     var exerciseSearch by remember { mutableStateOf("") }
-    var exercisePickerForDraftId by remember { mutableStateOf<String?>(null) }
+    var strengthExercisePickTarget by remember { mutableStateOf<StrengthExercisePickTarget?>(null) }
     val routinesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val hyroxRoutinesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val participantsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val exerciseSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val templateEditSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val workoutHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(showParticipantsSheet) {
         if (showParticipantsSheet) {
@@ -366,8 +370,8 @@ fun AddWorkoutTabScreen(
         f.sportStats.forEach { (k, v) -> sportStats[k] = v }
         vm.applyDuplicateFromDetail(payload)
     }
-    LaunchedEffect(exercisePickerForDraftId) {
-        if (exercisePickerForDraftId != null) {
+    LaunchedEffect(strengthExercisePickTarget) {
+        if (strengthExercisePickTarget != null) {
             vm.onExercisePickerOpened()
         }
     }
@@ -668,247 +672,33 @@ fun AddWorkoutTabScreen(
                 }
             }
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            stringResource(R.string.add_section_quick_actions),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        TextButton(
-                            onClick = { showRecommend = true },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("✦ ${stringResource(R.string.add_recommend_button)}")
-                        }
-                        HorizontalDivider()
-                        Text(
-                            stringResource(R.string.add_section_lifts),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            stringResource(R.string.add_lifts_reorder_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val lifts = strengthExercises
-                        lifts.forEachIndexed { index, ex ->
-                            val canMoveUp = index > 0
-                            val canMoveDown = index < lifts.lastIndex
-                            val moreThanOne = lifts.size > 1
-                            Text(
-                                stringResource(R.string.add_exercise_pick),
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            OutlinedButton(
-                                onClick = {
-                                    exercisePickerForDraftId = ex.id
-                                    exerciseSearch = ""
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                enabled = !ui.loadingExercises
-                            ) {
-                                Text(
-                                    ex.exerciseId?.let { ex.exerciseName.trim() }
-                                        ?.takeIf { it.isNotEmpty() }
-                                        ?: stringResource(R.string.add_exercise_tap_to_pick)
-                                )
-                            }
-                            if (ui.loadingExercises) {
-                                Text(
-                                    stringResource(R.string.add_loading_exercises),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                            OutlinedTextField(
-                                value = ex.customName,
-                                onValueChange = { vm.updateExerciseCustomName(ex.id, it) },
-                                label = { Text(stringResource(R.string.add_exercise_alias_label)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = ex.notes,
-                                onValueChange = { vm.updateExerciseNotes(ex.id, it) },
-                                label = { Text(stringResource(R.string.add_exercise_notes_label)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 2,
-                                maxLines = 4
-                            )
-                            ex.sets.forEachIndexed { setIndex, set ->
-                                val errColor = MaterialTheme.colorScheme.error
-                                val sn = set.setNumber.coerceIn(1, 99)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(Modifier.weight(1f, fill = false)) {
-                                        Text(
-                                            stringResource(R.string.add_strength_set_slot_format, setIndex + 1),
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            stringResource(R.string.add_strength_repeat_times_label),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            shape = RoundedCornerShape(20.dp),
-                                            color = MaterialTheme.colorScheme.surfaceVariant
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                IconButton(
-                                                    onClick = { vm.bumpSetNumber(ex.id, set.id, -1) },
-                                                    enabled = sn > 1,
-                                                    modifier = Modifier.heightIn(max = 40.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Remove,
-                                                        contentDescription = stringResource(R.string.add_set_stepper_minus)
-                                                    )
-                                                }
-                                                VerticalDivider(Modifier.height(24.dp))
-                                                Text(
-                                                    stringResource(R.string.add_strength_repeat_times_format, sn),
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.padding(horizontal = 6.dp)
-                                                )
-                                                VerticalDivider(Modifier.height(24.dp))
-                                                IconButton(
-                                                    onClick = { vm.bumpSetNumber(ex.id, set.id, 1) },
-                                                    enabled = sn < 99,
-                                                    modifier = Modifier.heightIn(max = 40.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Add,
-                                                        contentDescription = stringResource(R.string.add_set_stepper_plus)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        if (ex.sets.size > 1) {
-                                            IconButton(
-                                                onClick = { vm.removeSet(ex.id, set.id) }
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Delete,
-                                                    contentDescription = stringResource(R.string.add_set_remove_content_description),
-                                                    tint = errColor
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    OutlinedTextField(
-                                        value = set.repsText,
-                                        onValueChange = { vm.updateSetReps(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_reps_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = set.weightText,
-                                        onValueChange = { vm.updateSetWeight(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_kg_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = set.rpeText,
-                                        onValueChange = { vm.updateSetRpe(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_rpe_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = set.restSecText,
-                                        onValueChange = { vm.updateSetRestSec(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                            Column(Modifier.fillMaxWidth()) {
-                                TextButton(
-                                    onClick = { vm.addSet(ex.id) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(stringResource(R.string.add_set_add))
-                                }
-                                Text(
-                                    stringResource(R.string.add_strength_next_row_hint, ex.sets.size + 1),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (canMoveUp) {
-                                    TextButton(onClick = { vm.moveExerciseUp(ex.id) }) {
-                                        Text(stringResource(R.string.add_move_exercise_up))
-                                    }
-                                }
-                                if (canMoveDown) {
-                                    TextButton(onClick = { vm.moveExerciseDown(ex.id) }) {
-                                        Text(stringResource(R.string.add_move_exercise_down))
-                                    }
-                                }
-                                if (moreThanOne) {
-                                    TextButton(
-                                        onClick = { vm.removeExercise(ex.id) }
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Delete,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                            Text(stringResource(R.string.add_remove_exercise))
-                                        }
-                                    }
-                                }
-                            }
-                            if (index < lifts.lastIndex) {
-                                HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                            }
-                        }
-                        TextButton(
-                            onClick = { vm.addBlankStrengthExercise() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(stringResource(R.string.add_add_exercise))
-                        }
-                        val canClearAllStrength = strengthExercises.size > 1 ||
-                            strengthExercises.any { it.exerciseId != null || it.exerciseName.isNotBlank() }
-                        if (canClearAllStrength) {
-                            OutlinedButton(
-                                onClick = { showClearStrengthDialog = true },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(stringResource(R.string.add_clear_all_exercises))
-                            }
-                        }
-                    }
-                }
+                val canClearAllStrength = strengthExercises.size > 1 ||
+                    strengthExercises.any { it.exerciseId != null || it.exerciseName.isNotBlank() }
+                StrengthExerciseDraftsEditorBlock(
+                    exercises = strengthExercises,
+                    loadingExercises = ui.loadingExercises,
+                    showQuickActions = true,
+                    onRecommendClick = { showRecommend = true },
+                    onPickExerciseClick = { draftId ->
+                        strengthExercisePickTarget = StrengthExercisePickTarget.WorkoutForm(draftId)
+                        exerciseSearch = ""
+                    },
+                    onUpdateCustomName = { id, v -> vm.updateExerciseCustomName(id, v) },
+                    onUpdateNotes = { id, v -> vm.updateExerciseNotes(id, v) },
+                    onBumpSetNumber = { e, s, d -> vm.bumpSetNumber(e, s, d) },
+                    onRemoveSet = { e, s -> vm.removeSet(e, s) },
+                    onUpdateSetReps = { e, s, v -> vm.updateSetReps(e, s, v) },
+                    onUpdateSetWeight = { e, s, v -> vm.updateSetWeight(e, s, v) },
+                    onUpdateSetRpe = { e, s, v -> vm.updateSetRpe(e, s, v) },
+                    onUpdateSetRestSec = { e, s, v -> vm.updateSetRestSec(e, s, v) },
+                    onAddSet = { vm.addSet(it) },
+                    onMoveExerciseUp = { vm.moveExerciseUp(it) },
+                    onMoveExerciseDown = { vm.moveExerciseDown(it) },
+                    onRemoveExercise = { vm.removeExercise(it) },
+                    onAddBlankExercise = { vm.addBlankStrengthExercise() },
+                    onClearAllExercises = { showClearStrengthDialog = true },
+                    showClearAllButton = canClearAllStrength
+                )
             }
             item {
                 Card(
@@ -1774,6 +1564,14 @@ fun AddWorkoutTabScreen(
         }
     }
     }
+    ui.strengthRoutineOverwritePending?.let { pend ->
+        StrengthRoutineOverwriteBottomSheet(
+            prompt = pend.prompt,
+            onDismissRequest = { vm.dismissStrengthRoutineOverwrite() },
+            onOverwriteTemplate = { vm.confirmStrengthRoutineOverwrite(true) },
+            onNotNow = { vm.confirmStrengthRoutineOverwrite(false) }
+        )
+    }
     if (showClearStrengthDialog) {
         AlertDialog(
             onDismissRequest = { showClearStrengthDialog = false },
@@ -1842,7 +1640,27 @@ fun AddWorkoutTabScreen(
                 onApplyRoutine = { id ->
                     vm.applyRoutine(id)
                     showRoutinesSheet = false
-                }
+                },
+                onEditRoutine = { id, name -> vm.loadRoutineForEdit(id, name) }
+            )
+        }
+    }
+    ui.strengthRoutineTemplateEdit?.let { edit ->
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (!edit.saving) vm.dismissRoutineTemplateEdit()
+            },
+            sheetState = templateEditSheetState
+        ) {
+            EditStrengthRoutineTemplateSheetContent(
+                edit = edit,
+                loadingExercises = ui.loadingExercises,
+                vm = vm,
+                onRequestExercisePick = { draftId ->
+                    strengthExercisePickTarget = StrengthExercisePickTarget.RoutineTemplate(draftId)
+                    exerciseSearch = ""
+                },
+                onDismiss = { vm.dismissRoutineTemplateEdit() }
             )
         }
     }
@@ -1899,10 +1717,10 @@ fun AddWorkoutTabScreen(
             )
         }
     }
-    val targetDraft = exercisePickerForDraftId
-    if (targetDraft != null) {
+    val strengthPick = strengthExercisePickTarget
+    if (strengthPick != null) {
         ModalBottomSheet(
-            onDismissRequest = { exercisePickerForDraftId = null; exerciseSearch = "" },
+            onDismissRequest = { strengthExercisePickTarget = null; exerciseSearch = "" },
             sheetState = exerciseSheetState
         ) {
             Column(Modifier.padding(16.dp)) {
@@ -2024,8 +1842,17 @@ fun AddWorkoutTabScreen(
                                         Modifier
                                             .weight(1f)
                                             .clickable {
-                                                vm.setExerciseOnDraft(targetDraft, exRow, exerciseLang)
-                                                exercisePickerForDraftId = null
+                                                when (strengthPick) {
+                                                    is StrengthExercisePickTarget.WorkoutForm ->
+                                                        vm.setExerciseOnDraft(strengthPick.draftId, exRow, exerciseLang)
+                                                    is StrengthExercisePickTarget.RoutineTemplate ->
+                                                        vm.templateEditSetExerciseOnDraft(
+                                                            strengthPick.draftId,
+                                                            exRow,
+                                                            exerciseLang
+                                                        )
+                                                }
+                                                strengthExercisePickTarget = null
                                                 exerciseSearch = ""
                                             }
                                     ) {
