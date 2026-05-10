@@ -244,7 +244,7 @@ struct ActiveSportWorkoutView: View {
             WorkoutLiveActivityManager.endIfAvailable()
         }
         .overlay {
-            if app.isAuthenticated {
+            if app.isAuthenticated, !showCountdown, !isSaving {
                 MessagesFloatingButton()
                     .environmentObject(app)
                     .allowsHitTesting(true)

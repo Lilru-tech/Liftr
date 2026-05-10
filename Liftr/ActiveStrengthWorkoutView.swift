@@ -61,6 +61,13 @@ struct ActiveStrengthWorkoutView: View {
         case guest2
     }
 
+    private enum EditMetricFocusField: Hashable {
+        case reps
+        case weight
+        case rest
+        case rpe
+    }
+
     private struct ExerciseRow: Decodable, Identifiable {
         let id: Int
         let exercise_id: Int64
@@ -173,6 +180,8 @@ struct ActiveStrengthWorkoutView: View {
     @State private var showDualIncompleteFinishConfirm = false
     @State private var editWeightText: String = ""
     @State private var editRestText: String = ""
+    @State private var editRpeText: String = ""
+    @FocusState private var editMetricFocus: EditMetricFocusField?
     @State private var dragOffsetY: CGFloat = 0
     @State private var isTransitioningExercise: Bool = false
     @State private var currentSetIndexByExercise: [Int: Int] = [:]
@@ -496,43 +505,92 @@ struct ActiveStrengthWorkoutView: View {
             WorkoutLiveActivityManager.endIfAvailable()
         }
         .sheet(isPresented: $showEditSheet) {
-            VStack(spacing: 20) {
-                Text("Edit reps, weight & rest")
-                    .font(.title3.weight(.semibold))
-                
-                TextField("Reps", text: $editRepsText)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                
-                TextField("Weight (kg)", text: $editWeightText)
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
-                
-                TextField("Rest (sec)", text: $editRestText)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(spacing: 10) {
+                        HStack(alignment: .top, spacing: 6) {
+                            StrengthStyleMetricField(title: "Reps") {
+                                TextField("—", text: $editRepsText)
+                                    .font(.body)
+                                    .keyboardType(.numberPad)
+                                    .focused($editMetricFocus, equals: .reps)
+                            }
+                            StrengthStyleMetricField(title: "kg") {
+                                TextField("—", text: $editWeightText)
+                                    .font(.body)
+                                    .keyboardType(.decimalPad)
+                                    .focused($editMetricFocus, equals: .weight)
+                            }
+                        }
+                        HStack(alignment: .top, spacing: 6) {
+                            StrengthStyleMetricField(title: "Rest s") {
+                                TextField("—", text: $editRestText)
+                                    .font(.body)
+                                    .keyboardType(.numberPad)
+                                    .focused($editMetricFocus, equals: .rest)
+                            }
+                            StrengthStyleMetricField(title: "RPE") {
+                                TextField("—", text: $editRpeText)
+                                    .font(.body)
+                                    .keyboardType(.decimalPad)
+                                    .focused($editMetricFocus, equals: .rpe)
+                            }
+                        }
+                    }
 
-                Text("Edits update this workout flow now and are written when you finish the workout.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                
-                HStack {
-                    Button("Cancel") {
-                        showEditSheet = false
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Quick rest")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach([30, 60, 90, 120, 180], id: \.self) { sec in
+                                    Button {
+                                        editRestText = "\(sec)"
+                                    } label: {
+                                        Text("\(sec)s")
+                                            .font(.subheadline.weight(.medium))
+                                            .monospacedDigit()
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    
-                    Button("Save") {
-                        applyEditsToCurrentExercise()
-                        showEditSheet = false
+
+                    Text("Edits update this workout flow now and are written when you finish the workout.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+                .padding()
+                .navigationTitle("Edit set")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            editMetricFocus = nil
+                            showEditSheet = false
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .buttonStyle(.borderedProminent)
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            editMetricFocus = nil
+                            applyEditsToCurrentExercise()
+                            showEditSheet = false
+                        }
+                    }
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            editMetricFocus = nil
+                        }
+                    }
                 }
             }
-            .padding()
-            .presentationDetents([.medium])
+            .presentationDetents([.height(420)])
+            .presentationDragIndicator(.visible)
         }
         .onReceive(restTimer) { _ in
             if !isSessionPaused {
@@ -587,7 +645,7 @@ struct ActiveStrengthWorkoutView: View {
             .frame(maxHeight: UIScreen.main.bounds.height * 0.92)
         }
         .overlay {
-            if app.isAuthenticated {
+            if app.isAuthenticated, !showCountdown, !isSaving {
                 MessagesFloatingButton()
                     .environmentObject(app)
                     .allowsHitTesting(true)
@@ -766,10 +824,15 @@ struct ActiveStrengthWorkoutView: View {
                     editWeightText = ""
                 }
                 editRestText = "\(s.rest_sec ?? 0)"
+                if let rpe = s.rpe {
+                    editRpeText = String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue)
+                } else {
+                    editRpeText = ""
+                }
                 editTargetLane = lane
                 showEditSheet = true
             } label: {
-                Text("Edit reps, weight & rest")
+                Text("Edit set")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
@@ -3360,6 +3423,17 @@ struct ActiveStrengthWorkoutView: View {
             newWeightDecimal = Decimal(string: trimmedWeight)
         }
 
+        let trimmedRpe = editRpeText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+
+        let newRpeDecimal: Decimal?
+        if trimmedRpe.isEmpty {
+            newRpeDecimal = nil
+        } else {
+            newRpeDecimal = Decimal(string: trimmedRpe)
+        }
+
         let trimmedRest = editRestText.trimmingCharacters(in: .whitespacesAndNewlines)
         let newRestSecRaw = Int(trimmedRest)
         let newRestSec = (newRestSecRaw != nil) ? max(0, newRestSecRaw!) : nil
@@ -3381,7 +3455,7 @@ struct ActiveStrengthWorkoutView: View {
             set_number: old.set_number,
             reps: newReps ?? old.reps,
             weight_kg: newWeightDecimal ?? old.weight_kg,
-            rpe: old.rpe,
+            rpe: newRpeDecimal ?? old.rpe,
             rest_sec: newRestSec ?? old.rest_sec
         )
 

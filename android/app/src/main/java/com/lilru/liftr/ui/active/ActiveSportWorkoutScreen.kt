@@ -439,7 +439,9 @@ fun ActiveSportWorkoutScreen(
             }
         }
     }
-        MessagesFloatingButton(supabase = supabase, modifier = Modifier.fillMaxSize())
+        if (!ui.finishing) {
+            MessagesFloatingButton(supabase = supabase, modifier = Modifier.fillMaxSize())
+        }
     }
 }
 

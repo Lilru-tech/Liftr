@@ -1026,10 +1026,12 @@ fun ActiveStrengthWorkoutScreen(
             onContinue = { vm.dismissElborblaCelebration(onClose) }
         )
     }
-    MessagesFloatingButton(
-        supabase = supabase,
-        modifier = Modifier.fillMaxSize()
-    )
+    if (!ui.finishing) {
+        MessagesFloatingButton(
+            supabase = supabase,
+            modifier = Modifier.fillMaxSize()
+        )
+    }
 }
 
 @Composable

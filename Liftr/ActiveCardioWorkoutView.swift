@@ -458,7 +458,7 @@ struct ActiveCardioWorkoutView: View {
             }
         }
         .overlay {
-            if app.isAuthenticated {
+            if app.isAuthenticated, !showCountdown, !isSaving {
                 MessagesFloatingButton()
                     .environmentObject(app)
                     .allowsHitTesting(true)
