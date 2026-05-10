@@ -101,6 +101,7 @@ enum StrengthRoutineRemotePersistence {
             let rpe: Double?
             let rest_sec: Int?
             let notes: String?
+            let weight_segments: [StrengthWeightSegWire]?
         }
 
         for item in strengthItems {
@@ -130,14 +131,19 @@ enum StrengthRoutineRemotePersistence {
             }
 
             let setRows: [StrengthRoutineSetRowInsert] = item.sets.map { s in
-                StrengthRoutineSetRowInsert(
+                let ws: [StrengthWeightSegWire]? = {
+                    guard let segs = s.weight_segments, segs.count >= 2 else { return nil }
+                    return segs.map { StrengthWeightSegWire(reps: $0.reps, weight_kg: $0.weight_kg) }
+                }()
+                return StrengthRoutineSetRowInsert(
                     routine_exercise_id: exerciseRowId,
                     set_number: s.set_number,
                     reps: s.reps,
                     weight_kg: s.weight_kg,
                     rpe: s.rpe,
                     rest_sec: s.rest_sec,
-                    notes: s.notes
+                    notes: s.notes,
+                    weight_segments: ws
                 )
             }
             if !setRows.isEmpty {

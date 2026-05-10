@@ -12,6 +12,7 @@ import com.lilru.liftr.ui.add.AddWorkoutKind
 import com.lilru.liftr.ui.add.AddWorkoutState
 import com.lilru.liftr.ui.add.StrengthExerciseDraft
 import com.lilru.liftr.ui.add.StrengthSetDraft
+import com.lilru.liftr.ui.add.parseWeightSegmentsColumn
 import com.lilru.liftr.ui.add.recommendation.HyroxExerciseRecommendationResult
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
@@ -23,6 +24,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -53,12 +55,14 @@ private data class NameName(val name: String? = null)
 
 @Serializable
 private data class ExerciseSetWire(
+    val id: Int = 0,
     @SerialName("workout_exercise_id") val workoutExerciseId: Int,
     @SerialName("set_number") val setNumber: Int,
     val reps: Int? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
-    @SerialName("rest_sec") val restSec: Int? = null
+    @SerialName("rest_sec") val restSec: Int? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
 )
 
 @Serializable
@@ -237,22 +241,27 @@ suspend fun loadDuplicateForAdd(
                     supabase.from(BackendContracts.Tables.EXERCISE_SETS)
                         .select(
                             columns = Columns.raw(
-                                "workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec"
+                                "id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments"
                             )
                         ) {
                             filter { isIn("workout_exercise_id", exIds) }
                             order("set_number", Order.ASCENDING)
+                            order("id", Order.ASCENDING)
                         }
                 }.getOrNull() ?: return null
                 val sRows = runCatching { loaderJson.decodeFromString<List<ExerciseSetWire>>(sData.data) }
                     .getOrNull() ?: return null
                 setsByEx = sRows.groupBy({ it.workoutExerciseId }, { s ->
+                    val segs = parseWeightSegmentsColumn(s.weightSegments)
+                    val r0 = segs.firstOrNull()?.repsText ?: s.reps?.toString() ?: "8"
+                    val w0 = segs.firstOrNull()?.weightText ?: s.weightKg?.let { fmtNum(it) } ?: ""
                     StrengthSetDraft(
                         setNumber = s.setNumber.coerceIn(1, 99),
-                        repsText = s.reps?.toString() ?: "8",
-                        weightText = s.weightKg?.let { fmtNum(it) } ?: "",
+                        repsText = r0,
+                        weightText = w0,
                         rpeText = s.rpe?.let { fmtNum(it) } ?: "",
-                        restSecText = s.restSec?.toString() ?: ""
+                        restSecText = s.restSec?.toString() ?: "",
+                        segments = segs
                     )
                 })
             }

@@ -75,6 +75,7 @@ import com.lilru.liftr.R
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
+import com.lilru.liftr.ui.add.StrengthSegmentPayload
 import com.lilru.liftr.ui.chat.MessagesFloatingButton
 import com.lilru.liftr.ui.components.LiftrAvatar
 import io.github.jan.supabase.SupabaseClient
@@ -83,6 +84,8 @@ import kotlin.math.ceil
 import kotlin.math.max
 import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /** Sector de descanso con vértice en el centro (paridad con iOS `RestDarkClockWedge`). */
 private fun DrawScope.drawRestClockWedgeFromCenter(totalSec: Int, restSec: Int, color: Color) {
@@ -754,15 +757,43 @@ fun ActiveStrengthWorkoutScreen(
                                                 ),
                                                 style = MaterialTheme.typography.titleMedium
                                             )
-                                            Text("${set.reps ?: 0} reps", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 2.dp))
-                                            Text(
-                                                "${set.weightKg?.let { String.format("%.1f", it) } ?: "0.0"} kg",
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(top = 2.dp)
-                                            )
+                                            val segs = set.weightSegments
+                                            if (segs != null && segs.size >= 2) {
+                                                Text("Drop set", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                    modifier = Modifier.padding(top = 2.dp)
+                                                ) {
+                                                    segs.forEach { el ->
+                                                        val o = el.jsonObject
+                                                        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                                        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+                                                        Text(
+                                                            "$r reps · ${String.format(Locale.US, "%.1f", w)} kg",
+                                                            style = MaterialTheme.typography.titleLarge,
+                                                            textAlign = TextAlign.Center
+                                                        )
+                                                    }
+                                                }
+                                            } else {
+                                                Text("${set.reps ?: 0} reps", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 2.dp))
+                                                Text(
+                                                    "${set.weightKg?.let { String.format(Locale.US, "%.1f", it) } ?: "0.0"} kg",
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.padding(top = 2.dp)
+                                                )
+                                            }
                                             set.rpe?.let {
                                                 Text(
                                                     "Target RPE ${String.format("%.1f", it)}",
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            val plannedRest = set.restSec ?: 0
+                                            if (!laneIsResting && plannedRest > 0) {
+                                                Text(
+                                                    "Rest ${plannedRest}s after set",
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
@@ -927,6 +958,25 @@ fun ActiveStrengthWorkoutScreen(
             }
         }
         if (showEditSheet && set != null) {
+        var showConvertToNormal by remember(showEditSheet, set.setId) { mutableStateOf(false) }
+        var convertNormalRepsText by remember(showEditSheet, set.setId) { mutableStateOf("") }
+        var convertNormalWeightText by remember(showEditSheet, set.setId) { mutableStateOf("") }
+
+        val initialDropSegs = remember(showEditSheet, set.setId) {
+            val arr = set.weightSegments
+            if (arr == null || arr.size < 2) {
+                mutableListOf<Pair<String, String>>()
+            } else {
+                arr.mapNotNull { el ->
+                    val o = el.jsonObject
+                    val r = o["reps"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    val w = o["weight_kg"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                    (r to w)
+                }.toMutableList()
+            }
+        }
+        var dropSegs by remember(showEditSheet, set.setId) { mutableStateOf(initialDropSegs) }
+
             Card(
                 modifier = Modifier
                     .align(Alignment.Center)
@@ -934,7 +984,61 @@ fun ActiveStrengthWorkoutScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Edit reps, weight & rest", style = MaterialTheme.typography.titleMedium)
+                Text("Edit reps, weight & rest", style = MaterialTheme.typography.titleMedium)
+
+                val isDropSet = !isGuestLaneActive && (dropSegs.size >= 2)
+                if (isDropSet) {
+                    Text("Drop set", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    dropSegs.forEachIndexed { idx, pair ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            OutlinedTextField(
+                                value = pair.first,
+                                onValueChange = { t ->
+                                    dropSegs = dropSegs.toMutableList().apply { this[idx] = (t to this[idx].second) }
+                                },
+                                label = { Text(stringResource(R.string.active_strength_field_reps)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = pair.second,
+                                onValueChange = { t ->
+                                    dropSegs = dropSegs.toMutableList().apply { this[idx] = (this[idx].first to t) }
+                                },
+                                label = { Text(stringResource(R.string.active_strength_field_weight_kg)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = {
+                                val last = dropSegs.lastOrNull() ?: ("10" to "0")
+                                dropSegs = dropSegs.toMutableList().apply { add(last) }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Add step") }
+                        OutlinedButton(
+                            onClick = {
+                                if (dropSegs.size > 2) dropSegs = dropSegs.toMutableList().apply { removeLast() }
+                            },
+                            enabled = dropSegs.size > 2,
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Remove step") }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val first = dropSegs.firstOrNull()
+                            convertNormalRepsText = first?.first ?: (set.reps?.toString() ?: "")
+                            convertNormalWeightText = first?.second ?: (set.weightKg?.toString() ?: "")
+                            showConvertToNormal = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Convert to normal set") }
+                } else {
                     OutlinedTextField(
                         value = if (isGuestLaneActive) guestEditRepsText else ui.editRepsText,
                         onValueChange = {
@@ -974,6 +1078,16 @@ fun ActiveStrengthWorkoutScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
+                val isWireDropSet = set.weightSegments != null && set.weightSegments.size >= 2
+                if (!isGuestLaneActive && !isDropSet && !isWireDropSet) {
+                        OutlinedButton(
+                            onClick = {
+                                vm.convertCurrentSetToDropSet()
+                                showEditSheet = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Convert to drop set") }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedButton(onClick = { showEditSheet = false }, modifier = Modifier.weight(1f)) {
                             Text("Cancel")
@@ -1002,7 +1116,18 @@ fun ActiveStrengthWorkoutScreen(
                                         }
                                     }
                                 } else {
+                                if (isDropSet) {
+                                    val segPayload = dropSegs.mapNotNull { (rT, wT) ->
+                                        val r = rT.trim().toIntOrNull() ?: return@mapNotNull null
+                                        val w = wT.trim().replace(',', '.').toDoubleOrNull() ?: return@mapNotNull null
+                                        StrengthSegmentPayload(r, w)
+                                    }
+                                    if (segPayload.size >= 2) {
+                                        vm.applyCurrentDropSetEdits(segPayload)
+                                    }
+                                } else {
                                     vm.applyCurrentSetEdits()
+                                }
                                 }
                                 showEditSheet = false
                             },
@@ -1010,7 +1135,51 @@ fun ActiveStrengthWorkoutScreen(
                         ) { Text("Save") }
                     }
                 }
+                }
             }
+        if (showConvertToNormal && !isGuestLaneActive) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+                    .align(Alignment.BottomCenter),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Convert to normal set", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = convertNormalRepsText,
+                        onValueChange = { convertNormalRepsText = it },
+                        label = { Text(stringResource(R.string.active_strength_field_reps)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    OutlinedTextField(
+                        value = convertNormalWeightText,
+                        onValueChange = { convertNormalWeightText = it },
+                        label = { Text(stringResource(R.string.active_strength_field_weight_kg)) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { showConvertToNormal = false },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Cancel") }
+                        Button(
+                            onClick = {
+                                val r = convertNormalRepsText.trim().toIntOrNull() ?: 10
+                                val w = convertNormalWeightText.trim().replace(',', '.').toDoubleOrNull() ?: 0.0
+                                vm.convertCurrentSetToNormalSet(r, w)
+                                showConvertToNormal = false
+                                showEditSheet = false
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Convert") }
+                    }
+                }
+            }
+        }
         }
     }
     ui.strengthRoutineOverwritePrompt?.let { prompt ->

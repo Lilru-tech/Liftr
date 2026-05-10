@@ -3,6 +3,11 @@ import Foundation
 import Supabase
 import SwiftUI
 
+struct StrengthWeightSegment: Equatable {
+    let reps: Int
+    let weightKg: Double
+}
+
 struct StrengthProgramItem: Equatable {
     var exerciseId: Int64
     var orderIndex: Int
@@ -39,14 +44,16 @@ struct StrengthProgramSet: Equatable {
     var rpe: Double?
     var restSec: Int?
     var notes: String?
+    var weightSegments: [StrengthWeightSegment]?
 
-    init(setNumber: Int, reps: Int?, weightKg: Double?, rpe: Double?, restSec: Int?, notes: String?) {
+    init(setNumber: Int, reps: Int?, weightKg: Double?, rpe: Double?, restSec: Int?, notes: String?, weightSegments: [StrengthWeightSegment]? = nil) {
         self.setNumber = setNumber
         self.reps = reps
         self.weightKg = weightKg
         self.rpe = rpe
         self.restSec = restSec
         self.notes = notes
+        self.weightSegments = weightSegments
     }
 
     fileprivate init(from s: RPCStrengthParams.StrengthItem.StrengthSet) {
@@ -56,6 +63,11 @@ struct StrengthProgramSet: Equatable {
         rpe = s.rpe
         restSec = s.rest_sec
         notes = s.notes
+        if let ws = s.weight_segments, ws.count >= 2 {
+            weightSegments = ws.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
+        } else {
+            weightSegments = nil
+        }
     }
 }
 
@@ -74,7 +86,8 @@ func strengthRoutineContentFingerprint(from items: [StrengthProgramItem]) -> Str
             let rest = s.restSec.map { String($0) } ?? ""
             let rep = s.reps.map { String($0) } ?? ""
             let n = s.notes ?? ""
-            return "\(s.setNumber)|\(rep)|\(w)|\(r)|\(rest)|\(n)"
+            let seg = (s.weightSegments ?? []).map { "\($0.reps)x\($0.weightKg)" }.joined(separator: "→")
+            return "\(s.setNumber)|\(rep)|\(w)|\(r)|\(rest)|\(n)|\(seg)"
         }
         let cn = item.customName ?? ""
         let note = item.notes ?? ""
@@ -323,7 +336,7 @@ struct StrengthRoutineOverwriteConfirmSheet: View {
 
     private static func buildGroups(from lines: [StrengthRoutineOverwriteDiffLine]) -> [ExerciseDiffGroup] {
         let fieldRank: [String: Int] = [
-            "Reps": 0, "Weight": 1, "RPE": 2, "Rest": 3, "Set notes": 4
+            "Reps": 0, "Weight": 1, "RPE": 2, "Rest": 3, "Drop steps": 4, "Set notes": 5
         ]
         let byExercise = Dictionary(grouping: lines) { $0.exerciseOrderIndex }
         return byExercise.keys.sorted().compactMap { order in
@@ -363,10 +376,11 @@ private struct StrengthRoutineSetWire: Decodable {
     let rpe: Double?
     let rest_sec: Int?
     let notes: String?
+    let weight_segments: [StrengthWeightSegWire]?
 }
 
 private func strengthRoutineFullDetailSelect() -> String {
-    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes))"
+    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
 }
 
 private func programItemsFromRoutineRow(_ row: StrengthRoutineFullRow) -> [StrengthProgramItem] {
@@ -374,13 +388,18 @@ private func programItemsFromRoutineRow(_ row: StrengthRoutineFullRow) -> [Stren
     return exs.map { ex in
         let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
         let mapped: [StrengthProgramSet] = setsSorted.map { s in
-            StrengthProgramSet(
+            let segs: [StrengthWeightSegment]? = {
+                guard let arr = s.weight_segments, arr.count >= 2 else { return nil }
+                return arr.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
+            }()
+            return StrengthProgramSet(
                 setNumber: s.set_number,
                 reps: s.reps,
                 weightKg: s.weight_kg,
                 rpe: s.rpe,
                 restSec: s.rest_sec,
-                notes: s.notes
+                notes: s.notes,
+                weightSegments: segs
             )
         }
         return StrengthProgramItem(
@@ -500,6 +519,20 @@ private func buildDiffLines(
                     newValue: pn.isEmpty ? "—" : pn
                 ))
             }
+            let psSeg = (ps.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
+            let rsSeg = (rs.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
+            if psSeg != rsSeg {
+                lines.append(StrengthRoutineOverwriteDiffLine(
+                    id: "\(baseId)-drop",
+                    exerciseContext: setLabel,
+                    exerciseTitle: exLabel,
+                    setNumber: ps.setNumber,
+                    exerciseOrderIndex: pEx.orderIndex,
+                    fieldTitle: "Drop steps",
+                    oldValue: rsSeg.isEmpty ? "—" : rsSeg,
+                    newValue: psSeg.isEmpty ? "—" : psSeg
+                ))
+            }
         }
     }
     return lines
@@ -606,6 +639,7 @@ func applyStrengthRoutinePrescriptionUpdate(
         let rpe: Double?
         let rest_sec: Int?
         let notes: String?
+        let weight_segments: [StrengthWeightSegWire]?
     }
 
     for item in strengthItems.sorted(by: { $0.order_index < $1.order_index }) {
@@ -635,14 +669,19 @@ func applyStrengthRoutinePrescriptionUpdate(
         }
 
         let setRows: [StrengthRoutineSetRowInsert] = item.sets.map { s in
-            StrengthRoutineSetRowInsert(
+            let ws: [StrengthWeightSegWire]? = {
+                guard let segs = s.weight_segments, segs.count >= 2 else { return nil }
+                return segs.map { StrengthWeightSegWire(reps: $0.reps, weight_kg: $0.weight_kg) }
+            }()
+            return StrengthRoutineSetRowInsert(
                 routine_exercise_id: exerciseRowId,
                 set_number: s.set_number,
                 reps: s.reps,
                 weight_kg: s.weight_kg,
                 rpe: s.rpe,
                 rest_sec: s.rest_sec,
-                notes: s.notes
+                notes: s.notes,
+                weight_segments: ws
             )
         }
         if !setRows.isEmpty {

@@ -49,6 +49,12 @@ fun StrengthExerciseDraftsEditorBlock(
     onUpdateSetWeight: (exerciseDraftId: String, setDraftId: String, weightText: String) -> Unit,
     onUpdateSetRpe: (exerciseDraftId: String, setDraftId: String, rpeText: String) -> Unit,
     onUpdateSetRestSec: (exerciseDraftId: String, setDraftId: String, restSecText: String) -> Unit,
+    onEnableDropSet: (exerciseDraftId: String, setDraftId: String) -> Unit,
+    onClearDropSet: (exerciseDraftId: String, setDraftId: String) -> Unit,
+    onAddDropSegment: (exerciseDraftId: String, setDraftId: String) -> Unit,
+    onRemoveLastDropSegment: (exerciseDraftId: String, setDraftId: String) -> Unit,
+    onUpdateDropSegmentReps: (exerciseDraftId: String, setDraftId: String, segmentDraftId: String, repsText: String) -> Unit,
+    onUpdateDropSegmentWeight: (exerciseDraftId: String, setDraftId: String, segmentDraftId: String, weightText: String) -> Unit,
     onAddSet: (exerciseDraftId: String) -> Unit,
     onMoveExerciseUp: (exerciseDraftId: String) -> Unit,
     onMoveExerciseDown: (exerciseDraftId: String) -> Unit,
@@ -196,41 +202,115 @@ fun StrengthExerciseDraftsEditorBlock(
                             }
                         }
                     }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = set.repsText,
-                            onValueChange = { onUpdateSetReps(ex.id, set.id, it) },
-                            label = { Text(stringResource(R.string.add_reps_field_label)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = set.weightText,
-                            onValueChange = { onUpdateSetWeight(ex.id, set.id, it) },
-                            label = { Text(stringResource(R.string.add_kg_field_label)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = set.rpeText,
-                            onValueChange = { onUpdateSetRpe(ex.id, set.id, it) },
-                            label = { Text(stringResource(R.string.add_rpe_field_label)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = set.restSecText,
-                            onValueChange = { onUpdateSetRestSec(ex.id, set.id, it) },
-                            label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
+                    if (set.segments.size >= 2) {
+                        set.segments.forEachIndexed { segIdx, seg ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stringResource(R.string.add_strength_drop_step_format, segIdx + 1),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                )
+                                OutlinedTextField(
+                                    value = seg.repsText,
+                                    onValueChange = { onUpdateDropSegmentReps(ex.id, set.id, seg.id, it) },
+                                    label = { Text(stringResource(R.string.add_reps_field_label)) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = seg.weightText,
+                                    onValueChange = { onUpdateDropSegmentWeight(ex.id, set.id, seg.id, it) },
+                                    label = { Text(stringResource(R.string.add_kg_field_label)) },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TextButton(onClick = { onAddDropSegment(ex.id, set.id) }) {
+                                Text(stringResource(R.string.add_strength_drop_add_step))
+                            }
+                            TextButton(
+                                onClick = { onRemoveLastDropSegment(ex.id, set.id) },
+                                enabled = set.segments.size > 2
+                            ) {
+                                Text(stringResource(R.string.add_strength_drop_remove_step))
+                            }
+                            TextButton(onClick = { onClearDropSet(ex.id, set.id) }) {
+                                Text(stringResource(R.string.add_strength_drop_clear))
+                            }
+                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = set.rpeText,
+                                onValueChange = { onUpdateSetRpe(ex.id, set.id, it) },
+                                label = { Text(stringResource(R.string.add_rpe_field_label)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = set.restSecText,
+                                onValueChange = { onUpdateSetRestSec(ex.id, set.id, it) },
+                                label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedTextField(
+                                value = set.repsText,
+                                onValueChange = { onUpdateSetReps(ex.id, set.id, it) },
+                                label = { Text(stringResource(R.string.add_reps_field_label)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = set.weightText,
+                                onValueChange = { onUpdateSetWeight(ex.id, set.id, it) },
+                                label = { Text(stringResource(R.string.add_kg_field_label)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = set.rpeText,
+                                onValueChange = { onUpdateSetRpe(ex.id, set.id, it) },
+                                label = { Text(stringResource(R.string.add_rpe_field_label)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = set.restSecText,
+                                onValueChange = { onUpdateSetRestSec(ex.id, set.id, it) },
+                                label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        TextButton(onClick = { onEnableDropSet(ex.id, set.id) }) {
+                            Text(stringResource(R.string.add_strength_drop_set))
+                        }
                     }
                 }
                 Column(Modifier.fillMaxWidth()) {

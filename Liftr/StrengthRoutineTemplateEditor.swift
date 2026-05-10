@@ -30,10 +30,11 @@ struct StrengthTemplateSetWire: Decodable {
     let rpe: Double?
     let rest_sec: Int?
     let notes: String?
+    let weight_segments: [StrengthWeightSegWire]?
 }
 
 func strengthTemplateDetailSelect() -> String {
-    "id,name,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes))"
+    "id,name,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
 }
 
 func editableExercisesFromStrengthTemplateDetail(
@@ -44,13 +45,15 @@ func editableExercisesFromStrengthTemplateDetail(
     return exs.map { ex in
         let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
         let mappedSets: [EditableSet] = setsSorted.map { s in
-            EditableSet(
+            let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
+            return EditableSet(
                 setNumber: s.set_number,
                 reps: s.reps,
                 weightKg: s.weight_kg.map { String($0) } ?? "",
                 rpe: s.rpe.map { String($0) } ?? "",
                 restSec: s.rest_sec,
-                notes: s.notes ?? ""
+                notes: s.notes ?? "",
+                segments: segDraft
             )
         }
         let fallbackSets = mappedSets.isEmpty ? [EditableSet(setNumber: 1)] : mappedSets
@@ -213,6 +216,7 @@ struct StrengthRoutineExercisesEditorBlock: View {
                     weightKg: weightBinding(i, s),
                     rpe: rpeBinding(i, s),
                     restSec: restBinding(i, s),
+                    segments: segmentsBinding(i, s),
                     showDelete: exercises[i].sets.count > 1,
                     onDelete: { removeSet(exerciseIndex: i, setIndex: s) }
                 )
@@ -382,6 +386,18 @@ struct StrengthRoutineExercisesEditorBlock: View {
                 replaceExercise(i) { ex in
                     guard ex.sets.indices.contains(s) else { return }
                     ex.sets[s].restSec = newVal
+                }
+            }
+        )
+    }
+
+    private func segmentsBinding(_ i: Int, _ s: Int) -> Binding<[StrengthEditorSegment]> {
+        Binding(
+            get: { exercises[safe: i]?.sets[safe: s]?.segments ?? [] },
+            set: { newVal in
+                replaceExercise(i) { ex in
+                    guard ex.sets.indices.contains(s) else { return }
+                    ex.sets[s].segments = newVal
                 }
             }
         )

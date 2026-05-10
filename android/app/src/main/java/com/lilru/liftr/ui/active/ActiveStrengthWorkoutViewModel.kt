@@ -34,9 +34,15 @@ import com.lilru.liftr.ui.add.StrengthProgramItem
 import com.lilru.liftr.ui.add.StrengthProgramSet
 import com.lilru.liftr.ui.add.StrengthRoutineOverwriteCandidate
 import com.lilru.liftr.ui.add.StrengthRoutineOverwritePrompt
+import com.lilru.liftr.ui.add.StrengthSegmentPayload
 import com.lilru.liftr.ui.add.StrengthSetDraft
+import com.lilru.liftr.ui.add.StrengthSegmentDraft
 import com.lilru.liftr.ui.add.applyStrengthRoutinePrescriptionUpdate
 import com.lilru.liftr.ui.add.fetchStrengthRoutineOverwriteCandidate
+import com.lilru.liftr.ui.add.weightSegmentsToJsonArray
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 data class ActiveStrengthSetLine(
     val setId: Int,
@@ -45,7 +51,9 @@ data class ActiveStrengthSetLine(
     val reps: Int?,
     val weightKg: Double?,
     val rpe: Double?,
-    val restSec: Int?
+    val restSec: Int?,
+    val segmentsInRow: Int = 1,
+    val weightSegments: JsonArray? = null
 )
 
 data class ActiveStrengthExerciseLine(
@@ -56,18 +64,22 @@ data class ActiveStrengthExerciseLine(
 
 private data class CompletedSetLine(
     val workoutExerciseId: Int,
+    val configId: Int,
+    val segmentsInRow: Int,
     val reps: Int?,
     val weightKg: Double?,
     val rpe: Double?,
-    val restSec: Int?
+    val restSec: Int?,
+    val weightSegments: JsonArray? = null
 )
 
-private data class CollapsedPerformedBlock(
+private data class CollapsedPersistRow(
     val count: Int,
     val reps: Int?,
     val weightKg: Double?,
     val rpe: Double?,
-    val restSec: Int?
+    val restSec: Int?,
+    val weightSegments: JsonArray? = null
 )
 
 data class ActiveStrengthUiState(
@@ -217,9 +229,10 @@ class ActiveStrengthWorkoutViewModel(
 
                 val sRes = supabase
                     .from(BackendContracts.Tables.EXERCISE_SETS)
-                    .select(columns = Columns.raw("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")) {
+                    .select(columns = Columns.raw("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")) {
                         filter { isIn("workout_exercise_id", weIds) }
                         order("set_number", Order.ASCENDING)
+                        order("id", Order.ASCENDING)
                     }
                 val setRows = decodeFlexibleList<SetWire>(sRes.data)
                 val byWe = setRows.groupBy { it.workoutExerciseId }
@@ -356,20 +369,26 @@ class ActiveStrengthWorkoutViewModel(
 
     private fun expandSetsForActiveUi(rows: List<SetWire>): List<ActiveStrengthSetLine> {
         if (rows.isEmpty()) return emptyList()
-        val sortedRows = rows.sortedBy { it.id }
+        val sortedRows = rows.sortedWith(compareBy<SetWire> { it.setNumber }.thenBy { it.id })
         val expanded = mutableListOf<ActiveStrengthSetLine>()
         sortedRows.forEach { row ->
-            val count = row.setNumber.coerceAtLeast(0)
-            repeat(count) {
+            val k = row.weightSegments?.takeIf { it.size >= 2 }?.size ?: 1
+            val macro = row.setNumber.coerceAtLeast(0)
+            repeat(macro) { repIdx ->
+                val firstSeg = row.weightSegments?.firstOrNull()?.jsonObject
+                val r0 = firstSeg?.get("reps")?.jsonPrimitive?.content?.toIntOrNull()
+                val w0 = firstSeg?.get("weight_kg")?.jsonPrimitive?.content?.toDoubleOrNull()
                 val sequentialNumber = expanded.size + 1
                 expanded += ActiveStrengthSetLine(
-                    setId = row.id * 1000 + sequentialNumber,
+                    setId = row.id * 100000 + repIdx + 1,
                     configId = row.id,
                     setNumber = sequentialNumber,
-                    reps = row.reps,
-                    weightKg = row.weightKg,
+                    reps = r0 ?: row.reps,
+                    weightKg = w0 ?: row.weightKg,
                     rpe = row.rpe,
-                    restSec = row.restSec
+                    restSec = row.restSec,
+                    segmentsInRow = k,
+                    weightSegments = row.weightSegments
                 )
             }
         }
@@ -418,6 +437,102 @@ class ActiveStrengthWorkoutViewModel(
                 completedEntirely = false
             )
         )
+    }
+
+    fun convertCurrentSetToDropSet() {
+        val s = _ui.value
+        if (s.loading || s.finishing || s.isResting) return
+        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
+        val cur = ex.sets.getOrNull(setIndex) ?: return
+        if (cur.weightSegments != null && cur.weightSegments.size >= 2) return
+        val cfgId = cur.configId
+        val r0 = cur.reps ?: 10
+        val w0 = cur.weightKg ?: 0.0
+        val rest = cur.restSec
+        val rpe = cur.rpe
+
+        fun transformForConfig(sets: List<ActiveStrengthSetLine>): List<ActiveStrengthSetLine> {
+            val k = 2
+            val ws = weightSegmentsToJsonArray(
+                listOf(
+                    StrengthSegmentPayload(r0, w0),
+                    StrengthSegmentPayload(r0, 0.0)
+                )
+            )
+            val out = sets.map { line ->
+                if (line.configId != cfgId) line
+                else line.copy(
+                    reps = r0,
+                    weightKg = w0,
+                    rpe = rpe,
+                    restSec = rest,
+                    segmentsInRow = k,
+                    weightSegments = ws
+                )
+            }
+            return renumberExpandedSets(out)
+        }
+
+        val nextSets = transformForConfig(ex.sets)
+        val nextEx = ex.copy(sets = nextSets)
+        val nextExercises = s.exercises.mapIndexed { idx, line ->
+            if (idx == s.currentExerciseIndex) nextEx else line
+        }
+        _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
+    }
+
+    fun applyCurrentDropSetEdits(segments: List<StrengthSegmentPayload>) {
+        val s = _ui.value
+        if (s.loading || s.finishing) return
+        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
+        val cur = ex.sets.getOrNull(setIndex) ?: return
+        if (segments.size < 2) return
+
+        val cfgId = cur.configId
+        val ws = weightSegmentsToJsonArray(segments)
+        val r0 = segments.first().reps
+        val w0 = segments.first().weightKg
+
+        val nextSets = ex.sets.map { line ->
+            if (line.configId != cfgId) line
+            else line.copy(
+                reps = r0,
+                weightKg = w0,
+                segmentsInRow = segments.size,
+                weightSegments = ws
+            )
+        }
+        val nextEx = ex.copy(sets = renumberExpandedSets(nextSets))
+        val nextExercises = s.exercises.mapIndexed { idx, line ->
+            if (idx == s.currentExerciseIndex) nextEx else line
+        }
+        _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
+    }
+
+    fun convertCurrentSetToNormalSet(reps: Int, weightKg: Double) {
+        val s = _ui.value
+        if (s.loading || s.finishing) return
+        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
+        val cur = ex.sets.getOrNull(setIndex) ?: return
+        val cfgId = cur.configId
+
+        val nextSets = ex.sets.map { line ->
+            if (line.configId != cfgId) line
+            else line.copy(
+                reps = reps,
+                weightKg = weightKg,
+                segmentsInRow = 1,
+                weightSegments = null
+            )
+        }
+        val nextEx = ex.copy(sets = renumberExpandedSets(nextSets))
+        val nextExercises = s.exercises.mapIndexed { idx, line ->
+            if (idx == s.currentExerciseIndex) nextEx else line
+        }
+        _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
     }
 
     fun addSetToCurrentExercise() {
@@ -486,10 +601,13 @@ class ActiveStrengthWorkoutViewModel(
         completedSetLines.add(
             CompletedSetLine(
                 workoutExerciseId = ex.workoutExerciseId,
+                configId = set.configId,
+                segmentsInRow = set.segmentsInRow,
                 reps = reps,
                 weightKg = weightKg,
                 rpe = rpe,
-                restSec = set.restSec
+                restSec = set.restSec,
+                weightSegments = set.weightSegments
             )
         )
         val nextSetIndex = (setIndex + 1).coerceAtMost(ex.sets.size)
@@ -719,8 +837,8 @@ class ActiveStrengthWorkoutViewModel(
                     supabase.from(BackendContracts.Tables.EXERCISE_SETS).delete {
                         filter { eq("workout_exercise_id", weId) }
                     }
-                    val collapsedBlocks = collapsePerformedLines(lines)
-                    collapsedBlocks.forEach { block ->
+                    val persistRows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
+                    persistRows.forEach { block ->
                         val payload = buildJsonObject {
                             put("workout_exercise_id", weId)
                             put("set_number", block.count)
@@ -728,6 +846,7 @@ class ActiveStrengthWorkoutViewModel(
                             if (block.weightKg != null) put("weight_kg", block.weightKg)
                             if (block.rpe != null) put("rpe", block.rpe)
                             if (block.restSec != null) put("rest_sec", block.restSec)
+                            block.weightSegments?.let { put("weight_segments", it) }
                         }
                         supabase.from(BackendContracts.Tables.EXERCISE_SETS).insert(payload) { }
                     }
@@ -786,14 +905,22 @@ class ActiveStrengthWorkoutViewModel(
         for (we in hostWeRows.sortedBy { it.orderIndex }) {
             val lines = completedSetLines.filter { it.workoutExerciseId == we.id }
             if (lines.isEmpty()) return null
-            val sets = lines.mapIndexed { idx, l ->
+            val rows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
+            val sets = rows.mapIndexed { idx, row ->
+                val segList = row.weightSegments?.takeIf { it.size >= 2 }?.mapNotNull { el ->
+                    val o = el.jsonObject
+                    val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                    val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+                    StrengthSegmentPayload(r, w)
+                }?.takeIf { it.size >= 2 }
                 StrengthProgramSet(
                     setNumber = idx + 1,
-                    reps = l.reps,
-                    weightKg = l.weightKg,
-                    rpe = l.rpe,
-                    restSec = l.restSec,
-                    notes = null
+                    reps = row.reps,
+                    weightKg = row.weightKg,
+                    rpe = row.rpe,
+                    restSec = row.restSec,
+                    notes = null,
+                    weightSegments = segList
                 )
             }
             items.add(
@@ -813,24 +940,44 @@ class ActiveStrengthWorkoutViewModel(
         return hostWeRows.sortedBy { it.orderIndex }.map { we ->
             val lines = completedSetLines.filter { it.workoutExerciseId == we.id }
             val custom = we.customName?.trim().orEmpty()
+            val rows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
             StrengthExerciseDraft(
                 exerciseId = we.exerciseId,
                 customName = custom,
                 exerciseName = "",
                 notes = we.notes.orEmpty(),
-                sets = lines.mapIndexed { i, l ->
-                    StrengthSetDraft(
-                        setNumber = i + 1,
-                        repsText = l.reps?.toString() ?: "",
-                        weightText = formatDoubleField(l.weightKg),
-                        rpeText = l.rpe?.let { r ->
-                            if (r == r.toInt().toDouble()) r.toInt().toString() else String.format(Locale.US, "%.1f", r)
-                        } ?: "",
-                        restSecText = l.restSec?.toString() ?: ""
-                    )
-                }
+                sets = rows.map { row -> strengthSetDraftFromPersistRow(row) }
             )
         }
+    }
+
+    private fun strengthSetDraftFromPersistRow(row: CollapsedPersistRow): StrengthSetDraft {
+        val arr = row.weightSegments
+        val segs = if (arr == null || arr.size < 2) {
+            emptyList()
+        } else {
+            arr.mapNotNull { el ->
+                val o = el.jsonObject
+                val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+                StrengthSegmentDraft(
+                    repsText = r.toString(),
+                    weightText = formatDoubleField(w)
+                )
+            }.takeIf { it.size == arr.size && it.size >= 2 } ?: emptyList()
+        }
+        val r0 = segs.firstOrNull()?.repsText ?: row.reps?.toString() ?: ""
+        val w0 = segs.firstOrNull()?.weightText ?: formatDoubleField(row.weightKg)
+        return StrengthSetDraft(
+            setNumber = row.count.coerceIn(1, 99),
+            repsText = r0,
+            weightText = w0,
+            rpeText = row.rpe?.let { r ->
+                if (r == r.toInt().toDouble()) r.toInt().toString() else String.format(Locale.US, "%.1f", r)
+            } ?: "",
+            restSecText = row.restSec?.toString() ?: "",
+            segments = segs
+        )
     }
 
     private suspend fun checkElborblaCelebration(): Boolean {
@@ -847,38 +994,102 @@ class ActiveStrengthWorkoutViewModel(
         }.getOrDefault(false)
     }
 
-    private fun collapsePerformedLines(lines: List<CompletedSetLine>): List<CollapsedPerformedBlock> {
+    private data class LegacyLineKey(val reps: Int?, val weightKg: Double?, val rpe: Double?, val restSec: Int?)
+    private data class SegmentLineKey(
+        val reps: Int?,
+        val weightKg: Double?,
+        val rpe: Double?,
+        val restSec: Int?,
+        val weightSegmentsRaw: String?
+    )
+
+    private fun chunkCompletedLines(lines: List<CompletedSetLine>): List<List<CompletedSetLine>> {
         if (lines.isEmpty()) return emptyList()
-        val collapsed = mutableListOf<CollapsedPerformedBlock>()
-        var current: CompletedSetLine? = null
+        val out = mutableListOf<MutableList<CompletedSetLine>>()
+        var cur = mutableListOf(lines.first())
+        for (i in 1 until lines.size) {
+            val line = lines[i]
+            if (line.configId == cur.first().configId) {
+                cur += line
+            } else {
+                out += cur
+                cur = mutableListOf(line)
+            }
+        }
+        out += cur
+        return out
+    }
+
+    private fun collapseLegacyChunk(chunk: List<CompletedSetLine>): List<CollapsedPersistRow> {
+        if (chunk.isEmpty()) return emptyList()
+        val collapsed = mutableListOf<CollapsedPersistRow>()
+        var currentKey: LegacyLineKey? = null
         var count = 0
-        lines.forEach { line ->
-            if (current != null && current == line) {
+        chunk.forEach { line ->
+            val key = LegacyLineKey(line.reps, line.weightKg, line.rpe, line.restSec)
+            if (currentKey != null && currentKey == key) {
                 count += 1
             } else {
-                current?.let { prev ->
-                    collapsed += CollapsedPerformedBlock(
-                        count = count,
-                        reps = prev.reps,
-                        weightKg = prev.weightKg,
-                        rpe = prev.rpe,
-                        restSec = prev.restSec
-                    )
+                if (currentKey != null) {
+                    collapsed += CollapsedPersistRow(count, currentKey!!.reps, currentKey!!.weightKg, currentKey!!.rpe, currentKey!!.restSec, null)
                 }
-                current = line
+                currentKey = key
                 count = 1
             }
         }
-        current?.let { prev ->
-            collapsed += CollapsedPerformedBlock(
-                count = count,
-                reps = prev.reps,
-                weightKg = prev.weightKg,
-                rpe = prev.rpe,
-                restSec = prev.restSec
-            )
+        if (currentKey != null) {
+            collapsed += CollapsedPersistRow(count, currentKey!!.reps, currentKey!!.weightKg, currentKey!!.rpe, currentKey!!.restSec, null)
         }
         return collapsed
+    }
+
+    private fun collapseSegmentChunk(chunk: List<CompletedSetLine>): List<CollapsedPersistRow> {
+        if (chunk.isEmpty()) return emptyList()
+        val collapsed = mutableListOf<CollapsedPersistRow>()
+        var currentKey: SegmentLineKey? = null
+        var currentSegs: JsonArray? = null
+        var count = 0
+
+        fun flush() {
+            val k = currentKey ?: return
+            collapsed += CollapsedPersistRow(
+                count = count,
+                reps = k.reps,
+                weightKg = k.weightKg,
+                rpe = k.rpe,
+                restSec = k.restSec,
+                weightSegments = currentSegs
+            )
+        }
+
+        chunk.forEach { line ->
+            val key = SegmentLineKey(
+                line.reps,
+                line.weightKg,
+                line.rpe,
+                line.restSec,
+                line.weightSegments?.toString()
+            )
+            if (currentKey != null && currentKey == key) {
+                count += 1
+            } else {
+                if (currentKey != null) flush()
+                currentKey = key
+                currentSegs = line.weightSegments
+                count = 1
+            }
+        }
+        if (currentKey != null) flush()
+        return collapsed
+    }
+
+    private fun chunkToPersistRows(chunk: List<CompletedSetLine>): List<CollapsedPersistRow> {
+        if (chunk.isEmpty()) return emptyList()
+        return if (chunk.first().segmentsInRow <= 1) {
+            collapseLegacyChunk(chunk)
+        } else {
+            collapseSegmentChunk(chunk)
+        }
     }
 
     fun dismissElborblaCelebration(onDone: () -> Unit) {
@@ -943,7 +1154,8 @@ private data class SetWire(
     val reps: Int? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
-    @SerialName("rest_sec") val restSec: Int? = null
+    @SerialName("rest_sec") val restSec: Int? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
 )
 
 @Serializable

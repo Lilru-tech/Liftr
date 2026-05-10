@@ -41,8 +41,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.SegmentedButton
@@ -55,7 +53,6 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
@@ -96,6 +93,7 @@ import com.lilru.liftr.navigation.AppNavEvents
 import com.lilru.liftr.navigation.MainOverlay
 import com.lilru.liftr.ui.add.duplicate.AddWorkoutDuplicateStore
 import com.lilru.liftr.ui.chat.RoutineShareSnapshot
+import com.lilru.liftr.ui.chat.SharedRoutineFromChatScreen
 import com.lilru.liftr.ui.chat.ShareRoutineToChatSheetContent
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.add.recommendation.CardioRecommendationResult
@@ -704,6 +702,12 @@ fun AddWorkoutTabScreen(
                     onUpdateSetWeight = { e, s, v -> vm.updateSetWeight(e, s, v) },
                     onUpdateSetRpe = { e, s, v -> vm.updateSetRpe(e, s, v) },
                     onUpdateSetRestSec = { e, s, v -> vm.updateSetRestSec(e, s, v) },
+                    onEnableDropSet = { e, s -> vm.enableDropSetForSet(e, s) },
+                    onClearDropSet = { e, s -> vm.clearDropSetForSet(e, s) },
+                    onAddDropSegment = { e, s -> vm.addDropSegmentStep(e, s) },
+                    onRemoveLastDropSegment = { e, s -> vm.removeLastDropSegment(e, s) },
+                    onUpdateDropSegmentReps = { e, s, seg, v -> vm.updateDropSegmentReps(e, s, seg, v) },
+                    onUpdateDropSegmentWeight = { e, s, seg, v -> vm.updateDropSegmentWeight(e, s, seg, v) },
                     onAddSet = { vm.addSet(it) },
                     onMoveExerciseUp = { vm.moveExerciseUp(it) },
                     onMoveExerciseDown = { vm.moveExerciseDown(it) },
@@ -2073,12 +2077,22 @@ private fun ExerciseLite.pickerSubtitle(): String =
         .filter { it.isNotEmpty() && !it.equals("strength", ignoreCase = true) }
         .joinToString(" · ")
 
+private fun draftSetHasRequiredRepsForSave(set: StrengthSetDraft): Boolean {
+    return if (set.segments.size >= 2) {
+        set.segments.all { seg ->
+            seg.repsText.trim().toIntOrNull()?.let { it > 0 } == true
+        }
+    } else {
+        set.repsText.trim().toIntOrNull()?.let { it > 0 } == true
+    }
+}
+
 private fun strengthExercisesFormValidForSave(exercises: List<StrengthExerciseDraft>): Boolean {
     if (exercises.isEmpty()) return false
     for (e in exercises) {
         if (e.exerciseId == null) return false
-        val hasReps = e.sets.any { it.repsText.trim().toIntOrNull() != null }
-        if (!hasReps) return false
+        val hasSavableSet = e.sets.any { draftSetHasRequiredRepsForSave(it) && draftSetToStrengthPayload(it) != null }
+        if (!hasSavableSet) return false
     }
     return true
 }

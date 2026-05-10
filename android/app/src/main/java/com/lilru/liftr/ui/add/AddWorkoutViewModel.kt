@@ -195,7 +195,8 @@ private data class RoutineSetRow(
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
     @SerialName("rest_sec") val restSec: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
 )
 
 @Serializable
@@ -232,7 +233,7 @@ private data class HyroxRoutineHeaderDb(
 private data class ProfileUsernameRow(val username: String, val avatarUrl: String?)
 
 private const val STRENGTH_DETAIL_SHARE_SELECT =
-    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes))"
+    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
 
 private const val HYROX_DETAIL_SHARE_SELECT =
     "id,name,updated_at,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
@@ -245,7 +246,8 @@ private data class ShareStrengthSet(
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
     @SerialName("rest_sec") val restSec: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
 )
 
 @Serializable
@@ -264,6 +266,12 @@ private data class ShareStrengthDetail(
     @SerialName("strength_routine_exercises") val strengthRoutineExercises: List<ShareStrengthEx>? = null
 )
 
+data class StrengthSegmentDraft(
+    val id: String = UUID.randomUUID().toString(),
+    val repsText: String = "8",
+    val weightText: String = ""
+)
+
 data class StrengthSetDraft(
     val id: String = UUID.randomUUID().toString(),
     /** Veces que cuenta esta fila al persistir / en UI activa (1…99); el ordinal de fila es el índice en la lista, no este valor. */
@@ -272,8 +280,23 @@ data class StrengthSetDraft(
     val weightText: String = "",
     val rpeText: String = "",
     val restSecText: String = "",
-    val notes: String = ""
+    val notes: String = "",
+    val segments: List<StrengthSegmentDraft> = emptyList()
 )
+
+internal fun parseWeightSegmentsColumn(arr: JsonArray?): List<StrengthSegmentDraft> {
+    if (arr == null || arr.size < 2) return emptyList()
+    val parsed = arr.mapNotNull { el ->
+        val o = el.jsonObject
+        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+        StrengthSegmentDraft(
+            repsText = r.toString(),
+            weightText = if (w == kotlin.math.floor(w)) w.toInt().toString() else String.format(java.util.Locale.US, "%.1f", w)
+        )
+    }
+    return if (parsed.size == arr.size && parsed.size >= 2) parsed else emptyList()
+}
 
 data class StrengthExerciseDraft(
     val id: String = UUID.randomUUID().toString(),
@@ -632,6 +655,175 @@ class AddWorkoutViewModel(
                 ex.copy(
                     sets = ex.sets.map { set ->
                         if (set.id == setDraftId) set.copy(notes = notes) else set
+                    }
+                )
+            }
+        }
+    }
+
+    private fun patchSetInExerciseList(
+        exercises: List<StrengthExerciseDraft>,
+        exerciseDraftId: String,
+        setDraftId: String,
+        patch: (StrengthSetDraft) -> StrengthSetDraft
+    ): List<StrengthExerciseDraft> =
+        exercises.map { ex ->
+            if (ex.id != exerciseDraftId) ex
+            else ex.copy(sets = ex.sets.map { set -> if (set.id == setDraftId) patch(set) else set })
+        }
+
+    fun enableDropSetForSet(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size >= 2) set
+                else set.copy(
+                    segments = listOf(
+                        StrengthSegmentDraft(repsText = set.repsText, weightText = set.weightText),
+                        StrengthSegmentDraft()
+                    )
+                )
+            }
+        }
+    }
+
+    fun clearDropSetForSet(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else {
+                    val first = set.segments.first()
+                    set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                }
+            }
+        }
+    }
+
+    fun addDropSegmentStep(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else set.copy(segments = set.segments + StrengthSegmentDraft())
+            }
+        }
+    }
+
+    fun removeLastDropSegment(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                when {
+                    set.segments.size < 2 -> set
+                    set.segments.size == 2 -> {
+                        val first = set.segments.first()
+                        set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                    }
+                    else -> set.copy(segments = set.segments.dropLast(1))
+                }
+            }
+        }
+    }
+
+    fun updateDropSegmentReps(exerciseDraftId: String, setDraftId: String, segmentDraftId: String, repsText: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(repsText = repsText)
+                    }
+                )
+            }
+        }
+    }
+
+    fun updateDropSegmentWeight(exerciseDraftId: String, setDraftId: String, segmentDraftId: String, weightText: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(weightText = weightText)
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditEnableDropSet(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size >= 2) set
+                else set.copy(
+                    segments = listOf(
+                        StrengthSegmentDraft(repsText = set.repsText, weightText = set.weightText),
+                        StrengthSegmentDraft()
+                    )
+                )
+            }
+        }
+    }
+
+    fun templateEditClearDropSet(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else {
+                    val first = set.segments.first()
+                    set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                }
+            }
+        }
+    }
+
+    fun templateEditAddDropSegment(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else set.copy(segments = set.segments + StrengthSegmentDraft())
+            }
+        }
+    }
+
+    fun templateEditRemoveLastDropSegment(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                when {
+                    set.segments.size < 2 -> set
+                    set.segments.size == 2 -> {
+                        val first = set.segments.first()
+                        set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                    }
+                    else -> set.copy(segments = set.segments.dropLast(1))
+                }
+            }
+        }
+    }
+
+    fun templateEditUpdateDropSegmentReps(
+        exerciseDraftId: String,
+        setDraftId: String,
+        segmentDraftId: String,
+        repsText: String
+    ) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(repsText = repsText)
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateDropSegmentWeight(
+        exerciseDraftId: String,
+        setDraftId: String,
+        segmentDraftId: String,
+        weightText: String
+    ) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(weightText = weightText)
                     }
                 )
             }
@@ -1126,7 +1318,7 @@ class AddWorkoutViewModel(
             emptyList()
         } else {
             val setRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_SETS)
-                .select(columns = Columns.raw("routine_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, notes")) {
+                .select(columns = Columns.raw("routine_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, notes, weight_segments")) {
                     filter { isIn("routine_exercise_id", exIds) }
                     order("set_number", Order.ASCENDING)
                 }
@@ -1143,15 +1335,19 @@ class AddWorkoutViewModel(
                 customName = ex.customName.orEmpty(),
                 notes = ex.notes.orEmpty(),
                 sets = sets.map { row ->
+                    val segs = parseWeightSegmentsColumn(row.weightSegments)
+                    val rep0 = segs.firstOrNull()?.repsText ?: row.reps?.toString() ?: ""
+                    val w0 = segs.firstOrNull()?.weightText ?: row.weightKg?.let { d ->
+                        if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
+                    } ?: ""
                     StrengthSetDraft(
                         setNumber = row.setNumber.coerceIn(1, 99),
-                        repsText = row.reps?.toString() ?: "",
-                        weightText = row.weightKg?.let { d ->
-                            if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
-                        } ?: "",
+                        repsText = rep0,
+                        weightText = w0,
                         rpeText = row.rpe?.toString() ?: "",
                         restSecText = row.restSec?.toString() ?: "",
-                        notes = row.notes.orEmpty()
+                        notes = row.notes.orEmpty(),
+                        segments = segs
                     )
                 }
             )
@@ -1211,23 +1407,19 @@ class AddWorkoutViewModel(
         val insertedRows = decodeFlexibleList<RoutineExerciseRow>(insertedExRes.data)
         insertedRows.forEachIndexed { index, row ->
             val src = selected.getOrNull(index) ?: return@forEachIndexed
-            src.sets.forEachIndexed { setIndex, set ->
-                val reps = set.repsText.trim().toIntOrNull()
-                val weight = set.weightText.trim().replace(",", ".").toDoubleOrNull()
-                val rpe = set.rpeText.trim().replace(",", ".").toDoubleOrNull()
-                val rest = set.restSecText.trim().toIntOrNull()
-                val n = set.notes.trim()
-                if ((reps == null || reps <= 0) && weight == null && rpe == null && rest == null && n.isBlank()) {
-                    return@forEachIndexed
-                }
+            src.sets.forEachIndexed { _, set ->
+                val p = draftSetToStrengthPayload(set) ?: return@forEachIndexed
                 val setPayload = buildJsonObject {
                     put("routine_exercise_id", row.id)
-                    put("set_number", set.setNumber.coerceIn(1, 99))
-                    if (reps != null && reps > 0) put("reps", reps)
-                    if (weight != null) put("weight_kg", weight)
-                    if (rpe != null) put("rpe", rpe)
-                    if (rest != null) put("rest_sec", rest)
-                    if (n.isNotBlank()) put("notes", n)
+                    put("set_number", p.setNumber.coerceIn(1, 99))
+                    if (p.reps != null) put("reps", p.reps)
+                    if (p.weightKg != null) put("weight_kg", p.weightKg)
+                    if (p.rpe != null) put("rpe", p.rpe)
+                    if (p.restSec != null) put("rest_sec", p.restSec)
+                    p.notes?.let { put("notes", it) }
+                    p.weightSegments?.takeIf { it.size >= 2 }?.let { segs ->
+                        put("weight_segments", weightSegmentsToJsonArray(segs))
+                    }
                 }
                 supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_SETS)
                     .insert(setPayload) { }
@@ -2502,15 +2694,19 @@ class AddWorkoutViewModel(
                 ?: "Exercise ${ex.exerciseId}"
             val display = if (cust.isNotEmpty()) cust else baseName
             val mappedSets = setsSorted.map { s ->
+                val segs = parseWeightSegmentsColumn(s.weightSegments)
+                val r0 = segs.firstOrNull()?.repsText ?: s.reps?.toString() ?: ""
+                val w0 = segs.firstOrNull()?.weightText ?: s.weightKg?.let { d ->
+                    if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
+                } ?: ""
                 StrengthSetDraft(
                     setNumber = s.setNumber.coerceIn(1, 99),
-                    repsText = s.reps?.toString() ?: "",
-                    weightText = s.weightKg?.let { d ->
-                        if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
-                    } ?: "",
+                    repsText = r0,
+                    weightText = w0,
                     rpeText = s.rpe?.toString() ?: "",
                     restSecText = s.restSec?.toString() ?: "",
-                    notes = s.notes ?: ""
+                    notes = s.notes ?: "",
+                    segments = segs
                 )
             }
             val fallbackSets = if (mappedSets.isEmpty()) listOf(StrengthSetDraft(setNumber = 1)) else mappedSets
@@ -2975,6 +3171,9 @@ class AddWorkoutViewModel(
                                                     p.rpe?.let { put("rpe", it) }
                                                     p.restSec?.let { put("rest_sec", it) }
                                                     p.notes?.let { put("notes", it) }
+                                                    p.weightSegments?.takeIf { it.size >= 2 }?.let { segs ->
+                                                        put("weight_segments", weightSegmentsToJsonArray(segs))
+                                                    }
                                                 }
                                             )
                                         }
@@ -3405,25 +3604,7 @@ class AddWorkoutViewModel(
         val mapped = exercises.map { exercise ->
             val exId = exercise.exerciseId ?: error("Missing exercise_id")
             if (exId <= 0L) error("Invalid exercise.")
-            val validSets = exercise.sets.mapNotNull { set ->
-                val reps = set.repsText.trim().toIntOrNull()
-                val weight = set.weightText.trim().replace(",", ".").toDoubleOrNull()
-                val rpe = set.rpeText.trim().replace(",", ".").toDoubleOrNull()
-                val restSec = set.restSecText.trim().toIntOrNull()
-                val notes = set.notes.trim()
-                if ((reps == null || reps <= 0) && weight == null && rpe == null && restSec == null && notes.isBlank()) {
-                    return@mapNotNull null
-                }
-                val safeReps = reps?.takeIf { it > 0 }
-                StrengthSetPayload(
-                    setNumber = set.setNumber.coerceIn(1, 99),
-                    reps = safeReps,
-                    weightKg = weight,
-                    rpe = rpe,
-                    restSec = restSec,
-                    notes = notes.ifBlank { null }
-                )
-            }
+            val validSets = exercise.sets.mapNotNull { set -> draftSetToStrengthPayload(set) }
             exercise to validSets
         }
         if (mapped.any { it.second.isEmpty() }) {
@@ -3495,7 +3676,9 @@ class AddWorkoutViewModel(
 }
 
 private fun StrengthExerciseDraft.deepCopy(): StrengthExerciseDraft = copy(
-    sets = sets.map { it.copy() }
+    sets = sets.map { s ->
+        s.copy(segments = s.segments.map { it.copy() })
+    }
 )
 
 class AddWorkoutViewModelFactory(

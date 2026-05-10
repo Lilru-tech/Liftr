@@ -97,9 +97,10 @@ fun NotificationSettingsScreen(
         err = null
         runCatching {
             supabase.from(BackendContracts.Tables.USER_NOTIFICATION_SETTINGS)
-                .select()
-                .filter { eq("user_id", meId) }
-                .limit(1)
+                .select {
+                    filter { eq("user_id", meId) }
+                    limit(1)
+                }
                 .decodeList<NotificationSettingsRow>()
                 .firstOrNull()
         }.onSuccess {

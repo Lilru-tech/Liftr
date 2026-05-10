@@ -19,18 +19,20 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
-data class StrengthProgramSet(
+internal data class StrengthProgramSet(
     val setNumber: Int,
     val reps: Int?,
     val weightKg: Double?,
     val rpe: Double?,
     val restSec: Int?,
-    val notes: String?
+    val notes: String?,
+    val weightSegments: List<StrengthSegmentPayload>? = null
 )
 
-data class StrengthProgramItem(
+internal data class StrengthProgramItem(
     val exerciseId: Long,
     val orderIndex: Int,
     val notes: String?,
@@ -55,6 +57,8 @@ data class StrengthRoutineOverwritePrompt(
     val diffLines: List<StrengthRoutineOverwriteDiffLine>
 )
 
+data class StrengthSegmentPayload(val reps: Int, val weightKg: Double)
+
 /** Shared with [AddWorkoutViewModel.buildStrengthPayloadItems]. */
 internal data class StrengthSetPayload(
     val setNumber: Int,
@@ -62,8 +66,70 @@ internal data class StrengthSetPayload(
     val weightKg: Double?,
     val rpe: Double?,
     val restSec: Int?,
-    val notes: String?
+    val notes: String?,
+    val weightSegments: List<StrengthSegmentPayload>? = null
 )
+
+internal fun weightSegmentsToJsonArray(segs: List<StrengthSegmentPayload>): JsonArray =
+    buildJsonArray {
+        segs.forEach { s ->
+            add(
+                buildJsonObject {
+                    put("reps", s.reps)
+                    put("weight_kg", s.weightKg)
+                }
+            )
+        }
+    }
+
+internal fun draftSetToStrengthPayload(set: StrengthSetDraft): StrengthSetPayload? {
+    val rpe = set.rpeText.trim().replace(',', '.').toDoubleOrNull()
+    val restSec = set.restSecText.trim().toIntOrNull()
+    val notes = set.notes.trim()
+    if (set.segments.size >= 2) {
+        val parsed = set.segments.mapNotNull { seg ->
+            val r = seg.repsText.trim().toIntOrNull()?.takeIf { it > 0 } ?: return@mapNotNull null
+            val w = seg.weightText.trim().replace(',', '.').toDoubleOrNull() ?: 0.0
+            StrengthSegmentPayload(r, w)
+        }
+        if (parsed.size != set.segments.size || parsed.size < 2) return null
+        val first = parsed.first()
+        return StrengthSetPayload(
+            setNumber = set.setNumber.coerceIn(1, 99),
+            reps = first.reps,
+            weightKg = first.weightKg,
+            rpe = rpe,
+            restSec = restSec,
+            notes = notes.ifBlank { null },
+            weightSegments = parsed
+        )
+    }
+    val reps = set.repsText.trim().toIntOrNull()
+    val weight = set.weightText.trim().replace(',', '.').toDoubleOrNull()
+    if ((reps == null || reps <= 0) && weight == null && rpe == null && restSec == null && notes.isBlank()) {
+        return null
+    }
+    return StrengthSetPayload(
+        setNumber = set.setNumber.coerceIn(1, 99),
+        reps = reps?.takeIf { it > 0 },
+        weightKg = weight,
+        rpe = rpe,
+        restSec = restSec,
+        notes = notes.ifBlank { null },
+        weightSegments = null
+    )
+}
+
+internal fun strengthProgramSetFromPayload(p: StrengthSetPayload): StrengthProgramSet =
+    StrengthProgramSet(
+        setNumber = p.setNumber,
+        reps = p.reps,
+        weightKg = p.weightKg,
+        rpe = p.rpe,
+        restSec = p.restSec,
+        notes = p.notes,
+        weightSegments = p.weightSegments
+    )
 
 sealed class StrengthRoutineOverwriteCandidate {
     data object None : StrengthRoutineOverwriteCandidate()
@@ -107,7 +173,7 @@ fun strengthRoutineContentFingerprintFromDrafts(exercises: List<StrengthExercise
     return strengthRoutineContentFingerprintFromItems(items)
 }
 
-fun strengthRoutineContentFingerprintFromItems(items: List<StrengthProgramItem>): String {
+internal fun strengthRoutineContentFingerprintFromItems(items: List<StrengthProgramItem>): String {
     val sorted = items.sortedBy { it.orderIndex }
     val lines = sorted.map { item ->
         val setParts = item.sets.sortedBy { it.setNumber }.map { s ->
@@ -116,7 +182,8 @@ fun strengthRoutineContentFingerprintFromItems(items: List<StrengthProgramItem>)
             val rest = s.restSec?.toString() ?: ""
             val rep = s.reps?.toString() ?: ""
             val n = s.notes ?: ""
-            "${s.setNumber}|$rep|$w|$r|$rest|$n"
+            val seg = s.weightSegments?.joinToString("|") { e -> "${e.reps}x${e.weightKg}" } ?: ""
+            "${s.setNumber}|$rep|$w|$r|$rest|$n|$seg"
         }
         val cn = item.customName ?: ""
         val note = item.notes ?: ""
@@ -125,7 +192,7 @@ fun strengthRoutineContentFingerprintFromItems(items: List<StrengthProgramItem>)
     return sha256Hex(lines.joinToString("\n"))
 }
 
-fun strengthRoutineStructureFingerprintFromItems(items: List<StrengthProgramItem>): String {
+internal fun strengthRoutineStructureFingerprintFromItems(items: List<StrengthProgramItem>): String {
     val sorted = items.sortedBy { it.orderIndex }
     val lines = sorted.map { item ->
         val cn = (item.customName ?: "").trim()
@@ -135,29 +202,13 @@ fun strengthRoutineStructureFingerprintFromItems(items: List<StrengthProgramItem
     return sha256Hex(lines.joinToString("\n"))
 }
 
-fun strengthProgramItemsFromDrafts(exercises: List<StrengthExerciseDraft>): List<StrengthProgramItem>? {
+internal fun strengthProgramItemsFromDrafts(exercises: List<StrengthExerciseDraft>): List<StrengthProgramItem>? {
     if (exercises.any { it.exerciseId == null }) return null
     val out = mutableListOf<StrengthProgramItem>()
     exercises.forEachIndexed { exerciseIndex, exercise ->
         val exId = exercise.exerciseId ?: return null
         val validSets = exercise.sets.mapNotNull { set ->
-            val reps = set.repsText.trim().toIntOrNull()
-            val weight = set.weightText.trim().replace(",", ".").toDoubleOrNull()
-            val rpe = set.rpeText.trim().replace(",", ".").toDoubleOrNull()
-            val restSec = set.restSecText.trim().toIntOrNull()
-            val notes = set.notes.trim()
-            if ((reps == null || reps <= 0) && weight == null && rpe == null && restSec == null && notes.isBlank()) {
-                return@mapNotNull null
-            }
-            val safeReps = reps?.takeIf { it > 0 }
-            StrengthProgramSet(
-                setNumber = set.setNumber.coerceIn(1, 99),
-                reps = safeReps,
-                weightKg = weight,
-                rpe = rpe,
-                restSec = restSec,
-                notes = notes.ifBlank { null }
-            )
+            draftSetToStrengthPayload(set)?.let { strengthProgramSetFromPayload(it) }
         }
         if (validSets.isEmpty()) return null
         val cn = customNameForFingerprint(exercise).ifBlank { null }
@@ -272,6 +323,22 @@ private fun buildDiffLines(
                     )
                 )
             }
+            val psSeg = ps.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
+            val rsSeg = rs.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
+            if (psSeg != rsSeg) {
+                lines.add(
+                    StrengthRoutineOverwriteDiffLine(
+                        id = "$baseId-seg",
+                        exerciseContext = setLabel,
+                        exerciseTitle = exLabel,
+                        setNumber = ps.setNumber,
+                        exerciseOrderIndex = pEx.orderIndex,
+                        fieldTitle = "Drop steps",
+                        oldValue = rsSeg.ifBlank { "—" },
+                        newValue = psSeg.ifBlank { "—" }
+                    )
+                )
+            }
             val pn = (ps.notes ?: "").trim()
             val rn = (rs.notes ?: "").trim()
             if (pn != rn) {
@@ -317,7 +384,8 @@ private data class RoutineSetWire(
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
     @SerialName("rest_sec") val restSec: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
 )
 
 private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgramItem> {
@@ -330,13 +398,26 @@ private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgra
             notes = ex.notes,
             customName = ex.customName,
             sets = setsSorted.map { s ->
+                val arr = s.weightSegments
+                val segPayload = if (arr == null || arr.size < 2) {
+                    null
+                } else {
+                    val parsed = arr.mapNotNull { el ->
+                        val o = el.jsonObject
+                        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+                        StrengthSegmentPayload(r, w)
+                    }
+                    parsed.takeIf { it.size == arr.size && it.size >= 2 }
+                }
                 StrengthProgramSet(
                     setNumber = s.setNumber,
                     reps = s.reps,
                     weightKg = s.weightKg,
                     rpe = s.rpe,
                     restSec = s.restSec,
-                    notes = s.notes
+                    notes = s.notes,
+                    weightSegments = segPayload
                 )
             }
         )
@@ -344,9 +425,9 @@ private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgra
 }
 
 private const val ROUTINE_FULL_SELECT =
-    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes))"
+    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
 
-suspend fun fetchStrengthRoutineOverwriteCandidate(
+internal suspend fun fetchStrengthRoutineOverwriteCandidate(
     supabase: SupabaseClient,
     userId: String,
     proposed: List<StrengthProgramItem>,
@@ -456,6 +537,9 @@ suspend fun applyStrengthRoutinePrescriptionUpdate(
                 if (set.rpe != null) put("rpe", set.rpe)
                 if (set.restSec != null) put("rest_sec", set.restSec)
                 set.notes?.let { put("notes", JsonPrimitive(it)) }
+                set.weightSegments?.takeIf { it.size >= 2 }?.let { segs ->
+                    put("weight_segments", weightSegmentsToJsonArray(segs))
+                }
             }
             supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_SETS).insert(setPayload) { }
         }
@@ -502,25 +586,7 @@ internal fun buildStrengthPayloadItemsForRoutineUpdate(
     return exercises.map { exercise ->
         val exId = exercise.exerciseId ?: error("Missing exercise_id")
         if (exId <= 0L) error("Invalid exercise.")
-        val validSets = exercise.sets.mapNotNull { set ->
-            val reps = set.repsText.trim().toIntOrNull()
-            val weight = set.weightText.trim().replace(",", ".").toDoubleOrNull()
-            val rpe = set.rpeText.trim().replace(",", ".").toDoubleOrNull()
-            val restSec = set.restSecText.trim().toIntOrNull()
-            val notes = set.notes.trim()
-            if ((reps == null || reps <= 0) && weight == null && rpe == null && restSec == null && notes.isBlank()) {
-                return@mapNotNull null
-            }
-            val safeReps = reps?.takeIf { it > 0 }
-            StrengthSetPayload(
-                setNumber = set.setNumber.coerceIn(1, 99),
-                reps = safeReps,
-                weightKg = weight,
-                rpe = rpe,
-                restSec = restSec,
-                notes = notes.ifBlank { null }
-            )
-        }
+        val validSets = exercise.sets.mapNotNull { set -> draftSetToStrengthPayload(set) }
         if (validSets.isEmpty()) {
             error("Each exercise must contain at least one set with reps > 0 or additional valid fields.")
         }

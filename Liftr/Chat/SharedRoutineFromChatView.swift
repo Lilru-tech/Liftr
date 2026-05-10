@@ -213,6 +213,14 @@ struct SharedRoutineFromChatView: View {
 
     @ViewBuilder
     private func strengthSetSummaryLine(_ s: EditableSet) -> some View {
+        let dropSummary: String? = {
+            guard s.segments.count >= 2 else { return nil }
+            return s.segments.map { seg in
+                let r = seg.reps.map { String($0) } ?? "—"
+                let w = seg.weightKg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : seg.weightKg
+                return "\(r)×\(w)"
+            }.joined(separator: " → ")
+        }()
         let repsStr = s.reps.map { String($0) } ?? "—"
         let kgStr = s.weightKg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : s.weightKg
         let rpeStr = s.rpe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "—" : s.rpe
@@ -222,7 +230,10 @@ struct SharedRoutineFromChatView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 44, alignment: .leading)
-            Text("\(repsStr) \(String(localized: "reps")) · \(kgStr) \(String(localized: "kg")) · \(String(localized: "RPE")) \(rpeStr) · \(String(localized: "Rest")) \(restStr)")
+            Text(
+                dropSummary
+                    ?? "\(repsStr) \(String(localized: "reps")) · \(kgStr) \(String(localized: "kg")) · \(String(localized: "RPE")) \(rpeStr) · \(String(localized: "Rest")) \(restStr)"
+            )
                 .font(.caption)
                 .foregroundStyle(.primary)
             Spacer(minLength: 0)

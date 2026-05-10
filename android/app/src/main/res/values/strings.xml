@@ -1190,6 +1190,11 @@
     <string name="add_exercise_alias_label">Exercise alias (optional)</string>
     <string name="add_exercise_notes_label">Exercise notes (optional)</string>
     <string name="add_set_add">Add set</string>
+    <string name="add_strength_drop_set">Drop set (multi weight)</string>
+    <string name="add_strength_drop_clear">Single weight</string>
+    <string name="add_strength_drop_add_step">Add weight step</string>
+    <string name="add_strength_drop_remove_step">Remove last step</string>
+    <string name="add_strength_drop_step_format">Step %1$d</string>
     <string name="add_set_stepper_minus">Decrease number of times (min 1)</string>
     <string name="add_set_stepper_plus">Increase number of times (max 99)</string>
     <string name="add_set_remove">Remove set</string>

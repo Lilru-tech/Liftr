@@ -1375,21 +1375,25 @@ struct WorkoutDetailView: View {
                 if !exIds.isEmpty {
                     let setRes = try await SupabaseManager.shared.client
                         .from("exercise_sets")
-                        .select("workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
+                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
                         .in("workout_exercise_id", values: exIds)
                         .order("set_number", ascending: true)
+                        .order("id", ascending: true)
                         .execute()
                     
                     struct SetWire: Decodable {
+                        let id: Int
                         let workout_exercise_id: Int
                         let set_number: Int
                         let reps: Int?
                         let weight_kg: Decimal?
                         let rpe: Decimal?
                         let rest_sec: Int?
+                        let weight_segments: [StrengthWeightSegWire]?
                     }
                     let sets = try decoder.decode([SetWire].self, from: setRes.data)
                     for s in sets {
+                        let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                         setsByEx[s.workout_exercise_id, default: []].append(
                             EditableSet(
                                 setNumber: s.set_number,
@@ -1397,7 +1401,8 @@ struct WorkoutDetailView: View {
                                 weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                                 rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                                 restSec: s.rest_sec,
-                                notes: ""
+                                notes: "",
+                                segments: segDraft
                             )
                         )
                     }
@@ -2086,6 +2091,7 @@ private struct StrengthDetailBlock: View {
         let weight_kg: Decimal?
         let rpe: Decimal?
         let rest_sec: Int?
+        let weight_segments: [StrengthWeightSegWire]?
     }
     
     @State private var exercises: [ExerciseRow] = []
@@ -2116,11 +2122,22 @@ private struct StrengthDetailBlock: View {
                         Text("No sets").font(.caption).foregroundStyle(.secondary)
                     } else {
                         VStack(spacing: 6) {
-                            ForEach(rows.sorted(by: { $0.set_number < $1.set_number })) { s in
+                            ForEach(rows.sorted(by: { a, b in
+                                if a.set_number != b.set_number { return a.set_number < b.set_number }
+                                return a.id < b.id
+                            })) { s in
+                                let dropSummary: String? = {
+                                    guard let ws = s.weight_segments, ws.count >= 2 else { return nil }
+                                    return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
+                                }()
                                 HStack(spacing: 12) {
                                     Text("#\(s.set_number)").font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
-                                    Text("\(s.reps ?? 0) reps").font(.footnote)
-                                    Text("• \(weightStr(s.weight_kg))").font(.footnote)
+                                    if let ds = dropSummary {
+                                        Text(ds).font(.footnote)
+                                    } else {
+                                        Text("\(s.reps ?? 0) reps").font(.footnote)
+                                        Text("• \(weightStr(s.weight_kg))").font(.footnote)
+                                    }
                                     if let rpe = s.rpe {
                                         Text("• RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))").font(.footnote)
                                     }
@@ -2190,9 +2207,10 @@ private struct StrengthDetailBlock: View {
             if !ids.isEmpty {
                 let sRes = try await SupabaseManager.shared.client
                     .from("exercise_sets")
-                    .select("*")
+                    .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
                     .in("workout_exercise_id", values: ids)
                     .order("set_number", ascending: true)
+                    .order("id", ascending: true)
                     .execute()
                 let sets = try JSONDecoder.supabase().decode([SetRow].self, from: sRes.data)
                 for s in sets { byEx[s.workout_exercise_id, default: []].append(s) }

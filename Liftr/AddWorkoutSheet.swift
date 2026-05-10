@@ -1286,6 +1286,14 @@ struct AddWorkoutSheet: View {
         .listRowBackground(Color.clear)
     }
     
+    private func editableSetHasRequiredRepsForSave(_ set: EditableSet) -> Bool {
+        if set.segments.count >= 2 {
+            return set.segments.allSatisfy { ($0.reps ?? 0) > 0 }
+        }
+        guard let r = set.reps, r > 0 else { return false }
+        return true
+    }
+
     private var canSave: Bool {
         switch kind {
         case .strength:
@@ -1293,7 +1301,7 @@ struct AddWorkoutSheet: View {
             for lane in programs {
                 guard lane.contains(where: { exerciseSelected($0) }) else { return false }
                 for ex in lane where exerciseSelected(ex) {
-                    let hasValidSet = ex.cleanSets().contains { $0.reps != nil }
+                    let hasValidSet = ex.cleanSets().contains { editableSetHasRequiredRepsForSave($0) }
                     if !hasValidSet { return false }
                 }
             }
@@ -1330,7 +1338,7 @@ struct AddWorkoutSheet: View {
         for lane in programs {
             guard lane.contains(where: { exerciseSelected($0) }) else { return false }
             for ex in lane where exerciseSelected(ex) {
-                let hasValidSet = ex.cleanSets().contains { $0.reps != nil }
+                let hasValidSet = ex.cleanSets().contains { editableSetHasRequiredRepsForSave($0) }
                 if !hasValidSet { return false }
             }
         }
@@ -3019,7 +3027,8 @@ struct AddWorkoutSheet: View {
                 weightKg: stringFromRecommendationKg(b.template.weightKg),
                 rpe: b.template.rpe.map { stringFromRecommendationRpe($0) } ?? "",
                 restSec: b.template.restSec,
-                notes: ""
+                notes: "",
+                segments: []
             )
         }
     }
@@ -3333,7 +3342,7 @@ struct EditableExercise: Identifiable {
     var sets: [EditableSet] = [EditableSet(setNumber: 1)]
     
     func cleanSets() -> [EditableSet] {
-        sets.filter { $0.reps != nil || !$0.weightKg.isEmpty || !$0.rpe.isEmpty }
+        sets.filter { $0.toStrengthSet() != nil }
     }
     
     func toStrengthItem() -> RPCStrengthParams.StrengthItem? {
@@ -3344,7 +3353,7 @@ struct EditableExercise: Identifiable {
             exercise_id: exerciseId,
             order_index: orderIndex,
             notes: notes.isEmpty ? nil : notes,
-            sets: cleaned.map { $0.toStrengthSet() },
+            sets: cleaned.compactMap { $0.toStrengthSet() },
             custom_name: exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : exerciseName
         )
     }
@@ -3364,7 +3373,8 @@ extension EditableExercise {
                 weightKg: $0.weightKg,
                 rpe: $0.rpe,
                 restSec: $0.restSec,
-                notes: $0.notes
+                notes: $0.notes,
+                segments: $0.segments
             )
         }
         return copy
@@ -3379,15 +3389,43 @@ struct EditableSet: Identifiable {
     var rpe: String = ""
     var restSec: Int? = nil
     var notes: String = ""
+    var segments: [StrengthEditorSegment] = []
     
-    func toStrengthSet() -> RPCStrengthParams.StrengthItem.StrengthSet {
-        .init(
-            set_number: setNumber,
-            reps: reps,
-            weight_kg: parseDouble(weightKg),
-            rpe: parseDouble(rpe),
+    func toStrengthSet() -> RPCStrengthParams.StrengthItem.StrengthSet? {
+        let rpeD = parseDouble(rpe)
+        let notesTrim = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if segments.count >= 2 {
+            var segs: [RPCStrengthParams.StrengthItem.StrengthSet.WeightSeg] = []
+            for seg in segments {
+                guard let r = seg.reps, r > 0 else { return nil }
+                let w = parseDouble(seg.weightKg) ?? 0
+                segs.append(RPCStrengthParams.StrengthItem.StrengthSet.WeightSeg(reps: r, weight_kg: w))
+            }
+            guard segs.count == segments.count, segs.count >= 2 else { return nil }
+            let first = segs[0]
+            return .init(
+                set_number: max(1, min(99, setNumber)),
+                reps: first.reps,
+                weight_kg: first.weight_kg,
+                rpe: rpeD,
+                rest_sec: restSec,
+                notes: notesTrim.isEmpty ? nil : notesTrim,
+                weight_segments: segs
+            )
+        }
+        let repsV = reps
+        let weight = parseDouble(weightKg)
+        if (repsV == nil || repsV! <= 0) && weight == nil && rpeD == nil && restSec == nil && notesTrim.isEmpty {
+            return nil
+        }
+        return .init(
+            set_number: max(1, min(99, setNumber)),
+            reps: repsV.flatMap { $0 > 0 ? $0 : nil },
+            weight_kg: weight,
+            rpe: rpeD,
             rest_sec: restSec,
-            notes: notes.isEmpty ? nil : notes
+            notes: notesTrim.isEmpty ? nil : notesTrim,
+            weight_segments: nil
         )
     }
     
@@ -3568,6 +3606,12 @@ struct RPCStrengthParams: Encodable {
             let rpe: Double?
             let rest_sec: Int?
             let notes: String?
+            let weight_segments: [WeightSeg]?
+
+            struct WeightSeg: Encodable {
+                let reps: Int
+                let weight_kg: Double
+            }
         }
     }
 }
