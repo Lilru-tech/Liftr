@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.MoreVert
@@ -171,6 +172,7 @@ private fun RoutineListRow(
     row: StrengthRoutineUi,
     busy: Boolean,
     updatedLabel: String?,
+    onPreview: () -> Unit,
     onApply: () -> Unit,
     onShareRoutine: () -> Unit,
     neighbors: Pair<List<StrengthRoutineUi>, Int>?,
@@ -191,6 +193,7 @@ private fun RoutineListRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
+            .clickable(enabled = !busy) { onPreview() }
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -210,7 +213,17 @@ private fun RoutineListRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Text(
+                    stringResource(R.string.add_routine_tap_to_preview),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Box {
                 IconButton(
                     onClick = { menu = true },
@@ -300,6 +313,7 @@ fun AddStrengthRoutinesSheetContent(
     onMoveRoutine: (Long, Int) -> Unit,
     onMoveRoutineToFolder: (Long, Long?) -> Unit,
     onDeleteRoutine: (Long) -> Unit,
+    onPreviewRoutine: (Long) -> Unit,
     onApplyRoutine: (Long) -> Unit,
     onShareRoutine: (Long) -> Unit,
     onEditRoutine: (Long, String) -> Unit
@@ -730,6 +744,7 @@ fun AddStrengthRoutinesSheetContent(
                             busy = ui.managingRoutines || ui.applyingRoutine ||
                                 ui.strengthRoutineTemplateEdit?.saving == true,
                             updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
+                            onPreview = { onPreviewRoutine(row.id) },
                             onApply = { onApplyRoutine(row.id) },
                             onShareRoutine = { onShareRoutine(row.id) },
                             neighbors = groupNeighbors(row),
@@ -795,6 +810,7 @@ fun AddStrengthRoutinesSheetContent(
                                 busy = ui.managingRoutines || ui.applyingRoutine ||
                                     ui.strengthRoutineTemplateEdit?.saving == true,
                                 updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
+                                onPreview = { onPreviewRoutine(row.id) },
                                 onApply = { onApplyRoutine(row.id) },
                                 onShareRoutine = { onShareRoutine(row.id) },
                                 neighbors = groupNeighbors(row),

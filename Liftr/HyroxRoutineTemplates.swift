@@ -496,9 +496,17 @@ struct HyroxRoutinesPickerSheet: View {
     @State private var duplicateError: String?
     @State private var shareRoutineChatToken: HyroxShareRoutineChatToken?
     @State private var shareRoutineBuildError: String?
+    @State private var routinePreviewToken: RoutinePreviewToken?
+    @State private var previewBuildError: String?
 
     private struct HyroxShareRoutineChatToken: Identifiable {
         let id = UUID()
+        let snapshot: RoutineShareSnapshot
+    }
+
+    private struct RoutinePreviewToken: Identifiable {
+        let id = UUID()
+        let row: HyroxRoutineListRow
         let snapshot: RoutineShareSnapshot
     }
 
@@ -816,6 +824,106 @@ struct HyroxRoutinesPickerSheet: View {
             }
             .presentationDetents([.medium])
         }
+        .sheet(item: $routinePreviewToken) { token in
+            NavigationStack {
+                SharedRoutineFromChatView(snapshot: token.snapshot)
+                    .environmentObject(app)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button(String(localized: "Close")) {
+                                routinePreviewToken = nil
+                            }
+                        }
+                        ToolbarItemGroup(placement: .primaryAction) {
+                            Menu {
+                                Button(String(localized: "Rename")) {
+                                    let row = token.row
+                                    routinePreviewToken = nil
+                                    DispatchQueue.main.async {
+                                        renameRoutineId = row.id
+                                        renameRoutineFolderId = row.folder_id
+                                        renameDraft = row.name
+                                        renameError = nil
+                                        showRenameSheet = true
+                                    }
+                                }
+                                Button(String(localized: "Duplicate")) {
+                                    let row = token.row
+                                    routinePreviewToken = nil
+                                    DispatchQueue.main.async {
+                                        duplicateSourceRoutine = row
+                                        duplicateNameDraft = "Copy of \(row.name)"
+                                        duplicateTargetFolderId = row.folder_id
+                                        duplicateError = nil
+                                        showDuplicateSheet = true
+                                    }
+                                }
+                                if routineSearchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                                   let neigh = routineNeighborInfo(token.row) {
+                                    if neigh.index > 0 {
+                                        Button(String(localized: "Move up")) {
+                                            Task { await swapRoutineSortOrder(token.row, withOffset: -1) }
+                                        }
+                                    }
+                                    if neigh.index < neigh.list.count - 1 {
+                                        Button(String(localized: "Move down")) {
+                                            Task { await swapRoutineSortOrder(token.row, withOffset: 1) }
+                                        }
+                                    }
+                                }
+                                Menu(String(localized: "Move to")) {
+                                    Button(String(localized: "No folder")) {
+                                        Task { await moveRoutine(token.row, to: nil) }
+                                    }
+                                    ForEach(sortedFolders) { f in
+                                        Button(f.name) {
+                                            Task { await moveRoutine(token.row, to: f.id) }
+                                        }
+                                    }
+                                }
+                                Button(String(localized: "Delete"), role: .destructive) {
+                                    let id = token.row.id
+                                    routinePreviewToken = nil
+                                    DispatchQueue.main.async {
+                                        routineIdPendingDelete = id
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                            }
+
+                            Button {
+                                let row = token.row
+                                Task {
+                                    shareRoutineBuildError = nil
+                                    do {
+                                        let snap = try await buildHyroxRoutineShareSnapshot(row: row)
+                                        await MainActor.run { routinePreviewToken = nil }
+                                        let chatToken = HyroxShareRoutineChatToken(snapshot: snap)
+                                        DispatchQueue.main.async {
+                                            shareRoutineChatToken = chatToken
+                                        }
+                                    } catch {
+                                        await MainActor.run { shareRoutineBuildError = error.localizedDescription }
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "paperplane")
+                            }
+
+                            Button {
+                                Task {
+                                    await applyRoutine(id: token.row.id, dismissRoutinesPicker: true)
+                                }
+                            } label: {
+                                Text(String(localized: "Apply"))
+                            }
+                        }
+                    }
+                    .gradientBG()
+            }
+        }
         .sheet(item: $shareRoutineChatToken) { token in
             ShareRoutineToChatSheet(snapshot: token.snapshot, onSent: {})
                 .environmentObject(app)
@@ -831,6 +939,17 @@ struct HyroxRoutinesPickerSheet: View {
             Button(String(localized: "OK"), role: .cancel) { shareRoutineBuildError = nil }
         } message: {
             Text(shareRoutineBuildError ?? "")
+        }
+        .alert(
+            String(localized: "Couldn't open routine"),
+            isPresented: Binding(
+                get: { previewBuildError != nil },
+                set: { if !$0 { previewBuildError = nil } }
+            )
+        ) {
+            Button(String(localized: "OK"), role: .cancel) { previewBuildError = nil }
+        } message: {
+            Text(previewBuildError ?? "")
         }
         .confirmationDialog(
             "Delete this routine?",
@@ -988,6 +1107,22 @@ struct HyroxRoutinesPickerSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    Text(String(localized: "Tap to preview"))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    if loading { return }
+                    Task {
+                        previewBuildError = nil
+                        do {
+                            let snap = try await buildHyroxRoutineShareSnapshot(row: row)
+                            await MainActor.run { routinePreviewToken = RoutinePreviewToken(row: row, snapshot: snap) }
+                        } catch {
+                            await MainActor.run { previewBuildError = error.localizedDescription }
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -1060,7 +1195,7 @@ struct HyroxRoutinesPickerSheet: View {
                 .buttonStyle(.plain)
 
                 Button {
-                    Task { await applyRoutine(id: row.id) }
+                    Task { await applyRoutine(id: row.id, dismissRoutinesPicker: true) }
                 } label: {
                     Text("Apply")
                         .font(.subheadline.weight(.semibold))
@@ -1281,7 +1416,7 @@ struct HyroxRoutinesPickerSheet: View {
         }
     }
 
-    private func applyRoutine(id: Int64) async {
+    private func applyRoutine(id: Int64, dismissRoutinesPicker: Bool = true) async {
         await MainActor.run { errorMessage = nil }
         do {
             let client = SupabaseManager.shared.client
@@ -1299,7 +1434,9 @@ struct HyroxRoutinesPickerSheet: View {
             }
             await MainActor.run {
                 onApply(payload)
-                dismiss()
+                if dismissRoutinesPicker {
+                    dismiss()
+                }
             }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }

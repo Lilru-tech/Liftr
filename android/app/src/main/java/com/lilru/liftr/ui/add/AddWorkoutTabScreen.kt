@@ -41,6 +41,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -257,6 +261,9 @@ fun AddWorkoutTabScreen(
     var showShareRoutineSheet by remember { mutableStateOf(false) }
     var routineShareSnapshot by remember { mutableStateOf<RoutineShareSnapshot?>(null) }
     var routineShareError by remember { mutableStateOf<String?>(null) }
+
+    var showRoutinePreviewSheet by remember { mutableStateOf(false) }
+    var routinePreviewSnapshot by remember { mutableStateOf<RoutineShareSnapshot?>(null) }
     val shareRoutineSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(showParticipantsSheet) {
         if (showParticipantsSheet) {
@@ -1643,6 +1650,18 @@ fun AddWorkoutTabScreen(
                 onMoveRoutine = { id, d -> vm.moveRoutine(id, d) },
                 onMoveRoutineToFolder = { id, folderId -> vm.moveRoutineToFolder(id, folderId) },
                 onDeleteRoutine = { id -> vm.deleteRoutine(id) },
+                onPreviewRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildStrengthRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routinePreviewSnapshot = snap
+                                showRoutinePreviewSheet = true
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
+                },
                 onApplyRoutine = { id ->
                     vm.applyRoutine(id)
                     showRoutinesSheet = false
@@ -1703,6 +1722,18 @@ fun AddWorkoutTabScreen(
                 onMoveRoutine = { id, d -> vm.moveHyroxRoutine(id, d) },
                 onMoveRoutineToFolder = { id, folderId -> vm.moveHyroxRoutineToFolder(id, folderId) },
                 onDeleteRoutine = { id -> vm.deleteHyroxRoutine(id) },
+                onPreviewRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildHyroxRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routinePreviewSnapshot = snap
+                                showRoutinePreviewSheet = true
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
+                },
                 onApplyRoutine = { id ->
                     vm.applyHyroxRoutine(id)
                     showHyroxRoutinesSheet = false
@@ -1721,6 +1752,36 @@ fun AddWorkoutTabScreen(
                     }
                 }
             )
+        }
+    }
+
+    if (showRoutinePreviewSheet && routinePreviewSnapshot != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showRoutinePreviewSheet = false
+                routinePreviewSnapshot = null
+            },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                SharedRoutineFromChatScreen(
+                    supabase = supabase,
+                    snapshot = routinePreviewSnapshot!!,
+                    onBack = {
+                        showRoutinePreviewSheet = false
+                        routinePreviewSnapshot = null
+                    },
+                    topBarActions = {
+                        IconButton(onClick = {
+                            showRoutinePreviewSheet = false
+                            routinePreviewSnapshot = null
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = null)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
     if (showShareRoutineSheet && routineShareSnapshot != null) {

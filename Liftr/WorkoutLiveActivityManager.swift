@@ -35,14 +35,11 @@ enum WorkoutLiveActivityManager {
         guard isSupported else { return }
         await end()
         let state = WorkoutLiveActivityAttributes.ContentState(startTime: startTime, kind: kind, isPaused: false, pausedElapsedSeconds: 0)
-        do {
-            current = try Activity.request(
-                attributes: WorkoutLiveActivityAttributes(),
-                content: .init(state: state, staleDate: nil),
-                pushType: nil
-            )
-        } catch {
-        }
+        current = try? Activity.request(
+            attributes: WorkoutLiveActivityAttributes(),
+            content: .init(state: state, staleDate: nil),
+            pushType: nil
+        )
     }
 
     static func updateStrengthPauseIfAvailable(isPaused: Bool, activeElapsedSeconds: Int) {
@@ -76,10 +73,7 @@ enum WorkoutLiveActivityManager {
                 pausedElapsedSeconds: 0
             )
         }
-        do {
-            try await activity.update(ActivityContent(state: next, staleDate: nil))
-        } catch {
-        }
+        await activity.update(ActivityContent(state: next, staleDate: nil))
     }
 
     @available(iOS 16.2, *)

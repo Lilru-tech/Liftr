@@ -43,6 +43,7 @@ object BackendContracts {
         const val MESSAGE_REACTIONS = "message_reactions"
         const val NOTIFICATIONS = "notifications"
         const val PROFILES = "profiles"
+        const val USER_NOTIFICATION_SETTINGS = "user_notification_settings"
         const val RACKET_SESSION_STATS = "racket_session_stats"
         const val RUGBY_SESSION_STATS = "rugby_session_stats"
         const val SKI_SESSION_STATS = "ski_session_stats"

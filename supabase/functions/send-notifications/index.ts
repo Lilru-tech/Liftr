@@ -13,7 +13,6 @@ const privateKey = SERVICE_JSON.private_key;
 const tokenUri = SERVICE_JSON.token_uri;
 
 Deno.serve(async () => {
-
   const { data: notifs } = await supabase
     .from("notifications")
     .select("*")
@@ -47,10 +46,10 @@ Deno.serve(async () => {
         continue;
       }
 
-        const ok = await sendToFcmV1(profile.fcm_token, notif);
-        if (ok) {
-          await markSent(notif.id);
-        }
+      const ok = await sendToFcmV1(profile.fcm_token, notif);
+      if (ok) {
+        await markSent(notif.id);
+      }
     } catch (e) {
       await markError(notif.id, "exception: " + e);
     }
@@ -129,16 +128,16 @@ async function sendToFcmV1(token: string, notif: any): Promise<boolean> {
   try {
     const access = await getAccessToken();
 
-      const payload = {
-        message: {
-          token,
-          notification: {
-            title: notif.title,
-            body: notif.body,
-          },
-          data: buildDataPayload(notif),
+    const payload = {
+      message: {
+        token,
+        notification: {
+          title: notif.title,
+          body: notif.body,
         },
-      };
+        data: buildDataPayload(notif),
+      },
+    };
 
     const url = `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`;
 
@@ -184,3 +183,4 @@ async function markError(id: number, msg: string) {
     .update({ send_error: msg })
     .eq("id", id);
 }
+

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -83,6 +84,7 @@ fun SharedRoutineFromChatScreen(
     supabase: SupabaseClient,
     snapshot: RoutineShareSnapshot,
     onBack: () -> Unit,
+    topBarActions: @Composable RowScope.() -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val app = LocalContext.current.applicationContext as Application
@@ -242,6 +244,7 @@ fun SharedRoutineFromChatScreen(
                         Icon(Icons.Filled.ArrowBack, contentDescription = null)
                     }
                 },
+                actions = topBarActions,
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
             )
         }
