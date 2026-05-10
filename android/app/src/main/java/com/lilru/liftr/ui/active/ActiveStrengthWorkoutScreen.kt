@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
@@ -25,10 +24,15 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -71,6 +75,7 @@ import com.lilru.liftr.R
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
+import com.lilru.liftr.ui.chat.MessagesFloatingButton
 import com.lilru.liftr.ui.components.LiftrAvatar
 import io.github.jan.supabase.SupabaseClient
 import kotlin.math.abs
@@ -142,6 +147,7 @@ fun ActiveStrengthWorkoutScreen(
         ui.currentExerciseIndex,
         ui.currentSetIndex,
         ui.sessionElapsedSec,
+        ui.isSessionPaused,
         ui.isResting,
         ui.restSecondsLeft,
         ui.loading
@@ -362,12 +368,28 @@ fun ActiveStrengthWorkoutScreen(
                         TextButton(onClick = onClose, enabled = !ui.showElborblaCelebration) {
                             Text(stringResource(R.string.active_strength_back))
                         }
-                        Card(colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.85f))) {
-                            Text(
-                                text = "⏱ ${formatElapsed(ui.sessionElapsedSec)}",
-                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.labelLarge
-                            )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Card(colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.85f))) {
+                                Text(
+                                    text = "⏱ ${formatElapsed(ui.sessionElapsedSec)}",
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    style = MaterialTheme.typography.labelLarge
+                                )
+                            }
+                            IconButton(
+                                onClick = { vm.toggleSessionPause() },
+                                enabled = !ui.finishing && !ui.loading
+                            ) {
+                                Icon(
+                                    imageVector = if (ui.isSessionPaused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
+                                    contentDescription = stringResource(
+                                        if (ui.isSessionPaused) R.string.active_strength_resume else R.string.active_strength_pause
+                                    )
+                                )
+                            }
                         }
                     }
 
@@ -1004,6 +1026,10 @@ fun ActiveStrengthWorkoutScreen(
             onContinue = { vm.dismissElborblaCelebration(onClose) }
         )
     }
+    MessagesFloatingButton(
+        supabase = supabase,
+        modifier = Modifier.fillMaxSize()
+    )
 }
 
 @Composable

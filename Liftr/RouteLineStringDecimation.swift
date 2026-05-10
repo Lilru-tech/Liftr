@@ -1,8 +1,6 @@
 import CoreLocation
 import Foundation
 
-/// Muestreo uniforme de `LineString` antes de persistir (paridad con Android `CardioRouteGeoJson.decimateLatLngPairs`
-/// y con `CardioWorkoutLocationTracker.maxRoutePoints`). Reduce timeouts en RPC de segmentos / PostGIS.
 enum RouteLineStringDecimation {
     static let maxStoredCoordinates = 2000
 
@@ -20,7 +18,6 @@ enum RouteLineStringDecimation {
         return out
     }
 
-    /// GeoJSON `LineString` compacto (mismo formato que guarda cardio en Supabase).
     static func encodeGeoJSONLineString(_ coords: [CLLocationCoordinate2D]) -> String? {
         guard coords.count >= 2 else { return nil }
         let parts = coords.map { "[\($0.longitude),\($0.latitude)]" }

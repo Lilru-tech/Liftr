@@ -516,6 +516,7 @@ struct AddWorkoutSheet: View {
                     applyLoadedStrengthRoutine(loaded)
                 }
             )
+            .environmentObject(app)
             .gradientBG()
             .presentationDetents([.large])
             .presentationBackground(.clear)
@@ -531,6 +532,7 @@ struct AddWorkoutSheet: View {
                     sport.applyHyroxRoutineTemplate(payload)
                 }
             )
+            .environmentObject(app)
             .gradientBG()
             .presentationDetents([.large])
             .presentationBackground(.clear)
@@ -2736,7 +2738,7 @@ struct AddWorkoutSheet: View {
         exercises: [EditableExercise],
         replaceRoutineId: Int64? = nil
     ) async throws -> StrengthRoutinePersistOutcome {
-        try await insertStrengthRoutineTemplate(
+        try await StrengthRoutineRemotePersistence.insertStrengthRoutineTemplate(
             client: client,
             userId: userId,
             name: name,
@@ -3805,217 +3807,6 @@ enum StrengthRoutineNameValidator {
     }
 }
 
-private struct StrengthRoutinePersistOutcome {
-    let alsoHasAnotherRoutineWithSameProgram: Bool
-}
-
-private func nextRoutineSortOrderForInsert(
-    client: SupabaseClient,
-    userId: UUID,
-    folderId: Int64?
-) async throws -> Int {
-    struct R: Decodable { let sort_order: Int? }
-    let res: [R]
-    if let fid = folderId {
-        let r = try await client
-            .from("strength_routines")
-            .select("sort_order")
-            .eq("user_id", value: userId)
-            .eq("folder_id", value: Int(fid))
-            .order("sort_order", ascending: false)
-            .limit(1)
-            .execute()
-        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
-    } else {
-        let r = try await client
-            .from("strength_routines")
-            .select("sort_order")
-            .eq("user_id", value: userId)
-            .is("folder_id", value: nil)
-            .order("sort_order", ascending: false)
-            .limit(1)
-            .execute()
-        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
-    }
-    return (res.first?.sort_order ?? 0) + 1
-}
-
-private func otherRoutinesWithSameContentCount(
-    client: SupabaseClient,
-    userId: UUID,
-    folderId: Int64?,
-    contentHash: String,
-    excludingRoutineId: Int64
-) async throws -> Int {
-    struct R: Decodable { let id: Int64 }
-    let res: [R]
-    if let fid = folderId {
-        let r = try await client
-            .from("strength_routines")
-            .select("id")
-            .eq("user_id", value: userId)
-            .eq("content_hash", value: contentHash)
-            .eq("folder_id", value: Int(fid))
-            .neq("id", value: Int(excludingRoutineId))
-            .limit(8)
-            .execute()
-        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
-    } else {
-        let r = try await client
-            .from("strength_routines")
-            .select("id")
-            .eq("user_id", value: userId)
-            .eq("content_hash", value: contentHash)
-            .is("folder_id", value: nil)
-            .neq("id", value: Int(excludingRoutineId))
-            .limit(8)
-            .execute()
-        res = try JSONDecoder.supabase().decode([R].self, from: r.data)
-    }
-    return res.count
-}
-
-private func insertStrengthRoutineTemplate(
-    client: SupabaseClient,
-    userId: UUID,
-    name: String,
-    folderId: Int64?,
-    exercises: [EditableExercise],
-    replaceRoutineId: Int64? = nil
-) async throws -> StrengthRoutinePersistOutcome {
-    let strengthItems = exercises.compactMap { $0.toStrengthItem() }
-    guard !strengthItems.isEmpty else {
-        throw NSError(
-            domain: "StrengthRoutine",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Add at least one exercise with reps before saving a routine."]
-        )
-    }
-
-    struct RoutineIdRow: Decodable { let id: Int64 }
-    struct RoutineExerciseIdRow: Decodable { let id: Int64 }
-
-    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-        return StrengthRoutinePersistOutcome(alsoHasAnotherRoutineWithSameProgram: false)
-    }
-
-    let contentHash = strengthRoutineContentFingerprint(from: exercises)
-
-    if let rid = replaceRoutineId {
-        _ = try await client
-            .from("strength_routines")
-            .delete()
-            .eq("id", value: Int(rid))
-            .eq("user_id", value: userId)
-            .execute()
-    }
-
-    let nextSort = try await nextRoutineSortOrderForInsert(client: client, userId: userId, folderId: folderId)
-
-    struct StrengthRoutineRowInsert: Encodable {
-        let user_id: UUID
-        let name: String
-        let folder_id: Int64?
-        let content_hash: String
-        let sort_order: Int
-    }
-
-    let headerRes = try await client
-        .from("strength_routines")
-        .insert(
-            StrengthRoutineRowInsert(
-                user_id: userId,
-                name: trimmed,
-                folder_id: folderId,
-                content_hash: contentHash,
-                sort_order: nextSort
-            ),
-            returning: .representation
-        )
-        .select("id")
-        .limit(1)
-        .execute()
-
-    let idRows = try JSONDecoder.supabase().decode([RoutineIdRow].self, from: headerRes.data)
-    guard let routineId = idRows.first?.id else {
-        throw NSError(
-            domain: "StrengthRoutine",
-            code: 3,
-            userInfo: [NSLocalizedDescriptionKey: "Routine was not saved (could not read the new routine)."]
-        )
-    }
-
-    struct StrengthRoutineExerciseRowInsert: Encodable {
-        let routine_id: Int64
-        let exercise_id: Int64
-        let order_index: Int
-        let notes: String?
-        let custom_name: String?
-    }
-
-    struct StrengthRoutineSetRowInsert: Encodable {
-        let routine_exercise_id: Int64
-        let set_number: Int
-        let reps: Int?
-        let weight_kg: Double?
-        let rpe: Double?
-        let rest_sec: Int?
-        let notes: String?
-    }
-
-    for item in strengthItems {
-        let exRes = try await client
-            .from("strength_routine_exercises")
-            .insert(
-                StrengthRoutineExerciseRowInsert(
-                    routine_id: routineId,
-                    exercise_id: item.exercise_id,
-                    order_index: item.order_index,
-                    notes: item.notes,
-                    custom_name: item.custom_name
-                ),
-                returning: .representation
-            )
-            .select("id")
-            .limit(1)
-            .execute()
-
-        let exIdRows = try JSONDecoder.supabase().decode([RoutineExerciseIdRow].self, from: exRes.data)
-        guard let exerciseRowId = exIdRows.first?.id else {
-            throw NSError(
-                domain: "StrengthRoutine",
-                code: 3,
-                userInfo: [NSLocalizedDescriptionKey: "Routine was not saved (exercise row missing)."]
-            )
-        }
-
-        let setRows: [StrengthRoutineSetRowInsert] = item.sets.map { s in
-            StrengthRoutineSetRowInsert(
-                routine_exercise_id: exerciseRowId,
-                set_number: s.set_number,
-                reps: s.reps,
-                weight_kg: s.weight_kg,
-                rpe: s.rpe,
-                rest_sec: s.rest_sec,
-                notes: s.notes
-            )
-        }
-        if !setRows.isEmpty {
-            _ = try await client.from("strength_routine_sets").insert(setRows).execute()
-        }
-    }
-
-    let dupCount = try await otherRoutinesWithSameContentCount(
-        client: client,
-        userId: userId,
-        folderId: folderId,
-        contentHash: contentHash,
-        excludingRoutineId: routineId
-    )
-    return StrengthRoutinePersistOutcome(alsoHasAnotherRoutineWithSameProgram: dupCount > 0)
-}
-
 private func nextFolderSortOrderForInsert(client: SupabaseClient, userId: UUID) async throws -> Int {
     struct R: Decodable { let sort_order: Int? }
     let res = try await client
@@ -4031,6 +3822,7 @@ private func nextFolderSortOrderForInsert(client: SupabaseClient, userId: UUID) 
 
 private struct StrengthRoutinesPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var app: AppState
     let exerciseDisplayName: (Int64) -> String
     let catalog: [Exercise]
     let loadingCatalog: Bool
@@ -4066,6 +3858,13 @@ private struct StrengthRoutinesPickerSheet: View {
     @State private var duplicateTargetFolderId: Int64? = nil
     @State private var duplicateError: String?
     @State private var routinePendingEdit: StrengthRoutineListRow?
+    @State private var shareRoutineChatToken: ShareRoutineChatToken?
+    @State private var shareRoutineBuildError: String?
+
+    private struct ShareRoutineChatToken: Identifiable {
+        let id = UUID()
+        let snapshot: RoutineShareSnapshot
+    }
 
     private var sortedFolders: [StrengthRoutineFolderRow] {
         folders.sorted { a, b in
@@ -4381,6 +4180,11 @@ private struct StrengthRoutinesPickerSheet: View {
             }
             .presentationDetents([.medium])
         }
+        .sheet(item: $shareRoutineChatToken) { token in
+            ShareRoutineToChatSheet(snapshot: token.snapshot, onSent: {})
+                .environmentObject(app)
+                .gradientBG()
+        }
         .sheet(item: $routinePendingEdit) { row in
             EditSavedStrengthRoutineSheet(
                 routineId: row.id,
@@ -4397,6 +4201,17 @@ private struct StrengthRoutinesPickerSheet: View {
             )
             .presentationDetents([.large])
             .presentationBackground(.clear)
+        }
+        .alert(
+            String(localized: "Couldn't share routine"),
+            isPresented: Binding(
+                get: { shareRoutineBuildError != nil },
+                set: { if !$0 { shareRoutineBuildError = nil } }
+            )
+        ) {
+            Button(String(localized: "OK"), role: .cancel) { shareRoutineBuildError = nil }
+        } message: {
+            Text(shareRoutineBuildError ?? "")
         }
         .confirmationDialog(
             "Delete this routine?",
@@ -4610,6 +4425,25 @@ private struct StrengthRoutinesPickerSheet: View {
                 }
 
                 Button {
+                    Task {
+                        shareRoutineBuildError = nil
+                        do {
+                            let snap = try await buildStrengthRoutineShareSnapshot(row: row)
+                            await MainActor.run { shareRoutineChatToken = ShareRoutineChatToken(snapshot: snap) }
+                        } catch {
+                            await MainActor.run { shareRoutineBuildError = error.localizedDescription }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "paperplane")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button {
                     Task { await applyRoutine(id: row.id) }
                 } label: {
                     Text("Apply")
@@ -4732,7 +4566,7 @@ private struct StrengthRoutinesPickerSheet: View {
                 await MainActor.run { duplicateError = "This routine has no exercises to copy." }
                 return
             }
-            _ = try await insertStrengthRoutineTemplate(
+            _ = try await StrengthRoutineRemotePersistence.insertStrengthRoutineTemplate(
                 client: client,
                 userId: session.user.id,
                 name: name,
@@ -4779,6 +4613,61 @@ private struct StrengthRoutinesPickerSheet: View {
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
+    }
+
+    private func buildStrengthRoutineShareSnapshot(row: StrengthRoutineListRow) async throws -> RoutineShareSnapshot {
+        let client = SupabaseManager.shared.client
+        let session = try await client.auth.session
+        struct ProfileLite: Decodable {
+            let username: String
+            let avatar_url: String?
+        }
+        let pRes = try await client
+            .from("profiles")
+            .select("username,avatar_url")
+            .eq("user_id", value: session.user.id.uuidString)
+            .single()
+            .execute()
+        let prof = try JSONDecoder.supabase().decode(ProfileLite.self, from: pRes.data)
+        let res = try await client
+            .from("strength_routines")
+            .select(strengthTemplateDetailSelect())
+            .eq("id", value: Int(row.id))
+            .single()
+            .execute()
+        let json = String(decoding: res.data, as: UTF8.self)
+        let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+        let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
+        let exerciseCount = exs.count
+        var totalSets = 0
+        var previewExerciseName: String?
+        for (idx, ex) in exs.enumerated() {
+            let n = (ex.strength_routine_sets ?? []).count
+            totalSets += n == 0 ? 1 : n
+            if idx == 0 {
+                let cn = ex.custom_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                previewExerciseName = cn.isEmpty ? "Exercise \(ex.exercise_id)" : cn
+            }
+        }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let updated = row.updated_at.map { iso.string(from: $0) }
+        return RoutineShareSnapshot(
+            v: 1,
+            type: "routine_share",
+            routine_kind: "strength",
+            name: row.name,
+            routine_id: row.id,
+            updated_at: updated,
+            owner_user_id: session.user.id,
+            owner_username: prof.username,
+            owner_avatar_url: prof.avatar_url,
+            share_nonce: UUID().uuidString,
+            detail_json: json,
+            exercise_count: exerciseCount > 0 ? exerciseCount : nil,
+            total_sets: totalSets > 0 ? totalSets : nil,
+            preview_exercise_name: previewExerciseName
+        )
     }
 
     private func applyRoutine(id: Int64) async {
@@ -4840,7 +4729,7 @@ private struct StrengthRoutinesPickerSheet: View {
                 }
                 return
             }
-            let nextOrder = try await nextRoutineSortOrderForInsert(
+            let nextOrder = try await StrengthRoutineRemotePersistence.nextSortOrderForInsert(
                 client: client,
                 userId: session.user.id,
                 folderId: folderId

@@ -100,6 +100,9 @@ struct RootView: View {
 
             case .competitionsHub, .competitionDetail, .competitionReviews:
                 app.selectedTab = .home
+
+            case .directMessage:
+                app.selectedTab = .home
             }
         }
         .sheet(
@@ -155,7 +158,6 @@ struct RootView: View {
                         app.notificationDestination = .none
                     })
                     .environmentObject(app)
-                    .gradientBG()
                 }
 
             case .challengeWeekly(let instanceId):
@@ -184,6 +186,13 @@ struct RootView: View {
                     CompetitionsHubView()
                         .gradientBG()
                 }
+
+            case .directMessage(let conversationId, let senderUserId):
+                NavigationStack {
+                    DeepLinkedChatThread(conversationId: conversationId, senderId: senderUserId)
+                        .environmentObject(app)
+                }
+                .gradientBG()
             }
         }
         .alert("You need to log in", isPresented: $showAuthAlert) {

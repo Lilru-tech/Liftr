@@ -17,6 +17,9 @@ import com.lilru.liftr.ui.add.recommendation.RecommendationDataSource
 import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationExerciseResult
 import com.lilru.liftr.ui.add.recommendation.StrengthSuggestionMode
 import com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationEngine
+import com.lilru.liftr.ui.chat.RoutineShareSnapshot
+import com.lilru.liftr.ui.chat.decodeRoutineShareHyroxDetail
+import com.lilru.liftr.ui.chat.decodeRoutineShareStrengthDetail
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -33,6 +36,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -223,6 +227,41 @@ private data class HyroxRoutineHeaderDb(
     @SerialName("avg_hr") val avgHr: Int? = null,
     @SerialName("max_hr") val maxHr: Int? = null,
     @SerialName("hyrox_routine_exercises") val exercises: List<HyroxRoutineExerciseDb>? = null
+)
+
+private data class ProfileUsernameRow(val username: String, val avatarUrl: String?)
+
+private const val STRENGTH_DETAIL_SHARE_SELECT =
+    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes))"
+
+private const val HYROX_DETAIL_SHARE_SELECT =
+    "id,name,updated_at,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
+        "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+
+@Serializable
+private data class ShareStrengthSet(
+    @SerialName("set_number") val setNumber: Int,
+    val reps: Int? = null,
+    @SerialName("weight_kg") val weightKg: Double? = null,
+    val rpe: Double? = null,
+    @SerialName("rest_sec") val restSec: Int? = null,
+    val notes: String? = null
+)
+
+@Serializable
+private data class ShareStrengthEx(
+    @SerialName("exercise_id") val exerciseId: Long,
+    @SerialName("order_index") val orderIndex: Int,
+    val notes: String? = null,
+    @SerialName("custom_name") val customName: String? = null,
+    @SerialName("strength_routine_sets") val strengthRoutineSets: List<ShareStrengthSet>? = null
+)
+
+@Serializable
+private data class ShareStrengthDetail(
+    val id: Long,
+    val name: String,
+    @SerialName("strength_routine_exercises") val strengthRoutineExercises: List<ShareStrengthEx>? = null
 )
 
 data class StrengthSetDraft(
@@ -2259,6 +2298,229 @@ class AddWorkoutViewModel(
             d.avgHr?.let { put("avg_hr", it) }
             d.maxHr?.let { put("max_hr", it) }
             put("exercises", exercises)
+        }
+    }
+
+    suspend fun buildStrengthRoutineShareSnapshotForChat(routineId: Long): RoutineShareSnapshot {
+        val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+        val profileRes = supabase.from(BackendContracts.Tables.PROFILES)
+            .select(columns = Columns.raw("username,avatar_url")) {
+                filter { eq("user_id", me) }
+                limit(1)
+            }
+        val prof = profileRowFromSelectData(profileRes.data)
+        val rRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(
+            columns = Columns.raw(STRENGTH_DETAIL_SHARE_SELECT)
+        ) {
+            filter { eq("id", routineId) }
+            limit(1)
+        }
+        val root = Json.parseToJsonElement(rRes.data.trim())
+        val obj = when (root) {
+            is JsonArray -> root.firstOrNull()?.jsonObject ?: error("Routine not found.")
+            is JsonObject -> root
+            else -> error("Routine not found.")
+        }
+        val detailJson = obj.toString()
+        val routineName = obj["name"]?.jsonPrimitive?.contentOrNull ?: "Routine"
+        val updatedAt = obj["updated_at"]?.jsonPrimitive?.contentOrNull
+        val parsed = decodeRoutineShareStrengthDetail(detailJson)
+        val exs = parsed?.strengthRoutineExercises?.sortedBy { it.orderIndex }.orEmpty()
+        val exerciseCount = exs.size
+        var totalSets = 0
+        var previewExerciseName: String? = null
+        exs.forEachIndexed { idx, ex ->
+            val n = ex.strengthRoutineSets?.size ?: 0
+            totalSets += if (n == 0) 1 else n
+            if (idx == 0) {
+                val cn = ex.customName?.trim().orEmpty()
+                previewExerciseName = if (cn.isNotEmpty()) cn else "Exercise ${ex.exerciseId}"
+            }
+        }
+        return RoutineShareSnapshot(
+            v = 1,
+            routineKind = "strength",
+            name = routineName,
+            routineId = routineId,
+            updatedAt = updatedAt,
+            ownerUserId = me,
+            ownerUsername = prof.username,
+            ownerAvatarUrl = prof.avatarUrl,
+            shareNonce = UUID.randomUUID().toString(),
+            detailJson = detailJson,
+            exerciseCount = exerciseCount.takeIf { it > 0 },
+            totalSets = totalSets.takeIf { it > 0 },
+            previewExerciseName = previewExerciseName
+        )
+    }
+
+    suspend fun buildHyroxRoutineShareSnapshotForChat(routineId: Long): RoutineShareSnapshot {
+        val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+        val profileRes = supabase.from(BackendContracts.Tables.PROFILES)
+            .select(columns = Columns.raw("username,avatar_url")) {
+                filter { eq("user_id", me) }
+                limit(1)
+            }
+        val prof = profileRowFromSelectData(profileRes.data)
+        val rRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(
+            columns = Columns.raw(HYROX_DETAIL_SHARE_SELECT)
+        ) {
+            filter { eq("id", routineId) }
+            limit(1)
+        }
+        val root = Json.parseToJsonElement(rRes.data.trim())
+        val obj = when (root) {
+            is JsonArray -> root.firstOrNull()?.jsonObject ?: error("Routine not found.")
+            is JsonObject -> root
+            else -> error("Routine not found.")
+        }
+        val detailJson = obj.toString()
+        val routineName = obj["name"]?.jsonPrimitive?.contentOrNull ?: "Routine"
+        val updatedAt = obj["updated_at"]?.jsonPrimitive?.contentOrNull
+        val parsed = decodeRoutineShareHyroxDetail(detailJson)
+        val rows = parsed?.hyroxRoutineExercises?.sortedBy { it.exerciseOrder }.orEmpty()
+        val exerciseCount = rows.size
+        val previewExerciseName = rows.firstOrNull()?.let { w ->
+            HyroxExerciseFormatting.label(
+                w.exerciseCode,
+                w.exerciseDisplayName,
+                w.notes
+            )
+        }
+        return RoutineShareSnapshot(
+            v = 1,
+            routineKind = "hyrox",
+            name = routineName,
+            routineId = routineId,
+            updatedAt = updatedAt,
+            ownerUserId = me,
+            ownerUsername = prof.username,
+            ownerAvatarUrl = prof.avatarUrl,
+            shareNonce = UUID.randomUUID().toString(),
+            detailJson = detailJson,
+            exerciseCount = exerciseCount.takeIf { it > 0 },
+            totalSets = null,
+            previewExerciseName = previewExerciseName
+        )
+    }
+
+    fun importStrengthRoutineFromShare(detailJson: String, routineName: String, folderId: Long?) {
+        val trimmed = routineName.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Enter a routine name.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val drafts = strengthDraftsFromShareDetailJson(detailJson, _uiState.value.exercises)
+                if (drafts.isEmpty()) error("This routine has no exercises to copy.")
+                if (drafts.any { it.exerciseId == null }) error("Routine is missing exercise references.")
+                val taken = _uiState.value.routines.any {
+                    it.name.equals(trimmed, ignoreCase = true) &&
+                        (it.folderId == folderId || (it.folderId == null && folderId == null))
+                }
+                if (taken) error("A routine with this name already exists in this folder.")
+                insertNewRoutineWithDrafts(me, trimmed, folderId, drafts)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    message = "Routine saved."
+                )
+                loadStrengthRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun importHyroxRoutineFromShare(detailJson: String, routineName: String, folderId: Long?) {
+        val trimmed = routineName.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Enter a routine name.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val root = Json.parseToJsonElement(detailJson.trim())
+                val obj = when (root) {
+                    is JsonArray -> root.firstOrNull()?.jsonObject ?: error("Invalid routine.")
+                    is JsonObject -> root
+                    else -> error("Invalid routine.")
+                }
+                val detail = json.decodeFromJsonElement(HyroxRoutineHeaderDb.serializer(), obj)
+                val stats = hyroxStatsJsonObjectFromDetail(detail)
+                val taken = _uiState.value.hyroxRoutines.any {
+                    it.name.equals(trimmed, ignoreCase = true) &&
+                        (it.folderId == folderId || (it.folderId == null && folderId == null))
+                }
+                if (taken) error("A routine with this name already exists in this folder.")
+                insertHyroxRoutineFromStats(me, trimmed, folderId, stats, replaceRoutineId = null)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    message = "Routine saved."
+                )
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    private fun profileRowFromSelectData(data: String): ProfileUsernameRow {
+        return runCatching {
+            val arr = Json.parseToJsonElement(data.trim()).jsonArray
+            val o = arr.firstOrNull()?.jsonObject ?: return@runCatching ProfileUsernameRow("", null)
+            ProfileUsernameRow(
+                username = o["username"]?.jsonPrimitive?.contentOrNull ?: "",
+                avatarUrl = o["avatar_url"]?.jsonPrimitive?.contentOrNull
+            )
+        }.getOrElse { ProfileUsernameRow("", null) }
+    }
+
+    private fun strengthDraftsFromShareDetailJson(
+        detailJson: String,
+        catalog: List<ExerciseLite>
+    ): List<StrengthExerciseDraft> {
+        val detail = runCatching { json.decodeFromString(ShareStrengthDetail.serializer(), detailJson) }.getOrNull()
+            ?: return emptyList()
+        val exs = (detail.strengthRoutineExercises ?: emptyList()).sortedBy { it.orderIndex }
+        return exs.map { ex ->
+            val setsSorted = (ex.strengthRoutineSets ?: emptyList()).sortedBy { it.setNumber }
+            val cust = ex.customName?.trim().orEmpty()
+            val baseName = catalog.firstOrNull { it.id == ex.exerciseId }?.let { it.nameEs ?: it.nameEn ?: it.name }
+                ?: "Exercise ${ex.exerciseId}"
+            val display = if (cust.isNotEmpty()) cust else baseName
+            val mappedSets = setsSorted.map { s ->
+                StrengthSetDraft(
+                    setNumber = s.setNumber.coerceIn(1, 99),
+                    repsText = s.reps?.toString() ?: "",
+                    weightText = s.weightKg?.let { d ->
+                        if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
+                    } ?: "",
+                    rpeText = s.rpe?.toString() ?: "",
+                    restSecText = s.restSec?.toString() ?: "",
+                    notes = s.notes ?: ""
+                )
+            }
+            val fallbackSets = if (mappedSets.isEmpty()) listOf(StrengthSetDraft(setNumber = 1)) else mappedSets
+            StrengthExerciseDraft(
+                exerciseId = ex.exerciseId,
+                exerciseName = display,
+                customName = cust,
+                notes = ex.notes ?: "",
+                sets = fallbackSets
+            )
         }
     }
 

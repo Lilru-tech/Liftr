@@ -2,16 +2,12 @@ import Foundation
 import Supabase
 import SwiftUI
 
-// MARK: - Array safe subscript (editor bindings)
-
 extension Array {
     subscript(safe index: Int) -> Element? {
         guard indices.contains(index) else { return nil }
         return self[index]
     }
 }
-
-// MARK: - Detail fetch (template → EditableExercise)
 
 struct StrengthTemplateDetailWire: Decodable {
     let id: Int64
@@ -72,8 +68,6 @@ func editableExercisesFromStrengthTemplateDetail(
     }
 }
 
-// MARK: - Shared strength program editor (Add workout + edit saved template)
-
 struct StrengthRoutineExercisesEditorBlock: View {
     @Binding var exercises: [EditableExercise]
     let laneIndex: Int
@@ -87,7 +81,6 @@ struct StrengthRoutineExercisesEditorBlock: View {
     let exerciseSelected: (EditableExercise) -> Bool
     let onRequestClearAll: () -> Void
     let onSuggest: () -> Void
-    /// When `false`, hides “Suggest next session” (e.g. editing a saved routine template).
     var showSuggestQuickAction: Bool = true
 
     var body: some View {
@@ -407,8 +400,6 @@ struct StrengthRoutineExercisesEditorBlock: View {
         }
     }
 }
-
-// MARK: - Edit saved routine template (from Routines picker)
 
 struct EditSavedStrengthRoutineSheet: View {
     let routineId: Int64

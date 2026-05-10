@@ -243,6 +243,14 @@ struct ActiveSportWorkoutView: View {
         .onDisappear {
             WorkoutLiveActivityManager.endIfAvailable()
         }
+        .overlay {
+            if app.isAuthenticated {
+                MessagesFloatingButton()
+                    .environmentObject(app)
+                    .allowsHitTesting(true)
+                    .zIndex(99)
+            }
+        }
     }
     
     private var statsOrSummarySection: some View {

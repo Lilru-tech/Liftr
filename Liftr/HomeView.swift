@@ -27,6 +27,7 @@ struct HomeView: View {
         let state: String
         let started_at: Date?
         let ended_at: Date?
+        let duration_min: Int?
         let calories_kcal: Decimal?
         let sport_sessions: [SportSessionRow]?
         let cardio_sessions: [CardioSessionRow]?
@@ -489,6 +490,14 @@ struct HomeView: View {
             print("[Home.selectedItem] \(old?.id.description ?? "nil") → \(new?.id.description ?? "nil") main=\(Thread.isMainThread)")
         }
         .background(.clear)
+        .overlay {
+            if app.isAuthenticated {
+                MessagesFloatingButton()
+                    .environmentObject(app)
+                    .allowsHitTesting(true)
+                    .zIndex(99)
+            }
+        }
         .task { await reloadAll() }
         .onChange(of: app.isAuthenticated) { _, _ in
             Task { await reloadAll() }
@@ -548,6 +557,7 @@ struct HomeView: View {
                         state: (ui["state"] as? String) ?? old.workout.state,
                         started_at: startedAt ?? old.workout.started_at,
                         ended_at: endedAt ?? old.workout.ended_at,
+                        duration_min: old.workout.duration_min,
                         calories_kcal: old.workout.calories_kcal,
                         sport_sessions: old.workout.sport_sessions,
                         cardio_sessions: old.workout.cardio_sessions
@@ -1089,7 +1099,7 @@ struct HomeView: View {
             
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal")
+                .select("id, user_id, kind, title, started_at, ended_at, duration_min, state, calories_kcal")
                 .eq("user_id", value: me.uuidString)
                 .gte("started_at", value: iso.string(from: start))
                 .lt("started_at", value: iso.string(from: end))
@@ -1121,7 +1131,9 @@ struct HomeView: View {
             var points = 0
             var kcalTotal = 0
             for w in rows {
-                if let s = w.started_at, let e = w.ended_at {
+                if let dm = w.duration_min, dm > 0 {
+                    minutes += dm
+                } else if let s = w.started_at, let e = w.ended_at {
                     minutes += max(Int(e.timeIntervalSince(s))/60, 0)
                 }
                 if let sc = scoresDict[w.id] { points += Int(sc.rounded()) }

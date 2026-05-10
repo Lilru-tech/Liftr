@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
@@ -29,6 +30,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -37,9 +39,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -49,12 +54,19 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.lilru.liftr.R
+import com.lilru.liftr.data.ChatRepository
+import com.lilru.liftr.ui.chat.AchievementShareSnapshot
+import com.lilru.liftr.ui.chat.ShareAchievementToChatSheetContent
 import com.lilru.liftr.ui.components.LiftrBackTopBar
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -70,6 +82,7 @@ fun AchievementsScreen(
     targetUserId: String,
     viewedUsername: String,
     fromNotification: Boolean = false,
+    initialOpenAchievementCode: String? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -80,6 +93,10 @@ fun AchievementsScreen(
     var selected by remember { mutableStateOf<AchievementRowUi?>(null) }
     var showSearch by remember { mutableStateOf(false) }
     val detailSheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    val chatRepo = remember { ChatRepository(supabase) }
+    var shareAchievementSnapshot by remember { mutableStateOf<AchievementShareSnapshot?>(null) }
+    var appliedInitialOpenCode by rememberSaveable { mutableStateOf(false) }
     val lockOptions = listOf(
         AchievementLockFilter.ALL to R.string.achievements_filter_all,
         AchievementLockFilter.UNLOCKED to R.string.achievements_filter_unlocked,
@@ -89,6 +106,24 @@ fun AchievementsScreen(
     val dateFmt = remember {
         DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)
             .withLocale(Locale.getDefault())
+    }
+
+    LaunchedEffect(initialOpenAchievementCode, ui.loading, ui.items) {
+        if (appliedInitialOpenCode) return@LaunchedEffect
+        if (initialOpenAchievementCode == null) {
+            appliedInitialOpenCode = true
+            return@LaunchedEffect
+        }
+        if (ui.loading) return@LaunchedEffect
+        if (ui.items.isEmpty()) return@LaunchedEffect
+        vm.setLockFilter(AchievementLockFilter.ALL)
+        vm.setCategory(AchievementCategoryFilter.ALL)
+        vm.setSearch("")
+        val match = ui.items.find { it.code == initialOpenAchievementCode }
+        if (match != null) {
+            selected = match
+        }
+        appliedInitialOpenCode = true
     }
 
     Column(
@@ -230,7 +265,39 @@ fun AchievementsScreen(
             sheetState = detailSheet
         ) {
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(row.title, style = MaterialTheme.typography.titleMedium)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(row.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                val me = supabase.auth.currentUserOrNull()?.id ?: return@launch
+                                val prof = runCatching { chatRepo.fetchProfile(me) }.getOrNull()
+                                val snap = AchievementShareSnapshot(
+                                    code = row.code,
+                                    achievementId = row.achievementId,
+                                    title = row.title,
+                                    category = row.category,
+                                    description = row.description,
+                                    iconUrl = row.iconUrl,
+                                    ownerUserId = me,
+                                    ownerUsername = prof?.username,
+                                    ownerAvatarUrl = prof?.avatarUrl
+                                )
+                                selected = null
+                                shareAchievementSnapshot = snap
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.Filled.Send,
+                            contentDescription = stringResource(R.string.achievement_share_chat_a11y)
+                        )
+                    }
+                }
                 Text(
                     prettySubtypeFromCode(row.code, row.category),
                     style = MaterialTheme.typography.labelMedium,
@@ -342,6 +409,22 @@ fun AchievementsScreen(
                     onClick = { selected = null },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(stringResource(R.string.feature_requests_close)) }
+            }
+        }
+    }
+    if (shareAchievementSnapshot != null) {
+        val snap = shareAchievementSnapshot!!
+        Dialog(
+            onDismissRequest = { shareAchievementSnapshot = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(Modifier.fillMaxSize()) {
+                ShareAchievementToChatSheetContent(
+                    supabase = supabase,
+                    snapshot = snap,
+                    onDone = { shareAchievementSnapshot = null },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     }

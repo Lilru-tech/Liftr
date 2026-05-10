@@ -10,10 +10,14 @@ sealed class MainOverlay {
     data class SegmentDetail(val segmentId: UUID) : MainOverlay()
     data class FollowerProfile(val userId: String) : MainOverlay()
     data class Goals(val userId: String) : MainOverlay()
-    data class Achievements(val fromNotification: Boolean = false) : MainOverlay()
+    data class Achievements(
+        val fromNotification: Boolean = false,
+        val openAchievementCode: String? = null
+    ) : MainOverlay()
     data object CompetitionsHub : MainOverlay()
     data class CompetitionDetailById(val competitionId: Int) : MainOverlay()
     data object CompetitionReviews : MainOverlay()
     data class AddWorkoutDraftKind(val kind: String) : MainOverlay()
     data class ChallengeWeeklyDetail(val instanceId: UUID) : MainOverlay()
+    data class ChatThread(val conversationId: Long, val otherUserId: String?) : MainOverlay()
 }

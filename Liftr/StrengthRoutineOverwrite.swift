@@ -3,8 +3,6 @@ import Foundation
 import Supabase
 import SwiftUI
 
-// MARK: - Program model (canonical for compare / hash / patch)
-
 struct StrengthProgramItem: Equatable {
     var exerciseId: Int64
     var orderIndex: Int
@@ -61,8 +59,6 @@ struct StrengthProgramSet: Equatable {
     }
 }
 
-// MARK: - Fingerprints (content must match legacy `strengthRoutineContentFingerprint`)
-
 func strengthRoutineContentFingerprint(from exercises: [EditableExercise]) -> String {
     let items = strengthProgramItems(from: exercises)
     return strengthRoutineContentFingerprint(from: items)
@@ -106,16 +102,11 @@ func strengthProgramItems(from exercises: [EditableExercise]) -> [StrengthProgra
     exercises.compactMap { StrengthProgramItem(from: $0) }.sorted { $0.orderIndex < $1.orderIndex }
 }
 
-// MARK: - Overwrite detection + diff
-
 struct StrengthRoutineOverwriteDiffLine: Identifiable, Equatable {
     let id: String
-    /// Full line for UI / accessibility, e.g. "Bench press · Set 2"
     let exerciseContext: String
-    /// Display name for grouping (same as prefix of exerciseContext before " · Set ").
     let exerciseTitle: String
     let setNumber: Int
-    /// Workout order; stable sort for grouping exercises.
     let exerciseOrderIndex: Int
     let fieldTitle: String
     let oldValue: String
@@ -558,8 +549,6 @@ func fetchStrengthRoutineOverwriteCandidate(
         diffLines: diff
     ))
 }
-
-// MARK: - Apply prescription in place (keeps routine id)
 
 func applyStrengthRoutinePrescriptionUpdate(
     client: SupabaseClient,

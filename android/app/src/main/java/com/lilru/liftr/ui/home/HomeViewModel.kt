@@ -498,7 +498,7 @@ class HomeViewModel(
         val res = supabase
             .from(BackendContracts.Tables.WORKOUTS)
             .select(
-                columns = Columns.raw("id, started_at, ended_at, calories_kcal")
+                columns = Columns.raw("id, started_at, ended_at, duration_min, calories_kcal")
             ) {
                 filter { eq("user_id", me) }
                 filter { gte("started_at", iso(start.toInstant())) }
@@ -514,12 +514,17 @@ class HomeViewModel(
         var points = 0
         var kcalT = 0
         for (r in rows) {
-            r.ended?.let { endS ->
-                val s0 = runCatching { Instant.parse(r.started) }.getOrNull()
-                val e0 = runCatching { Instant.parse(endS) }.getOrNull()
-                if (s0 != null && e0 != null) {
-                    val m = ChronoUnit.MINUTES.between(s0, e0).toInt()
-                    if (m > 0) minutes += m
+            val dm = r.durationMin
+            if (dm != null && dm > 0) {
+                minutes += dm
+            } else {
+                r.ended?.let { endS ->
+                    val s0 = runCatching { Instant.parse(r.started) }.getOrNull()
+                    val e0 = runCatching { Instant.parse(endS) }.getOrNull()
+                    if (s0 != null && e0 != null) {
+                        val m = ChronoUnit.MINUTES.between(s0, e0).toInt()
+                        if (m > 0) minutes += m
+                    }
                 }
             }
             val sc = scores[r.id] ?: 0.0
@@ -538,6 +543,7 @@ class HomeViewModel(
         val id: Int,
         val started: String,
         val ended: String?,
+        val durationMin: Int?,
         val kcal: Double?
     )
 
@@ -561,7 +567,20 @@ class HomeViewModel(
                 } else {
                     null
                 }
-                out.add(StartedCal(id, st, o.optString("ended_at", "").takeIf { it.isNotBlank() }, kc))
+                val dm = if (o.has("duration_min") && !o.isNull("duration_min")) {
+                    o.optInt("duration_min")
+                } else {
+                    null
+                }
+                out.add(
+                    StartedCal(
+                        id,
+                        st,
+                        o.optString("ended_at", "").takeIf { it.isNotBlank() },
+                        dm,
+                        kc
+                    )
+                )
             }
             out
         }.getOrDefault(emptyList())

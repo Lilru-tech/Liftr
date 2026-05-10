@@ -91,6 +91,8 @@ import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
 import com.lilru.liftr.navigation.AppNavEvents
 import com.lilru.liftr.navigation.MainOverlay
 import com.lilru.liftr.ui.add.duplicate.AddWorkoutDuplicateStore
+import com.lilru.liftr.ui.chat.RoutineShareSnapshot
+import com.lilru.liftr.ui.chat.ShareRoutineToChatSheetContent
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.add.recommendation.CardioRecommendationResult
 import com.lilru.liftr.ui.add.recommendation.HyroxExerciseRecommendationResult
@@ -252,6 +254,10 @@ fun AddWorkoutTabScreen(
     val exerciseSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val templateEditSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val workoutHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showShareRoutineSheet by remember { mutableStateOf(false) }
+    var routineShareSnapshot by remember { mutableStateOf<RoutineShareSnapshot?>(null) }
+    var routineShareError by remember { mutableStateOf<String?>(null) }
+    val shareRoutineSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(showParticipantsSheet) {
         if (showParticipantsSheet) {
             participantsSearchQuery = ""
@@ -1641,6 +1647,19 @@ fun AddWorkoutTabScreen(
                     vm.applyRoutine(id)
                     showRoutinesSheet = false
                 },
+                onShareRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildStrengthRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routineShareSnapshot = snap
+                                showShareRoutineSheet = true
+                                showRoutinesSheet = false
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
+                },
                 onEditRoutine = { id, name -> vm.loadRoutineForEdit(id, name) }
             )
         }
@@ -1687,9 +1706,53 @@ fun AddWorkoutTabScreen(
                 onApplyRoutine = { id ->
                     vm.applyHyroxRoutine(id)
                     showHyroxRoutinesSheet = false
+                },
+                onShareRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildHyroxRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routineShareSnapshot = snap
+                                showShareRoutineSheet = true
+                                showHyroxRoutinesSheet = false
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
                 }
             )
         }
+    }
+    if (showShareRoutineSheet && routineShareSnapshot != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showShareRoutineSheet = false
+                routineShareSnapshot = null
+            },
+            sheetState = shareRoutineSheetState
+        ) {
+            ShareRoutineToChatSheetContent(
+                supabase = supabase,
+                snapshot = routineShareSnapshot!!,
+                onDone = {
+                    showShareRoutineSheet = false
+                    routineShareSnapshot = null
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+    routineShareError?.let { err ->
+        AlertDialog(
+            onDismissRequest = { routineShareError = null },
+            title = { Text(stringResource(R.string.share_routine_error_title)) },
+            text = { Text(err) },
+            confirmButton = {
+                TextButton(onClick = { routineShareError = null }) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            }
+        )
     }
     if (showParticipantsSheet) {
         ModalBottomSheet(

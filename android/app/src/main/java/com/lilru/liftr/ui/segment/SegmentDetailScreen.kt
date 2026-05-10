@@ -50,11 +50,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.lilru.liftr.R
 import com.lilru.liftr.cardio.CardioRouteGeoJson
+import com.lilru.liftr.data.ChatRepository
+import com.lilru.liftr.ui.chat.SegmentShareSnapshot
+import com.lilru.liftr.ui.chat.ShareSegmentToChatSheetContent
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.home.workoutDetailScreenGradientModifier
@@ -159,6 +166,8 @@ fun SegmentDetailScreen(
     var reloadTick by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val meId = supabase.auth.currentUserOrNull()?.id
+    val chatRepo = remember { ChatRepository(supabase) }
+    var shareSegmentSnapshot by remember { mutableStateOf<SegmentShareSnapshot?>(null) }
 
     LaunchedEffect(segmentId, reloadTick) {
         loading = true
@@ -263,6 +272,32 @@ fun SegmentDetailScreen(
                     }
                 },
                 actions = {
+                    if (detail != null) {
+                        IconButton(
+                            onClick = {
+                                val d = detail!!
+                                scope.launch {
+                                    val prof = d.createdBy?.let { cb ->
+                                        runCatching { chatRepo.fetchProfile(cb) }.getOrNull()
+                                    }
+                                    shareSegmentSnapshot = SegmentShareSnapshot(
+                                        segmentId = segmentId.toString(),
+                                        name = d.name,
+                                        segmentLengthM = d.segmentLengthM,
+                                        leaderboardEffortCount = d.leaderboardEffortCount,
+                                        ownerUserId = d.createdBy,
+                                        ownerUsername = prof?.username,
+                                        ownerAvatarUrl = prof?.avatarUrl
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Filled.Send,
+                                contentDescription = stringResource(R.string.segment_share_chat_a11y)
+                            )
+                        }
+                    }
                     val d = detail
                     if (d != null && meId != null && d.createdBy == meId) {
                         Box {
@@ -652,6 +687,23 @@ fun SegmentDetailScreen(
                 }
             }
         )
+    }
+
+    if (shareSegmentSnapshot != null) {
+        val snap = shareSegmentSnapshot!!
+        Dialog(
+            onDismissRequest = { shareSegmentSnapshot = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(Modifier.fillMaxSize()) {
+                ShareSegmentToChatSheetContent(
+                    supabase = supabase,
+                    snapshot = snap,
+                    onDone = { shareSegmentSnapshot = null },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
     }
     }
 }

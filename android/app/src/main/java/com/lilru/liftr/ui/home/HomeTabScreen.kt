@@ -64,6 +64,7 @@ import com.lilru.liftr.R
 import com.lilru.liftr.navigation.AppNavEvents
 import com.lilru.liftr.navigation.MainOverlay
 import com.lilru.liftr.prefs.HomeUiPreferences
+import com.lilru.liftr.ui.chat.MessagesFloatingButton
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.launch
@@ -250,6 +251,9 @@ fun HomeTabScreen(
                             }
                         }
                     )
+                }
+                if (me != null) {
+                    MessagesFloatingButton(supabase = supabase)
                 }
             }
         }

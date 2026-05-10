@@ -299,7 +299,6 @@ struct NotificationsListView: View {
                 NavigationStack {
                     SegmentDetailView(segmentId: sid, onClose: nil)
                         .environmentObject(app)
-                        .gradientBG()
                 }
             } else {
                 Text("Segment not found")
@@ -316,7 +315,16 @@ struct NotificationsListView: View {
             } else {
                 Text("Challenge not found")
             }
-            
+
+        case "dm_message":
+            if let cid = dmConversationId(from: n.data) {
+                DeepLinkedChatThread(conversationId: cid, senderId: dmSenderId(from: n.data))
+                    .environmentObject(app)
+                    .gradientBG()
+            } else {
+                Text("Conversation not found")
+            }
+
         default:
             VStack(spacing: 12) {
                 Text(n.title)
@@ -331,7 +339,22 @@ struct NotificationsListView: View {
             .padding()
         }
     }
-    
+
+    private func dmConversationId(from data: [String: JSONValue]?) -> Int64? {
+        guard let v = data?["conversation_id"] else { return nil }
+        switch v {
+        case .string(let s): return Int64(s)
+        case .int(let i): return Int64(i)
+        case .double(let d): return Int64(d)
+        default: return nil
+        }
+    }
+
+    private func dmSenderId(from data: [String: JSONValue]?) -> UUID? {
+        guard let s = data?["sender_id"]?.stringValue else { return nil }
+        return UUID(uuidString: s)
+    }
+
     private func deleteAllNotifications() async {
         guard let uid = app.userId else { return }
         await MainActor.run { deletingAll = true; error = nil }

@@ -28,7 +28,6 @@ struct StrengthStyleMetricField<Content: View>: View {
 }
 
 struct StrengthSetRowEditor: View {
-    /// Row index in the exercise (1-based), shown as #1, #2 — not the same as `setNumber` (repeat count).
     let lineOrdinal: Int
     @Binding var setNumber: Int
     @Binding var reps: Int?

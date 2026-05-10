@@ -19,6 +19,8 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 data class StrengthProgramSet(
     val setNumber: Int,
     val reps: Int?,
@@ -488,7 +490,7 @@ private fun parseRoutineExerciseRows(raw: String): List<RoutineExerciseRowParsed
 }
 
 /** Same validation as [AddWorkoutViewModel.buildStrengthPayloadItems] but public for routine patch. */
-fun buildStrengthPayloadItemsForRoutineUpdate(
+internal fun buildStrengthPayloadItemsForRoutineUpdate(
     exercises: List<StrengthExerciseDraft>
 ): List<Pair<StrengthExerciseDraft, List<StrengthSetPayload>>> {
     if (exercises.any { it.exerciseId == null }) {

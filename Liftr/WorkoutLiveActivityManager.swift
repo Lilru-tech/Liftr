@@ -34,13 +34,50 @@ enum WorkoutLiveActivityManager {
     static func start(startTime: Date, kind: WorkoutLiveSessionKind) async {
         guard isSupported else { return }
         await end()
-        let state = WorkoutLiveActivityAttributes.ContentState(startTime: startTime, kind: kind)
+        let state = WorkoutLiveActivityAttributes.ContentState(startTime: startTime, kind: kind, isPaused: false, pausedElapsedSeconds: 0)
         do {
             current = try Activity.request(
                 attributes: WorkoutLiveActivityAttributes(),
                 content: .init(state: state, staleDate: nil),
                 pushType: nil
             )
+        } catch {
+        }
+    }
+
+    static func updateStrengthPauseIfAvailable(isPaused: Bool, activeElapsedSeconds: Int) {
+        Task { @MainActor in
+            if #available(iOS 16.2, *) {
+                await updateStrengthPause(isPaused: isPaused, activeElapsedSeconds: activeElapsedSeconds)
+            }
+        }
+    }
+
+    @available(iOS 16.2, *)
+    private static func updateStrengthPause(isPaused: Bool, activeElapsedSeconds: Int) async {
+        guard let activity = current else { return }
+        let prev = activity.content.state
+        guard prev.kind == .strength else { return }
+        let next: WorkoutLiveActivityAttributes.ContentState
+        if isPaused {
+            next = WorkoutLiveActivityAttributes.ContentState(
+                startTime: prev.startTime,
+                kind: prev.kind,
+                isPaused: true,
+                pausedElapsedSeconds: max(0, activeElapsedSeconds)
+            )
+        } else {
+            let sec = max(0, activeElapsedSeconds)
+            let newStart = Date().addingTimeInterval(Double(-sec))
+            next = WorkoutLiveActivityAttributes.ContentState(
+                startTime: newStart,
+                kind: prev.kind,
+                isPaused: false,
+                pausedElapsedSeconds: 0
+            )
+        }
+        do {
+            try await activity.update(ActivityContent(state: next, staleDate: nil))
         } catch {
         }
     }

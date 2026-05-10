@@ -3,8 +3,6 @@ import Foundation
 import SwiftUI
 import Supabase
 
-// MARK: - Apply payload (import routine into Add form)
-
 struct HyroxRoutineApplyPayload: Equatable {
     var exercises: [HyroxExerciseForm]
     var hyDivision: String
@@ -39,8 +37,6 @@ extension SportForm {
     }
 }
 
-// MARK: - List / detail wire types
-
 private struct HyroxRoutineFolderRow: Identifiable, Hashable, Decodable {
     let id: Int64
     let name: String
@@ -56,7 +52,7 @@ private struct HyroxRoutineListRow: Identifiable, Decodable {
     let sort_order: Int?
 }
 
-private struct HyroxRoutineExerciseWire: Decodable {
+struct HyroxRoutineExerciseWire: Decodable {
     let exercise_code: String
     let exercise_order: Int
     let distance_m: Int?
@@ -69,7 +65,7 @@ private struct HyroxRoutineExerciseWire: Decodable {
     let exercise_display_name: String?
 }
 
-private struct HyroxRoutineDetailWire: Decodable {
+struct HyroxRoutineDetailWire: Decodable {
     let id: Int64
     let name: String
     let division: String?
@@ -85,11 +81,11 @@ private struct HyroxRoutineDetailWire: Decodable {
     let hyrox_routine_exercises: [HyroxRoutineExerciseWire]?
 }
 
-private func hyroxRoutineDetailSelect() -> String {
+func hyroxRoutineDetailSelect() -> String {
     "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr,hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
 }
 
-private func hyroxApplyPayloadFromDetail(_ detail: HyroxRoutineDetailWire) -> HyroxRoutineApplyPayload {
+func hyroxApplyPayloadFromDetail(_ detail: HyroxRoutineDetailWire) -> HyroxRoutineApplyPayload {
     let exs = (detail.hyrox_routine_exercises ?? []).sorted { $0.exercise_order < $1.exercise_order }
     let forms: [HyroxExerciseForm] = exs.map { w in
         let fields = HyroxExerciseFormatting.formFields(
@@ -129,8 +125,6 @@ private func hyroxApplyPayloadFromDetail(_ detail: HyroxRoutineDetailWire) -> Hy
         hyMaxHR: detail.max_hr.map(String.init) ?? ""
     )
 }
-
-// MARK: - Name validation
 
 enum HyroxRoutineNameValidator {
     static func isRoutineNameTaken(
@@ -189,8 +183,6 @@ enum HyroxRoutineNameValidator {
         return row.id
     }
 }
-
-// MARK: - Persist template
 
 struct HyroxRoutinePersistOutcome {
     let alsoHasAnotherRoutineWithSameProgram: Bool
@@ -471,6 +463,7 @@ private extension String {
 }
 struct HyroxRoutinesPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var app: AppState
     let onApply: (HyroxRoutineApplyPayload) -> Void
 
     @State private var routines: [HyroxRoutineListRow] = []
@@ -501,6 +494,13 @@ struct HyroxRoutinesPickerSheet: View {
     @State private var duplicateNameDraft: String = ""
     @State private var duplicateTargetFolderId: Int64? = nil
     @State private var duplicateError: String?
+    @State private var shareRoutineChatToken: HyroxShareRoutineChatToken?
+    @State private var shareRoutineBuildError: String?
+
+    private struct HyroxShareRoutineChatToken: Identifiable {
+        let id = UUID()
+        let snapshot: RoutineShareSnapshot
+    }
 
     private var sortedFolders: [HyroxRoutineFolderRow] {
         folders.sorted { a, b in
@@ -816,6 +816,22 @@ struct HyroxRoutinesPickerSheet: View {
             }
             .presentationDetents([.medium])
         }
+        .sheet(item: $shareRoutineChatToken) { token in
+            ShareRoutineToChatSheet(snapshot: token.snapshot, onSent: {})
+                .environmentObject(app)
+                .gradientBG()
+        }
+        .alert(
+            String(localized: "Couldn't share routine"),
+            isPresented: Binding(
+                get: { shareRoutineBuildError != nil },
+                set: { if !$0 { shareRoutineBuildError = nil } }
+            )
+        ) {
+            Button(String(localized: "OK"), role: .cancel) { shareRoutineBuildError = nil }
+        } message: {
+            Text(shareRoutineBuildError ?? "")
+        }
         .confirmationDialog(
             "Delete this routine?",
             isPresented: Binding(
@@ -1025,6 +1041,25 @@ struct HyroxRoutinesPickerSheet: View {
                 }
 
                 Button {
+                    Task {
+                        shareRoutineBuildError = nil
+                        do {
+                            let snap = try await buildHyroxRoutineShareSnapshot(row: row)
+                            await MainActor.run { shareRoutineChatToken = HyroxShareRoutineChatToken(snapshot: snap) }
+                        } catch {
+                            await MainActor.run { shareRoutineBuildError = error.localizedDescription }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "paperplane")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button {
                     Task { await applyRoutine(id: row.id) }
                 } label: {
                     Text("Apply")
@@ -1037,6 +1072,54 @@ struct HyroxRoutinesPickerSheet: View {
                 .buttonStyle(.plain)
             }
         }
+    }
+
+    private func buildHyroxRoutineShareSnapshot(row: HyroxRoutineListRow) async throws -> RoutineShareSnapshot {
+        let client = SupabaseManager.shared.client
+        let session = try await client.auth.session
+        struct ProfileLite: Decodable {
+            let username: String
+            let avatar_url: String?
+        }
+        let pRes = try await client
+            .from("profiles")
+            .select("username,avatar_url")
+            .eq("user_id", value: session.user.id.uuidString)
+            .single()
+            .execute()
+        let prof = try JSONDecoder.supabase().decode(ProfileLite.self, from: pRes.data)
+        let res = try await client
+            .from("hyrox_routines")
+            .select(hyroxRoutineDetailSelect())
+            .eq("id", value: Int(row.id))
+            .single()
+            .execute()
+        let json = String(decoding: res.data, as: UTF8.self)
+        let detail = try JSONDecoder.supabase().decode(HyroxRoutineDetailWire.self, from: res.data)
+        let rows = (detail.hyrox_routine_exercises ?? []).sorted { $0.exercise_order < $1.exercise_order }
+        let exerciseCount = rows.count
+        let previewExerciseName: String? = rows.first.map {
+            HyroxExerciseFormatting.label(code: $0.exercise_code, displayName: $0.exercise_display_name, notes: $0.notes)
+        }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let updated = row.updated_at.map { iso.string(from: $0) }
+        return RoutineShareSnapshot(
+            v: 1,
+            type: "routine_share",
+            routine_kind: "hyrox",
+            name: row.name,
+            routine_id: row.id,
+            updated_at: updated,
+            owner_user_id: session.user.id,
+            owner_username: prof.username,
+            owner_avatar_url: prof.avatar_url,
+            share_nonce: UUID().uuidString,
+            detail_json: json,
+            exercise_count: exerciseCount > 0 ? exerciseCount : nil,
+            total_sets: nil,
+            preview_exercise_name: previewExerciseName
+        )
     }
 
     private func orderedRoutinesInGroup(_ row: HyroxRoutineListRow) -> [HyroxRoutineListRow] {

@@ -90,6 +90,7 @@ data class ActiveStrengthUiState(
     /** Segundos totales planificados al iniciar cada descanso (sector “quesito” en burbujas). */
     val restPlannedTotalSecByExerciseId: Map<Int, Int> = emptyMap(),
     val sessionElapsedSec: Int = 0,
+    val isSessionPaused: Boolean = false,
     val finishing: Boolean = false,
     val completedEntirely: Boolean = false,
     val editRepsText: String = "",
@@ -130,6 +131,8 @@ class ActiveStrengthWorkoutViewModel(
     private val completedSetLines: MutableList<CompletedSetLine> = mutableListOf()
     private var hostWeRows: List<WeWire> = emptyList()
     private var pendingFinishOnDone: (() -> Unit)? = null
+    private var accumulatedPausedSeconds: Int = 0
+    private var pauseBeganEpochMs: Long? = null
 
     init {
         load()
@@ -145,12 +148,38 @@ class ActiveStrengthWorkoutViewModel(
     private fun startSessionTimer() {
         sessionJob?.cancel()
         sessionJob = viewModelScope.launch {
-            while (true) {
+            while (isActive) {
                 delay(1000)
-                _ui.value = _ui.value.copy(
-                    sessionElapsedSec = _ui.value.sessionElapsedSec + 1
-                )
+                val cur = _ui.value
+                if (cur.isSessionPaused) continue
+                _ui.value = cur.copy(sessionElapsedSec = cur.sessionElapsedSec + 1)
             }
+        }
+    }
+
+    fun toggleSessionPause() {
+        val s = _ui.value
+        if (s.finishing || s.loading) return
+        if (s.isSessionPaused) {
+            val began = pauseBeganEpochMs ?: run {
+                _ui.value = s.copy(isSessionPaused = false)
+                return
+            }
+            val now = System.currentTimeMillis()
+            val dtMs = (now - began).coerceAtLeast(0L)
+            pauseBeganEpochMs = null
+            if (dtMs > 0L) {
+                for (id in restDeadlineMsByExerciseId.keys.toList()) {
+                    val end = restDeadlineMsByExerciseId[id] ?: continue
+                    restDeadlineMsByExerciseId[id] = end + dtMs
+                }
+                accumulatedPausedSeconds =
+                    (accumulatedPausedSeconds + (dtMs / 1000L).toInt()).coerceAtMost(Int.MAX_VALUE / 4)
+            }
+            _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(s.copy(isSessionPaused = false)))
+        } else {
+            pauseBeganEpochMs = System.currentTimeMillis()
+            _ui.value = s.copy(isSessionPaused = true)
         }
     }
 
@@ -172,7 +201,14 @@ class ActiveStrengthWorkoutViewModel(
                 val weRows = decodeFlexibleList<WeWire>(wRes.data)
                 hostWeRows = weRows
                 if (weRows.isEmpty()) {
-                    _ui.value = _ui.value.copy(loading = false, error = null, exercises = emptyList())
+                    accumulatedPausedSeconds = 0
+                    pauseBeganEpochMs = null
+                    _ui.value = _ui.value.copy(
+                        loading = false,
+                        error = null,
+                        exercises = emptyList(),
+                        isSessionPaused = false
+                    )
                     return@runCatching
                 }
                 val exIds = weRows.map { it.exerciseId }.distinct()
@@ -202,10 +238,13 @@ class ActiveStrengthWorkoutViewModel(
                     )
                 }
                 if (lines.isEmpty()) {
+                    accumulatedPausedSeconds = 0
+                    pauseBeganEpochMs = null
                     _ui.value = _ui.value.copy(
                         loading = false,
                         error = null,
-                        exercises = emptyList()
+                        exercises = emptyList(),
+                        isSessionPaused = false
                     )
                     return@runCatching
                 }
@@ -228,6 +267,8 @@ class ActiveStrengthWorkoutViewModel(
                 restJob = null
                 restDeadlineMsByExerciseId.clear()
                 restPlannedTotalSecByExerciseIdMutable.clear()
+                accumulatedPausedSeconds = 0
+                pauseBeganEpochMs = null
                 _ui.value = withSyncedEditFields(
                     _ui.value.copy(
                         loading = false,
@@ -244,15 +285,19 @@ class ActiveStrengthWorkoutViewModel(
                         restSecondsLeft = 0,
                         restSecondsLeftByExerciseId = emptyMap(),
                         restPlannedTotalSecByExerciseId = emptyMap(),
-                        navEmphasisLockWorkoutExerciseId = null
+                        navEmphasisLockWorkoutExerciseId = null,
+                        isSessionPaused = false
                     )
                 )
             }.onFailure { e ->
                 hostWeRows = emptyList()
                 Log.e(TAG, "load failed", e)
+                accumulatedPausedSeconds = 0
+                pauseBeganEpochMs = null
                 _ui.value = _ui.value.copy(
                     loading = false,
-                    error = e.message?.take(280) ?: e::class.java.simpleName
+                    error = e.message?.take(280) ?: e::class.java.simpleName,
+                    isSessionPaused = false
                 )
             }
         }
@@ -515,6 +560,8 @@ class ActiveStrengthWorkoutViewModel(
         restDeadlineMsByExerciseId.clear()
         restPlannedTotalSecByExerciseIdMutable.clear()
         completedSetLines.clear()
+        accumulatedPausedSeconds = 0
+        pauseBeganEpochMs = null
         val s = _ui.value
         val map = s.exercises.associate { it.workoutExerciseId to 0 }
         _ui.value = withSyncedEditFields(
@@ -527,7 +574,8 @@ class ActiveStrengthWorkoutViewModel(
                 restSecondsLeftByExerciseId = emptyMap(),
                 restPlannedTotalSecByExerciseId = emptyMap(),
                 completedEntirely = false,
-                navEmphasisLockWorkoutExerciseId = null
+                navEmphasisLockWorkoutExerciseId = null,
+                isSessionPaused = false
             )
         )
     }
@@ -568,6 +616,7 @@ class ActiveStrengthWorkoutViewModel(
         restJob = viewModelScope.launch {
             while (isActive && restDeadlineMsByExerciseId.isNotEmpty()) {
                 delay(1000)
+                if (_ui.value.isSessionPaused) continue
                 _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(_ui.value))
             }
         }
@@ -659,7 +708,11 @@ class ActiveStrengthWorkoutViewModel(
         _ui.value = _ui.value.copy(finishing = true, error = null)
         val res = runCatching {
             val userId = supabase.auth.currentUserOrNull()?.id ?: error("No session")
-            val ended = Instant.now().toString()
+            val openPauseSec = pauseBeganEpochMs?.let {
+                ((System.currentTimeMillis() - it).coerceAtLeast(0L) / 1000L).toInt()
+            } ?: 0
+            val pausedSec = (accumulatedPausedSeconds + openPauseSec).coerceAtLeast(0)
+            var effectiveEnded = Instant.now()
             if (completedSetLines.isNotEmpty()) {
                 val byWe = completedSetLines.groupBy { it.workoutExerciseId }
                 for ((weId, lines) in byWe) {
@@ -682,14 +735,20 @@ class ActiveStrengthWorkoutViewModel(
             }
             val nRes = supabase
                 .from(BackendContracts.Tables.WORKOUTS)
-                .select(columns = Columns.raw("notes, state")) {
+                .select(columns = Columns.raw("notes, state, started_at")) {
                     filter { eq("id", workoutId) }
                     limit(1)
                 }
             val wRow = decodeFlexibleList<WorkoutNotesStateRow>(nRes.data).firstOrNull()
+            wRow?.started_at?.let { raw ->
+                runCatching { Instant.parse(raw) }.getOrNull()?.let { st ->
+                    if (effectiveEnded.isBefore(st)) effectiveEnded = st
+                }
+            }
+            val ended = effectiveEnded.toString()
             val mergedNotes = mergeWorkoutNotesForFinish(wRow?.notes, null)
             supabase.from(BackendContracts.Tables.WORKOUTS).update(
-                workoutFinishUpdateJson(ended, mergedNotes, wRow?.state)
+                workoutFinishUpdateJson(ended, mergedNotes, wRow?.state, pausedSec)
             ) {
                 filter { eq("id", workoutId) }
             }

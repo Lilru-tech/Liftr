@@ -101,9 +101,9 @@ struct ActiveStrengthWorkoutView: View {
         let state: String?
     }
 
-    /// Cierra el workout y lo publica si estaba planificado.
     private struct WorkoutEndPatch: Encodable {
         let ended_at: Date
+        let paused_sec: Int
         let state: String?
     }
 
@@ -152,6 +152,9 @@ struct ActiveStrengthWorkoutView: View {
     @State private var showCountdown = true
     @State private var strengthWorkoutSessionStart: Date? = nil
     @State private var strengthWorkoutElapsedTick: UInt32 = 0
+    @State private var isSessionPaused = false
+    @State private var accumulatedPausedSeconds: Int = 0
+    @State private var sessionPauseBegan: Date? = nil
     @State private var currentExerciseIndex: Int = 0
     @State private var pagerDisplayIndexHost: Int = 0
     @State private var pagerDisplayIndexGuest: Int = 0
@@ -464,7 +467,19 @@ struct ActiveStrengthWorkoutView: View {
                 }
                 if !showCountdown, strengthWorkoutSessionStart != nil {
                     ToolbarItem(placement: .topBarTrailing) {
-                        strengthWorkoutSessionElapsedChip()
+                        HStack(spacing: 8) {
+                            strengthWorkoutSessionElapsedChip()
+                            Button {
+                                toggleSessionPause()
+                            } label: {
+                                Image(systemName: isSessionPaused ? "play.fill" : "pause.fill")
+                                    .font(.body.weight(.semibold))
+                                    .frame(width: 36, height: 36)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(isSessionPaused ? String(localized: "Resume workout") : String(localized: "Pause workout"))
+                        }
                     }
                 }
             }
@@ -520,15 +535,18 @@ struct ActiveStrengthWorkoutView: View {
             .presentationDetents([.medium])
         }
         .onReceive(restTimer) { _ in
-            if isResting || gIsResting || g2IsResting || hasActiveRestInExerciseTimerDictionaries() {
-                syncRestCountdownFromEndDate()
-            }
-            if strengthWorkoutSessionStart != nil, !showCountdown {
-                strengthWorkoutElapsedTick &+= 1
+            if !isSessionPaused {
+                if isResting || gIsResting || g2IsResting || hasActiveRestInExerciseTimerDictionaries() {
+                    syncRestCountdownFromEndDate()
+                }
+                if strengthWorkoutSessionStart != nil, !showCountdown {
+                    strengthWorkoutElapsedTick &+= 1
+                }
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            guard !isSessionPaused else { return }
             syncRestCountdownFromEndDate()
             if strengthWorkoutSessionStart != nil {
                 strengthWorkoutElapsedTick &+= 1
@@ -567,6 +585,14 @@ struct ActiveStrengthWorkoutView: View {
             .presentationDragIndicator(.visible)
             .presentationBackground(.clear)
             .frame(maxHeight: UIScreen.main.bounds.height * 0.92)
+        }
+        .overlay {
+            if app.isAuthenticated {
+                MessagesFloatingButton()
+                    .environmentObject(app)
+                    .allowsHitTesting(true)
+                    .zIndex(99)
+            }
         }
     }
     
@@ -1214,7 +1240,6 @@ struct ActiveStrengthWorkoutView: View {
         return false
     }
 
-    /// Actualiza todos los temporizadores de descanso guardados por `exerciseId` (la burbuja sigue mostrando el tiempo aunque cambies de ejercicio).
     private func syncRestCountdownFromEndDate() {
         syncHostRestTimersFromDictionaries()
         syncGuestRestTimersFromDictionaries()
@@ -1830,8 +1855,7 @@ struct ActiveStrengthWorkoutView: View {
             }
         }
     }
-    
-    /// Avanza el **trabajo** al siguiente ejercicio y alinea el pager (p. ej. botón “Next exercise”).
+
     private func goToNextExercise() {
         let lane = mainDisplayLane
         let ordered = orderedExercises(lane: lane)
@@ -1867,7 +1891,6 @@ struct ActiveStrengthWorkoutView: View {
         restoreStateForDualIndex()
     }
 
-    /// Solo mueve el pager (preview) sin cambiar el ejercicio en el que se está trabajando.
     private func pagerShiftForward() {
         let lane = mainDisplayLane
         let ordered = orderedExercises(lane: lane)
@@ -2267,10 +2290,16 @@ struct ActiveStrengthWorkoutView: View {
         .frame(maxWidth: availableWidth)
     }
 
-    private var strengthWorkoutElapsedDisplayString: String {
+    private var strengthSessionActiveElapsedSeconds: Int {
         _ = strengthWorkoutElapsedTick
-        guard let start = strengthWorkoutSessionStart else { return "0:00" }
-        let elapsed = max(0, Int(floor(Date().timeIntervalSince(start))))
+        guard let start = strengthWorkoutSessionStart else { return 0 }
+        let gross = max(0, Int(floor(Date().timeIntervalSince(start))))
+        let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
+        return max(0, gross - accumulatedPausedSeconds - openPause)
+    }
+
+    private var strengthWorkoutElapsedDisplayString: String {
+        let elapsed = strengthSessionActiveElapsedSeconds
         let h = elapsed / 3600
         let m = (elapsed % 3600) / 60
         let s = elapsed % 60
@@ -2297,6 +2326,55 @@ struct ActiveStrengthWorkoutView: View {
         .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Workout time, \(strengthWorkoutElapsedDisplayString)")
+    }
+
+    private func shiftAllRestEndDatesForward(by delta: TimeInterval) {
+        guard delta > 0 else { return }
+        if let e = restEndDate { restEndDate = e.addingTimeInterval(delta) }
+        for id in restEndDateByExercise.keys {
+            if let e = restEndDateByExercise[id] {
+                restEndDateByExercise[id] = e.addingTimeInterval(delta)
+            }
+        }
+        if let e = gRestEndDate { gRestEndDate = e.addingTimeInterval(delta) }
+        for id in gRestEndDateByExercise.keys {
+            if let e = gRestEndDateByExercise[id] {
+                gRestEndDateByExercise[id] = e.addingTimeInterval(delta)
+            }
+        }
+        if let e = g2RestEndDate { g2RestEndDate = e.addingTimeInterval(delta) }
+        for id in g2RestEndDateByExercise.keys {
+            if let e = g2RestEndDateByExercise[id] {
+                g2RestEndDateByExercise[id] = e.addingTimeInterval(delta)
+            }
+        }
+    }
+
+    private func toggleSessionPause() {
+        if isSessionPaused {
+            guard let began = sessionPauseBegan else {
+                isSessionPaused = false
+                return
+            }
+            let dt = Date().timeIntervalSince(began)
+            if dt > 0 {
+                shiftAllRestEndDatesForward(by: dt)
+                accumulatedPausedSeconds = min(Int.max / 4, accumulatedPausedSeconds + Int(floor(dt)))
+            }
+            sessionPauseBegan = nil
+            isSessionPaused = false
+            WorkoutLiveActivityManager.updateStrengthPauseIfAvailable(
+                isPaused: false,
+                activeElapsedSeconds: strengthSessionActiveElapsedSeconds
+            )
+        } else {
+            sessionPauseBegan = Date()
+            isSessionPaused = true
+            WorkoutLiveActivityManager.updateStrengthPauseIfAvailable(
+                isPaused: true,
+                activeElapsedSeconds: strengthSessionActiveElapsedSeconds
+            )
+        }
     }
 
     private func activeStrengthNavFirstHintBanner() -> some View {
@@ -2782,8 +2860,6 @@ struct ActiveStrengthWorkoutView: View {
         )
     }
     
-    /// Prescripción “actual” del host: primero el estado del editor (`setsByExercise`), que es lo que el usuario ve y edita;
-    /// si falta, series completadas (`performedMap`) como respaldo.
     private func programItemsForRoutineOverwrite(
         exList: [ExerciseRow],
         setsMap: [Int: [SetRow]],
@@ -2887,6 +2963,11 @@ struct ActiveStrengthWorkoutView: View {
         let extra: (Int64, [EditableExercise])? = updateRoutine
             ? (deferral.prompt.routineId, deferral.editableForRoutine)
             : nil
+        let (wallEndedAt, pausedSec) = await MainActor.run { () -> (Date, Int) in
+            let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
+            let total = max(0, accumulatedPausedSeconds + openPause)
+            return (Date(), total)
+        }
         await runStrengthWorkoutPersistence(
             exList: deferral.exList,
             performedMap: deferral.performedMap,
@@ -2896,7 +2977,9 @@ struct ActiveStrengthWorkoutView: View {
             guest2ExList: deferral.guest2ExList,
             guest2PerformedMap: deferral.guest2PerformedMap,
             guest2WorkoutId: deferral.guest2WorkoutId,
-            routinePrescriptionOverwrite: extra
+            routinePrescriptionOverwrite: extra,
+            wallEndedAt: wallEndedAt,
+            pausedSec: pausedSec
         )
     }
 
@@ -2909,7 +2992,9 @@ struct ActiveStrengthWorkoutView: View {
         guest2ExList: [ExerciseRow],
         guest2PerformedMap: [Int: [PerformedSet]],
         guest2WorkoutId: Int?,
-        routinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])?
+        routinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])?,
+        wallEndedAt: Date,
+        pausedSec: Int
     ) async {
         let client = SupabaseManager.shared.client
 
@@ -2968,7 +3053,20 @@ struct ActiveStrengthWorkoutView: View {
         do {
             try await persistExerciseRows(exList, performedMap: performedMap)
 
-            let endTime = Date()
+            struct StartedAtRow: Decodable { let started_at: Date? }
+            func clampedEndTime(for id: Int) async throws -> Date {
+                let res = try await client
+                    .from("workouts")
+                    .select("started_at")
+                    .eq("id", value: id)
+                    .single()
+                    .execute()
+                let row = try JSONDecoder.supabase().decode(StartedAtRow.self, from: res.data)
+                var end = wallEndedAt
+                if let st = row.started_at, end < st { end = st }
+                return end
+            }
+            let endTime = try await clampedEndTime(for: workoutId)
 
             func stateToPublishOnFinish(for workoutId: Int) async throws -> String? {
                 let res = try await client
@@ -2982,9 +3080,10 @@ struct ActiveStrengthWorkoutView: View {
                 return "published"
             }
 
+            let stateHost = try await stateToPublishOnFinish(for: workoutId)
             _ = try await client
                 .from("workouts")
-                .update(WorkoutEndPatch(ended_at: endTime, state: try await stateToPublishOnFinish(for: workoutId)))
+                .update(WorkoutEndPatch(ended_at: endTime, paused_sec: pausedSec, state: stateHost))
                 .eq("id", value: workoutId)
                 .execute()
 
@@ -2992,9 +3091,11 @@ struct ActiveStrengthWorkoutView: View {
 
             if let gid = guestWorkoutId {
                 try await persistExerciseRows(guestExList, performedMap: guestPerformedMap)
+                let endGuest = try await clampedEndTime(for: gid)
+                let stateG = try await stateToPublishOnFinish(for: gid)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: endTime, state: try await stateToPublishOnFinish(for: gid)))
+                    .update(WorkoutEndPatch(ended_at: endGuest, paused_sec: pausedSec, state: stateG))
                     .eq("id", value: gid)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: gid)
@@ -3002,9 +3103,11 @@ struct ActiveStrengthWorkoutView: View {
 
             if let g2id = guest2WorkoutId {
                 try await persistExerciseRows(guest2ExList, performedMap: guest2PerformedMap)
+                let endG2 = try await clampedEndTime(for: g2id)
+                let stateG2 = try await stateToPublishOnFinish(for: g2id)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: endTime, state: try await stateToPublishOnFinish(for: g2id)))
+                    .update(WorkoutEndPatch(ended_at: endG2, paused_sec: pausedSec, state: stateG2))
                     .eq("id", value: g2id)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: g2id)
@@ -3102,6 +3205,11 @@ struct ActiveStrengthWorkoutView: View {
             }
         }
 
+        let (wallEndedAt, pausedSec) = await MainActor.run { () -> (Date, Int) in
+            let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
+            let total = max(0, accumulatedPausedSeconds + openPause)
+            return (Date(), total)
+        }
         await runStrengthWorkoutPersistence(
             exList: exList,
             performedMap: performedMap,
@@ -3111,7 +3219,9 @@ struct ActiveStrengthWorkoutView: View {
             guest2ExList: guest2ExList,
             guest2PerformedMap: guest2PerformedMap,
             guest2WorkoutId: guest2WorkoutId,
-            routinePrescriptionOverwrite: nil
+            routinePrescriptionOverwrite: nil,
+            wallEndedAt: wallEndedAt,
+            pausedSec: pausedSec
         )
     }
 
@@ -3454,11 +3564,8 @@ struct ActiveStrengthWorkoutView: View {
     }
 }
 
-/// Sector oscuro del tiempo de descanso **restante**, como reloj: vértice en el centro de la burbuja (no `trim` del círculo, que se desalinea).
 private struct RestDarkClockWedge: Shape {
-    /// Fracción ya transcurrida del descanso [0, 1].
     var elapsedFraction: CGFloat
-    /// Fracción que queda por transcurrir [0, 1].
     var restFraction: CGFloat
 
     func path(in rect: CGRect) -> Path {
@@ -3483,7 +3590,6 @@ private struct RestDarkClockWedge: Shape {
     }
 }
 
-/// Avatar del header en entreno dual: descanso en forma de sector (“quesito”) y pulso al terminar.
 private struct DualLaneAvatarCell: View {
     let urlString: String?
     let isFocused: Bool
@@ -3576,13 +3682,9 @@ private struct StrengthExerciseNavColumn: View {
     let allWorkoutExercisesComplete: Bool
     let isWavePulsing: Bool
     let jumpOK: Bool
-    /// Identidad del ejercicio en el que se está trabajando (animación coherente sin mezclar con el índice del pager).
     let workAnchorExerciseId: Int?
-    /// Segundos de descanso restantes en la burbuja del ejercicio actual (mismo tratamiento visual que avatares en grupo).
     let restOverlaySeconds: Int?
-    /// Duración total del descanso al iniciarlo (para el sector oscuro).
     let restPlannedTotalSeconds: Int?
-    /// En modo solo, la burbuja del ejercicio activo se agranda un poco más.
     let enlargeActiveBubbleForSolo: Bool
     @Binding var popoverPresented: Bool
     let onShortTap: () -> Void

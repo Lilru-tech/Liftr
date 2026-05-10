@@ -157,11 +157,21 @@ func prettySubtype(from code: String, fallbackCategory: String) -> String {
     }
 }
 
+private struct ShareAchievementChatToken: Identifiable {
+    let id = UUID()
+    let snapshot: AchievementShareSnapshot
+}
+
 struct AchievementsGridView: View {
     let userId: UUID?
     let viewedUsername: String
     var externalReloadToken: UUID? = nil
-    
+    var openAchievementCode: String? = nil
+
+    @EnvironmentObject private var app: AppState
+    @State private var didApplyOpenCode = false
+    @State private var shareAchievementToken: ShareAchievementChatToken?
+
     enum LockFilter: String, CaseIterable, Identifiable {
         case all = "All", unlocked = "Unlocked", locked = "Locked"
         var id: String { rawValue }
@@ -210,11 +220,26 @@ struct AchievementsGridView: View {
             Color.clear.frame(height: 8)
         }
         .sheet(item: $selected) { row in
-            AchievementDetailSheet(row: row)
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
+            AchievementDetailSheet(row: row) {
+                Task { await beginShareAchievement(row: row) }
+            }
+            .presentationDetents([.medium])
+            .presentationDragIndicator(.visible)
+            .environmentObject(app)
         }
-        .task { await load() }
+        .sheet(item: $shareAchievementToken) { token in
+            ShareAchievementToChatSheet(snapshot: token.snapshot) {}
+                .environmentObject(app)
+                .gradientBG()
+        }
+        .task {
+            if openAchievementCode != nil {
+                lockFilter = .all
+                category = .all
+                search = ""
+            }
+            await load()
+        }
         .onChange(of: externalReloadToken) { _, _ in
             guard externalReloadToken != nil else { return }
             Task { await recomputeAndReload() }
@@ -222,6 +247,25 @@ struct AchievementsGridView: View {
         .refreshable { await recomputeAndReload() }
         .onChange(of: lockFilter) { _, _ in }
         .onChange(of: category) { _, _ in }
+        .onChange(of: items) { _, newItems in
+            guard let code = openAchievementCode, !didApplyOpenCode, !newItems.isEmpty else { return }
+            if let match = newItems.first(where: { $0.code == code }) {
+                didApplyOpenCode = true
+                selected = match
+            }
+        }
+    }
+
+    @MainActor
+    private func beginShareAchievement(row: AchievementRow) async {
+        let uid = app.userId
+        var prof: ChatProfile?
+        if let uid {
+            prof = try? await ChatService.fetchProfile(userId: uid)
+        }
+        let snap = AchievementShareSnapshot.build(from: row, ownerUserId: uid, profile: prof)
+        selected = nil
+        shareAchievementToken = ShareAchievementChatToken(snapshot: snap)
     }
     
     private var header: some View {
@@ -391,7 +435,7 @@ struct AchievementsGridView: View {
     }
 }
 
-struct AchievementRow: Decodable, Identifiable {
+struct AchievementRow: Decodable, Identifiable, Equatable {
     let achievement_id: Int
     let code: String
     let title: String
@@ -401,15 +445,10 @@ struct AchievementRow: Decodable, Identifiable {
     let user_id: UUID?
     let unlocked_at: Date?
     let is_unlocked: Bool
-    /// From `achievements.requirement_type` when RPC returns it (e.g. count, streak).
     let requirement_type: String?
-    /// Target threshold from catalog (e.g. 1000 for distance-style goals).
     let requirement_value: Double?
-    /// Current progress toward the threshold; nil when locked unless backend fills it.
     let progress_current: Double?
-    /// % of Liftr users (≥1 published workout) who unlocked this; nil if backend hides small samples.
     let community_pct_unlocked: Double?
-    /// Denominator for `community_pct_unlocked` when present (distinct users with a published workout).
     let community_sample_size: Int?
     var id: String { "\(achievement_id)|\(code)" }
 
@@ -447,6 +486,26 @@ struct AchievementRow: Decodable, Identifiable {
         if let i = try c.decodeIfPresent(Int.self, forKey: key) { return i }
         if let d = try c.decodeIfPresent(Double.self, forKey: key) { return Int(d) }
         return nil
+    }
+}
+
+extension AchievementShareSnapshot {
+    static func build(from row: AchievementRow,
+                      ownerUserId: UUID?,
+                      profile: ChatProfile?) -> AchievementShareSnapshot {
+        AchievementShareSnapshot(
+            v: 1,
+            type: "achievement_share",
+            code: row.code,
+            achievement_id: row.achievement_id,
+            title: row.title,
+            category: row.category,
+            description: row.description,
+            icon_url: row.icon_url,
+            owner_user_id: ownerUserId,
+            owner_username: profile?.username,
+            owner_avatar_url: profile?.avatar_url
+        )
     }
 }
 
@@ -501,6 +560,7 @@ private struct AchievementTile: View {
 
 private struct AchievementDetailSheet: View {
     let row: AchievementRow
+    var onShareToChat: () -> Void
 
     private var progressFraction: Double {
         if row.is_unlocked { return 1 }
@@ -542,6 +602,14 @@ private struct AchievementDetailSheet: View {
                     }
                 }
                 Spacer()
+                Button(action: onShareToChat) {
+                    Image(systemName: "paperplane")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(.horizontal)
 

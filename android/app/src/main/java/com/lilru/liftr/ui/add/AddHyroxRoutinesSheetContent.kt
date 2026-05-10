@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -171,6 +172,7 @@ private fun RoutineListRow(
     busy: Boolean,
     updatedLabel: String?,
     onApply: () -> Unit,
+    onShareRoutine: () -> Unit,
     neighbors: Pair<List<StrengthRoutineUi>, Int>?,
     onRenameRoutine: () -> Unit,
     onDuplicate: () -> Unit,
@@ -255,6 +257,15 @@ private fun RoutineListRow(
                     )
                 }
             }
+            IconButton(
+                onClick = onShareRoutine,
+                enabled = !busy
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Share,
+                    contentDescription = stringResource(R.string.add_routine_share_via_chat_content_description)
+                )
+            }
             TextButton(
                 onClick = onApply,
                 enabled = !busy
@@ -284,7 +295,8 @@ fun AddHyroxRoutinesSheetContent(
     onMoveRoutine: (Long, Int) -> Unit,
     onMoveRoutineToFolder: (Long, Long?) -> Unit,
     onDeleteRoutine: (Long) -> Unit,
-    onApplyRoutine: (Long) -> Unit
+    onApplyRoutine: (Long) -> Unit,
+    onShareRoutine: (Long) -> Unit
 ) {
     val ctx = LocalContext.current.applicationContext
     val persistScope = rememberCoroutineScope()
@@ -712,6 +724,7 @@ fun AddHyroxRoutinesSheetContent(
                             busy = ui.managingRoutines || ui.applyingRoutine,
                             updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                             onApply = { onApplyRoutine(row.id) },
+                            onShareRoutine = { onShareRoutine(row.id) },
                             neighbors = groupNeighbors(row),
                             onRenameRoutine = {
                                 routineToRename = row
@@ -774,6 +787,7 @@ fun AddHyroxRoutinesSheetContent(
                                 busy = ui.managingRoutines || ui.applyingRoutine,
                                 updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                                 onApply = { onApplyRoutine(row.id) },
+                                onShareRoutine = { onShareRoutine(row.id) },
                                 neighbors = groupNeighbors(row),
                                 onRenameRoutine = {
                                     routineToRename = row

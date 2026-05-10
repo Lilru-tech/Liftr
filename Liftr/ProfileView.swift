@@ -361,7 +361,6 @@ struct ProfileView: View {
                 List(mySegments) { row in
                     NavigationLink {
                         SegmentDetailView(segmentId: row.id, onClose: nil)
-                            .gradientBG()
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(row.name)

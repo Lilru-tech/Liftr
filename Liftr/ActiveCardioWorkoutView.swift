@@ -457,6 +457,14 @@ struct ActiveCardioWorkoutView: View {
                 }
             }
         }
+        .overlay {
+            if app.isAuthenticated {
+                MessagesFloatingButton()
+                    .environmentObject(app)
+                    .allowsHitTesting(true)
+                    .zIndex(99)
+            }
+        }
     }
 
     private func playKmSplitFeedback() {

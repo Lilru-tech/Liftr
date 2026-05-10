@@ -138,6 +138,11 @@ object NotificationRouter {
                 val u = runCatching { UUID.fromString(cid) }.getOrNull() ?: return null
                 MainOverlay.ChallengeWeeklyDetail(u)
             }
+            "dm_message" -> {
+                val cid = map["conversation_id"]?.toLongOrNull() ?: return null
+                val sender = map["sender_id"]?.trim()?.takeIf { it.isNotEmpty() && looksLikeUuid(it) }
+                MainOverlay.ChatThread(cid, sender)
+            }
             "legacy" -> {
                 if (map["workout_id"] != null) {
                     val w = map["workout_id"]?.toIntOrNull() ?: return null

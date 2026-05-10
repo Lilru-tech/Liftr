@@ -1,10 +1,3 @@
-//
-//  LiftrWorkoutLiveActivityLiveActivity.swift
-//  LiftrWorkoutLiveActivity
-//
-//  Created by David Gomez sanchez on 23/4/26.
-//
-
 import ActivityKit
 import LiftrWorkoutActivityKit
 import WidgetKit
@@ -26,8 +19,12 @@ struct LiftrWorkoutLiveActivityLiveActivity: Widget {
                         .foregroundStyle(.white.opacity(0.7))
                 }
                 Spacer(minLength: 0)
-                // En Live Activity, `Text(…, .timer)` se actualiza solo; `TimelineView` suele quedar congelada (0:00).
-                SessionWorkoutTimer(start: context.state.startTime, font: .title3.weight(.semibold))
+                SessionWorkoutTimer(
+                    start: context.state.startTime,
+                    isPaused: context.state.isPaused,
+                    pausedElapsedSeconds: context.state.pausedElapsedSeconds,
+                    font: .title3.weight(.semibold)
+                )
                     .multilineTextAlignment(.trailing)
             }
             .padding(.horizontal, 12)
@@ -44,17 +41,25 @@ struct LiftrWorkoutLiveActivityLiveActivity: Widget {
                         .font(.headline)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    SessionWorkoutTimer(start: context.state.startTime, font: .title2.weight(.semibold))
+                    SessionWorkoutTimer(
+                        start: context.state.startTime,
+                        isPaused: context.state.isPaused,
+                        pausedElapsedSeconds: context.state.pausedElapsedSeconds,
+                        font: .title2.weight(.semibold)
+                    )
                 }
             } compactLeading: {
-                // Ancho fijo: el icono no participa en un HStack “infinito” con el trailing.
                 Image(systemName: "stopwatch")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white)
                     .frame(width: 18, height: 15, alignment: .center)
-            } compactTrailing: {
-                // `Text(…, .timer)` pide ancho de layout enorme; el contenedor fija el tamaño de la píldora compacta.
-                DynamicIslandCompactTimer(start: context.state.startTime)
+            }
+            compactTrailing: {
+                DynamicIslandCompactTimer(
+                    start: context.state.startTime,
+                    isPaused: context.state.isPaused,
+                    pausedElapsedSeconds: context.state.pausedElapsedSeconds
+                )
             } minimal: {
                 Image(systemName: "stopwatch")
             }
@@ -70,30 +75,59 @@ struct LiftrWorkoutLiveActivityLiveActivity: Widget {
     }
 }
 
-// MARK: - Crono (usa `Text(…, .timer)`: en ActivityKit avanza; `TimelineView` no tick en la isla/lock y se queda en 0:00)
+@inline(__always)
+private func formatWorkoutLiveActivityElapsed(_ sec: Int) -> String {
+    let h = sec / 3600
+    let m = (sec % 3600) / 60
+    let s = sec % 60
+    if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+    return String(format: "%d:%02d", m, s)
+}
+
+@inline(__always)
+private func formatWorkoutLiveActivityElapsedShort(_ sec: Int) -> String {
+    let m = (sec % 3600) / 60
+    let s = sec % 60
+    return String(format: "%d:%02d", m, s)
+}
 
 private struct SessionWorkoutTimer: View {
     var start: Date
+    var isPaused: Bool
+    var pausedElapsedSeconds: Int
     var font: Font
 
     var body: some View {
-        Text(start, style: .timer)
+        Group {
+            if isPaused {
+                Text(formatWorkoutLiveActivityElapsed(max(0, pausedElapsedSeconds)))
+            } else {
+                Text(start, style: .timer)
+            }
+        }
             .font(font)
             .monospacedDigit()
             .foregroundStyle(.white)
     }
 }
 
-/// Crono del compact: mismo `Text(…, .timer)` (sigue actualizando), envuelto en un ancho fijo para no alargar la isla.
 private struct DynamicIslandCompactTimer: View {
     var start: Date
+    var isPaused: Bool
+    var pausedElapsedSeconds: Int
 
     private static let slotWidth: CGFloat = 58
 
     var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 0)
-            Text(start, style: .timer)
+            Group {
+                if isPaused {
+                    Text(formatWorkoutLiveActivityElapsedShort(max(0, pausedElapsedSeconds)))
+                } else {
+                    Text(start, style: .timer)
+                }
+            }
                 .font(.caption2.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(.white)

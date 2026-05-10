@@ -4,8 +4,6 @@ import MapKit
 import CoreLocation
 import UIKit
 
-// MARK: - GeoJSON LineString (paridad con CardioRouteGeoJSONParser en WorkoutDetailView)
-
 private enum SegmentLineGeoJSON {
     private struct LineStringBody: Decodable {
         let type: String
@@ -28,7 +26,6 @@ private enum SegmentLineGeoJSON {
     }
 }
 
-/// Mapa compacto + pantalla completa con zoom (misma idea que `CardioRouteMapMini` en `WorkoutDetailView`).
 private struct ExpandablePolylineRouteMap: View {
     let coordinates: [CLLocationCoordinate2D]
     var fullscreenNavigationTitle: String = "Segment"
@@ -109,12 +106,9 @@ private struct ExpandablePolylineRouteMap: View {
     }
 }
 
-// MARK: - Crear segmento desde cardio publicado
-
 struct CreateSegmentFromWorkoutSheet: View {
     let workoutId: Int
     var onCreated: (UUID) -> Void
-    /// Si el servidor detecta un segmento publicado casi idéntico, abrir ese detalle (p. ej. cerrar crear y mostrar el existente).
     var onOpenExistingSegment: ((UUID) -> Void)? = nil
     var onCancel: () -> Void
 
@@ -127,7 +121,6 @@ struct CreateSegmentFromWorkoutSheet: View {
     @State private var error: String?
     @State private var routeOptimizeBanner: String?
     @State private var mapCamera: MapCameraPosition = .automatic
-    /// Próximo toque en el mapa fija inicio o fin (vértice más cercano → fracción por longitud acumulada).
     @State private var mapPickPhase: MapPickPhase = .start
     @State private var duplicateSegmentAlertId: UUID?
     @State private var showExpandedPickMap = false
@@ -160,8 +153,6 @@ struct CreateSegmentFromWorkoutSheet: View {
     }
 
     private var canUseRouteMap: Bool { routeCoordinates.count >= 2 }
-
-    /// Misma línea visual que `FormNoteTextField` / filas con fondo suave en el resto de la app.
     private var segmentFieldFill: Color { Color.primary.opacity(0.06) }
     private var segmentFieldStroke: Color { Color.primary.opacity(0.10) }
 
@@ -311,7 +302,6 @@ struct CreateSegmentFromWorkoutSheet: View {
         let route_geojson: String
     }
 
-    /// Rutas con miles de puntos hacen que `create_segment_from_workout_v1` supere `statement_timeout`; alineamos con el tope de persistencia (~2000).
     private func optimizeDenseRouteIfNeeded() async {
         let count = routeCoordinates.count
         guard count > RouteLineStringDecimation.maxStoredCoordinates else { return }
@@ -460,10 +450,8 @@ struct CreateSegmentFromWorkoutSheet: View {
         let f = lengthFraction(atVertexIndex: idx, coords: routeCoordinates)
         switch phase {
         case .start:
-            // Mantener el otro pin intacto: solo actualizamos el marcador arrastrado.
             startFraction = min(1, max(0, f))
         case .end:
-            // Mantener el otro pin intacto: solo actualizamos el marcador arrastrado.
             endFraction = min(1, max(0, f))
         }
     }
@@ -518,7 +506,6 @@ struct CreateSegmentFromWorkoutSheet: View {
         return best
     }
 
-    /// Fracción 0…1 de longitud acumulada hasta el vértice `i` (alineado con `ST_LineSubstring` sobre la misma polilínea).
     private func lengthFraction(atVertexIndex i: Int, coords: [CLLocationCoordinate2D]) -> Double {
         guard coords.count >= 2 else { return 0 }
         let j = min(max(i, 0), coords.count - 1)
@@ -625,7 +612,6 @@ struct CreateSegmentFromWorkoutSheet: View {
     private static let friendlyDuplicateSegmentMessage =
         "This part of the route already matches a published segment. Others get matched automatically when they publish a compatible run—you do not need to create it again."
 
-    /// PostgREST puede exponer `message`, `hint` o un texto agregado en `localizedDescription`; el `HINT` del servidor lleva el UUID del segmento existente.
     private static func errorBlob(from error: Error) -> String {
         var parts: [String] = []
         if let pe = error as? PostgrestError {
@@ -656,7 +642,10 @@ struct CreateSegmentFromWorkoutSheet: View {
     }
 }
 
-// MARK: - Detalle + leaderboard
+private struct ShareSegmentChatToken: Identifiable {
+    let id = UUID()
+    let snapshot: SegmentShareSnapshot
+}
 
 struct SegmentDetailView: View {
     let segmentId: UUID
@@ -670,9 +659,7 @@ struct SegmentDetailView: View {
         let name: String
         let buffer_m: Double
         let status: String
-        /// Puede faltar en segmentos legacy sin geometría persistida; el RPC devuelve LineString vacío cuando no hay datos.
         let geojson: String?
-        /// Segmentos muy antiguos pueden no tener `created_by` en BD.
         let created_by: UUID?
         let foreign_efforts_count: Int64
         let segment_length_m: Double?
@@ -698,13 +685,10 @@ struct SegmentDetailView: View {
         let workout_id: Int
         let matched_at: Date?
         let effort_at: Date?
-        /// Métrica legacy del matcher interno (si el servidor la envía).
         let confidence: Double?
-        /// Fracción del eje del segmento cubierta por la ruta del entreno (0–1); preferida para la UI.
         let route_coverage: Double?
         let is_source_workout: Bool?
 
-        /// Ordena por mejor tiempo en el segmento y re-asigna `#rank` (misma lista que devuelve el RPC).
         static func leaderboardDisplayRows(from rows: [LeaderRow]) -> [LeaderRow] {
             let sorted = rows.sorted { $0.elapsed_sec < $1.elapsed_sec }
             return sorted.enumerated().map { i, r in
@@ -724,7 +708,6 @@ struct SegmentDetailView: View {
             }
         }
 
-        /// Porcentaje 0–100 para fila de leaderboard: prioriza `route_coverage` del servidor.
         var displayOverlapFraction: Double? {
             if let rc = route_coverage, rc > 0, rc <= 1 { return rc }
             if let c = confidence, c > 0, c <= 1 { return c }
@@ -759,12 +742,12 @@ struct SegmentDetailView: View {
     @State private var ownerBusy = false
     @State private var ownerError: String?
     @State private var showDeleteConfirm = false
+    @State private var shareSegmentToken: ShareSegmentChatToken?
 
     private var coords: [CLLocationCoordinate2D] {
         SegmentLineGeoJSON.coordinates(from: detail?.geojson)
     }
 
-    /// Mejor tiempo del viewer entre filas del ranking mostrado.
     private var displayViewerPersonalBest: (elapsedSec: Int, workoutId: Int)? {
         guard let uid = sessionUserId else { return nil }
         let mine = leaders.filter { $0.user_id == uid }
@@ -813,6 +796,19 @@ struct SegmentDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
+                    if detail != nil {
+                        Button {
+                            Task { await beginShareSegment() }
+                        } label: {
+                            Image(systemName: "paperplane")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                                .frame(width: 36, height: 36)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Share segment in chat")
+                    }
                     if let d = detail, let me = sessionUserId, d.created_by == me {
                         Menu {
                             Button("Rename") {
@@ -846,6 +842,11 @@ struct SegmentDetailView: View {
                 sessionUserId = s.user.id
             }
             await load()
+        }
+        .sheet(item: $shareSegmentToken) { token in
+            ShareSegmentToChatSheet(snapshot: token.snapshot) {}
+                .environmentObject(app)
+                .gradientBG()
         }
         .sheet(isPresented: $showRenameSheet) {
             NavigationStack {
@@ -896,6 +897,7 @@ struct SegmentDetailView: View {
         } message: {
             Text("This cannot be undone. You can delete only while no other athlete has a matched effort on this segment.")
         }
+        .gradientBG()
     }
 
     @ViewBuilder
@@ -1090,6 +1092,27 @@ struct SegmentDetailView: View {
                 ownerError = error.localizedDescription
             }
         }
+    }
+
+    @MainActor
+    private func beginShareSegment() async {
+        guard let d = detail else { return }
+        var prof: ChatProfile?
+        if let cid = d.created_by {
+            prof = try? await ChatService.fetchProfile(userId: cid)
+        }
+        let snap = SegmentShareSnapshot(
+            v: 1,
+            type: "segment_share",
+            segment_id: d.id.uuidString,
+            name: d.name,
+            segment_length_m: d.segment_length_m,
+            leaderboard_effort_count: d.leaderboard_effort_count,
+            owner_user_id: d.created_by,
+            owner_username: prof?.username,
+            owner_avatar_url: prof?.avatar_url
+        )
+        shareSegmentToken = ShareSegmentChatToken(snapshot: snap)
     }
 
     private func load() async {

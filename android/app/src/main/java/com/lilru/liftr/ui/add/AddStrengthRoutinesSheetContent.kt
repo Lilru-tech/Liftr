@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -171,6 +172,7 @@ private fun RoutineListRow(
     busy: Boolean,
     updatedLabel: String?,
     onApply: () -> Unit,
+    onShareRoutine: () -> Unit,
     neighbors: Pair<List<StrengthRoutineUi>, Int>?,
     onEditRoutine: () -> Unit,
     onRenameRoutine: () -> Unit,
@@ -260,6 +262,15 @@ private fun RoutineListRow(
                     )
                 }
             }
+            IconButton(
+                onClick = onShareRoutine,
+                enabled = !busy
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Share,
+                    contentDescription = stringResource(R.string.add_routine_share_via_chat_content_description)
+                )
+            }
             TextButton(
                 onClick = onApply,
                 enabled = !busy
@@ -290,6 +301,7 @@ fun AddStrengthRoutinesSheetContent(
     onMoveRoutineToFolder: (Long, Long?) -> Unit,
     onDeleteRoutine: (Long) -> Unit,
     onApplyRoutine: (Long) -> Unit,
+    onShareRoutine: (Long) -> Unit,
     onEditRoutine: (Long, String) -> Unit
 ) {
     val ctx = LocalContext.current.applicationContext
@@ -719,6 +731,7 @@ fun AddStrengthRoutinesSheetContent(
                                 ui.strengthRoutineTemplateEdit?.saving == true,
                             updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                             onApply = { onApplyRoutine(row.id) },
+                            onShareRoutine = { onShareRoutine(row.id) },
                             neighbors = groupNeighbors(row),
                             onEditRoutine = { onEditRoutine(row.id, row.name) },
                             onRenameRoutine = {
@@ -783,6 +796,7 @@ fun AddStrengthRoutinesSheetContent(
                                     ui.strengthRoutineTemplateEdit?.saving == true,
                                 updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                                 onApply = { onApplyRoutine(row.id) },
+                                onShareRoutine = { onShareRoutine(row.id) },
                                 neighbors = groupNeighbors(row),
                                 onEditRoutine = { onEditRoutine(row.id, row.name) },
                                 onRenameRoutine = {
