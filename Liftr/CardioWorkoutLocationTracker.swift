@@ -92,9 +92,10 @@ final class CardioWorkoutLocationTracker: NSObject, ObservableObject {
 
     func routeGeoJSONString() -> String? {
         guard routeCoordinates.count >= 2 else { return nil }
+        let coords = RouteLineStringDecimation.decimate(routeCoordinates)
         var parts: [String] = []
-        parts.reserveCapacity(routeCoordinates.count)
-        for c in routeCoordinates {
+        parts.reserveCapacity(coords.count)
+        for c in coords {
             parts.append("[\(c.longitude),\(c.latitude)]")
         }
         return "{\"type\":\"LineString\",\"coordinates\":[\(parts.joined(separator: ","))]}"

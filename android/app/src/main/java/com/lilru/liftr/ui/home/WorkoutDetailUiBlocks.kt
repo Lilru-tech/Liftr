@@ -310,6 +310,13 @@ fun WorkoutDetailStrengthReadonlySection(
                         )
                     } else {
                         ex.sets.sortedBy { it.setNumber }.forEach { s ->
+                            val dropSummary = if (s.weightSegments.size >= 2) {
+                                s.weightSegments.joinToString(" → ") { seg ->
+                                    "${seg.repsText.trim()}×${seg.weightText.trim().ifBlank { "0" }}"
+                                }
+                            } else {
+                                null
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
                                     "#${s.setNumber}",
@@ -317,8 +324,12 @@ fun WorkoutDetailStrengthReadonlySection(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(end = 4.dp)
                                 )
-                                Text("${s.reps ?: 0} reps", style = MaterialTheme.typography.bodySmall)
-                                Text("• ${String.format(Locale.US, "%.1f kg", s.weightKg ?: 0.0)}", style = MaterialTheme.typography.bodySmall)
+                                if (dropSummary != null) {
+                                    Text(dropSummary, style = MaterialTheme.typography.bodySmall)
+                                } else {
+                                    Text("${s.reps ?: 0} reps", style = MaterialTheme.typography.bodySmall)
+                                    Text("• ${String.format(Locale.US, "%.1f kg", s.weightKg ?: 0.0)}", style = MaterialTheme.typography.bodySmall)
+                                }
                                 s.rpe?.let { r ->
                                     Text("• RPE ${String.format(Locale.US, "%.1f", r)}", style = MaterialTheme.typography.bodySmall)
                                 }

@@ -87,6 +87,7 @@ struct WorkoutDetailView: View {
     @State private var participants: [ParticipantRow] = []
     @State private var loadLikesRequestId = 0
     @State private var showCommentsSheet = false
+    @State private var shareWorkoutChatToken: ShareWorkoutChatToken?
     @State private var showErrorAlert = false
     @State private var alertMessage = ""
     @State private var compareCandidateId: Int? = nil
@@ -196,6 +197,13 @@ struct WorkoutDetailView: View {
             .environmentObject(app)
             .presentationDetents(Set([.large]))
             .presentationBackground(.ultraThinMaterial)
+        }
+        .sheet(item: $shareWorkoutChatToken) { token in
+            ShareWorkoutToChatSheet(snapshot: token.snapshot) {
+                shareWorkoutChatToken = nil
+            }
+            .environmentObject(app)
+            .gradientBG()
         }
         .sheet(isPresented: $showComparePicker) {
             CompareCandidatePicker(items: compareCandidates) { chosen in
@@ -485,6 +493,9 @@ struct WorkoutDetailView: View {
             HStack(spacing: 10) {
                 likeButtonGroup
                 commentButton
+                if app.userId != nil {
+                    shareToChatButton
+                }
                 Spacer()
             }
         }
@@ -845,6 +856,52 @@ struct WorkoutDetailView: View {
             .padding(.horizontal, 12)
             .background(.ultraThinMaterial, in: Capsule())
         }
+    }
+
+    private var shareToChatButton: some View {
+        Button {
+            guard let snap = makeWorkoutShareSnapshot() else { return }
+            shareWorkoutChatToken = ShareWorkoutChatToken(snapshot: snap)
+        } label: {
+            Image(systemName: "paperplane")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(workout == nil || profile == nil)
+    }
+
+    private struct ShareWorkoutChatToken: Identifiable {
+        let id = UUID()
+        let snapshot: WorkoutShareSnapshot
+    }
+
+    private func makeWorkoutShareSnapshot() -> WorkoutShareSnapshot? {
+        guard let w = workout, let prof = profile else { return nil }
+        let ref = w.started_at ?? w.ended_at ?? Date()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        let performedAt = iso.string(from: ref)
+        let scoreInt: Int? = totalScore.map { Int($0.rounded()) }
+        let kcalInt: Int? = {
+            guard let c = totalCalories, c > 0 else { return nil }
+            return Int(c.rounded())
+        }()
+        return WorkoutShareSnapshot(
+            v: 1,
+            workout_id: Int64(workoutId),
+            title: w.title,
+            kind: w.kind,
+            score: scoreInt,
+            kcal: kcalInt,
+            performed_at: performedAt,
+            owner_user_id: w.user_id,
+            owner_username: prof.username,
+            owner_avatar_url: prof.avatar_url
+        )
     }
     
     @ToolbarContentBuilder
@@ -1318,21 +1375,25 @@ struct WorkoutDetailView: View {
                 if !exIds.isEmpty {
                     let setRes = try await SupabaseManager.shared.client
                         .from("exercise_sets")
-                        .select("workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
+                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
                         .in("workout_exercise_id", values: exIds)
                         .order("set_number", ascending: true)
+                        .order("id", ascending: true)
                         .execute()
                     
                     struct SetWire: Decodable {
+                        let id: Int
                         let workout_exercise_id: Int
                         let set_number: Int
                         let reps: Int?
                         let weight_kg: Decimal?
                         let rpe: Decimal?
                         let rest_sec: Int?
+                        let weight_segments: [StrengthWeightSegWire]?
                     }
                     let sets = try decoder.decode([SetWire].self, from: setRes.data)
                     for s in sets {
+                        let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                         setsByEx[s.workout_exercise_id, default: []].append(
                             EditableSet(
                                 setNumber: s.set_number,
@@ -1340,7 +1401,8 @@ struct WorkoutDetailView: View {
                                 weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                                 rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                                 restSec: s.rest_sec,
-                                notes: ""
+                                notes: "",
+                                segments: segDraft
                             )
                         )
                     }
@@ -2029,6 +2091,7 @@ private struct StrengthDetailBlock: View {
         let weight_kg: Decimal?
         let rpe: Decimal?
         let rest_sec: Int?
+        let weight_segments: [StrengthWeightSegWire]?
     }
     
     @State private var exercises: [ExerciseRow] = []
@@ -2059,11 +2122,22 @@ private struct StrengthDetailBlock: View {
                         Text("No sets").font(.caption).foregroundStyle(.secondary)
                     } else {
                         VStack(spacing: 6) {
-                            ForEach(rows.sorted(by: { $0.set_number < $1.set_number })) { s in
+                            ForEach(rows.sorted(by: { a, b in
+                                if a.set_number != b.set_number { return a.set_number < b.set_number }
+                                return a.id < b.id
+                            })) { s in
+                                let dropSummary: String? = {
+                                    guard let ws = s.weight_segments, ws.count >= 2 else { return nil }
+                                    return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
+                                }()
                                 HStack(spacing: 12) {
                                     Text("#\(s.set_number)").font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
-                                    Text("\(s.reps ?? 0) reps").font(.footnote)
-                                    Text("• \(weightStr(s.weight_kg))").font(.footnote)
+                                    if let ds = dropSummary {
+                                        Text(ds).font(.footnote)
+                                    } else {
+                                        Text("\(s.reps ?? 0) reps").font(.footnote)
+                                        Text("• \(weightStr(s.weight_kg))").font(.footnote)
+                                    }
                                     if let rpe = s.rpe {
                                         Text("• RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))").font(.footnote)
                                     }
@@ -2133,9 +2207,10 @@ private struct StrengthDetailBlock: View {
             if !ids.isEmpty {
                 let sRes = try await SupabaseManager.shared.client
                     .from("exercise_sets")
-                    .select("*")
+                    .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
                     .in("workout_exercise_id", values: ids)
                     .order("set_number", ascending: true)
+                    .order("id", ascending: true)
                     .execute()
                 let sets = try JSONDecoder.supabase().decode([SetRow].self, from: sRes.data)
                 for s in sets { byEx[s.workout_exercise_id, default: []].append(s) }
@@ -2382,7 +2457,7 @@ private struct CardioDetailBlock: View {
         .sheet(isPresented: $showCreateSegment) {
             CreateSegmentFromWorkoutSheet(
                 workoutId: workoutId,
-                routeCoordinates: routeCoordinates,
+                initialRouteCoordinates: routeCoordinates,
                 onCreated: { id in
                     showCreateSegment = false
                     segmentNav = SegmentNavSheet(id: id)
@@ -2399,7 +2474,6 @@ private struct CardioDetailBlock: View {
             NavigationStack {
                 SegmentDetailView(segmentId: nav.id, onClose: { segmentNav = nil })
             }
-            .gradientBG()
             .presentationBackground(.clear)
         }
     }

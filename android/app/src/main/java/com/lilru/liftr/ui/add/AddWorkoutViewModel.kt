@@ -17,12 +17,17 @@ import com.lilru.liftr.ui.add.recommendation.RecommendationDataSource
 import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationExerciseResult
 import com.lilru.liftr.ui.add.recommendation.StrengthSuggestionMode
 import com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationEngine
+import com.lilru.liftr.ui.chat.RoutineShareSnapshot
+import com.lilru.liftr.ui.chat.decodeRoutineShareHyroxDetail
+import com.lilru.liftr.ui.chat.decodeRoutineShareStrengthDetail
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,10 +36,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
@@ -64,10 +72,16 @@ enum class ExercisePickerSortMode {
     RECENT
 }
 
+data class HyroxRoutineApplyDraft(
+    val exercisesJson: String,
+    val sportStatsOverlay: Map<String, String>
+)
+
 data class AddWorkoutUiState(
     val loadingExercises: Boolean = true,
     val loadingFollowees: Boolean = true,
     val loadingRoutines: Boolean = true,
+    val loadingHyroxRoutines: Boolean = true,
     val creating: Boolean = false,
     val savingRoutine: Boolean = false,
     val applyingRoutine: Boolean = false,
@@ -76,6 +90,9 @@ data class AddWorkoutUiState(
     val followees: List<ProfileLite> = emptyList(),
     val routineFolders: List<RoutineFolderUi> = emptyList(),
     val routines: List<StrengthRoutineUi> = emptyList(),
+    val hyroxRoutineFolders: List<RoutineFolderUi> = emptyList(),
+    val hyroxRoutines: List<StrengthRoutineUi> = emptyList(),
+    val pendingHyroxApply: HyroxRoutineApplyDraft? = null,
     val selectedParticipantIds: Set<String> = emptySet(),
     val perPersonStrength: Boolean = false,
     val currentUserId: String? = null,
@@ -95,7 +112,19 @@ data class AddWorkoutUiState(
      * Tras crear un entreno (publicado o planificado): [AddWorkoutTabScreen] pide al shell ir a Home
      * y refrescar el feed.
      */
-    val postPublishHomeNonce: Int = 0
+    val postPublishHomeNonce: Int = 0,
+    val strengthRoutineOverwritePending: StrengthRoutineOverwritePending? = null,
+    /** Edición in-place del contenido de una plantilla (menú ⋯ → Edit); el nombre sigue en Rename. */
+    val strengthRoutineTemplateEdit: StrengthRoutineTemplateEdit? = null
+)
+
+data class StrengthRoutineTemplateEdit(
+    val routineId: Long,
+    val routineName: String,
+    val drafts: List<StrengthExerciseDraft> = emptyList(),
+    val loading: Boolean = true,
+    val saving: Boolean = false,
+    val error: String? = null
 )
 
 data class RoutineFolderUi(
@@ -166,7 +195,81 @@ private data class RoutineSetRow(
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
     @SerialName("rest_sec") val restSec: Int? = null,
-    val notes: String? = null
+    val notes: String? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
+)
+
+@Serializable
+private data class HyroxRoutineExerciseDb(
+    @SerialName("exercise_code") val exerciseCode: String,
+    @SerialName("exercise_order") val exerciseOrder: Int,
+    @SerialName("distance_m") val distanceM: Int? = null,
+    val reps: Int? = null,
+    @SerialName("weight_kg") val weightKg: Double? = null,
+    @SerialName("duration_sec") val durationSec: Int? = null,
+    @SerialName("height_cm") val heightCm: Int? = null,
+    @SerialName("implement_count") val implementCount: Int? = null,
+    val notes: String? = null,
+    @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
+)
+
+@Serializable
+private data class HyroxRoutineHeaderDb(
+    val id: Long,
+    val name: String,
+    val division: String? = null,
+    val category: String? = null,
+    @SerialName("age_group") val ageGroup: String? = null,
+    @SerialName("official_time_sec") val officialTimeSec: Int? = null,
+    @SerialName("penalty_time_sec") val penaltyTimeSec: Int? = null,
+    @SerialName("no_reps") val noReps: Int? = null,
+    @SerialName("rank_overall") val rankOverall: Int? = null,
+    @SerialName("rank_category") val rankCategory: Int? = null,
+    @SerialName("avg_hr") val avgHr: Int? = null,
+    @SerialName("max_hr") val maxHr: Int? = null,
+    @SerialName("hyrox_routine_exercises") val exercises: List<HyroxRoutineExerciseDb>? = null
+)
+
+private data class ProfileUsernameRow(val username: String, val avatarUrl: String?)
+
+private const val STRENGTH_DETAIL_SHARE_SELECT =
+    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
+
+private const val HYROX_DETAIL_SHARE_SELECT =
+    "id,name,updated_at,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
+        "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+
+@Serializable
+private data class ShareStrengthSet(
+    @SerialName("set_number") val setNumber: Int,
+    val reps: Int? = null,
+    @SerialName("weight_kg") val weightKg: Double? = null,
+    val rpe: Double? = null,
+    @SerialName("rest_sec") val restSec: Int? = null,
+    val notes: String? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
+)
+
+@Serializable
+private data class ShareStrengthEx(
+    @SerialName("exercise_id") val exerciseId: Long,
+    @SerialName("order_index") val orderIndex: Int,
+    val notes: String? = null,
+    @SerialName("custom_name") val customName: String? = null,
+    @SerialName("strength_routine_sets") val strengthRoutineSets: List<ShareStrengthSet>? = null
+)
+
+@Serializable
+private data class ShareStrengthDetail(
+    val id: Long,
+    val name: String,
+    @SerialName("strength_routine_exercises") val strengthRoutineExercises: List<ShareStrengthEx>? = null
+)
+
+data class StrengthSegmentDraft(
+    val id: String = UUID.randomUUID().toString(),
+    val repsText: String = "8",
+    val weightText: String = ""
 )
 
 data class StrengthSetDraft(
@@ -177,8 +280,23 @@ data class StrengthSetDraft(
     val weightText: String = "",
     val rpeText: String = "",
     val restSecText: String = "",
-    val notes: String = ""
+    val notes: String = "",
+    val segments: List<StrengthSegmentDraft> = emptyList()
 )
+
+internal fun parseWeightSegmentsColumn(arr: JsonArray?): List<StrengthSegmentDraft> {
+    if (arr == null || arr.size < 2) return emptyList()
+    val parsed = arr.mapNotNull { el ->
+        val o = el.jsonObject
+        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+        StrengthSegmentDraft(
+            repsText = r.toString(),
+            weightText = if (w == kotlin.math.floor(w)) w.toInt().toString() else String.format(java.util.Locale.US, "%.1f", w)
+        )
+    }
+    return if (parsed.size == arr.size && parsed.size >= 2) parsed else emptyList()
+}
 
 data class StrengthExerciseDraft(
     val id: String = UUID.randomUUID().toString(),
@@ -310,7 +428,8 @@ class AddWorkoutViewModel(
             message = null,
             error = null,
             pendingOpenWorkoutId = null,
-            postPublishHomeNonce = _uiState.value.postPublishHomeNonce + 1
+            postPublishHomeNonce = _uiState.value.postPublishHomeNonce + 1,
+            strengthRoutineOverwritePending = null
         )
     }
     private val json = Json { ignoreUnknownKeys = true }
@@ -542,12 +661,457 @@ class AddWorkoutViewModel(
         }
     }
 
+    private fun patchSetInExerciseList(
+        exercises: List<StrengthExerciseDraft>,
+        exerciseDraftId: String,
+        setDraftId: String,
+        patch: (StrengthSetDraft) -> StrengthSetDraft
+    ): List<StrengthExerciseDraft> =
+        exercises.map { ex ->
+            if (ex.id != exerciseDraftId) ex
+            else ex.copy(sets = ex.sets.map { set -> if (set.id == setDraftId) patch(set) else set })
+        }
+
+    fun enableDropSetForSet(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size >= 2) set
+                else set.copy(
+                    segments = listOf(
+                        StrengthSegmentDraft(repsText = set.repsText, weightText = set.weightText),
+                        StrengthSegmentDraft()
+                    )
+                )
+            }
+        }
+    }
+
+    fun clearDropSetForSet(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else {
+                    val first = set.segments.first()
+                    set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                }
+            }
+        }
+    }
+
+    fun addDropSegmentStep(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else set.copy(segments = set.segments + StrengthSegmentDraft())
+            }
+        }
+    }
+
+    fun removeLastDropSegment(exerciseDraftId: String, setDraftId: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                when {
+                    set.segments.size < 2 -> set
+                    set.segments.size == 2 -> {
+                        val first = set.segments.first()
+                        set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                    }
+                    else -> set.copy(segments = set.segments.dropLast(1))
+                }
+            }
+        }
+    }
+
+    fun updateDropSegmentReps(exerciseDraftId: String, setDraftId: String, segmentDraftId: String, repsText: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(repsText = repsText)
+                    }
+                )
+            }
+        }
+    }
+
+    fun updateDropSegmentWeight(exerciseDraftId: String, setDraftId: String, segmentDraftId: String, weightText: String) {
+        updateActiveExercises { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(weightText = weightText)
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditEnableDropSet(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size >= 2) set
+                else set.copy(
+                    segments = listOf(
+                        StrengthSegmentDraft(repsText = set.repsText, weightText = set.weightText),
+                        StrengthSegmentDraft()
+                    )
+                )
+            }
+        }
+    }
+
+    fun templateEditClearDropSet(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else {
+                    val first = set.segments.first()
+                    set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                }
+            }
+        }
+    }
+
+    fun templateEditAddDropSegment(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                if (set.segments.size < 2) set
+                else set.copy(segments = set.segments + StrengthSegmentDraft())
+            }
+        }
+    }
+
+    fun templateEditRemoveLastDropSegment(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                when {
+                    set.segments.size < 2 -> set
+                    set.segments.size == 2 -> {
+                        val first = set.segments.first()
+                        set.copy(segments = emptyList(), repsText = first.repsText, weightText = first.weightText)
+                    }
+                    else -> set.copy(segments = set.segments.dropLast(1))
+                }
+            }
+        }
+    }
+
+    fun templateEditUpdateDropSegmentReps(
+        exerciseDraftId: String,
+        setDraftId: String,
+        segmentDraftId: String,
+        repsText: String
+    ) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(repsText = repsText)
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateDropSegmentWeight(
+        exerciseDraftId: String,
+        setDraftId: String,
+        segmentDraftId: String,
+        weightText: String
+    ) {
+        mutateTemplateEditDrafts { list ->
+            patchSetInExerciseList(list, exerciseDraftId, setDraftId) { set ->
+                set.copy(
+                    segments = set.segments.map { seg ->
+                        if (seg.id != segmentDraftId) seg else seg.copy(weightText = weightText)
+                    }
+                )
+            }
+        }
+    }
+
+    private fun mutateTemplateEditDrafts(
+        mutator: (List<StrengthExerciseDraft>) -> List<StrengthExerciseDraft>
+    ) {
+        val cur = _uiState.value.strengthRoutineTemplateEdit ?: return
+        if (cur.loading) return
+        _uiState.value = _uiState.value.copy(
+            strengthRoutineTemplateEdit = cur.copy(
+                drafts = mutator(cur.drafts),
+                error = null
+            )
+        )
+    }
+
+    fun loadRoutineForEdit(routineId: Long, routineName: String) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            _uiState.value = _uiState.value.copy(
+                strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                    routineId = routineId,
+                    routineName = routineName,
+                    drafts = emptyList(),
+                    loading = true,
+                    error = null
+                ),
+                error = null,
+                message = null
+            )
+            runCatching { buildDraftsForRoutine(routineId) }
+                .onSuccess { drafts ->
+                    if (drafts.isEmpty()) {
+                        _uiState.value = _uiState.value.copy(
+                            strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                                routineId = routineId,
+                                routineName = routineName,
+                                drafts = emptyList(),
+                                loading = false,
+                                error = app.getString(R.string.add_routine_template_empty_load)
+                            )
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                                routineId = routineId,
+                                routineName = routineName,
+                                drafts = drafts,
+                                loading = false
+                            )
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    val msg = e.message?.take(300)?.ifBlank { e::class.java.simpleName }
+                        ?: app.getString(R.string.add_routine_template_load_error)
+                    _uiState.value = _uiState.value.copy(
+                        strengthRoutineTemplateEdit = StrengthRoutineTemplateEdit(
+                            routineId = routineId,
+                            routineName = routineName,
+                            drafts = emptyList(),
+                            loading = false,
+                            error = msg
+                        )
+                    )
+                }
+        }
+    }
+
+    fun dismissRoutineTemplateEdit() {
+        _uiState.value = _uiState.value.copy(strengthRoutineTemplateEdit = null)
+    }
+
+    fun saveEditedRoutine() {
+        val edit = _uiState.value.strengthRoutineTemplateEdit ?: return
+        if (edit.loading || edit.saving) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                strengthRoutineTemplateEdit = edit.copy(saving = true, error = null)
+            )
+            val uid = supabase.auth.currentUserOrNull()?.id
+            if (uid == null) {
+                _uiState.value = _uiState.value.copy(
+                    strengthRoutineTemplateEdit = edit.copy(
+                        saving = false,
+                        error = "Sign in required."
+                    )
+                )
+                return@launch
+            }
+            runCatching {
+                applyStrengthRoutinePrescriptionUpdate(
+                    supabase,
+                    uid,
+                    edit.routineId,
+                    edit.drafts
+                )
+            }.onSuccess {
+                val msg = getApplication<Application>().getString(R.string.add_routine_template_updated)
+                _uiState.value = _uiState.value.copy(
+                    strengthRoutineTemplateEdit = null,
+                    message = msg,
+                    error = null
+                )
+                loadStrengthRoutines()
+            }.onFailure { e ->
+                val cur = _uiState.value.strengthRoutineTemplateEdit
+                val err = e.message?.take(300)?.ifBlank { e::class.java.simpleName }.orEmpty()
+                if (cur != null) {
+                    _uiState.value = _uiState.value.copy(
+                        strengthRoutineTemplateEdit = cur.copy(saving = false, error = err)
+                    )
+                }
+            }
+        }
+    }
+
+    fun templateEditSetExerciseOnDraft(draftId: String, ex: ExerciseLite, languageCode: String = "es") {
+        val name = when (languageCode) {
+            "en" -> ex.nameEn ?: ex.nameEs ?: ex.name
+            else -> ex.nameEs ?: ex.nameEn ?: ex.name
+        }
+        mutateTemplateEditDrafts { list ->
+            list.map { row ->
+                if (row.id == draftId) {
+                    row.copy(exerciseId = ex.id, exerciseName = name)
+                } else {
+                    row
+                }
+            }
+        }
+    }
+
+    fun templateEditAddBlankStrengthExercise() {
+        mutateTemplateEditDrafts { it + StrengthExerciseDraft() }
+    }
+
+    fun templateEditRemoveExercise(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            val next = list.filterNot { it.id == exerciseDraftId }
+            if (next.isEmpty()) listOf(StrengthExerciseDraft()) else next
+        }
+    }
+
+    fun templateEditMoveExerciseUp(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { current ->
+            val mutable = current.toMutableList()
+            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
+            if (index <= 0) return@mutateTemplateEditDrafts current
+            val item = mutable.removeAt(index)
+            mutable.add(index - 1, item)
+            mutable
+        }
+    }
+
+    fun templateEditMoveExerciseDown(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { current ->
+            val mutable = current.toMutableList()
+            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
+            if (index == -1 || index >= mutable.lastIndex) return@mutateTemplateEditDrafts current
+            val item = mutable.removeAt(index)
+            mutable.add(index + 1, item)
+            mutable
+        }
+    }
+
+    fun templateEditAddSet(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id == exerciseDraftId) {
+                    ex.copy(sets = ex.sets + StrengthSetDraft(setNumber = 1))
+                } else {
+                    ex
+                }
+            }
+        }
+    }
+
+    fun templateEditBumpSetNumber(exerciseDraftId: String, setDraftId: String, delta: Int) {
+        if (delta == 0) return
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id != setDraftId) return@map set
+                        set.copy(setNumber = (set.setNumber + delta).coerceIn(1, 99))
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditRemoveSet(exerciseDraftId: String, setDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                val nextSets = ex.sets.filterNot { it.id == setDraftId }
+                ex.copy(sets = if (nextSets.isEmpty()) listOf(StrengthSetDraft()) else nextSets)
+            }
+        }
+    }
+
+    fun templateEditUpdateSetReps(exerciseDraftId: String, setDraftId: String, repsText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(repsText = repsText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateSetWeight(exerciseDraftId: String, setDraftId: String, weightText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(weightText = weightText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateExerciseCustomName(exerciseDraftId: String, customName: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id == exerciseDraftId) ex.copy(customName = customName) else ex
+            }
+        }
+    }
+
+    fun templateEditUpdateExerciseNotes(exerciseDraftId: String, notes: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id == exerciseDraftId) ex.copy(notes = notes) else ex
+            }
+        }
+    }
+
+    fun templateEditUpdateSetRpe(exerciseDraftId: String, setDraftId: String, rpeText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(rpeText = rpeText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditUpdateSetRestSec(exerciseDraftId: String, setDraftId: String, restSecText: String) {
+        mutateTemplateEditDrafts { list ->
+            list.map { ex ->
+                if (ex.id != exerciseDraftId) return@map ex
+                ex.copy(
+                    sets = ex.sets.map { set ->
+                        if (set.id == setDraftId) set.copy(restSecText = restSecText) else set
+                    }
+                )
+            }
+        }
+    }
+
+    fun templateEditClearAllStrengthExercises() {
+        mutateTemplateEditDrafts { listOf(StrengthExerciseDraft()) }
+    }
+
     fun clearStatus() {
         _uiState.value = _uiState.value.copy(error = null, message = null)
     }
 
     fun consumePendingOpenWorkout() {
         _uiState.value = _uiState.value.copy(pendingOpenWorkoutId = null)
+    }
+
+    fun consumePendingHyroxApply() {
+        _uiState.value = _uiState.value.copy(pendingHyroxApply = null)
     }
 
     /** Llamar desde [AddWorkoutTabScreen] tras [onWorkoutPublishedToHome], para no re-disparar al volver a Add. */
@@ -754,7 +1318,7 @@ class AddWorkoutViewModel(
             emptyList()
         } else {
             val setRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_SETS)
-                .select(columns = Columns.raw("routine_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, notes")) {
+                .select(columns = Columns.raw("routine_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, notes, weight_segments")) {
                     filter { isIn("routine_exercise_id", exIds) }
                     order("set_number", Order.ASCENDING)
                 }
@@ -771,15 +1335,19 @@ class AddWorkoutViewModel(
                 customName = ex.customName.orEmpty(),
                 notes = ex.notes.orEmpty(),
                 sets = sets.map { row ->
+                    val segs = parseWeightSegmentsColumn(row.weightSegments)
+                    val rep0 = segs.firstOrNull()?.repsText ?: row.reps?.toString() ?: ""
+                    val w0 = segs.firstOrNull()?.weightText ?: row.weightKg?.let { d ->
+                        if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
+                    } ?: ""
                     StrengthSetDraft(
                         setNumber = row.setNumber.coerceIn(1, 99),
-                        repsText = row.reps?.toString() ?: "",
-                        weightText = row.weightKg?.let { d ->
-                            if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
-                        } ?: "",
+                        repsText = rep0,
+                        weightText = w0,
                         rpeText = row.rpe?.toString() ?: "",
                         restSecText = row.restSec?.toString() ?: "",
-                        notes = row.notes.orEmpty()
+                        notes = row.notes.orEmpty(),
+                        segments = segs
                     )
                 }
             )
@@ -792,9 +1360,11 @@ class AddWorkoutViewModel(
         folderId: Long?,
         selected: List<StrengthExerciseDraft>
     ): Long {
+        val contentHash = strengthRoutineContentFingerprintFromDrafts(selected)
         val routinePayload = buildJsonObject {
             put("user_id", userId)
             put("name", routineName)
+            put("content_hash", contentHash)
             put("sort_order", System.currentTimeMillis().toInt())
             if (folderId != null) put("folder_id", folderId)
         }
@@ -837,23 +1407,19 @@ class AddWorkoutViewModel(
         val insertedRows = decodeFlexibleList<RoutineExerciseRow>(insertedExRes.data)
         insertedRows.forEachIndexed { index, row ->
             val src = selected.getOrNull(index) ?: return@forEachIndexed
-            src.sets.forEachIndexed { setIndex, set ->
-                val reps = set.repsText.trim().toIntOrNull()
-                val weight = set.weightText.trim().replace(",", ".").toDoubleOrNull()
-                val rpe = set.rpeText.trim().replace(",", ".").toDoubleOrNull()
-                val rest = set.restSecText.trim().toIntOrNull()
-                val n = set.notes.trim()
-                if ((reps == null || reps <= 0) && weight == null && rpe == null && rest == null && n.isBlank()) {
-                    return@forEachIndexed
-                }
+            src.sets.forEachIndexed { _, set ->
+                val p = draftSetToStrengthPayload(set) ?: return@forEachIndexed
                 val setPayload = buildJsonObject {
                     put("routine_exercise_id", row.id)
-                    put("set_number", set.setNumber.coerceIn(1, 99))
-                    if (reps != null && reps > 0) put("reps", reps)
-                    if (weight != null) put("weight_kg", weight)
-                    if (rpe != null) put("rpe", rpe)
-                    if (rest != null) put("rest_sec", rest)
-                    if (n.isNotBlank()) put("notes", n)
+                    put("set_number", p.setNumber.coerceIn(1, 99))
+                    if (p.reps != null) put("reps", p.reps)
+                    if (p.weightKg != null) put("weight_kg", p.weightKg)
+                    if (p.rpe != null) put("rpe", p.rpe)
+                    if (p.restSec != null) put("rest_sec", p.restSec)
+                    p.notes?.let { put("notes", it) }
+                    p.weightSegments?.takeIf { it.size >= 2 }?.let { segs ->
+                        put("weight_segments", weightSegmentsToJsonArray(segs))
+                    }
                 }
                 supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_SETS)
                     .insert(setPayload) { }
@@ -1311,6 +1877,849 @@ class AddWorkoutViewModel(
         }
     }
 
+    fun loadHyroxRoutines() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(loadingHyroxRoutines = true)
+            runCatching {
+                val folderRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS)
+                    .select(columns = Columns.raw("id, name, sort_order")) {
+                        order("sort_order", Order.ASCENDING)
+                        order("name", Order.ASCENDING)
+                    }
+                val folders = decodeFlexibleList<RoutineFolderRow>(folderRes.data)
+                    .map { RoutineFolderUi(id = it.id, name = it.name, sortOrder = it.sortOrder) }
+
+                val routineRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINES)
+                    .select(columns = Columns.raw("id, name, folder_id, sort_order, updated_at")) {
+                        order("sort_order", Order.ASCENDING)
+                        order("name", Order.ASCENDING)
+                    }
+                val routineRows = decodeFlexibleList<RoutineRow>(routineRes.data)
+                val routineIds = routineRows.map { it.id }
+                val exerciseRows = if (routineIds.isEmpty()) {
+                    emptyList()
+                } else {
+                    val exRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINE_EXERCISES)
+                        .select(columns = Columns.raw("id, routine_id")) {
+                            filter { isIn("routine_id", routineIds) }
+                        }
+                    decodeFlexibleList<RoutineExerciseIdRoutinePair>(exRes.data)
+                }
+                val exerciseCountByRoutine = exerciseRows.groupingBy { it.routineId }.eachCount()
+                val routines = routineRows.map { row ->
+                    StrengthRoutineUi(
+                        id = row.id,
+                        name = row.name,
+                        folderId = row.folderId,
+                        sortOrder = row.sortOrder,
+                        exerciseCount = exerciseCountByRoutine[row.id] ?: 0,
+                        updatedAtIso = row.updatedAt
+                    )
+                }
+                folders to routines
+            }.onSuccess { pair ->
+                val (folders, routines) = pair
+                _uiState.value = _uiState.value.copy(
+                    loadingHyroxRoutines = false,
+                    hyroxRoutineFolders = folders,
+                    hyroxRoutines = routines,
+                    error = null
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    loadingHyroxRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun applyHyroxRoutine(routineId: Long) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(applyingRoutine = true, error = null, message = null)
+            runCatching {
+                val detail = fetchHyroxRoutineDetail(routineId) ?: error("Routine not found.")
+                val exJson = hyroxExercisesJsonFromDetail(detail)
+                val overlay = hyroxSportStatsOverlayFromDetail(detail)
+                HyroxRoutineApplyDraft(exercisesJson = exJson, sportStatsOverlay = overlay)
+            }.onSuccess { draft ->
+                _uiState.value = _uiState.value.copy(
+                    applyingRoutine = false,
+                    pendingHyroxApply = draft,
+                    message = "Routine applied.",
+                    error = null
+                )
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    applyingRoutine = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun saveCurrentAsHyroxRoutine(
+        routineName: String,
+        folderId: Long?,
+        durationMinText: String,
+        sportStats: Map<String, String>,
+        hyroxExercisesText: String
+    ) {
+        val trimmedName = routineName.trim()
+        if (trimmedName.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Routine name is required.")
+            return
+        }
+        if (hyroxExercisesText.isBlank()) {
+            _uiState.value = _uiState.value.copy(error = "Add at least one Hyrox station before saving.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(savingRoutine = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val stats = SportStatsPayloadBuilder.build(
+                    sport = AddSportType.HYROX,
+                    durationMinText = durationMinText,
+                    footballPosition = AddFootballPosition.GOALKEEPER,
+                    racketMode = AddRacketMode.SINGLES,
+                    racketFormat = AddRacketFormat.BEST_OF_3,
+                    sportStats = sportStats,
+                    hyroxExercisesText = hyroxExercisesText
+                )
+                insertHyroxRoutineFromStats(me, trimmedName, folderId, stats, replaceRoutineId = null)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    savingRoutine = false,
+                    message = "Hyrox routine saved."
+                )
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    savingRoutine = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    private suspend fun fetchHyroxRoutineDetail(routineId: Long): HyroxRoutineHeaderDb? {
+        val res = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(
+            columns = Columns.raw(
+                "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
+                    "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+            )
+        ) {
+            filter { eq("id", routineId) }
+            limit(1)
+        }
+        val root = runCatching { Json.parseToJsonElement(res.data) }.getOrNull() ?: return null
+        val obj = when (root) {
+            is JsonArray -> root.firstOrNull()?.jsonObject
+            is JsonObject -> root
+            else -> null
+        } ?: return null
+        return runCatching { json.decodeFromJsonElement(HyroxRoutineHeaderDb.serializer(), obj) }.getOrNull()
+    }
+
+    private fun hyroxExercisesJsonFromDetail(d: HyroxRoutineHeaderDb): String {
+        val rows = (d.exercises ?: emptyList()).sortedBy { it.exerciseOrder }
+        val arr = buildJsonArray {
+            rows.forEach { r ->
+                val p = HyroxExerciseFormatting.persistedPayload(
+                    r.exerciseCode,
+                    r.exerciseDisplayName.orEmpty(),
+                    r.notes
+                )
+                add(
+                    buildJsonObject {
+                        put("exercise_code", p.code)
+                        p.displayName?.takeIf { it.isNotBlank() }?.let { put("custom_display_name", it) }
+                        r.distanceM?.let { put("distance_m", it) }
+                        r.reps?.let { put("reps", it) }
+                        r.weightKg?.let { put("weight_kg", it) }
+                        r.durationSec?.let { put("duration_sec", it) }
+                        r.heightCm?.let { put("height_cm", it) }
+                        r.implementCount?.let { put("implement_count", it) }
+                        r.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
+                    }
+                )
+            }
+        }
+        return arr.toString()
+    }
+
+    private fun hyroxSportStatsOverlayFromDetail(d: HyroxRoutineHeaderDb): Map<String, String> = buildMap {
+        put("division", d.division.orEmpty())
+        put("category", d.category.orEmpty())
+        put("age_group", d.ageGroup.orEmpty())
+        d.officialTimeSec?.let { put("official_time_sec", it.toString()) }
+        d.penaltyTimeSec?.let { put("penalty_time_sec", it.toString()) }
+        d.noReps?.let { put("no_reps", it.toString()) }
+        d.rankOverall?.let { put("rank_overall", it.toString()) }
+        d.rankCategory?.let { put("rank_category", it.toString()) }
+        d.avgHr?.let { put("avg_hr", it.toString()) }
+        d.maxHr?.let { put("max_hr", it.toString()) }
+    }
+
+    private fun hyroxStatsFingerprint(stats: JsonObject): String {
+        val exercises = stats["exercises"]?.jsonArray ?: JsonArray(emptyList())
+        val header = buildJsonObject {
+            stats.forEach { (k, v) ->
+                if (k != "exercises") put(k, v)
+            }
+        }
+        val canonical = header.toString() + "|" + exercises.toString()
+        val md = MessageDigest.getInstance("SHA-256")
+        return md.digest(canonical.toByteArray(StandardCharsets.UTF_8)).joinToString("") { b -> "%02x".format(b) }
+    }
+
+    private suspend fun insertHyroxRoutineFromStats(
+        userId: String,
+        name: String,
+        folderId: Long?,
+        stats: JsonObject,
+        replaceRoutineId: Long?
+    ): Long {
+        val exercises = stats["exercises"]?.jsonArray ?: error("Missing Hyrox exercises.")
+        if (exercises.isEmpty()) error("Hyrox exercises empty.")
+        val hash = hyroxStatsFingerprint(stats)
+        if (replaceRoutineId != null) {
+            supabase.from(BackendContracts.Tables.HYROX_ROUTINES).delete {
+                filter {
+                    eq("id", replaceRoutineId)
+                    eq("user_id", userId)
+                }
+            }
+        }
+        val sortOrder = System.currentTimeMillis().toInt()
+        val header = buildJsonObject {
+            put("user_id", userId)
+            put("name", name)
+            put("sort_order", sortOrder)
+            put("content_hash", hash)
+            if (folderId != null) put("folder_id", folderId)
+            stats["division"]?.let { put("division", it) }
+            stats["category"]?.let { put("category", it) }
+            stats["age_group"]?.let { put("age_group", it) }
+            stats["official_time_sec"]?.let { put("official_time_sec", it) }
+            stats["penalty_time_sec"]?.let { put("penalty_time_sec", it) }
+            stats["no_reps"]?.let { put("no_reps", it) }
+            stats["rank_overall"]?.let { put("rank_overall", it) }
+            stats["rank_category"]?.let { put("rank_category", it) }
+            stats["avg_hr"]?.let { put("avg_hr", it) }
+            stats["max_hr"]?.let { put("max_hr", it) }
+        }
+        val ins = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).insert(header) { }
+        val newRoutineId = parseSingleIdFromRpc(ins.data)
+            ?: lookupLastHyroxRoutineId(userId, name, folderId)
+            ?: error("Could not resolve Hyrox routine id after insert.")
+        var idx = 0
+        for (el in exercises) {
+            val o = el.jsonObject
+            idx += 1
+            val order = o["exercise_order"]?.jsonPrimitive?.content?.toIntOrNull() ?: idx
+            val exIns = buildJsonObject {
+                put("routine_id", newRoutineId)
+                put("exercise_code", o["exercise_code"]!!.jsonPrimitive.content)
+                put("exercise_order", order)
+                o["distance_m"]?.let { put("distance_m", it) }
+                o["reps"]?.let { put("reps", it) }
+                o["weight_kg"]?.let { put("weight_kg", it) }
+                o["duration_sec"]?.let { put("duration_sec", it) }
+                o["height_cm"]?.let { put("height_cm", it) }
+                o["implement_count"]?.let { put("implement_count", it) }
+                o["notes"]?.let { put("notes", it) }
+                o["exercise_display_name"]?.let { put("exercise_display_name", it) }
+            }
+            supabase.from(BackendContracts.Tables.HYROX_ROUTINE_EXERCISES).insert(exIns) { }
+        }
+        return newRoutineId
+    }
+
+    private suspend fun lookupLastHyroxRoutineId(userId: String, routineName: String, folderId: Long?): Long? {
+        val res = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(columns = Columns.raw("id")) {
+            filter {
+                eq("user_id", userId)
+                eq("name", routineName)
+                if (folderId != null) eq("folder_id", folderId)
+            }
+            order("id", Order.DESCENDING)
+            limit(1)
+        }
+        return Json.parseToJsonElement(res.data).jsonArray.firstOrNull()
+            ?.jsonObject?.get("id")?.toString()?.trim('"')?.toLongOrNull()
+    }
+
+    private suspend fun insertHyroxRoutineAfterWorkout(
+        userId: String,
+        name: String,
+        folderId: Long?,
+        durationMinText: String,
+        sportStats: Map<String, String>,
+        hyroxExercisesText: String
+    ) {
+        val stats = SportStatsPayloadBuilder.build(
+            sport = AddSportType.HYROX,
+            durationMinText = durationMinText,
+            footballPosition = AddFootballPosition.GOALKEEPER,
+            racketMode = AddRacketMode.SINGLES,
+            racketFormat = AddRacketFormat.BEST_OF_3,
+            sportStats = sportStats,
+            hyroxExercisesText = hyroxExercisesText
+        )
+        insertHyroxRoutineFromStats(userId, name, folderId, stats, replaceRoutineId = null)
+    }
+
+    fun createHyroxRoutineFolder(name: String) {
+        viewModelScope.launch {
+            val trimmed = name.trim()
+            if (trimmed.isEmpty()) {
+                _uiState.value = _uiState.value.copy(error = "Folder name is required.")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val payload = buildJsonObject {
+                    put("user_id", me)
+                    put("name", trimmed)
+                    put("sort_order", System.currentTimeMillis().toInt())
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).insert(payload) { }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder created successfully.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun renameHyroxRoutineFolder(folderId: Long, newName: String) {
+        viewModelScope.launch {
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) {
+                _uiState.value = _uiState.value.copy(error = "Folder name is required.")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).update(
+                    buildJsonObject { put("name", trimmed) }
+                ) {
+                    filter {
+                        eq("id", folderId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder renamed.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun moveHyroxRoutineFolder(folderId: Long, direction: Int) {
+        viewModelScope.launch {
+            val ordered = _uiState.value.hyroxRoutineFolders.sortedBy { it.sortOrder }
+            val index = ordered.indexOfFirst { it.id == folderId }
+            if (index == -1) return@launch
+            val targetIndex = index + direction
+            if (targetIndex !in ordered.indices) return@launch
+            val source = ordered[index]
+            val target = ordered[targetIndex]
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).update(
+                    buildJsonObject { put("sort_order", target.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", source.id)
+                        eq("user_id", me)
+                    }
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).update(
+                    buildJsonObject { put("sort_order", source.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", target.id)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder order updated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun deleteHyroxRoutineFolder(folderId: Long) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(
+                    buildJsonObject { put("folder_id", JsonNull) }
+                ) {
+                    filter {
+                        eq("user_id", me)
+                        eq("folder_id", folderId)
+                    }
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINE_FOLDERS).delete {
+                    filter {
+                        eq("id", folderId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Folder deleted.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun renameHyroxRoutine(routineId: Long, newName: String) {
+        viewModelScope.launch {
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) {
+                _uiState.value = _uiState.value.copy(error = "Routine name is required.")
+                return@launch
+            }
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val payload = buildJsonObject { put("name", trimmed) }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(payload) {
+                    filter {
+                        eq("id", routineId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine renamed.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun moveHyroxRoutine(routineId: Long, direction: Int) {
+        viewModelScope.launch {
+            val current = _uiState.value
+            val me = current.hyroxRoutines.firstOrNull { it.id == routineId } ?: return@launch
+            val sameFolder = current.hyroxRoutines
+                .filter { it.folderId == me.folderId }
+                .sortedWith(compareBy<StrengthRoutineUi> { it.sortOrder }.thenBy { it.id })
+            val index = sameFolder.indexOfFirst { it.id == routineId }
+            if (index == -1) return@launch
+            val targetIndex = index + direction
+            if (targetIndex !in sameFolder.indices) return@launch
+            val source = sameFolder[index]
+            val target = sameFolder[targetIndex]
+            _uiState.value = current.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val uid = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(
+                    buildJsonObject { put("sort_order", target.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", source.id)
+                        eq("user_id", uid)
+                    }
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(
+                    buildJsonObject { put("sort_order", source.sortOrder) }
+                ) {
+                    filter {
+                        eq("id", target.id)
+                        eq("user_id", uid)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine order updated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun moveHyroxRoutineToFolder(routineId: Long, folderId: Long?) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val payload = buildJsonObject {
+                    if (folderId != null) put("folder_id", folderId) else put("folder_id", JsonNull)
+                    put("sort_order", System.currentTimeMillis().toInt())
+                }
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(payload) {
+                    filter {
+                        eq("id", routineId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine folder updated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun deleteHyroxRoutine(routineId: Long) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                supabase.from(BackendContracts.Tables.HYROX_ROUTINES).delete {
+                    filter {
+                        eq("id", routineId)
+                        eq("user_id", me)
+                    }
+                }
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine deleted.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun duplicateHyroxRoutine(sourceRoutineId: Long, newName: String, targetFolderId: Long?) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Enter a routine name.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val detail = fetchHyroxRoutineDetail(sourceRoutineId)
+                    ?: error("Routine not found.")
+                val stats = hyroxStatsJsonObjectFromDetail(detail)
+                val taken = _uiState.value.hyroxRoutines.any {
+                    it.name.equals(trimmed, ignoreCase = true) &&
+                        (it.folderId == targetFolderId || (it.folderId == null && targetFolderId == null))
+                }
+                if (taken) error("A routine with this name already exists in this folder.")
+                insertHyroxRoutineFromStats(me, trimmed, targetFolderId, stats, replaceRoutineId = null)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(managingRoutines = false, message = "Routine duplicated.")
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    private fun hyroxStatsJsonObjectFromDetail(d: HyroxRoutineHeaderDb): JsonObject {
+        val exercises = buildJsonArray {
+            (d.exercises ?: emptyList()).sortedBy { it.exerciseOrder }.forEach { r ->
+                val p = HyroxExerciseFormatting.persistedPayload(
+                    r.exerciseCode,
+                    r.exerciseDisplayName.orEmpty(),
+                    r.notes
+                )
+                add(
+                    buildJsonObject {
+                        put("exercise_code", p.code)
+                        p.displayName?.takeIf { it.isNotBlank() }?.let { put("exercise_display_name", it) }
+                        put("exercise_order", r.exerciseOrder)
+                        r.distanceM?.let { put("distance_m", it) }
+                        r.reps?.let { put("reps", it) }
+                        r.weightKg?.let { put("weight_kg", it) }
+                        r.durationSec?.let { put("duration_sec", it) }
+                        r.heightCm?.let { put("height_cm", it) }
+                        r.implementCount?.let { put("implement_count", it) }
+                        r.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
+                    }
+                )
+            }
+        }
+        return buildJsonObject {
+            d.division?.takeIf { it.isNotBlank() }?.let { put("division", it) }
+            d.category?.takeIf { it.isNotBlank() }?.let { put("category", it) }
+            d.ageGroup?.takeIf { it.isNotBlank() }?.let { put("age_group", it) }
+            d.officialTimeSec?.let { put("official_time_sec", it) }
+            d.penaltyTimeSec?.let { put("penalty_time_sec", it) }
+            d.noReps?.let { put("no_reps", it) }
+            d.rankOverall?.let { put("rank_overall", it) }
+            d.rankCategory?.let { put("rank_category", it) }
+            d.avgHr?.let { put("avg_hr", it) }
+            d.maxHr?.let { put("max_hr", it) }
+            put("exercises", exercises)
+        }
+    }
+
+    suspend fun buildStrengthRoutineShareSnapshotForChat(routineId: Long): RoutineShareSnapshot {
+        val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+        val profileRes = supabase.from(BackendContracts.Tables.PROFILES)
+            .select(columns = Columns.raw("username,avatar_url")) {
+                filter { eq("user_id", me) }
+                limit(1)
+            }
+        val prof = profileRowFromSelectData(profileRes.data)
+        val rRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(
+            columns = Columns.raw(STRENGTH_DETAIL_SHARE_SELECT)
+        ) {
+            filter { eq("id", routineId) }
+            limit(1)
+        }
+        val root = Json.parseToJsonElement(rRes.data.trim())
+        val obj = when (root) {
+            is JsonArray -> root.firstOrNull()?.jsonObject ?: error("Routine not found.")
+            is JsonObject -> root
+            else -> error("Routine not found.")
+        }
+        val detailJson = obj.toString()
+        val routineName = obj["name"]?.jsonPrimitive?.contentOrNull ?: "Routine"
+        val updatedAt = obj["updated_at"]?.jsonPrimitive?.contentOrNull
+        val parsed = decodeRoutineShareStrengthDetail(detailJson)
+        val exs = parsed?.strengthRoutineExercises?.sortedBy { it.orderIndex }.orEmpty()
+        val exerciseCount = exs.size
+        var totalSets = 0
+        var previewExerciseName: String? = null
+        exs.forEachIndexed { idx, ex ->
+            val n = ex.strengthRoutineSets?.size ?: 0
+            totalSets += if (n == 0) 1 else n
+            if (idx == 0) {
+                val cn = ex.customName?.trim().orEmpty()
+                previewExerciseName = if (cn.isNotEmpty()) cn else "Exercise ${ex.exerciseId}"
+            }
+        }
+        return RoutineShareSnapshot(
+            v = 1,
+            routineKind = "strength",
+            name = routineName,
+            routineId = routineId,
+            updatedAt = updatedAt,
+            ownerUserId = me,
+            ownerUsername = prof.username,
+            ownerAvatarUrl = prof.avatarUrl,
+            shareNonce = UUID.randomUUID().toString(),
+            detailJson = detailJson,
+            exerciseCount = exerciseCount.takeIf { it > 0 },
+            totalSets = totalSets.takeIf { it > 0 },
+            previewExerciseName = previewExerciseName
+        )
+    }
+
+    suspend fun buildHyroxRoutineShareSnapshotForChat(routineId: Long): RoutineShareSnapshot {
+        val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+        val profileRes = supabase.from(BackendContracts.Tables.PROFILES)
+            .select(columns = Columns.raw("username,avatar_url")) {
+                filter { eq("user_id", me) }
+                limit(1)
+            }
+        val prof = profileRowFromSelectData(profileRes.data)
+        val rRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(
+            columns = Columns.raw(HYROX_DETAIL_SHARE_SELECT)
+        ) {
+            filter { eq("id", routineId) }
+            limit(1)
+        }
+        val root = Json.parseToJsonElement(rRes.data.trim())
+        val obj = when (root) {
+            is JsonArray -> root.firstOrNull()?.jsonObject ?: error("Routine not found.")
+            is JsonObject -> root
+            else -> error("Routine not found.")
+        }
+        val detailJson = obj.toString()
+        val routineName = obj["name"]?.jsonPrimitive?.contentOrNull ?: "Routine"
+        val updatedAt = obj["updated_at"]?.jsonPrimitive?.contentOrNull
+        val parsed = decodeRoutineShareHyroxDetail(detailJson)
+        val rows = parsed?.hyroxRoutineExercises?.sortedBy { it.exerciseOrder }.orEmpty()
+        val exerciseCount = rows.size
+        val previewExerciseName = rows.firstOrNull()?.let { w ->
+            HyroxExerciseFormatting.label(
+                w.exerciseCode,
+                w.exerciseDisplayName,
+                w.notes
+            )
+        }
+        return RoutineShareSnapshot(
+            v = 1,
+            routineKind = "hyrox",
+            name = routineName,
+            routineId = routineId,
+            updatedAt = updatedAt,
+            ownerUserId = me,
+            ownerUsername = prof.username,
+            ownerAvatarUrl = prof.avatarUrl,
+            shareNonce = UUID.randomUUID().toString(),
+            detailJson = detailJson,
+            exerciseCount = exerciseCount.takeIf { it > 0 },
+            totalSets = null,
+            previewExerciseName = previewExerciseName
+        )
+    }
+
+    fun importStrengthRoutineFromShare(detailJson: String, routineName: String, folderId: Long?) {
+        val trimmed = routineName.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Enter a routine name.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val drafts = strengthDraftsFromShareDetailJson(detailJson, _uiState.value.exercises)
+                if (drafts.isEmpty()) error("This routine has no exercises to copy.")
+                if (drafts.any { it.exerciseId == null }) error("Routine is missing exercise references.")
+                val taken = _uiState.value.routines.any {
+                    it.name.equals(trimmed, ignoreCase = true) &&
+                        (it.folderId == folderId || (it.folderId == null && folderId == null))
+                }
+                if (taken) error("A routine with this name already exists in this folder.")
+                insertNewRoutineWithDrafts(me, trimmed, folderId, drafts)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    message = "Routine saved."
+                )
+                loadStrengthRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    fun importHyroxRoutineFromShare(detailJson: String, routineName: String, folderId: Long?) {
+        val trimmed = routineName.trim()
+        if (trimmed.isEmpty()) {
+            _uiState.value = _uiState.value.copy(error = "Enter a routine name.")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(managingRoutines = true, error = null, message = null)
+            runCatching {
+                val me = supabase.auth.currentUserOrNull()?.id ?: error("Missing session user.")
+                val root = Json.parseToJsonElement(detailJson.trim())
+                val obj = when (root) {
+                    is JsonArray -> root.firstOrNull()?.jsonObject ?: error("Invalid routine.")
+                    is JsonObject -> root
+                    else -> error("Invalid routine.")
+                }
+                val detail = json.decodeFromJsonElement(HyroxRoutineHeaderDb.serializer(), obj)
+                val stats = hyroxStatsJsonObjectFromDetail(detail)
+                val taken = _uiState.value.hyroxRoutines.any {
+                    it.name.equals(trimmed, ignoreCase = true) &&
+                        (it.folderId == folderId || (it.folderId == null && folderId == null))
+                }
+                if (taken) error("A routine with this name already exists in this folder.")
+                insertHyroxRoutineFromStats(me, trimmed, folderId, stats, replaceRoutineId = null)
+            }.onSuccess {
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    message = "Routine saved."
+                )
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    managingRoutines = false,
+                    error = e.message?.take(300) ?: e::class.java.simpleName
+                )
+            }
+        }
+    }
+
+    private fun profileRowFromSelectData(data: String): ProfileUsernameRow {
+        return runCatching {
+            val arr = Json.parseToJsonElement(data.trim()).jsonArray
+            val o = arr.firstOrNull()?.jsonObject ?: return@runCatching ProfileUsernameRow("", null)
+            ProfileUsernameRow(
+                username = o["username"]?.jsonPrimitive?.contentOrNull ?: "",
+                avatarUrl = o["avatar_url"]?.jsonPrimitive?.contentOrNull
+            )
+        }.getOrElse { ProfileUsernameRow("", null) }
+    }
+
+    private fun strengthDraftsFromShareDetailJson(
+        detailJson: String,
+        catalog: List<ExerciseLite>
+    ): List<StrengthExerciseDraft> {
+        val detail = runCatching { json.decodeFromString(ShareStrengthDetail.serializer(), detailJson) }.getOrNull()
+            ?: return emptyList()
+        val exs = (detail.strengthRoutineExercises ?: emptyList()).sortedBy { it.orderIndex }
+        return exs.map { ex ->
+            val setsSorted = (ex.strengthRoutineSets ?: emptyList()).sortedBy { it.setNumber }
+            val cust = ex.customName?.trim().orEmpty()
+            val baseName = catalog.firstOrNull { it.id == ex.exerciseId }?.let { it.nameEs ?: it.nameEn ?: it.name }
+                ?: "Exercise ${ex.exerciseId}"
+            val display = if (cust.isNotEmpty()) cust else baseName
+            val mappedSets = setsSorted.map { s ->
+                val segs = parseWeightSegmentsColumn(s.weightSegments)
+                val r0 = segs.firstOrNull()?.repsText ?: s.reps?.toString() ?: ""
+                val w0 = segs.firstOrNull()?.weightText ?: s.weightKg?.let { d ->
+                    if (d == kotlin.math.floor(d)) d.toInt().toString() else d.toString()
+                } ?: ""
+                StrengthSetDraft(
+                    setNumber = s.setNumber.coerceIn(1, 99),
+                    repsText = r0,
+                    weightText = w0,
+                    rpeText = s.rpe?.toString() ?: "",
+                    restSecText = s.restSec?.toString() ?: "",
+                    notes = s.notes ?: "",
+                    segments = segs
+                )
+            }
+            val fallbackSets = if (mappedSets.isEmpty()) listOf(StrengthSetDraft(setNumber = 1)) else mappedSets
+            StrengthExerciseDraft(
+                exerciseId = ex.exerciseId,
+                exerciseName = display,
+                customName = cust,
+                notes = ex.notes ?: "",
+                sets = fallbackSets
+            )
+        }
+    }
+
     fun copyHostLaneToActiveLane() {
         val current = _uiState.value
         if (!current.perPersonStrength) return
@@ -1601,6 +3010,7 @@ class AddWorkoutViewModel(
     ) {
         viewModelScope.launch {
             val snap = _uiState.value
+            if (snap.strengthRoutineOverwritePending != null) return@launch
             val participantIds = snap.selectedParticipantIds.toList()
             val perPersonStrength = snap.perPersonStrength
             if (perPersonStrength && participantIds.size > 2) {
@@ -1609,6 +3019,103 @@ class AddWorkoutViewModel(
                 )
                 return@launch
             }
+            if (!perPersonStrength) {
+                val items = strengthProgramItemsFromDrafts(snap.selectedExercises)
+                if (items != null && items.isNotEmpty()) {
+                    val uid = supabase.auth.currentUserOrNull()?.id
+                    if (uid != null) {
+                        val candidate = runCatching {
+                            fetchStrengthRoutineOverwriteCandidate(
+                                supabase,
+                                uid,
+                                items
+                            ) { eid ->
+                                val ex = snap.exercises.firstOrNull { it.id == eid }
+                                ex?.nameEn?.takeIf { it.isNotBlank() }
+                                    ?: ex?.nameEs?.takeIf { it.isNotBlank() }
+                                    ?: ex?.name.orEmpty()
+                            }
+                        }.getOrNull() ?: StrengthRoutineOverwriteCandidate.None
+                        if (candidate is StrengthRoutineOverwriteCandidate.Prompt) {
+                            _uiState.value = snap.copy(
+                                strengthRoutineOverwritePending = StrengthRoutineOverwritePending(
+                                    prompt = candidate.value,
+                                    createParams = StrengthCreateWorkoutParams(
+                                        title = title,
+                                        notes = notes,
+                                        durationMin = durationMin,
+                                        intensity = intensity,
+                                        state = state,
+                                        startedAtIso = startedAtIso,
+                                        endedAtIso = endedAtIso,
+                                        useCustomSchedule = useCustomSchedule,
+                                        scheduleEndedEnabled = scheduleEndedEnabled
+                                    ),
+                                    exercisesSnapshot = snap.selectedExercises.map { it.deepCopy() }
+                                ),
+                                error = null,
+                                message = null
+                            )
+                            return@launch
+                        }
+                    }
+                }
+            }
+            beginCreateStrengthWorkout(
+                title = title,
+                notes = notes,
+                durationMin = durationMin,
+                intensity = intensity,
+                state = state,
+                startedAtIso = startedAtIso,
+                endedAtIso = endedAtIso,
+                useCustomSchedule = useCustomSchedule,
+                scheduleEndedEnabled = scheduleEndedEnabled,
+                routinePrescriptionOverwrite = null
+            )
+        }
+    }
+
+    fun dismissStrengthRoutineOverwrite() {
+        _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
+    }
+
+    fun confirmStrengthRoutineOverwrite(updateRoutine: Boolean) {
+        val pending = _uiState.value.strengthRoutineOverwritePending ?: return
+        val p = pending.createParams
+        _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
+        val overwrite: Pair<Long, List<StrengthExerciseDraft>>? =
+            if (updateRoutine) pending.prompt.routineId to pending.exercisesSnapshot else null
+        beginCreateStrengthWorkout(
+            title = p.title,
+            notes = p.notes,
+            durationMin = p.durationMin,
+            intensity = p.intensity,
+            state = p.state,
+            startedAtIso = p.startedAtIso,
+            endedAtIso = p.endedAtIso,
+            useCustomSchedule = p.useCustomSchedule,
+            scheduleEndedEnabled = p.scheduleEndedEnabled,
+            routinePrescriptionOverwrite = overwrite
+        )
+    }
+
+    private fun beginCreateStrengthWorkout(
+        title: String,
+        notes: String,
+        durationMin: Int?,
+        intensity: AddWorkoutIntensity,
+        state: AddWorkoutState,
+        startedAtIso: String?,
+        endedAtIso: String?,
+        useCustomSchedule: Boolean,
+        scheduleEndedEnabled: Boolean,
+        routinePrescriptionOverwrite: Pair<Long, List<StrengthExerciseDraft>>?
+    ) {
+        viewModelScope.launch {
+            val snap = _uiState.value
+            val participantIds = snap.selectedParticipantIds.toList()
+            val perPersonStrength = snap.perPersonStrength
             _uiState.value = _uiState.value.copy(creating = true, error = null, message = null)
             runCatching {
                 val userId = supabase.auth.currentUserOrNull()?.id
@@ -1664,6 +3171,9 @@ class AddWorkoutViewModel(
                                                     p.rpe?.let { put("rpe", it) }
                                                     p.restSec?.let { put("rest_sec", it) }
                                                     p.notes?.let { put("notes", it) }
+                                                    p.weightSegments?.takeIf { it.size >= 2 }?.let { segs ->
+                                                        put("weight_segments", weightSegmentsToJsonArray(segs))
+                                                    }
                                                 }
                                             )
                                         }
@@ -1716,7 +3226,7 @@ class AddWorkoutViewModel(
                     val firstWid = squadIds.firstOrNull()
                     supabase.submitWorkoutToCompetitionIfActive(firstWid)
                 } else {
-                    val selected = snap.selectedExercises
+                    val selected = routinePrescriptionOverwrite?.second ?: snap.selectedExercises
                     if (selected.isEmpty()) error("Add at least one exercise first.")
                     val params = paramsForState(targetState, buildStrengthPayloadItems(selected))
                     val res = supabase.postgrest.rpc(BackendContracts.Rpc.CREATE_STRENGTH_WORKOUT, params) { }
@@ -1727,8 +3237,20 @@ class AddWorkoutViewModel(
                     }
                     supabase.submitWorkoutToCompetitionIfActive(workoutId)
                 }
+                if (routinePrescriptionOverwrite != null) {
+                    applyStrengthRoutinePrescriptionUpdate(
+                        supabase,
+                        userId,
+                        routinePrescriptionOverwrite.first,
+                        routinePrescriptionOverwrite.second
+                    )
+                }
             }.onSuccess {
-                onWorkoutCreatedUi(strengthSuccessMessage(perPersonStrength, state))
+                var msg = strengthSuccessMessage(perPersonStrength, state)
+                if (routinePrescriptionOverwrite != null) {
+                    msg += " Routine template updated."
+                }
+                onWorkoutCreatedUi(msg)
             }.onFailure { e ->
                 Log.e(TAG, "createStrengthWorkout failed", e)
                 val raw = e.message.orEmpty()
@@ -1869,7 +3391,10 @@ class AddWorkoutViewModel(
         startedAtIso: String? = null,
         endedAtIso: String? = null,
         useCustomSchedule: Boolean = false,
-        scheduleEndedEnabled: Boolean = false
+        scheduleEndedEnabled: Boolean = false,
+        saveHyroxRoutineTemplate: Boolean = false,
+        hyroxRoutineName: String = "",
+        hyroxRoutineFolderId: Long? = null
     ) {
         viewModelScope.launch {
             val participantIds = _uiState.value.selectedParticipantIds.toList()
@@ -1936,6 +3461,23 @@ class AddWorkoutViewModel(
                     patchHyroxExerciseDisplayNamesIfNeeded(workoutId, hyroxExercisesText)
                 }
                 supabase.submitWorkoutToCompetitionIfActive(workoutId)
+                if (sport == AddSportType.HYROX && saveHyroxRoutineTemplate) {
+                    val rn = hyroxRoutineName.trim()
+                    if (rn.isNotEmpty()) {
+                        try {
+                            insertHyroxRoutineAfterWorkout(
+                                userId = userId.toString(),
+                                name = rn,
+                                folderId = hyroxRoutineFolderId,
+                                durationMinText = durationMinText,
+                                sportStats = sportStats,
+                                hyroxExercisesText = hyroxExercisesText
+                            )
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Hyrox routine template save failed", e)
+                        }
+                    }
+                }
             }.onSuccess {
                 val r = getApplication<Application>().resources
                 val msg = if (state == AddWorkoutState.PUBLISHED) {
@@ -2062,25 +3604,7 @@ class AddWorkoutViewModel(
         val mapped = exercises.map { exercise ->
             val exId = exercise.exerciseId ?: error("Missing exercise_id")
             if (exId <= 0L) error("Invalid exercise.")
-            val validSets = exercise.sets.mapNotNull { set ->
-                val reps = set.repsText.trim().toIntOrNull()
-                val weight = set.weightText.trim().replace(",", ".").toDoubleOrNull()
-                val rpe = set.rpeText.trim().replace(",", ".").toDoubleOrNull()
-                val restSec = set.restSecText.trim().toIntOrNull()
-                val notes = set.notes.trim()
-                if ((reps == null || reps <= 0) && weight == null && rpe == null && restSec == null && notes.isBlank()) {
-                    return@mapNotNull null
-                }
-                val safeReps = reps?.takeIf { it > 0 }
-                StrengthSetPayload(
-                    setNumber = set.setNumber.coerceIn(1, 99),
-                    reps = safeReps,
-                    weightKg = weight,
-                    rpe = rpe,
-                    restSec = restSec,
-                    notes = notes.ifBlank { null }
-                )
-            }
+            val validSets = exercise.sets.mapNotNull { set -> draftSetToStrengthPayload(set) }
             exercise to validSets
         }
         if (mapped.any { it.second.isEmpty() }) {
@@ -2151,17 +3675,10 @@ class AddWorkoutViewModel(
     }
 }
 
-private data class StrengthSetPayload(
-    val setNumber: Int,
-    val reps: Int?,
-    val weightKg: Double?,
-    val rpe: Double?,
-    val restSec: Int?,
-    val notes: String?
-)
-
 private fun StrengthExerciseDraft.deepCopy(): StrengthExerciseDraft = copy(
-    sets = sets.map { it.copy() }
+    sets = sets.map { s ->
+        s.copy(segments = s.segments.map { it.copy() })
+    }
 )
 
 class AddWorkoutViewModelFactory(

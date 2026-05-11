@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -39,6 +41,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -49,7 +53,6 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
@@ -71,6 +74,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -88,6 +92,9 @@ import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
 import com.lilru.liftr.navigation.AppNavEvents
 import com.lilru.liftr.navigation.MainOverlay
 import com.lilru.liftr.ui.add.duplicate.AddWorkoutDuplicateStore
+import com.lilru.liftr.ui.chat.RoutineShareSnapshot
+import com.lilru.liftr.ui.chat.SharedRoutineFromChatScreen
+import com.lilru.liftr.ui.chat.ShareRoutineToChatSheetContent
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.add.recommendation.CardioRecommendationResult
 import com.lilru.liftr.ui.add.recommendation.HyroxExerciseRecommendationResult
@@ -208,6 +215,11 @@ fun AddWorkoutTabScreen(
     var createRoutineEnabled by rememberSaveable { mutableStateOf(false) }
     var newStrengthRoutineName by rememberSaveable { mutableStateOf("") }
     var newStrengthTemplateFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var createHyroxRoutineEnabled by rememberSaveable { mutableStateOf(false) }
+    var newHyroxRoutineName by rememberSaveable { mutableStateOf("") }
+    var newHyroxRoutineFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
+    var showHyroxRoutinesSheet by remember { mutableStateOf(false) }
+    var hyroxFolderMenuExpanded by remember { mutableStateOf(false) }
     val cardioStats = remember { mutableStateMapOf<String, String>() }
     val sportStats = remember { mutableStateMapOf<String, String>() }
     val strengthExercises = if (ui.perPersonStrength) {
@@ -235,12 +247,22 @@ fun AddWorkoutTabScreen(
     var participantsSearchQuery by remember { mutableStateOf("") }
     var showWorkoutHelp by rememberSaveable { mutableStateOf(false) }
     var showClearStrengthDialog by remember { mutableStateOf(false) }
+    var showClearHyroxDialog by remember { mutableStateOf(false) }
     var exerciseSearch by remember { mutableStateOf("") }
-    var exercisePickerForDraftId by remember { mutableStateOf<String?>(null) }
+    var strengthExercisePickTarget by remember { mutableStateOf<StrengthExercisePickTarget?>(null) }
     val routinesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val hyroxRoutinesSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val participantsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val exerciseSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val templateEditSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val workoutHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showShareRoutineSheet by remember { mutableStateOf(false) }
+    var routineShareSnapshot by remember { mutableStateOf<RoutineShareSnapshot?>(null) }
+    var routineShareError by remember { mutableStateOf<String?>(null) }
+
+    var showRoutinePreviewSheet by remember { mutableStateOf(false) }
+    var routinePreviewSnapshot by remember { mutableStateOf<RoutineShareSnapshot?>(null) }
+    val shareRoutineSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(showParticipantsSheet) {
         if (showParticipantsSheet) {
             participantsSearchQuery = ""
@@ -264,7 +286,9 @@ fun AddWorkoutTabScreen(
         createRoutineEnabled,
         newStrengthRoutineName,
         sportType,
-        hyroxExercisesJson
+        hyroxExercisesJson,
+        createHyroxRoutineEnabled,
+        newHyroxRoutineName
     ) {
         canSaveAddWorkout(
             kind = selectedKind,
@@ -272,7 +296,9 @@ fun AddWorkoutTabScreen(
             createRoutineEnabled = createRoutineEnabled,
             newStrengthRoutineName = newStrengthRoutineName,
             sportType = sportType,
-            hyroxExercisesJson = hyroxExercisesJson
+            hyroxExercisesJson = hyroxExercisesJson,
+            createHyroxRoutineEnabled = createHyroxRoutineEnabled,
+            newHyroxRoutineName = newHyroxRoutineName
         )
     }
     val canSaveRoutineOnly = remember(
@@ -283,6 +309,15 @@ fun AddWorkoutTabScreen(
         createRoutineEnabled &&
             strengthExercisesFormValidForSave(strengthExercises) &&
             newStrengthRoutineName.trim().isNotEmpty()
+    }
+    val canSaveHyroxRoutineOnly = remember(
+        createHyroxRoutineEnabled,
+        hyroxExercisesJson,
+        newHyroxRoutineName
+    ) {
+        createHyroxRoutineEnabled &&
+            hyroxExercisesJsonValid(hyroxExercisesJson) &&
+            newHyroxRoutineName.trim().isNotEmpty()
     }
     LaunchedEffect(createRoutineEnabled) {
         if (!createRoutineEnabled) {
@@ -346,13 +381,37 @@ fun AddWorkoutTabScreen(
         f.sportStats.forEach { (k, v) -> sportStats[k] = v }
         vm.applyDuplicateFromDetail(payload)
     }
-    LaunchedEffect(exercisePickerForDraftId) {
-        if (exercisePickerForDraftId != null) {
+    LaunchedEffect(strengthExercisePickTarget) {
+        if (strengthExercisePickTarget != null) {
             vm.onExercisePickerOpened()
         }
     }
     LaunchedEffect(showRoutinesSheet) {
         if (showRoutinesSheet) vm.loadStrengthRoutines()
+    }
+    LaunchedEffect(showHyroxRoutinesSheet) {
+        if (showHyroxRoutinesSheet) vm.loadHyroxRoutines()
+    }
+    LaunchedEffect(ui.pendingHyroxApply) {
+        val draft = ui.pendingHyroxApply ?: return@LaunchedEffect
+        hyroxExercisesJson = draft.exercisesJson
+        draft.sportStatsOverlay.forEach { (k, v) -> sportStats[k] = v }
+        vm.consumePendingHyroxApply()
+    }
+    LaunchedEffect(sportType) {
+        if (sportType != AddSportType.HYROX) {
+            createHyroxRoutineEnabled = false
+            newHyroxRoutineName = ""
+            newHyroxRoutineFolderId = null
+        }
+    }
+    LaunchedEffect(createHyroxRoutineEnabled) {
+        if (!createHyroxRoutineEnabled) {
+            newHyroxRoutineName = ""
+            newHyroxRoutineFolderId = null
+        } else {
+            vm.loadHyroxRoutines()
+        }
     }
 
     val scheduleDurationMin: Int? = remember(startedAtIsoText, endedAtIsoText, scheduleEndedEnabled) {
@@ -400,10 +459,18 @@ fun AddWorkoutTabScreen(
         }
     }
 
+    val showRoutinesToolbarAction =
+        selectedKind == AddWorkoutKind.STRENGTH ||
+            (selectedKind == AddWorkoutKind.SPORT && sportType == AddSportType.HYROX)
     Box(modifier = modifier.fillMaxSize()) {
-    if (selectedKind == AddWorkoutKind.STRENGTH) {
+    if (showRoutinesToolbarAction) {
         IconButton(
-            onClick = { showRoutinesSheet = true },
+            onClick = {
+                when {
+                    selectedKind == AddWorkoutKind.STRENGTH -> showRoutinesSheet = true
+                    else -> showHyroxRoutinesSheet = true
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(4.dp)
@@ -419,7 +486,7 @@ fun AddWorkoutTabScreen(
             .fillMaxSize()
             .padding(horizontal = 12.dp)
             .padding(
-                top = if (selectedKind == AddWorkoutKind.STRENGTH) 44.dp else 8.dp
+                top = if (showRoutinesToolbarAction) 44.dp else 8.dp
             ),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -616,247 +683,39 @@ fun AddWorkoutTabScreen(
                 }
             }
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            stringResource(R.string.add_section_quick_actions),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        TextButton(
-                            onClick = { showRecommend = true },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("✦ ${stringResource(R.string.add_recommend_button)}")
-                        }
-                        HorizontalDivider()
-                        Text(
-                            stringResource(R.string.add_section_lifts),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            stringResource(R.string.add_lifts_reorder_hint),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val lifts = strengthExercises
-                        lifts.forEachIndexed { index, ex ->
-                            val canMoveUp = index > 0
-                            val canMoveDown = index < lifts.lastIndex
-                            val moreThanOne = lifts.size > 1
-                            Text(
-                                stringResource(R.string.add_exercise_pick),
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            OutlinedButton(
-                                onClick = {
-                                    exercisePickerForDraftId = ex.id
-                                    exerciseSearch = ""
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                enabled = !ui.loadingExercises
-                            ) {
-                                Text(
-                                    ex.exerciseId?.let { ex.exerciseName.trim() }
-                                        ?.takeIf { it.isNotEmpty() }
-                                        ?: stringResource(R.string.add_exercise_tap_to_pick)
-                                )
-                            }
-                            if (ui.loadingExercises) {
-                                Text(
-                                    stringResource(R.string.add_loading_exercises),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                            OutlinedTextField(
-                                value = ex.customName,
-                                onValueChange = { vm.updateExerciseCustomName(ex.id, it) },
-                                label = { Text(stringResource(R.string.add_exercise_alias_label)) },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            OutlinedTextField(
-                                value = ex.notes,
-                                onValueChange = { vm.updateExerciseNotes(ex.id, it) },
-                                label = { Text(stringResource(R.string.add_exercise_notes_label)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 2,
-                                maxLines = 4
-                            )
-                            ex.sets.forEachIndexed { setIndex, set ->
-                                val errColor = MaterialTheme.colorScheme.error
-                                val sn = set.setNumber.coerceIn(1, 99)
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(Modifier.weight(1f, fill = false)) {
-                                        Text(
-                                            stringResource(R.string.add_strength_set_slot_format, setIndex + 1),
-                                            style = MaterialTheme.typography.titleSmall,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            stringResource(R.string.add_strength_repeat_times_label),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            shape = RoundedCornerShape(20.dp),
-                                            color = MaterialTheme.colorScheme.surfaceVariant
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                IconButton(
-                                                    onClick = { vm.bumpSetNumber(ex.id, set.id, -1) },
-                                                    enabled = sn > 1,
-                                                    modifier = Modifier.heightIn(max = 40.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Remove,
-                                                        contentDescription = stringResource(R.string.add_set_stepper_minus)
-                                                    )
-                                                }
-                                                VerticalDivider(Modifier.height(24.dp))
-                                                Text(
-                                                    stringResource(R.string.add_strength_repeat_times_format, sn),
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.padding(horizontal = 6.dp)
-                                                )
-                                                VerticalDivider(Modifier.height(24.dp))
-                                                IconButton(
-                                                    onClick = { vm.bumpSetNumber(ex.id, set.id, 1) },
-                                                    enabled = sn < 99,
-                                                    modifier = Modifier.heightIn(max = 40.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Filled.Add,
-                                                        contentDescription = stringResource(R.string.add_set_stepper_plus)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                        if (ex.sets.size > 1) {
-                                            IconButton(
-                                                onClick = { vm.removeSet(ex.id, set.id) }
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Filled.Delete,
-                                                    contentDescription = stringResource(R.string.add_set_remove_content_description),
-                                                    tint = errColor
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    OutlinedTextField(
-                                        value = set.repsText,
-                                        onValueChange = { vm.updateSetReps(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_reps_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = set.weightText,
-                                        onValueChange = { vm.updateSetWeight(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_kg_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = set.rpeText,
-                                        onValueChange = { vm.updateSetRpe(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_rpe_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    OutlinedTextField(
-                                        value = set.restSecText,
-                                        onValueChange = { vm.updateSetRestSec(ex.id, set.id, it) },
-                                        label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
-                                        singleLine = true,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                            Column(Modifier.fillMaxWidth()) {
-                                TextButton(
-                                    onClick = { vm.addSet(ex.id) },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(stringResource(R.string.add_set_add))
-                                }
-                                Text(
-                                    stringResource(R.string.add_strength_next_row_hint, ex.sets.size + 1),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
-                                )
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (canMoveUp) {
-                                    TextButton(onClick = { vm.moveExerciseUp(ex.id) }) {
-                                        Text(stringResource(R.string.add_move_exercise_up))
-                                    }
-                                }
-                                if (canMoveDown) {
-                                    TextButton(onClick = { vm.moveExerciseDown(ex.id) }) {
-                                        Text(stringResource(R.string.add_move_exercise_down))
-                                    }
-                                }
-                                if (moreThanOne) {
-                                    TextButton(
-                                        onClick = { vm.removeExercise(ex.id) }
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Filled.Delete,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.error
-                                            )
-                                            Text(stringResource(R.string.add_remove_exercise))
-                                        }
-                                    }
-                                }
-                            }
-                            if (index < lifts.lastIndex) {
-                                HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                            }
-                        }
-                        TextButton(
-                            onClick = { vm.addBlankStrengthExercise() },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(stringResource(R.string.add_add_exercise))
-                        }
-                        val canClearAllStrength = strengthExercises.size > 1 ||
-                            strengthExercises.any { it.exerciseId != null || it.exerciseName.isNotBlank() }
-                        if (canClearAllStrength) {
-                            OutlinedButton(
-                                onClick = { showClearStrengthDialog = true },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(stringResource(R.string.add_clear_all_exercises))
-                            }
-                        }
-                    }
-                }
+                val canClearAllStrength = strengthExercises.size > 1 ||
+                    strengthExercises.any { it.exerciseId != null || it.exerciseName.isNotBlank() }
+                StrengthExerciseDraftsEditorBlock(
+                    exercises = strengthExercises,
+                    loadingExercises = ui.loadingExercises,
+                    showQuickActions = true,
+                    onRecommendClick = { showRecommend = true },
+                    onPickExerciseClick = { draftId ->
+                        strengthExercisePickTarget = StrengthExercisePickTarget.WorkoutForm(draftId)
+                        exerciseSearch = ""
+                    },
+                    onUpdateCustomName = { id, v -> vm.updateExerciseCustomName(id, v) },
+                    onUpdateNotes = { id, v -> vm.updateExerciseNotes(id, v) },
+                    onBumpSetNumber = { e, s, d -> vm.bumpSetNumber(e, s, d) },
+                    onRemoveSet = { e, s -> vm.removeSet(e, s) },
+                    onUpdateSetReps = { e, s, v -> vm.updateSetReps(e, s, v) },
+                    onUpdateSetWeight = { e, s, v -> vm.updateSetWeight(e, s, v) },
+                    onUpdateSetRpe = { e, s, v -> vm.updateSetRpe(e, s, v) },
+                    onUpdateSetRestSec = { e, s, v -> vm.updateSetRestSec(e, s, v) },
+                    onEnableDropSet = { e, s -> vm.enableDropSetForSet(e, s) },
+                    onClearDropSet = { e, s -> vm.clearDropSetForSet(e, s) },
+                    onAddDropSegment = { e, s -> vm.addDropSegmentStep(e, s) },
+                    onRemoveLastDropSegment = { e, s -> vm.removeLastDropSegment(e, s) },
+                    onUpdateDropSegmentReps = { e, s, seg, v -> vm.updateDropSegmentReps(e, s, seg, v) },
+                    onUpdateDropSegmentWeight = { e, s, seg, v -> vm.updateDropSegmentWeight(e, s, seg, v) },
+                    onAddSet = { vm.addSet(it) },
+                    onMoveExerciseUp = { vm.moveExerciseUp(it) },
+                    onMoveExerciseDown = { vm.moveExerciseDown(it) },
+                    onRemoveExercise = { vm.removeExercise(it) },
+                    onAddBlankExercise = { vm.addBlankStrengthExercise() },
+                    onClearAllExercises = { showClearStrengthDialog = true },
+                    showClearAllButton = canClearAllStrength
+                )
             }
             item {
                 Card(
@@ -1377,7 +1236,101 @@ fun AddWorkoutTabScreen(
                         }
                     }
                 }
-                AddSportType.HANDBALL, AddSportType.HOCKEY, AddSportType.RUGBY, AddSportType.HYROX, AddSportType.SKI -> {
+                AddSportType.HYROX -> {
+                    item {
+                        Text(
+                            stringResource(R.string.workout_detail_hyrox_stats_title),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["division"] ?: "",
+                                onValueChange = { sportStats["division"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_division)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["category"] ?: "",
+                                onValueChange = { sportStats["category"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_category)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    item {
+                        OutlinedTextField(
+                            value = sportStats["age_group"] ?: "",
+                            onValueChange = { sportStats["age_group"] = it; vm.clearStatus() },
+                            label = { Text(stringResource(R.string.workout_detail_hyrox_age_group)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["official_time_sec"] ?: "",
+                                onValueChange = { sportStats["official_time_sec"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_official_time)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["penalty_time_sec"] ?: "",
+                                onValueChange = { sportStats["penalty_time_sec"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_penalty_time)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["no_reps"] ?: "",
+                                onValueChange = { sportStats["no_reps"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_no_reps)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["rank_overall"] ?: "",
+                                onValueChange = { sportStats["rank_overall"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_rank_overall)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["rank_category"] ?: "",
+                                onValueChange = { sportStats["rank_category"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_rank_category)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = sportStats["avg_hr"] ?: "",
+                                onValueChange = { sportStats["avg_hr"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_avg_hr)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = sportStats["max_hr"] ?: "",
+                                onValueChange = { sportStats["max_hr"] = it; vm.clearStatus() },
+                                label = { Text(stringResource(R.string.workout_detail_hyrox_max_hr)) },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
                     item {
                         OutlinedTextField(
                             value = sportStats["raw_stats_json"] ?: "",
@@ -1388,17 +1341,142 @@ fun AddWorkoutTabScreen(
                             maxLines = 8
                         )
                     }
-                    if (sportType == AddSportType.HYROX) {
-                        item {
-                            OutlinedTextField(
-                                value = hyroxExercisesJson,
-                                onValueChange = { hyroxExercisesJson = it },
-                                label = { Text(stringResource(R.string.add_sport_hyrox_exercises_json_label)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                minLines = 4,
-                                maxLines = 8
-                            )
+                    item {
+                        OutlinedTextField(
+                            value = hyroxExercisesJson,
+                            onValueChange = { hyroxExercisesJson = it; vm.clearStatus() },
+                            label = { Text(stringResource(R.string.add_sport_hyrox_exercises_json_label)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 4,
+                            maxLines = 8
+                        )
+                    }
+                    item {
+                        val canClearAllHyrox =
+                            hyroxExercisesJsonValid(hyroxExercisesJson) ||
+                                hyroxExercisesJson.trim().isNotEmpty()
+                        if (canClearAllHyrox) {
+                            OutlinedButton(
+                                onClick = { showClearHyroxDialog = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.add_clear_all_exercises))
+                            }
                         }
+                    }
+                    item {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.padding(12.dp)
+                            ) {
+                                Text(
+                                    stringResource(R.string.add_section_routine_template),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        stringResource(R.string.add_create_routine_toggle),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                    Switch(
+                                        checked = createHyroxRoutineEnabled,
+                                        onCheckedChange = { createHyroxRoutineEnabled = it; vm.clearStatus() }
+                                    )
+                                }
+                                if (createHyroxRoutineEnabled) {
+                                    OutlinedTextField(
+                                        value = newHyroxRoutineName,
+                                        onValueChange = { newHyroxRoutineName = it; vm.clearStatus() },
+                                        label = { Text(stringResource(R.string.add_routine_name_create_label)) },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    ExposedDropdownMenuBox(
+                                        expanded = hyroxFolderMenuExpanded,
+                                        onExpandedChange = { hyroxFolderMenuExpanded = it }
+                                    ) {
+                                        val hyroxFolderLabel = newHyroxRoutineFolderId?.let { id ->
+                                            ui.hyroxRoutineFolders.firstOrNull { it.id == id }?.name
+                                        } ?: stringResource(R.string.add_routine_folder_none)
+                                        OutlinedTextField(
+                                            value = hyroxFolderLabel,
+                                            onValueChange = {},
+                                            readOnly = true,
+                                            label = { Text(stringResource(R.string.add_routine_folder_label)) },
+                                            trailingIcon = {
+                                                ExposedDropdownMenuDefaults.TrailingIcon(expanded = hyroxFolderMenuExpanded)
+                                            },
+                                            modifier = Modifier
+                                                .menuAnchor(
+                                                    type = MenuAnchorType.PrimaryNotEditable,
+                                                    enabled = true
+                                                )
+                                                .fillMaxWidth()
+                                        )
+                                        ExposedDropdownMenu(
+                                            expanded = hyroxFolderMenuExpanded,
+                                            onDismissRequest = { hyroxFolderMenuExpanded = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.add_routine_folder_none)) },
+                                                onClick = {
+                                                    newHyroxRoutineFolderId = null
+                                                    hyroxFolderMenuExpanded = false
+                                                }
+                                            )
+                                            ui.hyroxRoutineFolders.forEach { folder ->
+                                                DropdownMenuItem(
+                                                    text = { Text(folder.name) },
+                                                    onClick = {
+                                                        newHyroxRoutineFolderId = folder.id
+                                                        hyroxFolderMenuExpanded = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Button(
+                                        onClick = {
+                                            vm.saveCurrentAsHyroxRoutine(
+                                                routineName = newHyroxRoutineName,
+                                                folderId = newHyroxRoutineFolderId,
+                                                durationMinText = sportDurationMin,
+                                                sportStats = sportStats.toMap(),
+                                                hyroxExercisesText = hyroxExercisesJson
+                                            )
+                                        },
+                                        enabled = canSaveHyroxRoutineOnly && !ui.savingRoutine,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            if (ui.savingRoutine) {
+                                                stringResource(R.string.add_routine_saving)
+                                            } else {
+                                                stringResource(R.string.add_routine_save_without_workout)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                AddSportType.HANDBALL, AddSportType.HOCKEY, AddSportType.RUGBY, AddSportType.SKI -> {
+                    item {
+                        OutlinedTextField(
+                            value = sportStats["raw_stats_json"] ?: "",
+                            onValueChange = { sportStats["raw_stats_json"] = it },
+                            label = { Text(stringResource(R.string.add_sport_raw_stats_json_label)) },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 4,
+                            maxLines = 8
+                        )
                     }
                 }
             }
@@ -1479,7 +1557,10 @@ fun AddWorkoutTabScreen(
                                 startedAtIso = scheduleStartIso,
                                 endedAtIso = scheduleEndIso,
                                 useCustomSchedule = true,
-                                scheduleEndedEnabled = scheduleEndedEnabled
+                                scheduleEndedEnabled = scheduleEndedEnabled,
+                                saveHyroxRoutineTemplate = sportType == AddSportType.HYROX && createHyroxRoutineEnabled,
+                                hyroxRoutineName = newHyroxRoutineName,
+                                hyroxRoutineFolderId = newHyroxRoutineFolderId
                             )
                         }
                     }
@@ -1500,6 +1581,14 @@ fun AddWorkoutTabScreen(
         }
     }
     }
+    ui.strengthRoutineOverwritePending?.let { pend ->
+        StrengthRoutineOverwriteBottomSheet(
+            prompt = pend.prompt,
+            onDismissRequest = { vm.dismissStrengthRoutineOverwrite() },
+            onOverwriteTemplate = { vm.confirmStrengthRoutineOverwrite(true) },
+            onNotNow = { vm.confirmStrengthRoutineOverwrite(false) }
+        )
+    }
     if (showClearStrengthDialog) {
         AlertDialog(
             onDismissRequest = { showClearStrengthDialog = false },
@@ -1517,6 +1606,29 @@ fun AddWorkoutTabScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showClearStrengthDialog = false }) {
+                    Text(stringResource(R.string.add_routine_dialog_cancel))
+                }
+            }
+        )
+    }
+    if (showClearHyroxDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHyroxDialog = false },
+            title = { Text(stringResource(R.string.add_clear_all_hyrox_stations_title)) },
+            text = { Text(stringResource(R.string.add_clear_all_hyrox_stations_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearHyroxDialog = false
+                        hyroxExercisesJson = "[]"
+                        vm.clearStatus()
+                    }
+                ) {
+                    Text(stringResource(R.string.add_clear_all_exercises_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHyroxDialog = false }) {
                     Text(stringResource(R.string.add_routine_dialog_cancel))
                 }
             }
@@ -1542,12 +1654,170 @@ fun AddWorkoutTabScreen(
                 onMoveRoutine = { id, d -> vm.moveRoutine(id, d) },
                 onMoveRoutineToFolder = { id, folderId -> vm.moveRoutineToFolder(id, folderId) },
                 onDeleteRoutine = { id -> vm.deleteRoutine(id) },
+                onPreviewRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildStrengthRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routinePreviewSnapshot = snap
+                                showRoutinePreviewSheet = true
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
+                },
                 onApplyRoutine = { id ->
                     vm.applyRoutine(id)
                     showRoutinesSheet = false
+                },
+                onShareRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildStrengthRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routineShareSnapshot = snap
+                                showShareRoutineSheet = true
+                                showRoutinesSheet = false
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
+                },
+                onEditRoutine = { id, name -> vm.loadRoutineForEdit(id, name) }
+            )
+        }
+    }
+    ui.strengthRoutineTemplateEdit?.let { edit ->
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (!edit.saving) vm.dismissRoutineTemplateEdit()
+            },
+            sheetState = templateEditSheetState
+        ) {
+            EditStrengthRoutineTemplateSheetContent(
+                edit = edit,
+                loadingExercises = ui.loadingExercises,
+                vm = vm,
+                onRequestExercisePick = { draftId ->
+                    strengthExercisePickTarget = StrengthExercisePickTarget.RoutineTemplate(draftId)
+                    exerciseSearch = ""
+                },
+                onDismiss = { vm.dismissRoutineTemplateEdit() }
+            )
+        }
+    }
+    if (showHyroxRoutinesSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showHyroxRoutinesSheet = false },
+            sheetState = hyroxRoutinesSheetState
+        ) {
+            AddHyroxRoutinesSheetContent(
+                ui = ui,
+                onClose = { showHyroxRoutinesSheet = false },
+                onReload = vm::loadHyroxRoutines,
+                onCreateFolder = { name -> vm.createHyroxRoutineFolder(name) },
+                onRenameFolder = { id, name -> vm.renameHyroxRoutineFolder(id, name) },
+                onMoveFolder = { id, d -> vm.moveHyroxRoutineFolder(id, d) },
+                onDeleteFolder = { id -> vm.deleteHyroxRoutineFolder(id) },
+                onRenameRoutine = { id, name -> vm.renameHyroxRoutine(id, name) },
+                onDuplicateRoutine = { sourceId, name, folderId ->
+                    vm.duplicateHyroxRoutine(sourceId, name, folderId)
+                },
+                onMoveRoutine = { id, d -> vm.moveHyroxRoutine(id, d) },
+                onMoveRoutineToFolder = { id, folderId -> vm.moveHyroxRoutineToFolder(id, folderId) },
+                onDeleteRoutine = { id -> vm.deleteHyroxRoutine(id) },
+                onPreviewRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildHyroxRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routinePreviewSnapshot = snap
+                                showRoutinePreviewSheet = true
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
+                },
+                onApplyRoutine = { id ->
+                    vm.applyHyroxRoutine(id)
+                    showHyroxRoutinesSheet = false
+                },
+                onShareRoutine = { id ->
+                    exerciseLangScope.launch {
+                        runCatching { vm.buildHyroxRoutineShareSnapshotForChat(id) }
+                            .onSuccess { snap ->
+                                routineShareSnapshot = snap
+                                showShareRoutineSheet = true
+                                showHyroxRoutinesSheet = false
+                            }
+                            .onFailure { e ->
+                                routineShareError = e.message
+                            }
+                    }
                 }
             )
         }
+    }
+
+    if (showRoutinePreviewSheet && routinePreviewSnapshot != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showRoutinePreviewSheet = false
+                routinePreviewSnapshot = null
+            },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                SharedRoutineFromChatScreen(
+                    supabase = supabase,
+                    snapshot = routinePreviewSnapshot!!,
+                    onBack = {
+                        showRoutinePreviewSheet = false
+                        routinePreviewSnapshot = null
+                    },
+                    topBarActions = {
+                        IconButton(onClick = {
+                            showRoutinePreviewSheet = false
+                            routinePreviewSnapshot = null
+                        }) {
+                            Icon(Icons.Filled.Close, contentDescription = null)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+    if (showShareRoutineSheet && routineShareSnapshot != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showShareRoutineSheet = false
+                routineShareSnapshot = null
+            },
+            sheetState = shareRoutineSheetState
+        ) {
+            ShareRoutineToChatSheetContent(
+                supabase = supabase,
+                snapshot = routineShareSnapshot!!,
+                onDone = {
+                    showShareRoutineSheet = false
+                    routineShareSnapshot = null
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+    }
+    routineShareError?.let { err ->
+        AlertDialog(
+            onDismissRequest = { routineShareError = null },
+            title = { Text(stringResource(R.string.share_routine_error_title)) },
+            text = { Text(err) },
+            confirmButton = {
+                TextButton(onClick = { routineShareError = null }) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            }
+        )
     }
     if (showParticipantsSheet) {
         ModalBottomSheet(
@@ -1575,10 +1845,10 @@ fun AddWorkoutTabScreen(
             )
         }
     }
-    val targetDraft = exercisePickerForDraftId
-    if (targetDraft != null) {
+    val strengthPick = strengthExercisePickTarget
+    if (strengthPick != null) {
         ModalBottomSheet(
-            onDismissRequest = { exercisePickerForDraftId = null; exerciseSearch = "" },
+            onDismissRequest = { strengthExercisePickTarget = null; exerciseSearch = "" },
             sheetState = exerciseSheetState
         ) {
             Column(Modifier.padding(16.dp)) {
@@ -1700,8 +1970,17 @@ fun AddWorkoutTabScreen(
                                         Modifier
                                             .weight(1f)
                                             .clickable {
-                                                vm.setExerciseOnDraft(targetDraft, exRow, exerciseLang)
-                                                exercisePickerForDraftId = null
+                                                when (strengthPick) {
+                                                    is StrengthExercisePickTarget.WorkoutForm ->
+                                                        vm.setExerciseOnDraft(strengthPick.draftId, exRow, exerciseLang)
+                                                    is StrengthExercisePickTarget.RoutineTemplate ->
+                                                        vm.templateEditSetExerciseOnDraft(
+                                                            strengthPick.draftId,
+                                                            exRow,
+                                                            exerciseLang
+                                                        )
+                                                }
+                                                strengthExercisePickTarget = null
                                                 exerciseSearch = ""
                                             }
                                     ) {
@@ -1798,14 +2077,30 @@ private fun ExerciseLite.pickerSubtitle(): String =
         .filter { it.isNotEmpty() && !it.equals("strength", ignoreCase = true) }
         .joinToString(" · ")
 
+private fun draftSetHasRequiredRepsForSave(set: StrengthSetDraft): Boolean {
+    return if (set.segments.size >= 2) {
+        set.segments.all { seg ->
+            seg.repsText.trim().toIntOrNull()?.let { it > 0 } == true
+        }
+    } else {
+        set.repsText.trim().toIntOrNull()?.let { it > 0 } == true
+    }
+}
+
 private fun strengthExercisesFormValidForSave(exercises: List<StrengthExerciseDraft>): Boolean {
     if (exercises.isEmpty()) return false
     for (e in exercises) {
         if (e.exerciseId == null) return false
-        val hasReps = e.sets.any { it.repsText.trim().toIntOrNull() != null }
-        if (!hasReps) return false
+        val hasSavableSet = e.sets.any { draftSetHasRequiredRepsForSave(it) && draftSetToStrengthPayload(it) != null }
+        if (!hasSavableSet) return false
     }
     return true
+}
+
+private fun hyroxExercisesJsonValid(hyroxExercisesJson: String): Boolean {
+    val arr = runCatching { Json.parseToJsonElement(hyroxExercisesJson.trim()).jsonArray }
+        .getOrNull()
+    return arr != null && !arr.isEmpty()
 }
 
 private fun canSaveAddWorkout(
@@ -1814,19 +2109,18 @@ private fun canSaveAddWorkout(
     createRoutineEnabled: Boolean,
     newStrengthRoutineName: String,
     sportType: AddSportType,
-    hyroxExercisesJson: String
+    hyroxExercisesJson: String,
+    createHyroxRoutineEnabled: Boolean = false,
+    newHyroxRoutineName: String = ""
 ): Boolean = when (kind) {
     AddWorkoutKind.STRENGTH -> strengthExercisesFormValidForSave(strengthExercises) &&
         (!createRoutineEnabled || newStrengthRoutineName.trim().isNotEmpty())
     AddWorkoutKind.CARDIO -> true
-    AddWorkoutKind.SPORT -> {
-        if (sportType == AddSportType.HYROX) {
-            val arr = runCatching { Json.parseToJsonElement(hyroxExercisesJson.trim()).jsonArray }
-                .getOrNull()
-            arr != null && !arr.isEmpty()
-        } else {
-            true
-        }
+    AddWorkoutKind.SPORT -> when (sportType) {
+        AddSportType.HYROX ->
+            hyroxExercisesJsonValid(hyroxExercisesJson) &&
+                (!createHyroxRoutineEnabled || newHyroxRoutineName.trim().isNotEmpty())
+        else -> true
     }
 }
 

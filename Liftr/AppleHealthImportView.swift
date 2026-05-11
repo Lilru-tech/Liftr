@@ -3,8 +3,17 @@ import SwiftUI
 struct AppleHealthImportView: View {
     @EnvironmentObject var app: AppState
 
+    private enum QuickRangePreset: Hashable {
+        case today
+        case last7Days
+        case last14Days
+        case lastMonth
+    }
+
     @State private var fromDate = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date()
     @State private var toDate = Date()
+    @State private var selectedQuickRange: QuickRangePreset? = .last14Days
+    @State private var applyingQuickRange = false
     @State private var importing = false
     @State private var summary: HealthKitImportSummary?
     @State private var banner: String?
@@ -35,12 +44,16 @@ struct AppleHealthImportView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
-                                quickRangeButton("Today") { applyQuickRangeToday() }
-                                quickRangeButton("Last 7 days") { applyQuickRangeLastDays(7) }
-                                quickRangeButton("Last 14 days") { applyQuickRangeLastDays(14) }
+                                quickRangeButton("Today", preset: .today) { applyQuickRangeToday() }
+                                quickRangeButton("Last 7 days", preset: .last7Days) { applyQuickRangeLastDays(7) }
+                                quickRangeButton("Last 14 days", preset: .last14Days) { applyQuickRangeLastDays(14) }
+                                quickRangeButton("Last month", preset: .lastMonth) { applyQuickRangeLastMonth() }
                             }
                         }
                         .padding(.bottom, 4)
+                        Text("Selected range: \(displayRangeText)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
                         DatePicker("From", selection: $fromDate, displayedComponents: [.date])
                         Divider().opacity(0.15)
@@ -123,6 +136,12 @@ struct AppleHealthImportView: View {
                 .presentationDetents([.medium, .large])
                 .presentationBackground(.clear)
         }
+        .onChange(of: fromDate) { _, _ in
+            handleManualDateChangeIfNeeded()
+        }
+        .onChange(of: toDate) { _, _ in
+            handleManualDateChangeIfNeeded()
+        }
     }
 
     @ViewBuilder
@@ -142,8 +161,9 @@ struct AppleHealthImportView: View {
         .listRowBackground(Color.clear)
     }
 
-    private func quickRangeButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func quickRangeButton(_ title: String, preset: QuickRangePreset, action: @escaping () -> Void) -> some View {
+        let isSelected = selectedQuickRange == preset
+        return Button(action: action) {
             Text(title)
                 .font(.subheadline.weight(.semibold))
                 .lineLimit(1)
@@ -152,22 +172,85 @@ struct AppleHealthImportView: View {
                 .padding(.vertical, 8)
         }
         .buttonStyle(.bordered)
+        .tint(isSelected ? .accentColor : .secondary)
         .disabled(importing)
+        .accessibilityLabel(isSelected ? "\(title), selected" : title)
     }
 
     private func applyQuickRangeToday() {
         let cal = Calendar.current
         let t = cal.startOfDay(for: Date())
-        fromDate = t
-        toDate = t
+        setQuickRange(.today, from: t, to: t)
     }
 
     private func applyQuickRangeLastDays(_ days: Int) {
         let cal = Calendar.current
         let endDay = cal.startOfDay(for: Date())
         let startDay = cal.date(byAdding: .day, value: -(max(1, days) - 1), to: endDay) ?? endDay
-        fromDate = startDay
-        toDate = endDay
+        let preset: QuickRangePreset = (days == 7) ? .last7Days : .last14Days
+        setQuickRange(preset, from: startDay, to: endDay)
+    }
+
+    private func applyQuickRangeLastMonth() {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        guard let startOfCurrentMonth = cal.date(from: cal.dateComponents([.year, .month], from: today)),
+              let startOfLastMonth = cal.date(byAdding: .month, value: -1, to: startOfCurrentMonth),
+              let endOfLastMonth = cal.date(byAdding: .day, value: -1, to: startOfCurrentMonth)
+        else { return }
+        setQuickRange(.lastMonth, from: startOfLastMonth, to: cal.startOfDay(for: endOfLastMonth))
+    }
+
+    private func setQuickRange(_ preset: QuickRangePreset, from: Date, to: Date) {
+        applyingQuickRange = true
+        fromDate = from
+        toDate = to
+        selectedQuickRange = preset
+        applyingQuickRange = false
+    }
+
+    private func handleManualDateChangeIfNeeded() {
+        guard !applyingQuickRange else { return }
+        guard let preset = selectedQuickRange else { return }
+        guard !matchesSelectedPresetDates(preset) else { return }
+        selectedQuickRange = nil
+    }
+
+    private func matchesSelectedPresetDates(_ preset: QuickRangePreset) -> Bool {
+        let cal = Calendar.current
+        let f = cal.startOfDay(for: fromDate)
+        let t = cal.startOfDay(for: toDate)
+        switch preset {
+        case .today:
+            let day = cal.startOfDay(for: Date())
+            return f == day && t == day
+        case .last7Days:
+            let endDay = cal.startOfDay(for: Date())
+            let startDay = cal.date(byAdding: .day, value: -6, to: endDay) ?? endDay
+            return f == startDay && t == endDay
+        case .last14Days:
+            let endDay = cal.startOfDay(for: Date())
+            let startDay = cal.date(byAdding: .day, value: -13, to: endDay) ?? endDay
+            return f == startDay && t == endDay
+        case .lastMonth:
+            let today = cal.startOfDay(for: Date())
+            guard let startOfCurrentMonth = cal.date(from: cal.dateComponents([.year, .month], from: today)),
+                  let startOfLastMonth = cal.date(byAdding: .month, value: -1, to: startOfCurrentMonth),
+                  let endOfLastMonth = cal.date(byAdding: .day, value: -1, to: startOfCurrentMonth)
+            else { return false }
+            return f == startOfLastMonth && t == cal.startOfDay(for: endOfLastMonth)
+        }
+    }
+
+    private static let quickRangeDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .none
+        return f
+    }()
+
+    private var displayRangeText: String {
+        "\(Self.quickRangeDateFormatter.string(from: fromDate)) – \(Self.quickRangeDateFormatter.string(from: toDate))"
     }
 
     private func runImport() async {

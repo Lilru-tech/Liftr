@@ -1,4 +1,52 @@
+import Foundation
+import Supabase
 import SwiftUI
+
+struct StrengthWeightSegWire: Codable, Hashable {
+    let reps: Int
+    let weight_kg: Double
+}
+
+extension Array where Element == StrengthWeightSegWire {
+    func asEditorSegmentsIfDropSet() -> [StrengthEditorSegment] {
+        guard count >= 2 else { return [] }
+        return map { w in
+            let str = w.weight_kg == floor(w.weight_kg) ? String(Int(w.weight_kg)) : String(format: "%.1f", w.weight_kg)
+            return StrengthEditorSegment(reps: w.reps, weightKg: str)
+        }
+    }
+}
+
+struct StrengthEditorSegment: Identifiable, Hashable {
+    let id: UUID
+    var reps: Int?
+    var weightKg: String
+
+    init(id: UUID = UUID(), reps: Int?, weightKg: String) {
+        self.id = id
+        self.reps = reps
+        self.weightKg = weightKg
+    }
+}
+
+extension Array where Element == StrengthEditorSegment {
+    func encodedWeightSegmentsOrNil() throws -> AnyJSON? {
+        guard count >= 2 else { return nil }
+        var elems: [AnyJSON] = []
+        for seg in self {
+            guard let r = seg.reps, r > 0 else { return nil }
+            let t = seg.weightKg.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let w = Double(t) else { return nil }
+            let obj: [String: AnyJSON] = [
+                "reps": try AnyJSON(r),
+                "weight_kg": try AnyJSON(w)
+            ]
+            elems.append(try AnyJSON(obj))
+        }
+        guard elems.count == count else { return nil }
+        return try AnyJSON(elems)
+    }
+}
 
 struct StrengthStyleMetricField<Content: View>: View {
     let title: String
@@ -28,15 +76,17 @@ struct StrengthStyleMetricField<Content: View>: View {
 }
 
 struct StrengthSetRowEditor: View {
-    /// Row index in the exercise (1-based), shown as #1, #2 — not the same as `setNumber` (repeat count).
     let lineOrdinal: Int
     @Binding var setNumber: Int
     @Binding var reps: Int?
     @Binding var weightKg: String
     @Binding var rpe: String
     @Binding var restSec: Int?
+    @Binding var segments: [StrengthEditorSegment]
     var showDelete: Bool
     var onDelete: () -> Void
+
+    private var isDrop: Bool { segments.count >= 2 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -81,23 +131,93 @@ struct StrengthSetRowEditor: View {
                 }
             }
 
-            HStack(alignment: .top, spacing: 6) {
-                StrengthStyleMetricField(title: "Reps") {
-                    TextField("—", value: $reps, format: .number)
-                        .keyboardType(.numberPad)
+            if isDrop {
+                ForEach(Array(segments.enumerated()), id: \.1.id) { pair in
+                    let idx = pair.0
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("\(idx + 1)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, alignment: .leading)
+                            .accessibilityLabel("Drop step \(idx + 1)")
+                        StrengthStyleMetricField(title: "Reps") {
+                            TextField(
+                                "—",
+                                value: Binding(
+                                    get: { segments[idx].reps },
+                                    set: { segments[idx].reps = $0 }
+                                ),
+                                format: .number
+                            )
+                            .keyboardType(.numberPad)
+                        }
+                        StrengthStyleMetricField(title: "kg") {
+                            TextField(
+                                "—",
+                                text: Binding(
+                                    get: { segments[idx].weightKg },
+                                    set: { segments[idx].weightKg = $0 }
+                                )
+                            )
+                            .keyboardType(.decimalPad)
+                        }
+                    }
                 }
-                StrengthStyleMetricField(title: "kg") {
-                    TextField("—", text: $weightKg)
-                        .keyboardType(.decimalPad)
+                HStack(spacing: 8) {
+                    Button("Add step") {
+                        segments.append(StrengthEditorSegment(reps: nil, weightKg: ""))
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(segments.count >= 12)
+                    Button("Remove step") {
+                        if segments.count > 2 { segments.removeLast() }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(segments.count <= 2)
+                    Button("Clear drop") {
+                        segments = []
+                    }
+                    .buttonStyle(.borderless)
                 }
-                StrengthStyleMetricField(title: "RPE") {
-                    TextField("—", text: $rpe)
-                        .keyboardType(.decimalPad)
+                .font(.caption.weight(.semibold))
+                HStack(alignment: .top, spacing: 6) {
+                    StrengthStyleMetricField(title: "RPE") {
+                        TextField("—", text: $rpe)
+                            .keyboardType(.decimalPad)
+                    }
+                    StrengthStyleMetricField(title: "Rest s") {
+                        TextField("—", value: $restSec, format: .number)
+                            .keyboardType(.numberPad)
+                    }
                 }
-                StrengthStyleMetricField(title: "Rest s") {
-                    TextField("—", value: $restSec, format: .number)
-                        .keyboardType(.numberPad)
+            } else {
+                HStack(alignment: .top, spacing: 6) {
+                    StrengthStyleMetricField(title: "Reps") {
+                        TextField("—", value: $reps, format: .number)
+                            .keyboardType(.numberPad)
+                    }
+                    StrengthStyleMetricField(title: "kg") {
+                        TextField("—", text: $weightKg)
+                            .keyboardType(.decimalPad)
+                    }
+                    StrengthStyleMetricField(title: "RPE") {
+                        TextField("—", text: $rpe)
+                            .keyboardType(.decimalPad)
+                    }
+                    StrengthStyleMetricField(title: "Rest s") {
+                        TextField("—", value: $restSec, format: .number)
+                            .keyboardType(.numberPad)
+                    }
                 }
+                Button("Drop set") {
+                    let w = weightKg.trimmingCharacters(in: .whitespacesAndNewlines)
+                    segments = [
+                        StrengthEditorSegment(reps: reps, weightKg: w),
+                        StrengthEditorSegment(reps: nil, weightKg: "")
+                    ]
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
             }
         }
         .padding(.vertical, 10)

@@ -61,6 +61,13 @@ struct ActiveStrengthWorkoutView: View {
         case guest2
     }
 
+    private enum EditMetricFocusField: Hashable {
+        case reps
+        case weight
+        case rest
+        case rpe
+    }
+
     private struct ExerciseRow: Decodable, Identifiable {
         let id: Int
         let exercise_id: Int64
@@ -71,7 +78,7 @@ struct ActiveStrengthWorkoutView: View {
         let exercise_name: String?
     }
     
-    private struct SetRow: Decodable, Identifiable {
+    private struct SetRow: Identifiable, Decodable {
         let id: Int
         let workout_exercise_id: Int
         let set_number: Int
@@ -79,8 +86,54 @@ struct ActiveStrengthWorkoutView: View {
         let weight_kg: Decimal?
         let rpe: Decimal?
         let rest_sec: Int?
+        let weight_segments: [StrengthWeightSegWire]?
+        let configId: Int
+        let segmentsInRow: Int
+
+        enum CodingKeys: String, CodingKey {
+            case id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(Int.self, forKey: .id)
+            workout_exercise_id = try c.decode(Int.self, forKey: .workout_exercise_id)
+            set_number = try c.decode(Int.self, forKey: .set_number)
+            reps = try c.decodeIfPresent(Int.self, forKey: .reps)
+            weight_kg = try c.decodeIfPresent(Decimal.self, forKey: .weight_kg)
+            rpe = try c.decodeIfPresent(Decimal.self, forKey: .rpe)
+            rest_sec = try c.decodeIfPresent(Int.self, forKey: .rest_sec)
+            weight_segments = try c.decodeIfPresent([StrengthWeightSegWire].self, forKey: .weight_segments)
+            let k = (weight_segments?.count ?? 0) >= 2 ? weight_segments!.count : 1
+            segmentsInRow = k
+            configId = id
+        }
+
+        init(
+            id: Int,
+            workout_exercise_id: Int,
+            set_number: Int,
+            reps: Int?,
+            weight_kg: Decimal?,
+            rpe: Decimal?,
+            rest_sec: Int?,
+            weight_segments: [StrengthWeightSegWire]?,
+            configId: Int,
+            segmentsInRow: Int
+        ) {
+            self.id = id
+            self.workout_exercise_id = workout_exercise_id
+            self.set_number = set_number
+            self.reps = reps
+            self.weight_kg = weight_kg
+            self.rpe = rpe
+            self.rest_sec = rest_sec
+            self.weight_segments = weight_segments
+            self.configId = configId
+            self.segmentsInRow = segmentsInRow
+        }
     }
-    
+
     private struct InsertSetPayload: Encodable {
         let workout_exercise_id: Int
         let set_number: Int
@@ -88,6 +141,7 @@ struct ActiveStrengthWorkoutView: View {
         let weight_kg: Decimal?
         let rpe: Decimal?
         let rest_sec: Int?
+        let weight_segments: [StrengthWeightSegWire]?
     }
     
     private struct PerformedSet {
@@ -95,11 +149,19 @@ struct ActiveStrengthWorkoutView: View {
         let weight_kg: Decimal?
         let rpe: Decimal?
         let rest_sec: Int?
+        let configId: Int
+        let segmentsInRow: Int
+        let weight_segments: [StrengthWeightSegWire]?
     }
     
-    /// Solo `ended_at`: `duration_min` en BD es columna generada (no se puede escribir desde el cliente).
+    private struct WorkoutStateRow: Decodable {
+        let state: String?
+    }
+
     private struct WorkoutEndPatch: Encodable {
         let ended_at: Date
+        let paused_sec: Int
+        let state: String?
     }
 
     
@@ -135,6 +197,9 @@ struct ActiveStrengthWorkoutView: View {
 
     @State private var restEndDate: Date? = nil
     @State private var restEndDateByExercise: [Int: Date] = [:]
+    @State private var restTotalPlannedByExercise: [Int: Int] = [:]
+    @State private var gRestTotalPlannedByExercise: [Int: Int] = [:]
+    @State private var g2RestTotalPlannedByExercise: [Int: Int] = [:]
     @State private var exercises: [ExerciseRow] = []
     @State private var setsByExercise: [Int: [SetRow]] = [:]
     @State private var loading = false
@@ -144,7 +209,16 @@ struct ActiveStrengthWorkoutView: View {
     @State private var showCountdown = true
     @State private var strengthWorkoutSessionStart: Date? = nil
     @State private var strengthWorkoutElapsedTick: UInt32 = 0
+    @State private var isSessionPaused = false
+    @State private var accumulatedPausedSeconds: Int = 0
+    @State private var sessionPauseBegan: Date? = nil
     @State private var currentExerciseIndex: Int = 0
+    @State private var pagerDisplayIndexHost: Int = 0
+    @State private var pagerDisplayIndexGuest: Int = 0
+    @State private var pagerDisplayIndexGuest2: Int = 0
+    @State private var navEmphasisLockExerciseIdHost: Int? = nil
+    @State private var navEmphasisLockExerciseIdGuest: Int? = nil
+    @State private var navEmphasisLockExerciseIdGuest2: Int? = nil
     @State private var guestCurrentExerciseIndex: Int = 0
     @State private var currentSetIndex: Int = 0
     @State private var isResting = false
@@ -156,6 +230,12 @@ struct ActiveStrengthWorkoutView: View {
     @State private var showDualIncompleteFinishConfirm = false
     @State private var editWeightText: String = ""
     @State private var editRestText: String = ""
+    @State private var editRpeText: String = ""
+    @State private var editDropSegments: [StrengthWeightSegWire] = []
+    @State private var showConvertToNormalSheet: Bool = false
+    @State private var convertToNormalRepsText: String = ""
+    @State private var convertToNormalWeightText: String = ""
+    @FocusState private var editMetricFocus: EditMetricFocusField?
     @State private var dragOffsetY: CGFloat = 0
     @State private var isTransitioningExercise: Bool = false
     @State private var currentSetIndexByExercise: [Int: Int] = [:]
@@ -199,7 +279,22 @@ struct ActiveStrengthWorkoutView: View {
     @State private var strengthNavStripWaveTask: Task<Void, Never>?
     @State private var navStripScrollEdgeFades = NavStripScrollEdgeFades(showLeading: false, showTrailing: false)
     @State private var showElborblaCelebration = false
+    @State private var strengthFinishDeferral: StrengthFinishDeferral?
     private let swipeThreshold: CGFloat = 110
+
+    private struct StrengthFinishDeferral: Identifiable {
+        let id = UUID()
+        let exList: [ExerciseRow]
+        let performedMap: [Int: [PerformedSet]]
+        let guestExList: [ExerciseRow]
+        let guestPerformedMap: [Int: [PerformedSet]]
+        let guestWorkoutId: Int?
+        let guest2ExList: [ExerciseRow]
+        let guest2PerformedMap: [Int: [PerformedSet]]
+        let guest2WorkoutId: Int?
+        let prompt: StrengthRoutineOverwritePrompt
+        let editableForRoutine: [EditableExercise]
+    }
     private let restTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     private var isDualMode: Bool { dualGuestWorkoutId != nil }
@@ -222,6 +317,28 @@ struct ActiveStrengthWorkoutView: View {
         case .host: return orderedExercises
         case .guest: return orderedGuestExercises
         case .guest2: return orderedGuest2Exercises
+        }
+    }
+
+    private func navEmphasisTargetExerciseId(lane: StrengthLaneKind) -> Int? {
+        let list = orderedExercises(lane: lane)
+        guard !list.isEmpty else { return nil }
+        switch lane {
+        case .host:
+            if let id = navEmphasisLockExerciseIdHost { return id }
+            let idx = pagerDisplayIndexHost
+            guard idx >= 0, idx < list.count else { return nil }
+            return list[idx].id
+        case .guest:
+            if let id = navEmphasisLockExerciseIdGuest { return id }
+            let idx = pagerDisplayIndexGuest
+            guard idx >= 0, idx < list.count else { return nil }
+            return list[idx].id
+        case .guest2:
+            if let id = navEmphasisLockExerciseIdGuest2 { return id }
+            let idx = pagerDisplayIndexGuest2
+            guard idx >= 0, idx < list.count else { return nil }
+            return list[idx].id
         }
     }
 
@@ -257,11 +374,11 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     private var pagerExerciseIndex: Int {
-        if !isDualMode { return currentExerciseIndex }
+        if !isDualMode { return pagerDisplayIndexHost }
         switch mainDisplayLane {
-        case .host: return currentExerciseIndex
-        case .guest: return guestCurrentExerciseIndex
-        case .guest2: return g2CurrentExerciseIndex
+        case .host: return pagerDisplayIndexHost
+        case .guest: return pagerDisplayIndexGuest
+        case .guest2: return pagerDisplayIndexGuest2
         }
     }
 
@@ -340,11 +457,15 @@ struct ActiveStrengthWorkoutView: View {
                 }
                 
                 if isSaving {
-                    Color.black.opacity(0.4)
-                        .ignoresSafeArea()
-                    ProgressView("Saving workout…")
-                        .padding(24)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    ZStack {
+                        Color.black.opacity(0.4)
+                            .ignoresSafeArea()
+                        ProgressView("Saving workout…")
+                            .padding(24)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .allowsHitTesting(true)
+                    .zIndex(4)
                 }
                 
                 if let msg = toastMessage {
@@ -405,10 +526,23 @@ struct ActiveStrengthWorkoutView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
+                        .disabled(isSaving)
                 }
                 if !showCountdown, strengthWorkoutSessionStart != nil {
                     ToolbarItem(placement: .topBarTrailing) {
-                        strengthWorkoutSessionElapsedChip()
+                        HStack(spacing: 8) {
+                            strengthWorkoutSessionElapsedChip()
+                            Button {
+                                toggleSessionPause()
+                            } label: {
+                                Image(systemName: isSessionPaused ? "play.fill" : "pause.fill")
+                                    .font(.body.weight(.semibold))
+                                    .frame(width: 36, height: 36)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(isSessionPaused ? String(localized: "Resume workout") : String(localized: "Pause workout"))
+                        }
                     }
                 }
             }
@@ -425,54 +559,224 @@ struct ActiveStrengthWorkoutView: View {
             WorkoutLiveActivityManager.endIfAvailable()
         }
         .sheet(isPresented: $showEditSheet) {
-            VStack(spacing: 20) {
-                Text("Edit reps, weight & rest")
-                    .font(.title3.weight(.semibold))
-                
-                TextField("Reps", text: $editRepsText)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                
-                TextField("Weight (kg)", text: $editWeightText)
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
-                
-                TextField("Rest (sec)", text: $editRestText)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
+            NavigationStack {
+                ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let ex = exerciseForEditSheet(),
+                       let drop = dropIndicatorLabel(for: ex, setIndex: currentSetIndexForEditLane(), lane: editTargetLane) {
+                        Text(drop)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
 
-                Text("Edits update this workout flow now and are written when you finish the workout.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
-                
-                HStack {
-                    Button("Cancel") {
-                        showEditSheet = false
+                    if editDropSegments.count >= 2 {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Drop set")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            ForEach(Array(editDropSegments.enumerated()), id: \.offset) { idx, _ in
+                                HStack(alignment: .top, spacing: 6) {
+                                    StrengthStyleMetricField(title: "Reps") {
+                                        TextField(
+                                            "—",
+                                            text: Binding(
+                                                get: { "\(editDropSegments[idx].reps)" },
+                                                set: { t in
+                                                    let v = Int(t.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                                                    editDropSegments[idx] = StrengthWeightSegWire(reps: v, weight_kg: editDropSegments[idx].weight_kg)
+                                                }
+                                            )
+                                        )
+                                        .font(.body)
+                                        .keyboardType(.numberPad)
+                                    }
+                                    StrengthStyleMetricField(title: "kg") {
+                                        TextField(
+                                            "—",
+                                            text: Binding(
+                                                get: { String(format: "%.1f", editDropSegments[idx].weight_kg) },
+                                                set: { t in
+                                                    let raw = t.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+                                                    let v = Double(raw) ?? 0
+                                                    editDropSegments[idx] = StrengthWeightSegWire(reps: editDropSegments[idx].reps, weight_kg: v)
+                                                }
+                                            )
+                                        )
+                                        .font(.body)
+                                        .keyboardType(.decimalPad)
+                                    }
+                                }
+                            }
+
+                            HStack(spacing: 10) {
+                                Button("Add step") {
+                                    let last = editDropSegments.last ?? StrengthWeightSegWire(reps: 10, weight_kg: 0)
+                                    editDropSegments.append(last)
+                                }
+                                .buttonStyle(.bordered)
+
+                                Button("Remove step") {
+                                    if editDropSegments.count > 2 {
+                                        editDropSegments.removeLast()
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(editDropSegments.count <= 2)
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    
-                    Button("Save") {
-                        applyEditsToCurrentExercise()
-                        showEditSheet = false
+
+                    VStack(spacing: 10) {
+                        if editDropSegments.count < 2 {
+                            HStack(alignment: .top, spacing: 6) {
+                                StrengthStyleMetricField(title: "Reps") {
+                                    TextField("—", text: $editRepsText)
+                                        .font(.body)
+                                        .keyboardType(.numberPad)
+                                        .focused($editMetricFocus, equals: .reps)
+                                }
+                                StrengthStyleMetricField(title: "kg") {
+                                    TextField("—", text: $editWeightText)
+                                        .font(.body)
+                                        .keyboardType(.decimalPad)
+                                        .focused($editMetricFocus, equals: .weight)
+                                }
+                            }
+                        }
+                        HStack(alignment: .top, spacing: 6) {
+                            StrengthStyleMetricField(title: "Rest s") {
+                                TextField("—", text: $editRestText)
+                                    .font(.body)
+                                    .keyboardType(.numberPad)
+                                    .focused($editMetricFocus, equals: .rest)
+                            }
+                            StrengthStyleMetricField(title: "RPE") {
+                                TextField("—", text: $editRpeText)
+                                    .font(.body)
+                                    .keyboardType(.decimalPad)
+                                    .focused($editMetricFocus, equals: .rpe)
+                            }
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .buttonStyle(.borderedProminent)
+
+                    if let ex = exerciseForEditSheet(), let set = currentSetFor(ex, setIndex: currentSetIndexForEditLane(), lane: editTargetLane) {
+                        if editDropSegments.count >= 2 {
+                            Button("Convert to normal set") {
+                                let first = editDropSegments.first ?? StrengthWeightSegWire(reps: 10, weight_kg: 0)
+                                convertToNormalRepsText = "\(first.reps)"
+                                convertToNormalWeightText = String(format: "%.1f", first.weight_kg)
+                                showConvertToNormalSheet = true
+                            }
+                            .buttonStyle(.bordered)
+                        } else if (set.weight_segments?.count ?? 0) < 2 {
+                            Button("Convert to drop set") {
+                                convertCurrentConfigToDropSet()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Quick rest")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach([30, 60, 90, 120, 180], id: \.self) { sec in
+                                    Button {
+                                        editRestText = "\(sec)"
+                                    } label: {
+                                        Text("\(sec)s")
+                                            .font(.subheadline.weight(.medium))
+                                            .monospacedDigit()
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+                        }
+                    }
+
+                    Text("Edits update this workout flow now and are written when you finish the workout.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+                .frame(maxWidth: .infinity, alignment: .top)
+                }
+                .navigationTitle("Edit set")
+                .navigationBarTitleDisplayMode(.inline)
+                .padding()
+                .sheet(isPresented: $showConvertToNormalSheet) {
+                    NavigationStack {
+                        VStack(alignment: .leading, spacing: 16) {
+                            StrengthStyleMetricField(title: "Reps") {
+                                TextField("—", text: $convertToNormalRepsText)
+                                    .font(.body)
+                                    .keyboardType(.numberPad)
+                            }
+                            StrengthStyleMetricField(title: "kg") {
+                                TextField("—", text: $convertToNormalWeightText)
+                                    .font(.body)
+                                    .keyboardType(.decimalPad)
+                            }
+                            Button("Convert") {
+                                applyConvertCurrentConfigToNormal()
+                                showConvertToNormalSheet = false
+                                showEditSheet = false
+                            }
+                            .buttonStyle(.borderedProminent)
+                            Spacer()
+                        }
+                        .padding()
+                        .navigationTitle("Convert to normal")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") { showConvertToNormalSheet = false }
+                            }
+                        }
+                    }
+                    .presentationDetents([.medium])
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancel") {
+                            editMetricFocus = nil
+                            showEditSheet = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            editMetricFocus = nil
+                            applyEditsToCurrentExercise()
+                            showEditSheet = false
+                        }
+                    }
+                    ToolbarItemGroup(placement: .keyboard) {
+                        Spacer()
+                        Button("Done") {
+                            editMetricFocus = nil
+                        }
+                    }
                 }
             }
-            .padding()
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .onReceive(restTimer) { _ in
-            if isResting || gIsResting || g2IsResting || hasActiveRestInExerciseTimerDictionaries() {
-                syncRestCountdownFromEndDate()
-            }
-            if strengthWorkoutSessionStart != nil, !showCountdown {
-                strengthWorkoutElapsedTick &+= 1
+            if !isSessionPaused {
+                if isResting || gIsResting || g2IsResting || hasActiveRestInExerciseTimerDictionaries() {
+                    syncRestCountdownFromEndDate()
+                }
+                if strengthWorkoutSessionStart != nil, !showCountdown {
+                    strengthWorkoutElapsedTick &+= 1
+                }
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            guard !isSessionPaused else { return }
             syncRestCountdownFromEndDate()
             if strengthWorkoutSessionStart != nil {
                 strengthWorkoutElapsedTick &+= 1
@@ -490,6 +794,35 @@ struct ActiveStrengthWorkoutView: View {
         .task { await load() }
         .onDisappear {
             Task { await sanitizeEndDateIfNeededOnClose() }
+        }
+        .sheet(item: $strengthFinishDeferral) { def in
+            StrengthRoutineOverwriteConfirmSheet(
+                prompt: def.prompt,
+                onUpdate: {
+                    let d = def
+                    strengthFinishDeferral = nil
+                    isSaving = true
+                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: true) }
+                },
+                onNotNow: {
+                    let d = def
+                    strengthFinishDeferral = nil
+                    isSaving = true
+                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: false) }
+                }
+            )
+            .presentationSizing(.fitted)
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.92)
+        }
+        .overlay {
+            if app.isAuthenticated, !showCountdown, !isSaving {
+                MessagesFloatingButton()
+                    .environmentObject(app)
+                    .allowsHitTesting(true)
+                    .zIndex(99)
+            }
         }
     }
     
@@ -638,12 +971,28 @@ struct ActiveStrengthWorkoutView: View {
                     .font(.headline)
                     .foregroundStyle(isExtraCurrentSet ? .green : .primary)
 
-                Text("\(s.reps ?? 0) reps")
-                    .font(.title2.weight(.semibold))
+                if let drop = dropIndicatorLabel(for: ex, setIndex: displaySetIndex, lane: lane) {
+                    Text(drop)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
 
-                Text(weightStr(s.weight_kg))
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
+                if let ws = s.weight_segments, ws.count >= 2 {
+                    VStack(spacing: 6) {
+                        ForEach(Array(ws.enumerated()), id: \.offset) { _, seg in
+                            Text("\(seg.reps) reps · \(weightStr(Decimal(seg.weight_kg)))")
+                                .font(.title3.weight(.semibold))
+                                .multilineTextAlignment(.center)
+                        }
+                    }
+                } else {
+                    Text("\(s.reps ?? 0) reps")
+                        .font(.title2.weight(.semibold))
+
+                    Text(weightStr(s.weight_kg))
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
 
                 if let rpe = s.rpe {
                     Text("Target RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))")
@@ -663,10 +1012,16 @@ struct ActiveStrengthWorkoutView: View {
                     editWeightText = ""
                 }
                 editRestText = "\(s.rest_sec ?? 0)"
+                if let rpe = s.rpe {
+                    editRpeText = String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue)
+                } else {
+                    editRpeText = ""
+                }
+                editDropSegments = s.weight_segments ?? []
                 editTargetLane = lane
                 showEditSheet = true
             } label: {
-                Text("Edit reps, weight & rest")
+                Text("Edit set")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .frame(height: 36)
@@ -974,12 +1329,12 @@ struct ActiveStrengthWorkoutView: View {
         if !hostLaneFullyComplete() { s += "· You\n" }
         if !guestLaneFullyComplete() { s += "· Partner 1\n" }
         if !guest2LaneFullyComplete() { s += "· Partner 2\n" }
-        s += "\nThis will save and close all workouts on this phone. Continue?"
+        s += "\nThis will save, publish, and close all workouts on this phone. Continue?"
         return s
     }
 
     private func earlyFinishAlertMessage() -> String {
-        let base = "You haven't completed all planned sets. The workout will be saved with only the sets you actually performed."
+        let base = "You haven't completed all planned sets. The workout will be saved with only the sets you actually performed. If you finish now, it will be published automatically."
         if isDualMode, let extra = dualPartnerProgressNote(), !extra.isEmpty {
             return base + "\n\n" + extra
         }
@@ -996,6 +1351,7 @@ struct ActiveStrengthWorkoutView: View {
             isRestingByExercise[exerciseId] = false
             remainingRestByExercise[exerciseId] = 0
             restEndDateByExercise[exerciseId] = nil
+            restTotalPlannedByExercise[exerciseId] = nil
         case .guest:
             gIsResting = false
             gRemainingRest = 0
@@ -1004,6 +1360,7 @@ struct ActiveStrengthWorkoutView: View {
             gIsRestingByExercise[exerciseId] = false
             gRemainingRestByExercise[exerciseId] = 0
             gRestEndDateByExercise[exerciseId] = nil
+            gRestTotalPlannedByExercise[exerciseId] = nil
         case .guest2:
             g2IsResting = false
             g2RemainingRest = 0
@@ -1012,6 +1369,7 @@ struct ActiveStrengthWorkoutView: View {
             g2IsRestingByExercise[exerciseId] = false
             g2RemainingRestByExercise[exerciseId] = 0
             g2RestEndDateByExercise[exerciseId] = nil
+            g2RestTotalPlannedByExercise[exerciseId] = nil
         }
     }
 
@@ -1024,24 +1382,31 @@ struct ActiveStrengthWorkoutView: View {
         }
         var expanded: [SetRow] = []
 
-        let orderedConfigs = configs.sorted { $0.id < $1.id }
+        let orderedConfigs = configs.sorted {
+            if $0.set_number != $1.set_number { return $0.set_number < $1.set_number }
+            return $0.id < $1.id
+        }
 
         for config in orderedConfigs {
-            let count = max(config.set_number, 0)
+            let k = (config.weight_segments?.count ?? 0) >= 2 ? (config.weight_segments?.count ?? 1) : 1
+            let macro = max(config.set_number, 0)
 
-            for _ in 0..<count {
+            for repIdx in 0..<macro {
                 let sequentialNumber = expanded.count + 1
-
+                let pseudoId = config.id * 100_000 + repIdx + 1
+                let firstSeg = config.weight_segments?.first
                 let pseudoSet = SetRow(
-                    id: config.id * 1000 + sequentialNumber,
+                    id: pseudoId,
                     workout_exercise_id: config.workout_exercise_id,
                     set_number: sequentialNumber,
-                    reps: config.reps,
-                    weight_kg: config.weight_kg,
+                    reps: firstSeg?.reps ?? config.reps,
+                    weight_kg: firstSeg != nil ? Decimal(firstSeg!.weight_kg) : config.weight_kg,
                     rpe: config.rpe,
-                    rest_sec: config.rest_sec
+                    rest_sec: config.rest_sec,
+                    weight_segments: config.weight_segments,
+                    configId: config.id,
+                    segmentsInRow: k
                 )
-
                 expanded.append(pseudoSet)
             }
         }
@@ -1052,6 +1417,22 @@ struct ActiveStrengthWorkoutView: View {
     private func startRest(for set: SetRow, lane: StrengthLaneKind = .host) {
         let sec = set.rest_sec ?? 0
         guard sec > 0 else { return }
+
+        let restingExId: Int? = {
+            switch lane {
+            case .host: return currentExercise?.id
+            case .guest: return currentGuestExercise?.id
+            case .guest2: return currentGuest2Exercise?.id
+            }
+        }()
+        switch lane {
+        case .host:
+            if navEmphasisLockExerciseIdHost == nil, let id = restingExId { navEmphasisLockExerciseIdHost = id }
+        case .guest:
+            if navEmphasisLockExerciseIdGuest == nil, let id = restingExId { navEmphasisLockExerciseIdGuest = id }
+        case .guest2:
+            if navEmphasisLockExerciseIdGuest2 == nil, let id = restingExId { navEmphasisLockExerciseIdGuest2 = id }
+        }
 
         let end = Date().addingTimeInterval(TimeInterval(sec))
         switch lane {
@@ -1064,6 +1445,7 @@ struct ActiveStrengthWorkoutView: View {
                 isRestingByExercise[ex.id] = true
                 remainingRestByExercise[ex.id] = sec
                 restEndDateByExercise[ex.id] = end
+                restTotalPlannedByExercise[ex.id] = sec
             }
         case .guest:
             gRestEndDate = end
@@ -1074,6 +1456,7 @@ struct ActiveStrengthWorkoutView: View {
                 gIsRestingByExercise[ex.id] = true
                 gRemainingRestByExercise[ex.id] = sec
                 gRestEndDateByExercise[ex.id] = end
+                gRestTotalPlannedByExercise[ex.id] = sec
             }
         case .guest2:
             g2RestEndDate = end
@@ -1084,6 +1467,7 @@ struct ActiveStrengthWorkoutView: View {
                 g2IsRestingByExercise[ex.id] = true
                 g2RemainingRestByExercise[ex.id] = sec
                 g2RestEndDateByExercise[ex.id] = end
+                g2RestTotalPlannedByExercise[ex.id] = sec
             }
         }
 
@@ -1115,7 +1499,6 @@ struct ActiveStrengthWorkoutView: View {
         return false
     }
 
-    /// Actualiza todos los temporizadores de descanso guardados por `exerciseId` (la burbuja sigue mostrando el tiempo aunque cambies de ejercicio).
     private func syncRestCountdownFromEndDate() {
         syncHostRestTimersFromDictionaries()
         syncGuestRestTimersFromDictionaries()
@@ -1133,6 +1516,7 @@ struct ActiveStrengthWorkoutView: View {
                 isRestingByExercise[id] = false
                 remainingRestByExercise[id] = 0
                 restEndDateByExercise[id] = nil
+                restTotalPlannedByExercise[id] = nil
                 if id == currentExercise?.id {
                     isResting = false
                     remainingRest = 0
@@ -1145,6 +1529,9 @@ struct ActiveStrengthWorkoutView: View {
             } else {
                 remainingRestByExercise[id] = newR
                 isRestingByExercise[id] = true
+                if restTotalPlannedByExercise[id] == nil {
+                    restTotalPlannedByExercise[id] = max(1, newR)
+                }
                 if id == currentExercise?.id {
                     isResting = true
                     remainingRest = newR
@@ -1170,6 +1557,7 @@ struct ActiveStrengthWorkoutView: View {
                 gIsRestingByExercise[id] = false
                 gRemainingRestByExercise[id] = 0
                 gRestEndDateByExercise[id] = nil
+                gRestTotalPlannedByExercise[id] = nil
                 if id == currentGuestExercise?.id {
                     gIsResting = false
                     gRemainingRest = 0
@@ -1182,6 +1570,9 @@ struct ActiveStrengthWorkoutView: View {
             } else {
                 gRemainingRestByExercise[id] = newR
                 gIsRestingByExercise[id] = true
+                if gRestTotalPlannedByExercise[id] == nil {
+                    gRestTotalPlannedByExercise[id] = max(1, newR)
+                }
                 if id == currentGuestExercise?.id {
                     gIsResting = true
                     gRemainingRest = newR
@@ -1207,6 +1598,7 @@ struct ActiveStrengthWorkoutView: View {
                 g2IsRestingByExercise[id] = false
                 g2RemainingRestByExercise[id] = 0
                 g2RestEndDateByExercise[id] = nil
+                g2RestTotalPlannedByExercise[id] = nil
                 if id == currentGuest2Exercise?.id {
                     g2IsResting = false
                     g2RemainingRest = 0
@@ -1219,6 +1611,9 @@ struct ActiveStrengthWorkoutView: View {
             } else {
                 g2RemainingRestByExercise[id] = newR
                 g2IsRestingByExercise[id] = true
+                if g2RestTotalPlannedByExercise[id] == nil {
+                    g2RestTotalPlannedByExercise[id] = max(1, newR)
+                }
                 if id == currentGuest2Exercise?.id {
                     g2IsResting = true
                     g2RemainingRest = newR
@@ -1289,13 +1684,18 @@ struct ActiveStrengthWorkoutView: View {
                 if sets.isEmpty { return }
             }
 
+            let completedRestSec = currentSetFor(ex, setIndex: currentSetIndex, lane: .host).map { $0.rest_sec ?? 0 } ?? 0
+
             if let s = currentSetFor(ex, setIndex: currentSetIndex, lane: .host) {
                 var list = performedSetsByExercise[ex.id] ?? []
                 let performed = PerformedSet(
                     reps: s.reps,
                     weight_kg: s.weight_kg,
                     rpe: s.rpe,
-                    rest_sec: s.rest_sec
+                    rest_sec: s.rest_sec,
+                    configId: s.configId,
+                    segmentsInRow: s.segmentsInRow,
+                    weight_segments: s.weight_segments
                 )
                 list.append(performed)
                 performedSetsByExercise[ex.id] = list
@@ -1313,6 +1713,10 @@ struct ActiveStrengthWorkoutView: View {
             isRestingByExercise[ex.id] = isResting
             remainingRestByExercise[ex.id] = remainingRest
 
+            if navEmphasisLockExerciseIdHost == nil, completedRestSec == 0 {
+                navEmphasisLockExerciseIdHost = ex.id
+            }
+
         case .guest:
             guard let ex = currentGuestExercise else { return }
             var sets = setsFor(ex, lane: .guest)
@@ -1322,13 +1726,18 @@ struct ActiveStrengthWorkoutView: View {
                 if sets.isEmpty { return }
             }
 
+            let completedRestSec = currentSetFor(ex, setIndex: gCurrentSetIndex, lane: .guest).map { $0.rest_sec ?? 0 } ?? 0
+
             if let s = currentSetFor(ex, setIndex: gCurrentSetIndex, lane: .guest) {
                 var list = gPerformedSetsByExercise[ex.id] ?? []
                 let performed = PerformedSet(
                     reps: s.reps,
                     weight_kg: s.weight_kg,
                     rpe: s.rpe,
-                    rest_sec: s.rest_sec
+                    rest_sec: s.rest_sec,
+                    configId: s.configId,
+                    segmentsInRow: s.segmentsInRow,
+                    weight_segments: s.weight_segments
                 )
                 list.append(performed)
                 gPerformedSetsByExercise[ex.id] = list
@@ -1346,6 +1755,10 @@ struct ActiveStrengthWorkoutView: View {
             gIsRestingByExercise[ex.id] = gIsResting
             gRemainingRestByExercise[ex.id] = gRemainingRest
 
+            if navEmphasisLockExerciseIdGuest == nil, completedRestSec == 0 {
+                navEmphasisLockExerciseIdGuest = ex.id
+            }
+
         case .guest2:
             guard let ex = currentGuest2Exercise else { return }
             var sets = setsFor(ex, lane: .guest2)
@@ -1355,13 +1768,18 @@ struct ActiveStrengthWorkoutView: View {
                 if sets.isEmpty { return }
             }
 
+            let completedRestSec = currentSetFor(ex, setIndex: g2CurrentSetIndex, lane: .guest2).map { $0.rest_sec ?? 0 } ?? 0
+
             if let s = currentSetFor(ex, setIndex: g2CurrentSetIndex, lane: .guest2) {
                 var list = g2PerformedSetsByExercise[ex.id] ?? []
                 let performed = PerformedSet(
                     reps: s.reps,
                     weight_kg: s.weight_kg,
                     rpe: s.rpe,
-                    rest_sec: s.rest_sec
+                    rest_sec: s.rest_sec,
+                    configId: s.configId,
+                    segmentsInRow: s.segmentsInRow,
+                    weight_segments: s.weight_segments
                 )
                 list.append(performed)
                 g2PerformedSetsByExercise[ex.id] = list
@@ -1378,6 +1796,10 @@ struct ActiveStrengthWorkoutView: View {
             g2CurrentSetIndexByExercise[ex.id] = g2CurrentSetIndex
             g2IsRestingByExercise[ex.id] = g2IsResting
             g2RemainingRestByExercise[ex.id] = g2RemainingRest
+
+            if navEmphasisLockExerciseIdGuest2 == nil, completedRestSec == 0 {
+                navEmphasisLockExerciseIdGuest2 = ex.id
+            }
         }
     }
 
@@ -1403,7 +1825,10 @@ struct ActiveStrengthWorkoutView: View {
                 reps: last.reps,
                 weight_kg: last.weight_kg,
                 rpe: last.rpe,
-                rest_sec: last.rest_sec
+                rest_sec: last.rest_sec,
+                weight_segments: last.weight_segments,
+                configId: last.id,
+                segmentsInRow: last.segmentsInRow
             )
 
             setsByExercise[key] = configs
@@ -1433,7 +1858,10 @@ struct ActiveStrengthWorkoutView: View {
                 reps: last.reps,
                 weight_kg: last.weight_kg,
                 rpe: last.rpe,
-                rest_sec: last.rest_sec
+                rest_sec: last.rest_sec,
+                weight_segments: last.weight_segments,
+                configId: last.id,
+                segmentsInRow: last.segmentsInRow
             )
 
             gSetsByExercise[key] = configs
@@ -1463,7 +1891,10 @@ struct ActiveStrengthWorkoutView: View {
                 reps: last.reps,
                 weight_kg: last.weight_kg,
                 rpe: last.rpe,
-                rest_sec: last.rest_sec
+                rest_sec: last.rest_sec,
+                weight_segments: last.weight_segments,
+                configId: last.id,
+                segmentsInRow: last.segmentsInRow
             )
 
             g2SetsByExercise[key] = configs
@@ -1481,14 +1912,18 @@ struct ActiveStrengthWorkoutView: View {
         let planned = setsFor(ex, lane: lane).count
         if planned > 0 { return }
 
+        let sid = Int.random(in: 1_000_000...9_999_999)
         let base = SetRow(
-            id: Int.random(in: 1_000_000...9_999_999),
+            id: sid,
             workout_exercise_id: ex.id,
             set_number: 1,
             reps: 10,
             weight_kg: 0,
             rpe: nil,
-            rest_sec: 60
+            rest_sec: 60,
+            weight_segments: nil,
+            configId: sid,
+            segmentsInRow: 1
         )
         switch lane {
         case .host: setsByExercise[key] = [base]
@@ -1523,7 +1958,10 @@ struct ActiveStrengthWorkoutView: View {
                 reps: last.reps,
                 weight_kg: last.weight_kg,
                 rpe: last.rpe,
-                rest_sec: last.rest_sec
+                rest_sec: last.rest_sec,
+                weight_segments: last.weight_segments,
+                configId: last.id,
+                segmentsInRow: last.segmentsInRow
             )
 
             if configs[lastIdx].set_number == 0 {
@@ -1588,7 +2026,10 @@ struct ActiveStrengthWorkoutView: View {
                 reps: last.reps,
                 weight_kg: last.weight_kg,
                 rpe: last.rpe,
-                rest_sec: last.rest_sec
+                rest_sec: last.rest_sec,
+                weight_segments: last.weight_segments,
+                configId: last.id,
+                segmentsInRow: last.segmentsInRow
             )
 
             if configs[lastIdx].set_number == 0 {
@@ -1653,7 +2094,10 @@ struct ActiveStrengthWorkoutView: View {
                 reps: last.reps,
                 weight_kg: last.weight_kg,
                 rpe: last.rpe,
-                rest_sec: last.rest_sec
+                rest_sec: last.rest_sec,
+                weight_segments: last.weight_segments,
+                configId: last.id,
+                segmentsInRow: last.segmentsInRow
             )
 
             if configs[lastIdx].set_number == 0 {
@@ -1701,8 +2145,43 @@ struct ActiveStrengthWorkoutView: View {
             }
         }
     }
-    
+
     private func goToNextExercise() {
+        let lane = mainDisplayLane
+        let ordered = orderedExercises(lane: lane)
+        let workIdx: Int = {
+            switch lane {
+            case .host: return currentExerciseIndex
+            case .guest: return guestCurrentExerciseIndex
+            case .guest2: return g2CurrentExerciseIndex
+            }
+        }()
+        guard !ordered.isEmpty, workIdx < ordered.count - 1 else { return }
+
+        persistStateForCurrentDualIndex()
+
+        switch lane {
+        case .host: navEmphasisLockExerciseIdHost = nil
+        case .guest: navEmphasisLockExerciseIdGuest = nil
+        case .guest2: navEmphasisLockExerciseIdGuest2 = nil
+        }
+
+        switch lane {
+        case .host:
+            currentExerciseIndex += 1
+            pagerDisplayIndexHost = currentExerciseIndex
+        case .guest:
+            guestCurrentExerciseIndex += 1
+            pagerDisplayIndexGuest = guestCurrentExerciseIndex
+        case .guest2:
+            g2CurrentExerciseIndex += 1
+            pagerDisplayIndexGuest2 = g2CurrentExerciseIndex
+        }
+
+        restoreStateForDualIndex()
+    }
+
+    private func pagerShiftForward() {
         let lane = mainDisplayLane
         let ordered = orderedExercises(lane: lane)
         let idx = pagerExerciseIndex
@@ -1711,15 +2190,15 @@ struct ActiveStrengthWorkoutView: View {
         persistStateForCurrentDualIndex()
 
         switch lane {
-        case .host: currentExerciseIndex += 1
-        case .guest: guestCurrentExerciseIndex += 1
-        case .guest2: g2CurrentExerciseIndex += 1
+        case .host: pagerDisplayIndexHost += 1
+        case .guest: pagerDisplayIndexGuest += 1
+        case .guest2: pagerDisplayIndexGuest2 += 1
         }
 
         restoreStateForDualIndex()
     }
     
-    private func goToPreviousExercise() {
+    private func pagerShiftBackward() {
         let lane = mainDisplayLane
         let ordered = orderedExercises(lane: lane)
         let idx = pagerExerciseIndex
@@ -1728,9 +2207,9 @@ struct ActiveStrengthWorkoutView: View {
         persistStateForCurrentDualIndex()
 
         switch lane {
-        case .host: currentExerciseIndex -= 1
-        case .guest: guestCurrentExerciseIndex -= 1
-        case .guest2: g2CurrentExerciseIndex -= 1
+        case .host: pagerDisplayIndexHost -= 1
+        case .guest: pagerDisplayIndexGuest -= 1
+        case .guest2: pagerDisplayIndexGuest2 -= 1
         }
 
         restoreStateForDualIndex()
@@ -1876,23 +2355,29 @@ struct ActiveStrengthWorkoutView: View {
             let n = orderedExercises.count
             guard n > 0 else {
                 currentExerciseIndex = 0
+                pagerDisplayIndexHost = 0
                 return
             }
             currentExerciseIndex = min(max(0, currentExerciseIndex), n - 1)
+            pagerDisplayIndexHost = min(max(0, pagerDisplayIndexHost), n - 1)
         case .guest:
             let n = orderedGuestExercises.count
             guard n > 0 else {
                 guestCurrentExerciseIndex = 0
+                pagerDisplayIndexGuest = 0
                 return
             }
             guestCurrentExerciseIndex = min(max(0, guestCurrentExerciseIndex), n - 1)
+            pagerDisplayIndexGuest = min(max(0, pagerDisplayIndexGuest), n - 1)
         case .guest2:
             let n = orderedGuest2Exercises.count
             guard n > 0 else {
                 g2CurrentExerciseIndex = 0
+                pagerDisplayIndexGuest2 = 0
                 return
             }
             g2CurrentExerciseIndex = min(max(0, g2CurrentExerciseIndex), n - 1)
+            pagerDisplayIndexGuest2 = min(max(0, pagerDisplayIndexGuest2), n - 1)
         }
     }
 
@@ -1924,9 +2409,15 @@ struct ActiveStrengthWorkoutView: View {
 
         if indexChanged {
             switch lane {
-            case .host: currentExerciseIndex = index
-            case .guest: guestCurrentExerciseIndex = index
-            case .guest2: g2CurrentExerciseIndex = index
+            case .host:
+                currentExerciseIndex = index
+                pagerDisplayIndexHost = index
+            case .guest:
+                guestCurrentExerciseIndex = index
+                pagerDisplayIndexGuest = index
+            case .guest2:
+                g2CurrentExerciseIndex = index
+                pagerDisplayIndexGuest2 = index
             }
         }
 
@@ -2089,10 +2580,16 @@ struct ActiveStrengthWorkoutView: View {
         .frame(maxWidth: availableWidth)
     }
 
-    private var strengthWorkoutElapsedDisplayString: String {
+    private var strengthSessionActiveElapsedSeconds: Int {
         _ = strengthWorkoutElapsedTick
-        guard let start = strengthWorkoutSessionStart else { return "0:00" }
-        let elapsed = max(0, Int(floor(Date().timeIntervalSince(start))))
+        guard let start = strengthWorkoutSessionStart else { return 0 }
+        let gross = max(0, Int(floor(Date().timeIntervalSince(start))))
+        let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
+        return max(0, gross - accumulatedPausedSeconds - openPause)
+    }
+
+    private var strengthWorkoutElapsedDisplayString: String {
+        let elapsed = strengthSessionActiveElapsedSeconds
         let h = elapsed / 3600
         let m = (elapsed % 3600) / 60
         let s = elapsed % 60
@@ -2119,6 +2616,55 @@ struct ActiveStrengthWorkoutView: View {
         .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Workout time, \(strengthWorkoutElapsedDisplayString)")
+    }
+
+    private func shiftAllRestEndDatesForward(by delta: TimeInterval) {
+        guard delta > 0 else { return }
+        if let e = restEndDate { restEndDate = e.addingTimeInterval(delta) }
+        for id in restEndDateByExercise.keys {
+            if let e = restEndDateByExercise[id] {
+                restEndDateByExercise[id] = e.addingTimeInterval(delta)
+            }
+        }
+        if let e = gRestEndDate { gRestEndDate = e.addingTimeInterval(delta) }
+        for id in gRestEndDateByExercise.keys {
+            if let e = gRestEndDateByExercise[id] {
+                gRestEndDateByExercise[id] = e.addingTimeInterval(delta)
+            }
+        }
+        if let e = g2RestEndDate { g2RestEndDate = e.addingTimeInterval(delta) }
+        for id in g2RestEndDateByExercise.keys {
+            if let e = g2RestEndDateByExercise[id] {
+                g2RestEndDateByExercise[id] = e.addingTimeInterval(delta)
+            }
+        }
+    }
+
+    private func toggleSessionPause() {
+        if isSessionPaused {
+            guard let began = sessionPauseBegan else {
+                isSessionPaused = false
+                return
+            }
+            let dt = Date().timeIntervalSince(began)
+            if dt > 0 {
+                shiftAllRestEndDatesForward(by: dt)
+                accumulatedPausedSeconds = min(Int.max / 4, accumulatedPausedSeconds + Int(floor(dt)))
+            }
+            sessionPauseBegan = nil
+            isSessionPaused = false
+            WorkoutLiveActivityManager.updateStrengthPauseIfAvailable(
+                isPaused: false,
+                activeElapsedSeconds: strengthSessionActiveElapsedSeconds
+            )
+        } else {
+            sessionPauseBegan = Date()
+            isSessionPaused = true
+            WorkoutLiveActivityManager.updateStrengthPauseIfAvailable(
+                isPaused: true,
+                activeElapsedSeconds: strengthSessionActiveElapsedSeconds
+            )
+        }
     }
 
     private func activeStrengthNavFirstHintBanner() -> some View {
@@ -2150,14 +2696,16 @@ struct ActiveStrengthWorkoutView: View {
         let ex = list[idx]
         let completed = isExerciseCompleted(ex, lane: lane)
         let isLast = idx == list.count - 1
-        let currentIdx: Int = {
+        let workAnchorExerciseId: Int? = {
             switch lane {
-            case .host: return currentExerciseIndex
-            case .guest: return guestCurrentExerciseIndex
-            case .guest2: return g2CurrentExerciseIndex
+            case .host: return currentExercise?.id
+            case .guest: return currentGuestExercise?.id
+            case .guest2: return currentGuest2Exercise?.id
             }
         }()
-        let isCurrent = idx == currentIdx
+        let emphasisTargetId = navEmphasisTargetExerciseId(lane: lane)
+        let isEmphasized = (emphasisTargetId == ex.id)
+        let isWorkAnchor = (workAnchorExerciseId == ex.id)
         let jumpOK = canJumpBetweenExercises
         let title = exerciseTitle(ex)
         let plannedSets = setsFor(ex, lane: lane).count
@@ -2184,6 +2732,13 @@ struct ActiveStrengthWorkoutView: View {
             let sec = max(0, Int(ceil(end.timeIntervalSinceNow)))
             return sec > 0 ? sec : nil
         }()
+        let restPlannedTotal: Int? = {
+            switch lane {
+            case .host: return restTotalPlannedByExercise[ex.id]
+            case .guest: return gRestTotalPlannedByExercise[ex.id]
+            case .guest2: return g2RestTotalPlannedByExercise[ex.id]
+            }
+        }()
         StrengthExerciseNavColumn(
             displayNumber: idx + 1,
             exerciseTitle: title,
@@ -2191,12 +2746,15 @@ struct ActiveStrengthWorkoutView: View {
             completed: completed,
             completionProgress: completionProgress,
             isLast: isLast,
-            isCurrent: isCurrent,
+            isEmphasized: isEmphasized,
+            isWorkAnchor: isWorkAnchor,
             allWorkoutExercisesComplete: allExercisesCompleted(for: lane),
             isWavePulsing: strengthNavStripWaveIndex == idx,
             jumpOK: jumpOK,
-            navAnimationIndex: currentIdx,
+            workAnchorExerciseId: workAnchorExerciseId,
             restOverlaySeconds: restBubbleSeconds,
+            restPlannedTotalSeconds: restPlannedTotal,
+            enlargeActiveBubbleForSolo: !isDualMode,
             popoverPresented: popBinding,
             onShortTap: { jumpToExercise(lane: lane, index: idx) },
             onLongPress: { navExercisePopoverIndex = popId }
@@ -2254,6 +2812,9 @@ struct ActiveStrengthWorkoutView: View {
                 remainingRest = 0
                 restEndDate = nil
                 restEndDateByExercise[ex.id] = nil
+                restTotalPlannedByExercise[ex.id] = nil
+            } else if isResting, restTotalPlannedByExercise[ex.id] == nil {
+                restTotalPlannedByExercise[ex.id] = max(1, remainingRest)
             }
         } else {
             currentSetIndex = 0
@@ -2278,6 +2839,9 @@ struct ActiveStrengthWorkoutView: View {
                 gRemainingRest = 0
                 gRestEndDate = nil
                 gRestEndDateByExercise[gx.id] = nil
+                gRestTotalPlannedByExercise[gx.id] = nil
+            } else if gIsResting, gRestTotalPlannedByExercise[gx.id] == nil {
+                gRestTotalPlannedByExercise[gx.id] = max(1, gRemainingRest)
             }
         } else if isDualMode {
             gCurrentSetIndex = 0
@@ -2302,6 +2866,9 @@ struct ActiveStrengthWorkoutView: View {
                 g2RemainingRest = 0
                 g2RestEndDate = nil
                 g2RestEndDateByExercise[gx2.id] = nil
+                g2RestTotalPlannedByExercise[gx2.id] = nil
+            } else if g2IsResting, g2RestTotalPlannedByExercise[gx2.id] == nil {
+                g2RestTotalPlannedByExercise[gx2.id] = max(1, g2RemainingRest)
             }
         } else if isTripleMode {
             g2CurrentSetIndex = 0
@@ -2320,7 +2887,12 @@ struct ActiveStrengthWorkoutView: View {
                     dualFocusLane = .host
                 }
             } label: {
-                dualAvatarCell(lane: .host, url: dualHostAvatarURL, isFocused: mainDisplayLane == .host)
+                dualAvatarCell(
+                    lane: .host,
+                    url: dualHostAvatarURL,
+                    isFocused: mainDisplayLane == .host,
+                    restPlannedTotal: currentExercise.flatMap { restTotalPlannedByExercise[$0.id] }
+                )
             }
             .buttonStyle(.plain)
 
@@ -2335,7 +2907,12 @@ struct ActiveStrengthWorkoutView: View {
                     dualFocusLane = .guest
                 }
             } label: {
-                dualAvatarCell(lane: .guest, url: dualGuestAvatarURL, isFocused: mainDisplayLane == .guest)
+                dualAvatarCell(
+                    lane: .guest,
+                    url: dualGuestAvatarURL,
+                    isFocused: mainDisplayLane == .guest,
+                    restPlannedTotal: currentGuestExercise.flatMap { gRestTotalPlannedByExercise[$0.id] }
+                )
             }
             .buttonStyle(.plain)
 
@@ -2351,7 +2928,12 @@ struct ActiveStrengthWorkoutView: View {
                         dualFocusLane = .guest2
                     }
                 } label: {
-                    dualAvatarCell(lane: .guest2, url: dualGuest2AvatarURL, isFocused: mainDisplayLane == .guest2)
+                    dualAvatarCell(
+                        lane: .guest2,
+                        url: dualGuest2AvatarURL,
+                        isFocused: mainDisplayLane == .guest2,
+                        restPlannedTotal: currentGuest2Exercise.flatMap { g2RestTotalPlannedByExercise[$0.id] }
+                    )
                 }
                 .buttonStyle(.plain)
             }
@@ -2373,7 +2955,7 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     @ViewBuilder
-    private func dualAvatarCell(lane: StrengthLaneKind, url: String?, isFocused: Bool) -> some View {
+    private func dualAvatarCell(lane: StrengthLaneKind, url: String?, isFocused: Bool, restPlannedTotal: Int?) -> some View {
         let resting: Bool = {
             switch lane {
             case .host: return isResting
@@ -2388,48 +2970,13 @@ struct ActiveStrengthWorkoutView: View {
             case .guest2: return g2RemainingRest
             }
         }()
-        let showRestOverlay = resting && secs > 0
-        let baseSize: CGFloat = 40
-        let scale: CGFloat = isFocused ? 1.18 : 0.88
-
-        ZStack {
-            Circle()
-                .fill(Color.secondary.opacity(isFocused ? 0.26 : 0.18))
-                .frame(width: baseSize, height: baseSize)
-            AvatarView(urlString: url)
-                .frame(width: baseSize, height: baseSize)
-                .clipped()
-                .clipShape(Circle())
-                .opacity(isFocused ? 1 : 0.88)
-
-            if showRestOverlay {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.black.opacity(0.35),
-                                Color.black.opacity(0.62)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .frame(width: baseSize, height: baseSize)
-                Text("\(secs)s")
-                    .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
-            }
-        }
-        .frame(width: baseSize, height: baseSize)
-        .clipShape(Circle())
-        .overlay(
-            Circle()
-                .stroke(isFocused ? Color.accentColor : Color.white.opacity(0.35), lineWidth: isFocused ? 3 : 1)
-                .frame(width: baseSize, height: baseSize)
+        DualLaneAvatarCell(
+            urlString: url,
+            isFocused: isFocused,
+            resting: resting,
+            restSeconds: secs,
+            restPlannedTotal: restPlannedTotal
         )
-        .scaleEffect(scale)
-        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: isFocused)
     }
 
     private func exerciseTitle(_ ex: ExerciseRow?) -> String {
@@ -2569,7 +3116,7 @@ struct ActiveStrengthWorkoutView: View {
                                 dragOffsetY = -step
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                                goToNextExercise()
+                                pagerShiftForward()
                                 dragOffsetY = 0
                                 isTransitioningExercise = false
                             }
@@ -2585,7 +3132,7 @@ struct ActiveStrengthWorkoutView: View {
                                 dragOffsetY = step
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
-                                goToPreviousExercise()
+                                pagerShiftBackward()
                                 dragOffsetY = 0
                                 isTransitioningExercise = false
                             }
@@ -2603,59 +3150,311 @@ struct ActiveStrengthWorkoutView: View {
         )
     }
     
-    private func saveAndFinishWorkout() async {
-        var exList: [ExerciseRow] = []
-        var performedMap: [Int: [PerformedSet]] = [:]
-        var guestExList: [ExerciseRow] = []
-        var guestPerformedMap: [Int: [PerformedSet]] = [:]
-        var guestWorkoutId: Int?
-        var guest2ExList: [ExerciseRow] = []
-        var guest2PerformedMap: [Int: [PerformedSet]] = [:]
-        var guest2WorkoutId: Int?
-
-        await MainActor.run {
-            exList = self.orderedExercises
-            performedMap = self.performedSetsByExercise
-            guestWorkoutId = self.dualGuestWorkoutId
-            guest2WorkoutId = self.dualGuest2WorkoutId
-            if guestWorkoutId != nil {
-                guestExList = self.orderedGuestExercises
-                guestPerformedMap = self.gPerformedSetsByExercise
+    private func programItemsForRoutineOverwrite(
+        exList: [ExerciseRow],
+        setsMap: [Int: [SetRow]],
+        performedMap: [Int: [PerformedSet]]
+    ) -> [StrengthProgramItem]? {
+        var items: [StrengthProgramItem] = []
+        for ex in exList.sorted(by: { $0.order_index < $1.order_index }) {
+            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            let sets: [StrengthProgramSet]
+            if !templateSets.isEmpty {
+                sets = templateSets.map { s in
+                    let segs: [StrengthWeightSegment]? = {
+                        guard let wss = s.weight_segments, wss.count >= 2 else { return nil }
+                        return wss.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
+                    }()
+                    return StrengthProgramSet(
+                        setNumber: s.set_number,
+                        reps: s.reps,
+                        weightKg: s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        rpe: s.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        restSec: s.rest_sec,
+                        notes: nil,
+                        weightSegments: segs
+                    )
+                }
+            } else {
+                let performed = performedMap[ex.id] ?? []
+                guard !performed.isEmpty else { return nil }
+                sets = performed.enumerated().map { idx, p in
+                    let segsFromPerformed: [StrengthWeightSegment]? = {
+                        guard let wss = p.weight_segments, wss.count >= 2 else { return nil }
+                        return wss.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
+                    }()
+                    return StrengthProgramSet(
+                        setNumber: idx + 1,
+                        reps: p.reps,
+                        weightKg: p.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        rpe: p.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        restSec: p.rest_sec,
+                        notes: nil,
+                        weightSegments: segsFromPerformed
+                    )
+                }
             }
-            if guest2WorkoutId != nil {
-                guest2ExList = self.orderedGuest2Exercises
-                guest2PerformedMap = self.g2PerformedSetsByExercise
-            }
-            self.isSaving = true
+            items.append(
+                StrengthProgramItem(
+                    exerciseId: ex.exercise_id,
+                    orderIndex: ex.order_index,
+                    notes: ex.notes,
+                    customName: ex.custom_name,
+                    sets: sets
+                )
+            )
         }
+        return items.isEmpty ? nil : items
+    }
 
+    private func editableExercisesForRoutineUpdateFromHost(
+        exList: [ExerciseRow],
+        setsMap: [Int: [SetRow]],
+        performedMap: [Int: [PerformedSet]]
+    ) -> [EditableExercise] {
+        exList.sorted(by: { $0.order_index < $1.order_index }).map { ex in
+            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            var ee = EditableExercise()
+            ee.exerciseId = ex.exercise_id
+            ee.exerciseName = ex.custom_name ?? ""
+            ee.orderIndex = ex.order_index
+            ee.notes = ex.notes ?? ""
+            if !templateSets.isEmpty {
+                ee.sets = templateSets.map { s in
+                    let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
+                    return EditableSet(
+                        setNumber: s.set_number,
+                        reps: s.reps,
+                        weightKg: activeDecimalToWeightField(s.weight_kg),
+                        rpe: activeDecimalToRpeField(s.rpe),
+                        restSec: s.rest_sec,
+                        notes: "",
+                        segments: segDraft
+                    )
+                }
+            } else {
+                let performed = performedMap[ex.id] ?? []
+                ee.sets = performed.enumerated().map { i, p in
+                    let segDraft = (p.weight_segments ?? []).asEditorSegmentsIfDropSet()
+                    return EditableSet(
+                        setNumber: i + 1,
+                        reps: p.reps,
+                        weightKg: activeDecimalToWeightField(p.weight_kg),
+                        rpe: activeDecimalToRpeField(p.rpe),
+                        restSec: p.rest_sec,
+                        notes: "",
+                        segments: segDraft
+                    )
+                }
+            }
+            return ee
+        }
+    }
+
+    private func activeDecimalToWeightField(_ d: Decimal?) -> String {
+        guard let d else { return "" }
+        return String(format: "%.1f", NSDecimalNumber(decimal: d).doubleValue)
+    }
+
+    private func activeDecimalToRpeField(_ d: Decimal?) -> String {
+        guard let d else { return "" }
+        let v = NSDecimalNumber(decimal: d).doubleValue
+        if v == floor(v) { return String(Int(v)) }
+        return String(format: "%.1f", v)
+    }
+
+    private func commitDeferredStrengthFinish(deferral: StrengthFinishDeferral, updateRoutine: Bool) async {
+        let extra: (Int64, [EditableExercise])? = updateRoutine
+            ? (deferral.prompt.routineId, deferral.editableForRoutine)
+            : nil
+        let (wallEndedAt, pausedSec) = await MainActor.run { () -> (Date, Int) in
+            let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
+            let total = max(0, accumulatedPausedSeconds + openPause)
+            return (Date(), total)
+        }
+        await runStrengthWorkoutPersistence(
+            exList: deferral.exList,
+            performedMap: deferral.performedMap,
+            guestExList: deferral.guestExList,
+            guestPerformedMap: deferral.guestPerformedMap,
+            guestWorkoutId: deferral.guestWorkoutId,
+            guest2ExList: deferral.guest2ExList,
+            guest2PerformedMap: deferral.guest2PerformedMap,
+            guest2WorkoutId: deferral.guest2WorkoutId,
+            routinePrescriptionOverwrite: extra,
+            wallEndedAt: wallEndedAt,
+            pausedSec: pausedSec
+        )
+    }
+
+    private func runStrengthWorkoutPersistence(
+        exList: [ExerciseRow],
+        performedMap: [Int: [PerformedSet]],
+        guestExList: [ExerciseRow],
+        guestPerformedMap: [Int: [PerformedSet]],
+        guestWorkoutId: Int?,
+        guest2ExList: [ExerciseRow],
+        guest2PerformedMap: [Int: [PerformedSet]],
+        guest2WorkoutId: Int?,
+        routinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])?,
+        wallEndedAt: Date,
+        pausedSec: Int
+    ) async {
         let client = SupabaseManager.shared.client
 
         func persistExerciseRows(_ rows: [ExerciseRow], performedMap: [Int: [PerformedSet]]) async throws {
-            for ex in rows {
-                let performedSets = performedMap[ex.id] ?? []
-                var blocks: [(count: Int, template: PerformedSet)] = []
-                var currentTemplate: PerformedSet?
-                var currentCount = 0
+            struct CompletedLine {
+                let configId: Int
+                let segmentsInRow: Int
+                let reps: Int?
+                let weight_kg: Decimal?
+                let rpe: Decimal?
+                let rest_sec: Int?
+                let weight_segments: [StrengthWeightSegWire]?
+            }
+            struct CollapsedPersistRow {
+                let count: Int
+                let reps: Int?
+                let weight_kg: Decimal?
+                let rpe: Decimal?
+                let rest_sec: Int?
+                let weight_segments: [StrengthWeightSegWire]?
+            }
+            struct LegacyKey: Equatable {
+                let reps: Int?
+                let weight_kg: Decimal?
+                let rpe: Decimal?
+                let rest_sec: Int?
+            }
 
-                for p in performedSets {
-                    if let cur = currentTemplate,
-                       cur.reps == p.reps,
-                       cur.weight_kg == p.weight_kg,
-                       cur.rpe == p.rpe,
-                       cur.rest_sec == p.rest_sec {
-                        currentCount += 1
+            func chunkCompletedLines(_ lines: [CompletedLine]) -> [[CompletedLine]] {
+                guard !lines.isEmpty else { return [] }
+                var out: [[CompletedLine]] = []
+                var cur: [CompletedLine] = [lines[0]]
+                for i in 1..<lines.count {
+                    let line = lines[i]
+                    if line.configId == cur[0].configId {
+                        cur.append(line)
                     } else {
-                        if let cur = currentTemplate {
-                            blocks.append((currentCount, cur))
-                        }
-                        currentTemplate = p
-                        currentCount = 1
+                        out.append(cur)
+                        cur = [line]
                     }
                 }
-                if let cur = currentTemplate {
-                    blocks.append((currentCount, cur))
+                out.append(cur)
+                return out
+            }
+
+            func collapseLegacyChunk(_ chunk: [CompletedLine]) -> [CollapsedPersistRow] {
+                if chunk.isEmpty { return [] }
+                var collapsed: [CollapsedPersistRow] = []
+                var currentKey: LegacyKey?
+                var count = 0
+                for line in chunk {
+                    let key = LegacyKey(reps: line.reps, weight_kg: line.weight_kg, rpe: line.rpe, rest_sec: line.rest_sec)
+                    if let cur = currentKey, cur == key {
+                        count += 1
+                    } else {
+                        if let cur = currentKey {
+                            collapsed.append(
+                                CollapsedPersistRow(
+                                    count: count,
+                                    reps: cur.reps,
+                                    weight_kg: cur.weight_kg,
+                                    rpe: cur.rpe,
+                                    rest_sec: cur.rest_sec,
+                                    weight_segments: nil
+                                )
+                            )
+                        }
+                        currentKey = key
+                        count = 1
+                    }
                 }
+                if let cur = currentKey {
+                    collapsed.append(
+                        CollapsedPersistRow(
+                            count: count,
+                            reps: cur.reps,
+                            weight_kg: cur.weight_kg,
+                            rpe: cur.rpe,
+                            rest_sec: cur.rest_sec,
+                            weight_segments: nil
+                        )
+                    )
+                }
+                return collapsed
+            }
+
+            func collapseSegmentChunk(_ chunk: [CompletedLine]) -> [CollapsedPersistRow] {
+                if chunk.count == 1, let f = chunk.first, let ws = f.weight_segments, ws.count >= 2 {
+                    let firstSeg = ws[0]
+                    return [
+                        CollapsedPersistRow(
+                            count: 1,
+                            reps: firstSeg.reps,
+                            weight_kg: Decimal(firstSeg.weight_kg),
+                            rpe: f.rpe,
+                            rest_sec: f.rest_sec,
+                            weight_segments: ws
+                        )
+                    ]
+                }
+                let k = max(2, chunk.first?.segmentsInRow ?? 1)
+                let n = chunk.count % k == 0 ? chunk.count / k : 1
+                let tail = Array(chunk.suffix(k))
+                let segs: [StrengthWeightSegWire] = tail.compactMap { line in
+                    guard let r = line.reps, let w = line.weight_kg else { return nil }
+                    let d = NSDecimalNumber(decimal: w).doubleValue
+                    return StrengthWeightSegWire(reps: r, weight_kg: d)
+                }
+                if segs.count != tail.count {
+                    return [
+                        CollapsedPersistRow(
+                            count: 1,
+                            reps: tail.first?.reps,
+                            weight_kg: tail.first?.weight_kg,
+                            rpe: chunk.first(where: { $0.rpe != nil })?.rpe,
+                            rest_sec: tail.last?.rest_sec,
+                            weight_segments: nil
+                        )
+                    ]
+                }
+                let validSegs = segs.count >= 2 ? segs : nil
+                return [
+                    CollapsedPersistRow(
+                        count: n,
+                        reps: tail.first?.reps,
+                        weight_kg: tail.first?.weight_kg,
+                        rpe: chunk.first(where: { $0.rpe != nil })?.rpe,
+                        rest_sec: tail.last?.rest_sec,
+                        weight_segments: validSegs
+                    )
+                ]
+            }
+
+            func chunkToPersistRows(_ chunk: [CompletedLine]) -> [CollapsedPersistRow] {
+                if chunk.isEmpty { return [] }
+                if chunk[0].segmentsInRow <= 1 {
+                    return collapseLegacyChunk(chunk)
+                }
+                return collapseSegmentChunk(chunk)
+            }
+
+            for ex in rows {
+                let performedSets = performedMap[ex.id] ?? []
+                let lines: [CompletedLine] = performedSets.map {
+                    CompletedLine(
+                        configId: $0.configId,
+                        segmentsInRow: $0.segmentsInRow,
+                        reps: $0.reps,
+                        weight_kg: $0.weight_kg,
+                        rpe: $0.rpe,
+                        rest_sec: $0.rest_sec,
+                        weight_segments: $0.weight_segments
+                    )
+                }
+                let chunks = chunkCompletedLines(lines)
+                let rowsOut: [CollapsedPersistRow] = chunks.flatMap { chunkToPersistRows($0) }
 
                 _ = try await client
                     .from("exercise_sets")
@@ -2663,14 +3462,15 @@ struct ActiveStrengthWorkoutView: View {
                     .eq("workout_exercise_id", value: ex.id)
                     .execute()
 
-                let payloads: [InsertSetPayload] = blocks.map { block in
+                let payloads: [InsertSetPayload] = rowsOut.map { row in
                     InsertSetPayload(
                         workout_exercise_id: ex.id,
-                        set_number: block.count,
-                        reps: block.template.reps,
-                        weight_kg: block.template.weight_kg,
-                        rpe: block.template.rpe,
-                        rest_sec: block.template.rest_sec
+                        set_number: row.count,
+                        reps: row.reps,
+                        weight_kg: row.weight_kg,
+                        rpe: row.rpe,
+                        rest_sec: row.rest_sec,
+                        weight_segments: row.weight_segments
                     )
                 }
 
@@ -2686,11 +3486,37 @@ struct ActiveStrengthWorkoutView: View {
         do {
             try await persistExerciseRows(exList, performedMap: performedMap)
 
-            let endTime = Date()
+            struct StartedAtRow: Decodable { let started_at: Date? }
+            func clampedEndTime(for id: Int) async throws -> Date {
+                let res = try await client
+                    .from("workouts")
+                    .select("started_at")
+                    .eq("id", value: id)
+                    .single()
+                    .execute()
+                let row = try JSONDecoder.supabase().decode(StartedAtRow.self, from: res.data)
+                var end = wallEndedAt
+                if let st = row.started_at, end < st { end = st }
+                return end
+            }
+            let endTime = try await clampedEndTime(for: workoutId)
 
+            func stateToPublishOnFinish(for workoutId: Int) async throws -> String? {
+                let res = try await client
+                    .from("workouts")
+                    .select("state")
+                    .eq("id", value: workoutId)
+                    .single()
+                    .execute()
+                let row = try JSONDecoder.supabase().decode(WorkoutStateRow.self, from: res.data)
+                guard row.state?.lowercased() == "planned" else { return nil }
+                return "published"
+            }
+
+            let stateHost = try await stateToPublishOnFinish(for: workoutId)
             _ = try await client
                 .from("workouts")
-                .update(WorkoutEndPatch(ended_at: endTime))
+                .update(WorkoutEndPatch(ended_at: endTime, paused_sec: pausedSec, state: stateHost))
                 .eq("id", value: workoutId)
                 .execute()
 
@@ -2698,9 +3524,11 @@ struct ActiveStrengthWorkoutView: View {
 
             if let gid = guestWorkoutId {
                 try await persistExerciseRows(guestExList, performedMap: guestPerformedMap)
+                let endGuest = try await clampedEndTime(for: gid)
+                let stateG = try await stateToPublishOnFinish(for: gid)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: endTime))
+                    .update(WorkoutEndPatch(ended_at: endGuest, paused_sec: pausedSec, state: stateG))
                     .eq("id", value: gid)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: gid)
@@ -2708,12 +3536,23 @@ struct ActiveStrengthWorkoutView: View {
 
             if let g2id = guest2WorkoutId {
                 try await persistExerciseRows(guest2ExList, performedMap: guest2PerformedMap)
+                let endG2 = try await clampedEndTime(for: g2id)
+                let stateG2 = try await stateToPublishOnFinish(for: g2id)
                 _ = try await client
                     .from("workouts")
-                    .update(WorkoutEndPatch(ended_at: endTime))
+                    .update(WorkoutEndPatch(ended_at: endG2, paused_sec: pausedSec, state: stateG2))
                     .eq("id", value: g2id)
                     .execute()
                 NotificationCenter.default.post(name: .workoutDidChange, object: g2id)
+            }
+
+            if let o = routinePrescriptionOverwrite, let uid = await MainActor.run(body: { app.userId }) {
+                try? await applyStrengthRoutinePrescriptionUpdate(
+                    client: client,
+                    userId: uid,
+                    routineId: o.routineId,
+                    exercises: o.exercises
+                )
             }
 
             let celebrate = await shouldShowElborblaCelebration(using: client)
@@ -2734,6 +3573,89 @@ struct ActiveStrengthWorkoutView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    private func saveAndFinishWorkout() async {
+        var exList: [ExerciseRow] = []
+        var performedMap: [Int: [PerformedSet]] = [:]
+        var hostSetsMap: [Int: [SetRow]] = [:]
+        var guestExList: [ExerciseRow] = []
+        var guestPerformedMap: [Int: [PerformedSet]] = [:]
+        var guestWorkoutId: Int?
+        var guest2ExList: [ExerciseRow] = []
+        var guest2PerformedMap: [Int: [PerformedSet]] = [:]
+        var guest2WorkoutId: Int?
+
+        await MainActor.run {
+            exList = self.orderedExercises
+            performedMap = self.performedSetsByExercise
+            hostSetsMap = self.setsByExercise
+            guestWorkoutId = self.dualGuestWorkoutId
+            guest2WorkoutId = self.dualGuest2WorkoutId
+            if guestWorkoutId != nil {
+                guestExList = self.orderedGuestExercises
+                guestPerformedMap = self.gPerformedSetsByExercise
+            }
+            if guest2WorkoutId != nil {
+                guest2ExList = self.orderedGuest2Exercises
+                guest2PerformedMap = self.g2PerformedSetsByExercise
+            }
+            self.isSaving = true
+        }
+
+        let client = SupabaseManager.shared.client
+
+        if let proposed = programItemsForRoutineOverwrite(exList: exList, setsMap: hostSetsMap, performedMap: performedMap),
+           let session = try? await client.auth.session {
+            let candidate = (
+                try? await fetchStrengthRoutineOverwriteCandidate(
+                    client: client,
+                    userId: session.user.id,
+                    proposed: proposed,
+                    exerciseDisplayName: { eid in
+                        exList.first(where: { $0.exercise_id == eid })?.exercise_name ?? ""
+                    }
+                )
+            ) ?? .none
+            if case .prompt(let pr) = candidate {
+                let editable = editableExercisesForRoutineUpdateFromHost(exList: exList, setsMap: hostSetsMap, performedMap: performedMap)
+                await MainActor.run {
+                    self.isSaving = false
+                    self.strengthFinishDeferral = StrengthFinishDeferral(
+                        exList: exList,
+                        performedMap: performedMap,
+                        guestExList: guestExList,
+                        guestPerformedMap: guestPerformedMap,
+                        guestWorkoutId: guestWorkoutId,
+                        guest2ExList: guest2ExList,
+                        guest2PerformedMap: guest2PerformedMap,
+                        guest2WorkoutId: guest2WorkoutId,
+                        prompt: pr,
+                        editableForRoutine: editable
+                    )
+                }
+                return
+            }
+        }
+
+        let (wallEndedAt, pausedSec) = await MainActor.run { () -> (Date, Int) in
+            let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
+            let total = max(0, accumulatedPausedSeconds + openPause)
+            return (Date(), total)
+        }
+        await runStrengthWorkoutPersistence(
+            exList: exList,
+            performedMap: performedMap,
+            guestExList: guestExList,
+            guestPerformedMap: guestPerformedMap,
+            guestWorkoutId: guestWorkoutId,
+            guest2ExList: guest2ExList,
+            guest2PerformedMap: guest2PerformedMap,
+            guest2WorkoutId: guest2WorkoutId,
+            routinePrescriptionOverwrite: nil,
+            wallEndedAt: wallEndedAt,
+            pausedSec: pausedSec
+        )
     }
 
     private func shouldShowElborblaCelebration(using client: SupabaseClient) async -> Bool {
@@ -2823,12 +3745,40 @@ struct ActiveStrengthWorkoutView: View {
         }
     }
     
+    private func exerciseForEditSheet() -> ExerciseRow? {
+        switch editTargetLane {
+        case .host: return currentExercise
+        case .guest: return currentGuestExercise
+        case .guest2: return currentGuest2Exercise
+        }
+    }
+
+    private func currentSetIndexForEditLane() -> Int {
+        switch editTargetLane {
+        case .host: return currentSetIndex
+        case .guest: return gCurrentSetIndex
+        case .guest2: return g2CurrentSetIndex
+        }
+    }
+
     private func configIndexForSetIndex(_ ex: ExerciseRow, setIndex: Int, lane: StrengthLaneKind = .host) -> Int? {
         let configs: [SetRow]
         switch lane {
-        case .host: configs = (setsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
-        case .guest: configs = (gSetsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
-        case .guest2: configs = (g2SetsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
+        case .host:
+            configs = (setsByExercise[ex.id] ?? []).sorted {
+                if $0.set_number != $1.set_number { return $0.set_number < $1.set_number }
+                return $0.id < $1.id
+            }
+        case .guest:
+            configs = (gSetsByExercise[ex.id] ?? []).sorted {
+                if $0.set_number != $1.set_number { return $0.set_number < $1.set_number }
+                return $0.id < $1.id
+            }
+        case .guest2:
+            configs = (g2SetsByExercise[ex.id] ?? []).sorted {
+                if $0.set_number != $1.set_number { return $0.set_number < $1.set_number }
+                return $0.id < $1.id
+            }
         }
         var cursor = 0
         for (i, c) in configs.enumerated() {
@@ -2840,6 +3790,142 @@ struct ActiveStrengthWorkoutView: View {
             cursor = next
         }
         return nil
+    }
+
+    private func dropIndicatorLabel(for ex: ExerciseRow, setIndex: Int, lane: StrengthLaneKind) -> String? {
+        let expanded = setsFor(ex, lane: lane)
+        guard setIndex >= 0, setIndex < expanded.count else { return nil }
+        guard (expanded[setIndex].weight_segments?.count ?? 0) >= 2 else { return nil }
+        return "Drop set"
+    }
+
+    private func sortedStrengthConfigs(_ ex: ExerciseRow, lane: StrengthLaneKind) -> [SetRow] {
+        switch lane {
+        case .host:
+            return (setsByExercise[ex.id] ?? []).sorted {
+                if $0.set_number != $1.set_number { return $0.set_number < $1.set_number }
+                return $0.id < $1.id
+            }
+        case .guest:
+            return (gSetsByExercise[ex.id] ?? []).sorted {
+                if $0.set_number != $1.set_number { return $0.set_number < $1.set_number }
+                return $0.id < $1.id
+            }
+        case .guest2:
+            return (g2SetsByExercise[ex.id] ?? []).sorted {
+                if $0.set_number != $1.set_number { return $0.set_number < $1.set_number }
+                return $0.id < $1.id
+            }
+        }
+    }
+
+    private func convertCurrentConfigToDropSet() {
+        let ex: ExerciseRow?
+        let activeSetIndex: Int
+        switch editTargetLane {
+        case .host:
+            ex = currentExercise
+            activeSetIndex = currentSetIndex
+        case .guest:
+            ex = currentGuestExercise
+            activeSetIndex = gCurrentSetIndex
+        case .guest2:
+            ex = currentGuest2Exercise
+            activeSetIndex = g2CurrentSetIndex
+        }
+        guard let ex else { return }
+        var configs = sortedStrengthConfigs(ex, lane: editTargetLane)
+        guard !configs.isEmpty else { return }
+
+        let idx = configIndexForSetIndex(ex, setIndex: activeSetIndex, lane: editTargetLane) ?? 0
+        let old = configs[idx]
+        if (old.weight_segments?.count ?? 0) >= 2 { return }
+
+        let reps0 = old.reps ?? Int(editRepsText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 10
+        let weight0: Double = {
+            if let w = old.weight_kg { return NSDecimalNumber(decimal: w).doubleValue }
+            let t = editWeightText.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: ".")
+            return Double(t) ?? 0
+        }()
+        let ws = [
+            StrengthWeightSegWire(reps: reps0, weight_kg: weight0),
+            StrengthWeightSegWire(reps: reps0, weight_kg: 0)
+        ]
+
+        let updated = SetRow(
+            id: old.id,
+            workout_exercise_id: old.workout_exercise_id,
+            set_number: old.set_number,
+            reps: ws[0].reps,
+            weight_kg: Decimal(ws[0].weight_kg),
+            rpe: old.rpe,
+            rest_sec: old.rest_sec,
+            weight_segments: ws,
+            configId: old.id,
+            segmentsInRow: 2
+        )
+        configs[idx] = updated
+        switch editTargetLane {
+        case .host: setsByExercise[ex.id] = configs
+        case .guest: gSetsByExercise[ex.id] = configs
+        case .guest2: g2SetsByExercise[ex.id] = configs
+        }
+        editDropSegments = ws
+    }
+
+    private func applyConvertCurrentConfigToNormal() {
+        let ex: ExerciseRow?
+        let activeSetIndex: Int
+        switch editTargetLane {
+        case .host:
+            ex = currentExercise
+            activeSetIndex = currentSetIndex
+        case .guest:
+            ex = currentGuestExercise
+            activeSetIndex = gCurrentSetIndex
+        case .guest2:
+            ex = currentGuest2Exercise
+            activeSetIndex = g2CurrentSetIndex
+        }
+        guard let ex else { return }
+
+        var configs = sortedStrengthConfigs(ex, lane: editTargetLane)
+        guard !configs.isEmpty else { return }
+
+        let idx = configIndexForSetIndex(ex, setIndex: activeSetIndex, lane: editTargetLane) ?? 0
+        let old = configs[idx]
+
+        let reps = Int(convertToNormalRepsText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? (old.reps ?? 10)
+        let weightRaw = convertToNormalWeightText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+        let weight = Decimal(string: weightRaw) ?? old.weight_kg ?? 0
+
+        let updated = SetRow(
+            id: old.id,
+            workout_exercise_id: old.workout_exercise_id,
+            set_number: old.set_number,
+            reps: reps,
+            weight_kg: weight,
+            rpe: old.rpe,
+            rest_sec: old.rest_sec,
+            weight_segments: nil,
+            configId: old.id,
+            segmentsInRow: 1
+        )
+        configs[idx] = updated
+        switch editTargetLane {
+        case .host: setsByExercise[ex.id] = configs
+        case .guest: gSetsByExercise[ex.id] = configs
+        case .guest2: g2SetsByExercise[ex.id] = configs
+        }
+        editDropSegments = []
+        editRepsText = "\(reps)"
+        if let d = Decimal(string: weightRaw) {
+            editWeightText = String(format: "%.1f", NSDecimalNumber(decimal: d).doubleValue)
+        } else {
+            editWeightText = ""
+        }
     }
             
     private func applyEditsToCurrentExercise() {
@@ -2871,30 +3957,57 @@ struct ActiveStrengthWorkoutView: View {
             newWeightDecimal = Decimal(string: trimmedWeight)
         }
 
+        let trimmedRpe = editRpeText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: ",", with: ".")
+
+        let newRpeDecimal: Decimal?
+        if trimmedRpe.isEmpty {
+            newRpeDecimal = nil
+        } else {
+            newRpeDecimal = Decimal(string: trimmedRpe)
+        }
+
         let trimmedRest = editRestText.trimmingCharacters(in: .whitespacesAndNewlines)
         let newRestSecRaw = Int(trimmedRest)
         let newRestSec = (newRestSecRaw != nil) ? max(0, newRestSecRaw!) : nil
 
-        var configs: [SetRow]
-        switch editTargetLane {
-        case .host: configs = (setsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
-        case .guest: configs = (gSetsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
-        case .guest2: configs = (g2SetsByExercise[ex.id] ?? []).sorted { $0.id < $1.id }
-        }
+        var configs = sortedStrengthConfigs(ex, lane: editTargetLane)
         guard !configs.isEmpty else { return }
 
         let idx = configIndexForSetIndex(ex, setIndex: activeSetIndex, lane: editTargetLane) ?? 0
         let old = configs[idx]
 
-        let updated = SetRow(
-            id: old.id,
-            workout_exercise_id: old.workout_exercise_id,
-            set_number: old.set_number,
-            reps: newReps ?? old.reps,
-            weight_kg: newWeightDecimal ?? old.weight_kg,
-            rpe: old.rpe,
-            rest_sec: newRestSec ?? old.rest_sec
-        )
+        let updated: SetRow
+        if editDropSegments.count >= 2 {
+            let restOut: Int? = newRestSec ?? old.rest_sec
+            let rpeOut = newRpeDecimal ?? old.rpe
+            updated = SetRow(
+                id: old.id,
+                workout_exercise_id: old.workout_exercise_id,
+                set_number: old.set_number,
+                reps: editDropSegments.first?.reps ?? old.reps,
+                weight_kg: editDropSegments.first != nil ? Decimal(editDropSegments.first!.weight_kg) : old.weight_kg,
+                rpe: rpeOut,
+                rest_sec: restOut,
+                weight_segments: editDropSegments,
+                configId: old.id,
+                segmentsInRow: editDropSegments.count
+            )
+        } else {
+            updated = SetRow(
+                id: old.id,
+                workout_exercise_id: old.workout_exercise_id,
+                set_number: old.set_number,
+                reps: newReps ?? old.reps,
+                weight_kg: newWeightDecimal ?? old.weight_kg,
+                rpe: newRpeDecimal ?? old.rpe,
+                rest_sec: newRestSec ?? old.rest_sec,
+                weight_segments: nil,
+                configId: old.id,
+                segmentsInRow: 1
+            )
+        }
 
         configs[idx] = updated
         switch editTargetLane {
@@ -2944,6 +4057,7 @@ struct ActiveStrengthWorkoutView: View {
                 .select("*")
                 .in("workout_exercise_id", values: ids)
                 .order("set_number", ascending: true)
+                .order("id", ascending: true)
                 .execute()
             let sets = try JSONDecoder.supabase().decode([SetRow].self, from: sRes.data)
             for s in sets {
@@ -3021,11 +4135,18 @@ struct ActiveStrengthWorkoutView: View {
                 self.guest2DataError = guest2Err
 
                 self.currentExerciseIndex = 0
+                self.pagerDisplayIndexHost = 0
+                self.pagerDisplayIndexGuest = 0
+                self.pagerDisplayIndexGuest2 = 0
                 self.guestCurrentExerciseIndex = 0
                 self.g2CurrentExerciseIndex = 0
                 self.currentSetIndex = 0
                 self.gCurrentSetIndex = 0
                 self.g2CurrentSetIndex = 0
+
+                self.navEmphasisLockExerciseIdHost = nil
+                self.navEmphasisLockExerciseIdGuest = nil
+                self.navEmphasisLockExerciseIdGuest2 = nil
 
                 self.isResting = false
                 self.remainingRest = 0
@@ -3068,6 +4189,108 @@ struct ActiveStrengthWorkoutView: View {
     }
 }
 
+private struct RestDarkClockWedge: Shape {
+    var elapsedFraction: CGFloat
+    var restFraction: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = min(rect.width, rect.height) / 2
+        let e = min(max(elapsedFraction, 0), 1)
+        let rf = min(max(restFraction, 0), 1)
+        if rf < 0.001 { return Path() }
+        var p = Path()
+        p.move(to: c)
+        let startDeg = -90.0 + 360.0 * Double(e)
+        let endDeg = startDeg + 360.0 * Double(rf)
+        p.addArc(
+            center: c,
+            radius: r,
+            startAngle: .degrees(startDeg),
+            endAngle: .degrees(endDeg),
+            clockwise: false
+        )
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct DualLaneAvatarCell: View {
+    let urlString: String?
+    let isFocused: Bool
+    let resting: Bool
+    let restSeconds: Int
+    let restPlannedTotal: Int?
+
+    @State private var restEndedPulse: CGFloat = 1
+
+    private var showRestOverlay: Bool { resting && restSeconds > 0 }
+
+    var body: some View {
+        let baseSize: CGFloat = 40
+        let focusScale: CGFloat = isFocused ? 1.18 : 0.88
+        let total = max(restPlannedTotal ?? max(restSeconds, 1), 1)
+        let elapsedFrac = CGFloat(Double(total - restSeconds) / Double(total))
+        let restFrac = CGFloat(Double(restSeconds) / Double(total))
+
+        ZStack {
+            Circle()
+                .fill(Color.secondary.opacity(isFocused ? 0.26 : 0.18))
+                .frame(width: baseSize, height: baseSize)
+            AvatarView(urlString: urlString)
+                .frame(width: baseSize, height: baseSize)
+                .clipped()
+                .clipShape(Circle())
+                .opacity(isFocused ? 1 : 0.88)
+
+            if showRestOverlay {
+                RestDarkClockWedge(elapsedFraction: elapsedFrac, restFraction: restFrac)
+                    .fill(Color.black.opacity(0.56))
+                    .frame(width: baseSize, height: baseSize)
+                Text("\(restSeconds)s")
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+                    .zIndex(1)
+            }
+        }
+        .frame(width: baseSize, height: baseSize)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(isFocused ? Color.accentColor : Color.white.opacity(0.35), lineWidth: isFocused ? 3 : 1)
+                .frame(width: baseSize, height: baseSize)
+        )
+        .scaleEffect(focusScale * restEndedPulse)
+        .animation(.spring(response: 0.42, dampingFraction: 0.78), value: isFocused)
+        .onChange(of: restSeconds) { old, new in
+            if old > 0 && new == 0 {
+                playRestEndedPulse()
+            }
+        }
+    }
+
+    private func playRestEndedPulse() {
+        Task { @MainActor in
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.52)) {
+                restEndedPulse = 1.11
+            }
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) {
+                restEndedPulse = 1.0
+            }
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.50)) {
+                restEndedPulse = 1.07
+            }
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.80)) {
+                restEndedPulse = 1.0
+            }
+        }
+    }
+}
+
 private struct StrengthExerciseNavColumn: View {
     private static let celebrationFill = Color(red: 0.99, green: 0.86, blue: 0.28)
     private static let celebrationProgress = Color(red: 0.90, green: 0.68, blue: 0.04)
@@ -3079,18 +4302,21 @@ private struct StrengthExerciseNavColumn: View {
     let completed: Bool
     let completionProgress: Double
     let isLast: Bool
-    let isCurrent: Bool
+    let isEmphasized: Bool
+    let isWorkAnchor: Bool
     let allWorkoutExercisesComplete: Bool
     let isWavePulsing: Bool
     let jumpOK: Bool
-    let navAnimationIndex: Int
-    /// Segundos de descanso restantes en la burbuja del ejercicio actual (mismo tratamiento visual que avatares en grupo).
+    let workAnchorExerciseId: Int?
     let restOverlaySeconds: Int?
+    let restPlannedTotalSeconds: Int?
+    let enlargeActiveBubbleForSolo: Bool
     @Binding var popoverPresented: Bool
     let onShortTap: () -> Void
     let onLongPress: () -> Void
     @State private var burstScale: CGFloat = 0.75
     @State private var burstOpacity: Double = 0
+    @State private var restEndedPulse: CGFloat = 1
 
     private var numberLabel: String { String(displayNumber) }
 
@@ -3102,7 +4328,7 @@ private struct StrengthExerciseNavColumn: View {
 
     private var accessibilityLine: String {
         var parts = ["Exercise \(displayNumber)"]
-        if isCurrent { parts.append("current") }
+        if isEmphasized { parts.append("current") }
         let pct = Int((min(max(completionProgress, 0), 1) * 100).rounded())
         parts.append("progress \(pct) percent")
         if completed { parts.append("completed") }
@@ -3114,7 +4340,10 @@ private struct StrengthExerciseNavColumn: View {
     }
 
     private var bubbleLayoutScale: CGFloat {
-        (isCurrent ? 1.09 : 1.0) * (isWavePulsing ? 1.18 : 1.0)
+        let currentBoost: CGFloat = isEmphasized
+            ? (enlargeActiveBubbleForSolo ? 1.14 : 1.09)
+            : 1.0
+        return currentBoost * (isWavePulsing ? 1.18 : 1.0)
     }
 
     var body: some View {
@@ -3122,8 +4351,9 @@ private struct StrengthExerciseNavColumn: View {
             pillStack
             progressDot
         }
-        .scaleEffect(bubbleLayoutScale)
-        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: navAnimationIndex)
+        .scaleEffect(bubbleLayoutScale * restEndedPulse)
+        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: workAnchorExerciseId)
+        .animation(.spring(response: 0.34, dampingFraction: 0.72), value: isEmphasized)
         .animation(.spring(response: 0.24, dampingFraction: 0.75), value: isWavePulsing)
         .popover(isPresented: $popoverPresented) {
             VStack(alignment: .center, spacing: 8) {
@@ -3146,6 +4376,13 @@ private struct StrengthExerciseNavColumn: View {
             guard oldValue < 0.999, newValue >= 0.999 else { return }
             scheduleBurst()
         }
+        .onChange(of: restOverlaySeconds) { oldValue, newValue in
+            let oldS = oldValue ?? 0
+            let newS = newValue ?? 0
+            if oldS > 0 && newS == 0 {
+                playRestEndedPulse()
+            }
+        }
     }
 
     private var pillStack: some View {
@@ -3167,28 +4404,22 @@ private struct StrengthExerciseNavColumn: View {
                         lineWidth: 2
                     )
             }
-            if isCurrent {
+            if isEmphasized {
                 Circle()
                     .strokeBorder(Color.white.opacity(0.95), lineWidth: 2.5)
             }
             if (restOverlaySeconds ?? 0) <= 0 {
                 Text(verbatim: numberLabel)
-                    .font(.callout.weight(isCurrent ? .bold : .semibold))
+                    .font(.callout.weight(isEmphasized ? .bold : .semibold))
                     .monospacedDigit()
                     .foregroundStyle(foregroundColor)
             }
             if let restSec = restOverlaySeconds, restSec > 0 {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.black.opacity(0.35),
-                                Color.black.opacity(0.62)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                let total = max(max(restPlannedTotalSeconds ?? restSec, restSec), 1)
+                let eFrac = CGFloat(Double(total - restSec) / Double(total))
+                let rFrac = CGFloat(Double(restSec) / Double(total))
+                RestDarkClockWedge(elapsedFraction: eFrac, restFraction: rFrac)
+                    .fill(Color.black.opacity(0.56))
                 Text("\(restSec)s")
                     .font(.system(size: 11, weight: .bold, design: .rounded))
                     .minimumScaleFactor(0.75)
@@ -3202,16 +4433,16 @@ private struct StrengthExerciseNavColumn: View {
                 .allowsHitTesting(false)
         }
         .frame(width: 34, height: 34)
-        .shadow(color: isCurrent ? Color.black.opacity(0.25) : .clear, radius: isCurrent ? 3 : 0, y: 1)
+        .shadow(color: isEmphasized ? Color.black.opacity(0.25) : .clear, radius: isEmphasized ? 3 : 0, y: 1)
         .contentShape(Circle())
         .onTapGesture {
-            guard jumpOK, !isCurrent else { return }
+            guard jumpOK, !isWorkAnchor else { return }
             onShortTap()
         }
         .onLongPressGesture(minimumDuration: 0.45) {
             onLongPress()
         }
-        .opacity(jumpOK || isCurrent ? 1 : 0.55)
+        .opacity(jumpOK || isEmphasized ? 1 : 0.55)
     }
 
     private var progressDot: some View {
@@ -3240,7 +4471,7 @@ private struct StrengthExerciseNavColumn: View {
             if allWorkoutExercisesComplete { return Self.celebrationDot.opacity(0.95) }
             return Color.blue.opacity(0.9)
         }
-        if isCurrent { return Color.white }
+        if isEmphasized { return Color.white }
         if isLast { return Color.green.opacity(0.95) }
         return Color.primary.opacity(0.28)
     }
@@ -3281,6 +4512,26 @@ private struct StrengthExerciseNavColumn: View {
             withTransaction(t) {
                 burstScale = 1.55
                 burstOpacity = 0
+            }
+        }
+    }
+
+    private func playRestEndedPulse() {
+        Task { @MainActor in
+            withAnimation(.spring(response: 0.34, dampingFraction: 0.52)) {
+                restEndedPulse = 1.11
+            }
+            try? await Task.sleep(nanoseconds: 320_000_000)
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) {
+                restEndedPulse = 1.0
+            }
+            try? await Task.sleep(nanoseconds: 340_000_000)
+            withAnimation(.spring(response: 0.30, dampingFraction: 0.50)) {
+                restEndedPulse = 1.07
+            }
+            try? await Task.sleep(nanoseconds: 280_000_000)
+            withAnimation(.spring(response: 0.42, dampingFraction: 0.80)) {
+                restEndedPulse = 1.0
             }
         }
     }

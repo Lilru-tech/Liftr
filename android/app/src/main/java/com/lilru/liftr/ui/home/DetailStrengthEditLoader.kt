@@ -2,7 +2,9 @@ package com.lilru.liftr.ui.home
 
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ui.add.StrengthExerciseDraft
+import com.lilru.liftr.ui.add.StrengthSegmentDraft
 import com.lilru.liftr.ui.add.StrengthSetDraft
+import com.lilru.liftr.ui.add.parseWeightSegmentsColumn
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
@@ -12,6 +14,7 @@ import kotlin.math.floor
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 
 @Serializable
 private data class WExWire(
@@ -28,12 +31,14 @@ private data class WExWire(
 
 @Serializable
 private data class SetWire(
+    val id: Int = 0,
     @SerialName("workout_exercise_id") val workoutExerciseId: Int,
     @SerialName("set_number") val setNumber: Int,
     val reps: Int? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
-    @SerialName("rest_sec") val restSec: Int? = null
+    @SerialName("rest_sec") val restSec: Int? = null,
+    @SerialName("weight_segments") val weightSegments: JsonArray? = null
 )
 
 private val j = Json { ignoreUnknownKeys = true }
@@ -85,22 +90,27 @@ suspend fun loadStrengthEditsForWorkout(
             supabase.from(BackendContracts.Tables.EXERCISE_SETS)
                 .select(
                     columns = Columns.raw(
-                        "workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec"
+                        "id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments"
                     )
                 ) {
                     filter { isIn("workout_exercise_id", exIds) }
                     order("set_number", Order.ASCENDING)
+                    order("id", Order.ASCENDING)
                 }
         }.getOrNull() ?: return null
         val sRows = runCatching { j.decodeFromString<List<SetWire>>(jsonArrayData(sData.data)) }
             .getOrNull() ?: return null
         setsByEx = sRows.groupBy({ it.workoutExerciseId }, { s ->
+            val segs = parseWeightSegmentsColumn(s.weightSegments)
+            val r0 = segs.firstOrNull()?.repsText ?: s.reps?.toString() ?: "8"
+            val w0 = segs.firstOrNull()?.weightText ?: s.weightKg?.let { fmtNum(it) } ?: ""
             StrengthSetDraft(
                 setNumber = s.setNumber.coerceIn(1, 99),
-                repsText = s.reps?.toString() ?: "8",
-                weightText = s.weightKg?.let { fmtNum(it) } ?: "",
+                repsText = r0,
+                weightText = w0,
                 rpeText = s.rpe?.let { fmtNum(it) } ?: "",
-                restSecText = s.restSec?.toString() ?: ""
+                restSecText = s.restSec?.toString() ?: "",
+                segments = segs
             )
         })
     }
@@ -131,7 +141,8 @@ data class StrengthReadonlySetLine(
     val reps: Int?,
     val weightKg: Double?,
     val rpe: Double?,
-    val restSec: Int?
+    val restSec: Int?,
+    val weightSegments: List<StrengthSegmentDraft> = emptyList()
 )
 
 data class StrengthReadonlyExerciseLine(
@@ -174,22 +185,25 @@ suspend fun loadStrengthReadonlyForDetail(
                 supabase.from(BackendContracts.Tables.EXERCISE_SETS)
                     .select(
                         columns = Columns.raw(
-                            "workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec"
+                            "id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments"
                         )
                     ) {
                         filter { isIn("workout_exercise_id", exIds) }
                         order("set_number", Order.ASCENDING)
+                        order("id", Order.ASCENDING)
                     }
             }.getOrNull() ?: return null
             val sRows = runCatching { j.decodeFromString<List<SetWire>>(jsonArrayData(sData.data)) }
                 .getOrNull() ?: return null
             sRows.groupBy({ it.workoutExerciseId }, { s ->
+                val segs = parseWeightSegmentsColumn(s.weightSegments)
                 StrengthReadonlySetLine(
                     setNumber = s.setNumber,
                     reps = s.reps,
                     weightKg = s.weightKg,
                     rpe = s.rpe,
-                    restSec = s.restSec
+                    restSec = s.restSec,
+                    weightSegments = segs
                 )
             })
         }

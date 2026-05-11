@@ -35,6 +35,15 @@ struct ActiveSportWorkoutView: View {
         let location: String?
         let notes: String?
     }
+
+    private struct WorkoutStateRow: Decodable {
+        let state: String?
+    }
+
+    private struct WorkoutFinishPatch: Encodable {
+        let ended_at: Date
+        let state: String?
+    }
     
     private struct ActiveHyroxExercise: Identifiable, Decodable {
         let id: Int
@@ -233,6 +242,14 @@ struct ActiveSportWorkoutView: View {
         }
         .onDisappear {
             WorkoutLiveActivityManager.endIfAvailable()
+        }
+        .overlay {
+            if app.isAuthenticated, !showCountdown, !isSaving {
+                MessagesFloatingButton()
+                    .environmentObject(app)
+                    .allowsHitTesting(true)
+                    .zIndex(99)
+            }
         }
     }
     
@@ -632,6 +649,22 @@ struct ActiveSportWorkoutView: View {
                 .update(payload)
                 .eq("workout_id", value: workoutId)
                 .execute()
+
+            let endTime = Date()
+            let stateRes = try await SupabaseManager.shared.client
+                .from("workouts")
+                .select("state")
+                .eq("id", value: workoutId)
+                .single()
+                .execute()
+            let stateRow = try JSONDecoder.supabase().decode(WorkoutStateRow.self, from: stateRes.data)
+            let stateToPublish = stateRow.state?.lowercased() == "planned" ? "published" : nil
+            _ = try await SupabaseManager.shared.client
+                .from("workouts")
+                .update(WorkoutFinishPatch(ended_at: endTime, state: stateToPublish))
+                .eq("id", value: workoutId)
+                .execute()
+            NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
             
             if let sessionId = sportRow?.id {
                 try await saveSportSpecificStats(sessionId: sessionId)

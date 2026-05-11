@@ -40,3 +40,20 @@ fun Modifier.liftrAppBackgroundGradient(themeId: String): Modifier = this.drawBe
         )
     )
 }
+
+/**
+ * Same hues as [liftrAppBackgroundGradient] but both stops are fully opaque.
+ * Use for full-screen overlays stacked on top of other composables (e.g. chat);
+ * the translucent stops in [liftrBackgroundGradientPair] would otherwise blend
+ * with the content underneath and show the previous screen through the gradient.
+ */
+fun Modifier.liftrAppBackgroundGradientOpaque(themeId: String): Modifier = this.drawBehind {
+    val (c0, c1) = liftrBackgroundGradientPair(themeId)
+    drawRect(
+        brush = Brush.linearGradient(
+            colors = listOf(c0.copy(alpha = 1f), c1.copy(alpha = 1f)),
+            start = Offset(0f, 0f),
+            end = Offset(size.width, size.height)
+        )
+    )
+}

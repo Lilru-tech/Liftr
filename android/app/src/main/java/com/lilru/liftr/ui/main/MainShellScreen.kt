@@ -523,6 +523,7 @@ fun MainShellScreen(
                         targetUserId = me,
                         viewedUsername = "",
                         fromNotification = overlayNonNull.fromNotification,
+                        initialOpenAchievementCode = overlayNonNull.openAchievementCode,
                         onBack = { clearOverlay() },
                         modifier = Modifier.fillMaxSize()
                     )
@@ -569,6 +570,25 @@ fun MainShellScreen(
                 )
             }
             is MainOverlay.AddWorkoutDraftKind -> { }
+            is MainOverlay.ChatThread -> {
+                val ot = overlayNonNull
+                var profile by remember(ot.conversationId) { mutableStateOf<com.lilru.liftr.ui.chat.ProfileLite?>(null) }
+                LaunchedEffect(ot.otherUserId) {
+                    val uid = ot.otherUserId
+                    if (uid != null) {
+                        runCatching {
+                            com.lilru.liftr.data.ChatRepository(supabase).fetchProfile(uid)
+                        }.onSuccess { profile = it }
+                    }
+                }
+                com.lilru.liftr.ui.chat.ChatThreadScreen(
+                    supabase = supabase,
+                    conversationId = ot.conversationId,
+                    otherProfile = profile,
+                    onBack = { clearOverlay() },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
                 }
             }
         }

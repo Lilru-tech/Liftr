@@ -2,6 +2,7 @@ package com.lilru.liftr.ui.active
 
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
@@ -40,6 +41,7 @@ import com.lilru.liftr.R
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
 import com.lilru.liftr.hyrox.HyroxExerciseFormatting
+import com.lilru.liftr.ui.chat.MessagesFloatingButton
 import io.github.jan.supabase.SupabaseClient
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -87,19 +89,20 @@ fun ActiveSportWorkoutScreen(
         }
     }
 
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.active_sport_title)) },
-                navigationIcon = {
-                    TextButton(onClick = onClose) {
-                        Text(stringResource(R.string.active_strength_back))
+    Box(modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.active_sport_title)) },
+                    navigationIcon = {
+                        TextButton(onClick = onClose) {
+                            Text(stringResource(R.string.active_strength_back))
+                        }
                     }
-                }
-            )
-        }
-    ) { padding ->
+                )
+            }
+        ) { padding ->
         when {
             ui.loading -> {
                 Column(
@@ -434,6 +437,10 @@ fun ActiveSportWorkoutScreen(
                     }
                 }
             }
+        }
+    }
+        if (!ui.finishing) {
+            MessagesFloatingButton(supabase = supabase, modifier = Modifier.fillMaxSize())
         }
     }
 }

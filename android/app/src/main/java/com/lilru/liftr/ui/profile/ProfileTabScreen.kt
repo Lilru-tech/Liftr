@@ -116,6 +116,7 @@ import com.lilru.liftr.ui.competition.CreateCompetitionScreen
 import com.lilru.liftr.ui.competition.CompetitionsHubScreen
 import com.lilru.liftr.ui.profile.period.PeriodCompareScreen
 import com.lilru.liftr.ui.profile.progress.ProfileProgressScreen
+import com.lilru.liftr.ui.profile.NotificationSettingsScreen
 import com.lilru.liftr.ui.ranking.RankingInitial
 import com.lilru.liftr.ui.ranking.RankingMetric
 import com.lilru.liftr.ui.ranking.RankingScope
@@ -630,6 +631,7 @@ fun ProfileTabScreen(
     var showCompetitions by rememberSaveable { mutableStateOf(false) }
     var showRanking by rememberSaveable { mutableStateOf(false) }
     var showCreateCompetition by rememberSaveable { mutableStateOf(false) }
+    var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
     var bioDraft by remember { mutableStateOf("") }
     var bioExpanded by rememberSaveable { mutableStateOf(false) }
@@ -711,6 +713,15 @@ fun ProfileTabScreen(
                 showNotifications = false
                 vm.refresh(false)
             },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showNotificationSettings) {
+        NotificationSettingsScreen(
+            supabase = supabase,
+            onBack = { showNotificationSettings = false },
             modifier = modifier
         )
         return
@@ -1212,6 +1223,13 @@ fun ProfileTabScreen(
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Text(stringResource(R.string.profile_health_connect))
+                            }
+                            OutlinedButton(
+                                onClick = { showNotificationSettings = true },
+                                enabled = !ui.loading,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(stringResource(R.string.notifications_settings_button))
                             }
                             if (backgroundThemeId != null && onBackgroundThemeChange != null) {
                                 ProfileBackgroundThemeMenu(

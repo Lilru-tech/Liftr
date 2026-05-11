@@ -4,8 +4,6 @@ import Supabase
 
 private struct WeeklyChallengesEmptyRpcParams: Encodable {}
 
-// MARK: - RPC models (snake_case keys from PostgREST)
-
 struct ActiveChallengeListRow: Decodable, Identifiable {
     var id: UUID { instance_id }
     let instance_id: UUID
@@ -26,8 +24,6 @@ struct ActiveChallengeListRow: Decodable, Identifiable {
     let scope_muscle_primary: String?
     let viewer_rank: Int?
     let viewer_claimed: Bool?
-
-    /// True when the signed-in user has a podium slot on this instance (requires RPC with viewer_claimed).
     var viewerOnPodium: Bool { viewer_claimed == true }
 
     var resolvedCategory: String {
@@ -207,7 +203,6 @@ private func challengeCadenceLabel(_ raw: String) -> String {
     }
 }
 
-/// Full-screen hub from Ranking FAB: list all active challenges.
 struct WeeklyChallengesHubView: View {
     @ObservedObject var loader: WeeklyChallengesLoader
     var onDismiss: (() -> Void)?

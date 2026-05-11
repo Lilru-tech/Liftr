@@ -25,6 +25,17 @@ Deno.serve(async () => {
 
   for (const notif of notifs) {
     try {
+      const { data: settings } = await supabase
+        .from("user_notification_settings")
+        .select("*")
+        .eq("user_id", notif.user_id)
+        .maybeSingle();
+
+      if (!shouldSendPush(settings, notif.type)) {
+        await markSent(notif.id);
+        continue;
+      }
+
       const { data: profile } = await supabase
         .from("profiles")
         .select("fcm_token")
@@ -47,6 +58,24 @@ Deno.serve(async () => {
 
   return new Response("done");
 });
+
+function shouldSendPush(settings: any | null | undefined, notifType: string | null | undefined): boolean {
+  if (!settings) return true;
+  if (settings.push_enabled === false) return false;
+
+  const t = String(notifType || "").trim();
+  if (!t) return true;
+
+  if (t === "dm_message") {
+    return settings.push_new_message !== false;
+  }
+
+  const key = "push_" + t;
+  const val = settings[key];
+  if (typeof val === "boolean") return val;
+
+  return true;
+}
 
 async function getAccessToken() {
   const now = Math.floor(Date.now() / 1000);

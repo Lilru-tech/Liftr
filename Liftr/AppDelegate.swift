@@ -7,6 +7,66 @@ import GoogleMobileAds
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
 
+    private static func notificationPayload(from userInfo: [AnyHashable: Any]) -> (notificationId: Int?, type: String, data: [String: Any]) {
+        let notificationId: Int?
+        if let idInt = userInfo["notification_id"] as? Int {
+            notificationId = idInt
+        } else if let idStr = userInfo["notification_id"] as? String,
+                  let idParsed = Int(idStr) {
+            notificationId = idParsed
+        } else {
+            notificationId = nil
+        }
+
+        var type = userInfo["type"] as? String ?? ""
+        if type.isEmpty, let t = userInfo["notification_type"] as? String {
+            type = t
+        }
+
+        var data: [String: Any] = [:]
+        if let d = userInfo["data"] as? [String: Any] {
+            data = d
+        } else if let d = userInfo["data"] as? [String: String] {
+            data = d
+        } else if let jsonString = userInfo["data"] as? String {
+            if let jsonData = jsonString.data(using: .utf8),
+               let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
+                data = obj
+            }
+        }
+
+        if data.isEmpty {
+            if let followerId = userInfo["follower_id"] as? String {
+                data["follower_id"] = followerId
+            }
+            if let workoutId = userInfo["workout_id"] as? String {
+                data["workout_id"] = workoutId
+            }
+            if let ownerId = userInfo["owner_id"] as? String {
+                data["owner_id"] = ownerId
+            }
+            if let segmentId = userInfo["segment_id"] as? String {
+                data["segment_id"] = segmentId
+            }
+        }
+
+        mergeTopLevelStringFields(from: userInfo, into: &data, keys: ["conversation_id", "sender_id"])
+
+        return (notificationId, type, data)
+    }
+
+    private static func mergeTopLevelStringFields(from userInfo: [AnyHashable: Any], into data: inout [String: Any], keys: [String]) {
+        for key in keys {
+            if data[key] != nil { continue }
+            guard let raw = userInfo[AnyHashable(key)] else { continue }
+            if let s = raw as? String {
+                data[key] = s
+            } else if let n = raw as? NSNumber {
+                data[key] = n.stringValue
+            }
+        }
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
@@ -18,54 +78,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         if let remoteNotification = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             print("🚀 [AppDelegate] launched from push, userInfo:", remoteNotification)
-            
-            let userInfo = remoteNotification
-            
-            let notificationId: Int?
-            if let idInt = userInfo["notification_id"] as? Int {
-                notificationId = idInt
-            } else if let idStr = userInfo["notification_id"] as? String,
-                      let idParsed = Int(idStr) {
-                notificationId = idParsed
-            } else {
-                notificationId = nil
-            }
-            
-            var type = userInfo["type"] as? String ?? ""
-            if type.isEmpty, let t = userInfo["notification_type"] as? String {
-                type = t
-            }
+            let (notificationId, type, data) = Self.notificationPayload(from: remoteNotification)
             print("🚀 [AppDelegate] launch parsed type:", type)
-            
-            var data: [String: Any] = [:]
-            if let d = userInfo["data"] as? [String: Any] {
-                data = d
-            } else if let d = userInfo["data"] as? [String: String] {
-                data = d
-            } else if let jsonString = userInfo["data"] as? String {
-                if let jsonData = jsonString.data(using: .utf8),
-                   let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                    data = obj
-                }
-            }
-            
-            if data.isEmpty {
-                if let followerId = userInfo["follower_id"] as? String {
-                    data["follower_id"] = followerId
-                }
-                if let workoutId = userInfo["workout_id"] as? String {
-                    data["workout_id"] = workoutId
-                }
-                if let ownerId = userInfo["owner_id"] as? String {
-                    data["owner_id"] = ownerId
-                }
-                if let segmentId = userInfo["segment_id"] as? String {
-                    data["segment_id"] = segmentId
-                }
-            }
-            
             print("🚀 [AppDelegate] launch parsed data:", data)
-            
+
             Task { @MainActor in
                 print("🚀 [AppDelegate] setting pendingNotification from launchOptions")
                 AppState.shared.handlePushNotificationTap(
@@ -133,52 +149,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
         print("🔔 [AppDelegate] didReceive userInfo:", userInfo)
-        
-        let notificationId: Int?
-        if let idInt = userInfo["notification_id"] as? Int {
-            notificationId = idInt
-        } else if let idStr = userInfo["notification_id"] as? String,
-                  let idParsed = Int(idStr) {
-            notificationId = idParsed
-        } else {
-            notificationId = nil
-        }
-        
-        var type = userInfo["type"] as? String ?? ""
-        if type.isEmpty, let t = userInfo["notification_type"] as? String {
-            type = t
-        }
+        let (notificationId, type, data) = Self.notificationPayload(from: userInfo)
         print("🔔 [AppDelegate] parsed type:", type)
-        
-        var data: [String: Any] = [:]
-        if let d = userInfo["data"] as? [String: Any] {
-            data = d
-        } else if let d = userInfo["data"] as? [String: String] {
-            data = d
-        } else if let jsonString = userInfo["data"] as? String {
-            if let jsonData = jsonString.data(using: .utf8),
-               let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                data = obj
-            }
-        }
-        
-        if data.isEmpty {
-            if let followerId = userInfo["follower_id"] as? String {
-                data["follower_id"] = followerId
-            }
-            if let workoutId = userInfo["workout_id"] as? String {
-                data["workout_id"] = workoutId
-            }
-            if let ownerId = userInfo["owner_id"] as? String {
-                data["owner_id"] = ownerId
-            }
-            if let segmentId = userInfo["segment_id"] as? String {
-                data["segment_id"] = segmentId
-            }
-        }
-        
         print("🔔 [AppDelegate] parsed data:", data)
-        
+
         Task { @MainActor in
             print("🔔 [AppDelegate] calling handlePushNotificationTap")
             AppState.shared.handlePushNotificationTap(
@@ -187,7 +161,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 data: data
             )
         }
-        
+
         completionHandler()
     }
 }

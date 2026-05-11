@@ -4,8 +4,6 @@ import MapKit
 import CoreLocation
 import UIKit
 
-// MARK: - GeoJSON LineString (paridad con CardioRouteGeoJSONParser en WorkoutDetailView)
-
 private enum SegmentLineGeoJSON {
     private struct LineStringBody: Decodable {
         let type: String
@@ -28,7 +26,6 @@ private enum SegmentLineGeoJSON {
     }
 }
 
-/// Mapa compacto + pantalla completa con zoom (misma idea que `CardioRouteMapMini` en `WorkoutDetailView`).
 private struct ExpandablePolylineRouteMap: View {
     let coordinates: [CLLocationCoordinate2D]
     var fullscreenNavigationTitle: String = "Segment"
@@ -109,26 +106,38 @@ private struct ExpandablePolylineRouteMap: View {
     }
 }
 
-// MARK: - Crear segmento desde cardio publicado
-
 struct CreateSegmentFromWorkoutSheet: View {
     let workoutId: Int
-    var routeCoordinates: [CLLocationCoordinate2D] = []
     var onCreated: (UUID) -> Void
-    /// Si el servidor detecta un segmento publicado casi idéntico, abrir ese detalle (p. ej. cerrar crear y mostrar el existente).
     var onOpenExistingSegment: ((UUID) -> Void)? = nil
     var onCancel: () -> Void
 
+    @State private var routeCoordinates: [CLLocationCoordinate2D]
     @State private var name: String = "Segment"
     @State private var startFraction: Double = 0
     @State private var endFraction: Double = 1
     @State private var busy = false
+    @State private var isOptimizingRoute = false
     @State private var error: String?
+    @State private var routeOptimizeBanner: String?
     @State private var mapCamera: MapCameraPosition = .automatic
-    /// Próximo toque en el mapa fija inicio o fin (vértice más cercano → fracción por longitud acumulada).
     @State private var mapPickPhase: MapPickPhase = .start
     @State private var duplicateSegmentAlertId: UUID?
     @State private var showExpandedPickMap = false
+
+    init(
+        workoutId: Int,
+        initialRouteCoordinates: [CLLocationCoordinate2D],
+        onCreated: @escaping (UUID) -> Void,
+        onOpenExistingSegment: ((UUID) -> Void)? = nil,
+        onCancel: @escaping () -> Void
+    ) {
+        self.workoutId = workoutId
+        self.onCreated = onCreated
+        self.onOpenExistingSegment = onOpenExistingSegment
+        self.onCancel = onCancel
+        _routeCoordinates = State(initialValue: initialRouteCoordinates)
+    }
 
     private enum MapPickPhase: Hashable {
         case start
@@ -144,8 +153,6 @@ struct CreateSegmentFromWorkoutSheet: View {
     }
 
     private var canUseRouteMap: Bool { routeCoordinates.count >= 2 }
-
-    /// Misma línea visual que `FormNoteTextField` / filas con fondo suave en el resto de la app.
     private var segmentFieldFill: Color { Color.primary.opacity(0.06) }
     private var segmentFieldStroke: Color { Color.primary.opacity(0.10) }
 
@@ -191,8 +198,15 @@ struct CreateSegmentFromWorkoutSheet: View {
                                 .stroke(segmentFieldStroke, lineWidth: 0.8)
                         )
                     } footer: {
-                        Text("Tap the blue route to snap start/end to the nearest point. Fractions follow route length (same as the server).")
-                            .font(.footnote)
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let routeOptimizeBanner {
+                                Text(routeOptimizeBanner)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("Tap the route, or drag the green (start) and red (end) pins to snap along the path. Fine tune sliders use the same length fractions as the server.")
+                                .font(.footnote)
+                        }
                     }
                     .listRowBackground(Color.clear)
                 }
@@ -235,13 +249,21 @@ struct CreateSegmentFromWorkoutSheet: View {
                     mapCamera = cameraForRoute(routeCoordinates)
                 }
             }
+            .task {
+                await optimizeDenseRouteIfNeeded()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { onCancel() }
+                        .disabled(busy)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Create") { Task { await create() } }
-                        .disabled(busy || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || startFraction >= endFraction)
+                        .disabled(
+                            busy || isOptimizingRoute
+                                || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || startFraction >= endFraction
+                        )
                 }
             }
             .alert("Similar segment already exists", isPresented: Binding(
@@ -260,13 +282,64 @@ struct CreateSegmentFromWorkoutSheet: View {
             } message: {
                 Text("This stretch is already covered by a published segment. Other athletes get matched automatically when they publish a compatible route.")
             }
+            .overlay {
+                if busy || isOptimizingRoute {
+                    ZStack {
+                        Color.black.opacity(0.45)
+                            .ignoresSafeArea()
+                        ProgressView(isOptimizingRoute ? "Optimizing route…" : "Creating segment…")
+                            .padding(24)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                    }
+                    .allowsHitTesting(true)
+                }
+            }
         }
         .gradientBG()
     }
 
+    private struct CardioRouteGeoJsonOnlyPatch: Encodable {
+        let route_geojson: String
+    }
+
+    private func optimizeDenseRouteIfNeeded() async {
+        let count = routeCoordinates.count
+        guard count > RouteLineStringDecimation.maxStoredCoordinates else { return }
+        await MainActor.run {
+            isOptimizingRoute = true
+            error = nil
+        }
+        let simplified = RouteLineStringDecimation.decimate(routeCoordinates)
+        guard let json = RouteLineStringDecimation.encodeGeoJSONLineString(simplified) else {
+            await MainActor.run { isOptimizingRoute = false }
+            return
+        }
+        do {
+            try await SupabaseManager.shared.client
+                .from("cardio_sessions")
+                .update(CardioRouteGeoJsonOnlyPatch(route_geojson: json))
+                .eq("workout_id", value: workoutId)
+                .execute()
+            await MainActor.run {
+                routeCoordinates = simplified
+                startFraction = 0
+                endFraction = 1
+                mapCamera = cameraForRoute(simplified)
+                routeOptimizeBanner = "Your stored route had \(count) GPS points; it was simplified so segment creation can finish in time."
+                isOptimizingRoute = false
+            }
+        } catch {
+            await MainActor.run {
+                isOptimizingRoute = false
+                self.error = (self.error.map { $0 + "\n" } ?? "")
+                    + "Could not simplify the stored route (\(error.localizedDescription)). Segment creation may still time out—try a shorter run or ask your admin to tune the database."
+            }
+        }
+    }
+
     @ViewBuilder
     private var mapPickHeader: some View {
-        Text(mapPickPhase == .start ? "Tap the map to set start" : "Tap the map to set end")
+        Text(mapPickPhase == .start ? "Tap the route or drag the green pin for start" : "Tap the route or drag the red pin for end")
             .font(.subheadline)
     }
 
@@ -304,6 +377,14 @@ struct CreateSegmentFromWorkoutSheet: View {
         }
     }
 
+    private func markerDragGesture(proxy: MapProxy, phase: MapPickPhase) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .global)
+            .onChanged { g in
+                guard let coord = proxy.convert(g.location, from: .global) else { return }
+                applyCoordinateForPhase(coord, phase: phase)
+            }
+    }
+
     private func segmentPickMap(compact: Bool) -> some View {
         MapReader { proxy in
             Group {
@@ -313,12 +394,14 @@ struct CreateSegmentFromWorkoutSheet: View {
                             .stroke(.blue.opacity(0.88), lineWidth: 4)
                         if let c = markerCoord(forFraction: startFraction) {
                             Annotation("Start", coordinate: c) {
-                                Circle().fill(.green).frame(width: 12, height: 12)
+                                segmentMarkerHandle(color: .green)
+                                    .highPriorityGesture(markerDragGesture(proxy: proxy, phase: .start))
                             }
                         }
                         if let c = markerCoord(forFraction: endFraction) {
                             Annotation("End", coordinate: c) {
-                                Circle().fill(.red).frame(width: 12, height: 12)
+                                segmentMarkerHandle(color: .red)
+                                    .highPriorityGesture(markerDragGesture(proxy: proxy, phase: .end))
                             }
                         }
                     }
@@ -335,12 +418,14 @@ struct CreateSegmentFromWorkoutSheet: View {
                             .stroke(.blue.opacity(0.88), lineWidth: 4)
                         if let c = markerCoord(forFraction: startFraction) {
                             Annotation("Start", coordinate: c) {
-                                Circle().fill(.green).frame(width: 12, height: 12)
+                                segmentMarkerHandle(color: .green)
+                                    .highPriorityGesture(markerDragGesture(proxy: proxy, phase: .start))
                             }
                         }
                         if let c = markerCoord(forFraction: endFraction) {
                             Annotation("End", coordinate: c) {
-                                Circle().fill(.red).frame(width: 12, height: 12)
+                                segmentMarkerHandle(color: .red)
+                                    .highPriorityGesture(markerDragGesture(proxy: proxy, phase: .end))
                             }
                         }
                     }
@@ -357,16 +442,28 @@ struct CreateSegmentFromWorkoutSheet: View {
 
     private func handleSegmentMapTap(proxy: MapProxy, point: CGPoint) {
         guard let coord = proxy.convert(point, from: .local) else { return }
+        applyCoordinateForPhase(coord, phase: mapPickPhase)
+    }
+
+    private func applyCoordinateForPhase(_ coord: CLLocationCoordinate2D, phase: MapPickPhase) {
         let idx = Self.nearestVertexIndex(coords: routeCoordinates, tap: coord)
         let f = lengthFraction(atVertexIndex: idx, coords: routeCoordinates)
-        switch mapPickPhase {
+        switch phase {
         case .start:
-            startFraction = min(f, 0.99)
-            if endFraction <= startFraction { endFraction = min(1, startFraction + 0.02) }
+            startFraction = min(1, max(0, f))
         case .end:
-            endFraction = max(f, 0.01)
-            if endFraction <= startFraction { startFraction = max(0, endFraction - 0.02) }
+            endFraction = min(1, max(0, f))
         }
+    }
+
+    @ViewBuilder
+    private func segmentMarkerHandle(color: Color) -> some View {
+        Circle()
+            .fill(color)
+            .frame(width: 14, height: 14)
+            .overlay(Circle().stroke(Color.white, lineWidth: 2))
+            .padding(12)
+            .contentShape(Circle())
     }
 
     private func markerCoord(forFraction frac: Double) -> CLLocationCoordinate2D? {
@@ -409,7 +506,6 @@ struct CreateSegmentFromWorkoutSheet: View {
         return best
     }
 
-    /// Fracción 0…1 de longitud acumulada hasta el vértice `i` (alineado con `ST_LineSubstring` sobre la misma polilínea).
     private func lengthFraction(atVertexIndex i: Int, coords: [CLLocationCoordinate2D]) -> Double {
         guard coords.count >= 2 else { return 0 }
         let j = min(max(i, 0), coords.count - 1)
@@ -516,7 +612,6 @@ struct CreateSegmentFromWorkoutSheet: View {
     private static let friendlyDuplicateSegmentMessage =
         "This part of the route already matches a published segment. Others get matched automatically when they publish a compatible run—you do not need to create it again."
 
-    /// PostgREST puede exponer `message`, `hint` o un texto agregado en `localizedDescription`; el `HINT` del servidor lleva el UUID del segmento existente.
     private static func errorBlob(from error: Error) -> String {
         var parts: [String] = []
         if let pe = error as? PostgrestError {
@@ -547,7 +642,10 @@ struct CreateSegmentFromWorkoutSheet: View {
     }
 }
 
-// MARK: - Detalle + leaderboard
+private struct ShareSegmentChatToken: Identifiable {
+    let id = UUID()
+    let snapshot: SegmentShareSnapshot
+}
 
 struct SegmentDetailView: View {
     let segmentId: UUID
@@ -561,8 +659,8 @@ struct SegmentDetailView: View {
         let name: String
         let buffer_m: Double
         let status: String
-        let geojson: String
-        let created_by: UUID
+        let geojson: String?
+        let created_by: UUID?
         let foreign_efforts_count: Int64
         let segment_length_m: Double?
         let center_lat: Double?
@@ -588,6 +686,33 @@ struct SegmentDetailView: View {
         let matched_at: Date?
         let effort_at: Date?
         let confidence: Double?
+        let route_coverage: Double?
+        let is_source_workout: Bool?
+
+        static func leaderboardDisplayRows(from rows: [LeaderRow]) -> [LeaderRow] {
+            let sorted = rows.sorted { $0.elapsed_sec < $1.elapsed_sec }
+            return sorted.enumerated().map { i, r in
+                LeaderRow(
+                    rank: i + 1,
+                    user_id: r.user_id,
+                    username: r.username,
+                    avatar_url: r.avatar_url,
+                    elapsed_sec: r.elapsed_sec,
+                    workout_id: r.workout_id,
+                    matched_at: r.matched_at,
+                    effort_at: r.effort_at,
+                    confidence: r.confidence,
+                    route_coverage: r.route_coverage,
+                    is_source_workout: r.is_source_workout
+                )
+            }
+        }
+
+        var displayOverlapFraction: Double? {
+            if let rc = route_coverage, rc > 0, rc <= 1 { return rc }
+            if let c = confidence, c > 0, c <= 1 { return c }
+            return nil
+        }
     }
 
     private static let effortDayFormatter: DateFormatter = {
@@ -617,9 +742,17 @@ struct SegmentDetailView: View {
     @State private var ownerBusy = false
     @State private var ownerError: String?
     @State private var showDeleteConfirm = false
+    @State private var shareSegmentToken: ShareSegmentChatToken?
 
     private var coords: [CLLocationCoordinate2D] {
         SegmentLineGeoJSON.coordinates(from: detail?.geojson)
+    }
+
+    private var displayViewerPersonalBest: (elapsedSec: Int, workoutId: Int)? {
+        guard let uid = sessionUserId else { return nil }
+        let mine = leaders.filter { $0.user_id == uid }
+        return mine.min(by: { $0.elapsed_sec < $1.elapsed_sec })
+            .map { ($0.elapsed_sec, $0.workout_id) }
     }
 
     private func mapsCenterCoordinate() -> CLLocationCoordinate2D? {
@@ -663,6 +796,19 @@ struct SegmentDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
+                    if detail != nil {
+                        Button {
+                            Task { await beginShareSegment() }
+                        } label: {
+                            Image(systemName: "paperplane")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Color.primary)
+                                .frame(width: 36, height: 36)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Share segment in chat")
+                    }
                     if let d = detail, let me = sessionUserId, d.created_by == me {
                         Menu {
                             Button("Rename") {
@@ -696,6 +842,11 @@ struct SegmentDetailView: View {
                 sessionUserId = s.user.id
             }
             await load()
+        }
+        .sheet(item: $shareSegmentToken) { token in
+            ShareSegmentToChatSheet(snapshot: token.snapshot) {}
+                .environmentObject(app)
+                .gradientBG()
         }
         .sheet(isPresented: $showRenameSheet) {
             NavigationStack {
@@ -746,6 +897,7 @@ struct SegmentDetailView: View {
         } message: {
             Text("This cannot be undone. You can delete only while no other athlete has a matched effort on this segment.")
         }
+        .gradientBG()
     }
 
     @ViewBuilder
@@ -770,14 +922,14 @@ struct SegmentDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(mapsCenterCoordinate() == nil)
-                    if let best = d.viewer_best_elapsed_sec, best > 0 {
+                    if let pb = displayViewerPersonalBest, pb.elapsedSec > 0 {
                         HStack(spacing: 8) {
                             Image(systemName: "star.fill")
                                 .foregroundStyle(.yellow)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Your best on this segment")
                                     .font(.caption.weight(.semibold))
-                                Text(Self.formatSegmentElapsed(best))
+                                Text(Self.formatSegmentElapsed(pb.elapsedSec))
                                     .font(.subheadline.monospacedDigit())
                             }
                             Spacer(minLength: 0)
@@ -786,7 +938,7 @@ struct SegmentDetailView: View {
                         .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
                     }
                     Text(
-                        "Times are estimates from route coverage until per-point timestamps are available for matching."
+                        "Times are estimates along the route until per-point timestamps are available for matching."
                     )
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -796,7 +948,7 @@ struct SegmentDetailView: View {
                     Text("No efforts yet").font(.subheadline).foregroundStyle(.secondary)
                 } else {
                     ForEach(leaders) { row in
-                        let isYourBestEffort = detail?.viewer_best_workout_id == row.workout_id
+                        let isYourBestEffort = displayViewerPersonalBest?.workoutId == row.workout_id
                         NavigationLink {
                             WorkoutDetailView(workoutId: row.workout_id, ownerId: row.user_id)
                                 .environmentObject(app)
@@ -818,10 +970,15 @@ struct SegmentDetailView: View {
                                             .font(.caption2)
                                             .foregroundStyle(.tertiary)
                                     }
-                                    if let c = row.confidence, c > 0, c <= 1 {
-                                        Text("Match quality ~\(Int((c * 100).rounded()))%")
+                                    if let frac = row.displayOverlapFraction {
+                                        Text("Segment overlap ~\(Int((frac * 100).rounded()))%")
                                             .font(.caption2)
                                             .foregroundStyle(.tertiary)
+                                    }
+                                    if row.is_source_workout == true {
+                                        Text("Defined from this workout’s route")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
                                 Spacer(minLength: 8)
@@ -868,11 +1025,11 @@ struct SegmentDetailView: View {
                 let pct = Int((avg * 100).rounded())
                 if let lo = d.confidence_min, let hi = d.confidence_max,
                    lo > 0, hi > 0, lo <= 1, hi <= 1, hi > lo {
-                    Text("Typical match quality ~\(pct)% (range \(Int((lo * 100).rounded()))–\(Int((hi * 100).rounded()))%)")
+                    Text("Typical segment overlap ~\(pct)% (range \(Int((lo * 100).rounded()))–\(Int((hi * 100).rounded()))%)")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Typical match quality ~\(pct)%")
+                    Text("Typical segment overlap ~\(pct)%")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -937,6 +1094,27 @@ struct SegmentDetailView: View {
         }
     }
 
+    @MainActor
+    private func beginShareSegment() async {
+        guard let d = detail else { return }
+        var prof: ChatProfile?
+        if let cid = d.created_by {
+            prof = try? await ChatService.fetchProfile(userId: cid)
+        }
+        let snap = SegmentShareSnapshot(
+            v: 1,
+            type: "segment_share",
+            segment_id: d.id.uuidString,
+            name: d.name,
+            segment_length_m: d.segment_length_m,
+            leaderboard_effort_count: d.leaderboard_effort_count,
+            owner_user_id: d.created_by,
+            owner_username: prof?.username,
+            owner_avatar_url: prof?.avatar_url
+        )
+        shareSegmentToken = ShareSegmentChatToken(snapshot: snap)
+    }
+
     private func load() async {
         await MainActor.run { loading = true; error = nil }
         do {
@@ -954,10 +1132,11 @@ struct SegmentDetailView: View {
                 .rpc("get_segment_leaderboard_v1", params: p2)
                 .execute()
             let lRows = try JSONDecoder.supabase().decode([LeaderRow].self, from: lRes.data)
+            let displayLeaders = LeaderRow.leaderboardDisplayRows(from: lRows)
 
             await MainActor.run {
                 detail = dRows.first
-                leaders = lRows
+                leaders = displayLeaders
                 loading = false
             }
         } catch {
