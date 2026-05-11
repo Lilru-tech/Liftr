@@ -98,7 +98,8 @@ final class HealthKitCardioImportService {
                     routeLocations = try await fetchRouteLocations(for: w)
                     let coords = routeLocations.map(\.coordinate)
                     if coords.count >= 2 {
-                        routeGeoJSON = Self.geoJSONLineString(from: coords)
+                        let trimmed = RouteLineStringDecimation.decimate(coords)
+                        routeGeoJSON = Self.geoJSONLineString(from: trimmed)
                         if distanceKm < 0.001 {
                             let m = Self.polylineLengthMeters(coords)
                             if m > 0 { distanceKm = m / 1000.0 }

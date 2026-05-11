@@ -286,8 +286,8 @@ struct ProfileView: View {
                 Text("Calendar").tag(Tab.calendar)
                 Text("PRs").tag(Tab.prs)
                 Text("Progress").tag(Tab.progress)
+                Text("Segments").tag(Tab.segments)
                 if isOwnProfile {
-                    Text("Segments").tag(Tab.segments)
                     Text("Settings").tag(Tab.settings)
                 }
             }
@@ -352,7 +352,7 @@ struct ProfileView: View {
                     .padding()
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             } else if mySegments.isEmpty {
-                Text("You have not created any segments yet.")
+                Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .padding()
@@ -361,7 +361,6 @@ struct ProfileView: View {
                 List(mySegments) { row in
                     NavigationLink {
                         SegmentDetailView(segmentId: row.id, onClose: nil)
-                            .gradientBG()
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(row.name)
@@ -386,23 +385,38 @@ struct ProfileView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .task(id: tab) {
-            guard isOwnProfile, tab == .segments else { return }
-            await loadMySegments()
+        .task(id: "\(tab.rawValue)-\(viewingUserId?.uuidString ?? "none")") {
+            guard tab == .segments else { return }
+            await loadProfileSegments()
         }
     }
 
-    private func loadMySegments() async {
+    private func loadProfileSegments() async {
         await MainActor.run {
             mySegmentsLoading = true
             mySegmentsError = nil
         }
-        struct Params: Encodable { let p_limit: Int }
         do {
-            let res = try await SupabaseManager.shared.client
-                .rpc("list_my_segments_v1", params: Params(p_limit: 100))
-                .execute()
-            let rows = try JSONDecoder.supabase().decode([MySegmentListRow].self, from: res.data)
+            let rows: [MySegmentListRow]
+            if isOwnProfile {
+                struct Params: Encodable { let p_limit: Int }
+                let res = try await SupabaseManager.shared.client
+                    .rpc("list_my_segments_v1", params: Params(p_limit: 100))
+                    .execute()
+                rows = try JSONDecoder.supabase().decode([MySegmentListRow].self, from: res.data)
+            } else if let uid = viewingUserId {
+                let res = try await SupabaseManager.shared.client
+                    .from("segments")
+                    .select("id, name, buffer_m, status, created_at")
+                    .eq("created_by", value: uid.uuidString)
+                    .eq("status", value: "published")
+                    .order("created_at", ascending: false)
+                    .limit(100)
+                    .execute()
+                rows = try JSONDecoder.supabase().decode([MySegmentListRow].self, from: res.data)
+            } else {
+                rows = []
+            }
             await MainActor.run {
                 mySegments = rows
                 mySegmentsLoading = false
@@ -1838,6 +1852,37 @@ struct ProfileView: View {
                             .minimumScaleFactor(0.7)
                     }
                     .padding(12)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+            }
+            Section("Notifications") {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+                    NavigationLink {
+                        NotificationSettingsView()
+                            .gradientBG()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "bell")
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Push notifications")
+                                    .font(.body.weight(.semibold))
+                                Text("Control which notifications are sent to your phone.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(12)
+                    }
+                    .buttonStyle(.plain)
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)

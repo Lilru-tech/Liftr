@@ -120,8 +120,15 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:storage-kt")
     implementation("io.github.jan-tennert.supabase:functions-kt")
-    // Obligatorio en Android: motor HTTP de Ktor; sin esto createSupabaseClient() suele lanzar y cerrar la app.
-    implementation("io.ktor:ktor-client-android:3.0.1")
+    implementation("io.github.jan-tennert.supabase:realtime-kt")
+    // Motor HTTP de Ktor para Android.
+    //
+    // OJO: NO usar `ktor-client-android` aquí. Su engine (HttpURLConnection) no
+    // soporta WebSockets, así que Supabase Realtime falla con
+    // `Engine doesn't support WebSocketCapability` y los broadcasts no llegan
+    // hasta que se reabre el canal manualmente. Con OkHttp se obtiene soporte
+    // de WebSocket nativo y mensajes en tiempo real funcionando.
+    implementation("io.ktor:ktor-client-okhttp:3.0.1")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")

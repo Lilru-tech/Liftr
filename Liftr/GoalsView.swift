@@ -18,7 +18,6 @@ struct GoalsView: View {
     private var effectiveUserId: UUID? { userId ?? app.userId }
     private var isOwnProfile: Bool { effectiveUserId != nil && effectiveUserId == app.userId }
     private var currentWeekStart: Date { GoalsManager.currentWeekStart() }
-    /// Week ended or target met (same as goal rows “Expired / Completed”).
     private var finishedGoalsUI: [GoalRowUI] { goals.filter { isFinished($0) } }
     private var activeGoals: [GoalRowUI] { goals.filter { !isFinished($0) } }
     private var activeGoalIds: [Int64] { activeGoals.map(\.id) }
@@ -425,7 +424,6 @@ struct GoalsView: View {
         return .red
     }
 
-    /// Active goals: tint by progress %. Finished week without completion (history / expired): always red.
     private func progressBarTint(for g: GoalRowUI) -> Color {
         if g.isCompleted { return progressColor(for: g.progressRatio, isCompleted: true) }
         if isFinished(g), !g.isCompleted { return .red }
@@ -621,9 +619,7 @@ private enum SummaryScope: String, CaseIterable, Identifiable {
 
 struct GoalStats: Decodable {
     let total_goals: Int
-    /// Count of goals with `is_completed` (RPC name kept for compatibility).
     let finished_goals: Int
-    /// Goals whose week ended without completion (`missed_goals` in RPC). Nil if older API.
     let missed_goals: Int?
     let finished_percent: Double
     let avg_progress_percent: Double

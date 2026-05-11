@@ -15,6 +15,8 @@ import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddWorkoutIntensity
 import com.lilru.liftr.ui.add.StrengthExerciseDraft
 import com.lilru.liftr.ui.add.StrengthSetDraft
+import com.lilru.liftr.ui.add.draftSetToStrengthPayload
+import com.lilru.liftr.ui.add.weightSegmentsToJsonArray
 import com.lilru.liftr.ui.add.SportStatsPayloadBuilder
 import com.lilru.liftr.ui.add.duplicate.SportEditEnrichment
 import com.lilru.liftr.ui.add.duplicate.loadSportEditEnrichment
@@ -288,14 +290,8 @@ class WorkoutDetailViewModel(
     private val _uiState = MutableStateFlow(WorkoutDetailUiState())
     val uiState: StateFlow<WorkoutDetailUiState> = _uiState.asStateFlow()
 
-    private fun strengthSetDraftHasData(s: StrengthSetDraft): Boolean {
-        val r = s.repsText.trim().toIntOrNull()
-        if (r != null && r > 0) return true
-        if (s.weightText.isNotBlank()) return true
-        if (s.rpeText.isNotBlank()) return true
-        if (s.restSecText.trim().toIntOrNull() != null) return true
-        return false
-    }
+    private fun strengthSetDraftHasData(s: StrengthSetDraft): Boolean =
+        draftSetToStrengthPayload(s) != null
 
     init {
         refresh()
@@ -807,18 +803,17 @@ class WorkoutDetailViewModel(
                 for (ex in exercises) {
                     val weId = ex.workoutExerciseId!!
                     for (st in ex.sets) {
-                        if (!strengthSetDraftHasData(st)) continue
-                        val reps = st.repsText.trim().toIntOrNull()
-                        val wKg = st.weightText.trim().replace(',', '.').toDoubleOrNull()
-                        val rpe = st.rpeText.trim().replace(',', '.').toDoubleOrNull()
-                        val rest = st.restSecText.trim().toIntOrNull()
+                        val p = draftSetToStrengthPayload(st) ?: continue
                         val row = buildJsonObject {
                             put("workout_exercise_id", weId)
-                            put("set_number", st.setNumber.coerceIn(1, 99))
-                            if (reps != null && reps > 0) put("reps", reps)
-                            if (wKg != null) put("weight_kg", wKg)
-                            if (rpe != null) put("rpe", rpe)
-                            if (rest != null) put("rest_sec", rest)
+                            put("set_number", p.setNumber.coerceIn(1, 99))
+                            if (p.reps != null) put("reps", p.reps)
+                            if (p.weightKg != null) put("weight_kg", p.weightKg)
+                            if (p.rpe != null) put("rpe", p.rpe)
+                            if (p.restSec != null) put("rest_sec", p.restSec)
+                            p.weightSegments?.takeIf { it.size >= 2 }?.let { segs ->
+                                put("weight_segments", weightSegmentsToJsonArray(segs))
+                            }
                         }
                         supabase.from(BackendContracts.Tables.EXERCISE_SETS).insert(row) { }
                     }

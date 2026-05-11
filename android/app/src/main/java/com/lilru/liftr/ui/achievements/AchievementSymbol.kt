@@ -98,6 +98,8 @@ fun prettySubtypeFromCode(code: String, fallbackCategory: String): String {
         c.startsWith("racket_") -> "Racket"
         c.startsWith("ski_") -> "Ski"
         c.startsWith("challenge_") -> "Challenges"
+        c.startsWith("strength_drop_") -> "Drop sets"
+        c.startsWith("strength_superset_") -> "Super series"
         else -> fallbackCategory.replaceFirstChar { it.titlecase() }
     }
 }

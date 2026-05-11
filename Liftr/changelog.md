@@ -6,6 +6,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-05-11
+
+### Added
+- **Chat (v1)** — Chat with people you **follow** (follow visibility must be enabled). Share **workouts**, **routines**, **achievements**, and **segments**. Chat is accessible from **Active workout**.
+- **Active strength — Supersets** — Build and perform **supersets / super series** in Strength workouts.
+- **Active strength — Drop sets** — Log **drop sets** in Strength workouts.
+- **Segments** — Segments are now visible on **other users’ profiles**.
+- **Hyrox routines** — Added routines support for **Hyrox**.
+- **Hyrox — Clear all** — Added **Clear all** option to reset the current Hyrox workout builder.
+- **Cardio routes** — Create a route by **dragging on the map**.
+- **Routines — Review & save changes** — When a workout matches a saved routine’s exercises but has different data, you can **review differences** and save them back into the routine.
+- **Routines — Editing** — You can now **edit routines**.
+- **Import** — Added a new **month pill** selector; selected pill is now **highlighted**.
+- **Notifications** — Users can now **enable/disable notifications** from inside the app.
+- **Routines** — Users can open a routine and see its **details** by tapping it.
+
+### Changed
+- **Workouts publishing** — Workouts are now **published automatically** when the user **finishes** in Active workout mode.
+- **Active strength — Pause** — Strength workouts can now be **paused** in Active workout mode.
+- **Active strength — Rest bubble clock** — Resting time on bubbles is now shown in a **clock-style** format.
+- **Active strength — Current bubble emphasis** — The **current** bubble exercise is now slightly **bigger** for clearer focus.
+- **Active strength — Rest end animation** — When the rest timer ends, the bubble **pulses** (bigger/smaller) **twice**.
+- **Active strength — Set editing UX** — Updated UX/UI for editing **reps**, **kg**, and **rest time** during Active Strength Workout.
+- **Active strength — RPE editing** — RPE can now be edited during Active Strength Workout.
+
+### Fixed
+- **Segments** — Fixed how segments were **coinciding**.
+- **Segments** — Fixed a **timeout** issue during segment creation.
+- **Segments** — Fixed an issue where segments appeared when the **coincidence threshold** was too low.
+- **Database** — Fixed multiple **database errors** affecting stability.
+- **Active strength** — Fixed an issue where the rest time was applied to the **next exercise** when resting in the previous one and tapping **Next exercise**.
+
 ## [1.11.0] - 2026-05-03
 
 ### Added
@@ -38,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.12.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.12.0
 [1.11.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.11.0
 
 ## [1.10.1] - 2026-04-30

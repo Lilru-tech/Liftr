@@ -215,7 +215,7 @@ struct EditWorkoutMetaSheet: View {
     @State private var didEditCardioDuration = false
     @State private var didEditSportDuration  = false
     
-    struct SEditableSet: Identifiable, Hashable {
+    struct SEditableSet: Identifiable {
         let id = UUID()
         var setId: Int?
         var setNumber: Int
@@ -223,6 +223,7 @@ struct EditWorkoutMetaSheet: View {
         var weightKg: String = ""
         var rpe: String = ""
         var restSec: Int?
+        var segments: [StrengthEditorSegment] = []
     }
     
     struct SEditableExercise: Identifiable {
@@ -709,6 +710,7 @@ struct EditWorkoutMetaSheet: View {
                                 weightKg: $s_items[i].sets[s].weightKg,
                                 rpe: $s_items[i].sets[s].rpe,
                                 restSec: $s_items[i].sets[s].restSec,
+                                segments: $s_items[i].sets[s].segments,
                                 showDelete: s_items[i].sets.count > 1,
                                 onDelete: { s_items[i].sets.remove(at: s) }
                             )
@@ -719,7 +721,7 @@ struct EditWorkoutMetaSheet: View {
                             HStack {
                                 Button {
                                     s_items[i].sets.append(
-                                        SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)
+                                        SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])
                                     )
                                 } label: { Label("Add set", systemImage: "plus.circle") }
                                     .buttonStyle(.borderless)
@@ -1325,9 +1327,10 @@ struct EditWorkoutMetaSheet: View {
                 if !exIds.isEmpty {
                     let sRes = try await SupabaseManager.shared.client
                         .from("exercise_sets")
-                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec")
+                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
                         .in("workout_exercise_id", values: exIds)
                         .order("set_number", ascending: true)
+                        .order("id", ascending: true)
                         .execute()
                     
                     struct SetWire: Decodable {
@@ -1338,16 +1341,19 @@ struct EditWorkoutMetaSheet: View {
                         let weight_kg: Decimal?
                         let rpe: Decimal?
                         let rest_sec: Int?
+                        let weight_segments: [StrengthWeightSegWire]?
                     }
                     let sWire = try decoder.decode([SetWire].self, from: sRes.data)
                     for s in sWire {
+                        let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                         let editable = SEditableSet(
                             setId: s.id,
                             setNumber: s.set_number,
                             reps: s.reps,
                             weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                             rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
-                            restSec: s.rest_sec
+                            restSec: s.rest_sec,
+                            segments: segDraft
                         )
                         setsByEx[s.workout_exercise_id, default: []].append(editable)
                     }
@@ -1360,7 +1366,7 @@ struct EditWorkoutMetaSheet: View {
                         name: ex.exercises?.name ?? "Exercise",
                         alias: ex.custom_name ?? "",
                         notes: ex.notes ?? "",
-                        sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]]
+                        sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]]
                     )
                 }
                 await MainActor.run { s_items = mapped }
@@ -1539,23 +1545,48 @@ struct EditWorkoutMetaSheet: View {
                     let weight_kg: Double?
                     let rpe: Double?
                     let rest_sec: Int?
+                    let weight_segments: [StrengthWeightSegWire]?
                 }
                 let payload: [InsertSet] = s_items.flatMap { ex in
                     ex.sets
                         .filter { s in
-                            s.reps != nil ||
-                            !s.weightKg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                            !s.rpe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                            s.restSec != nil
+                            if s.segments.count >= 2 {
+                                return s.segments.allSatisfy { seg in
+                                    guard let r = seg.reps, r > 0 else { return false }
+                                    let t = seg.weightKg.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    return Double(t) != nil
+                                }
+                            }
+                            return s.reps != nil ||
+                                !s.weightKg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                !s.rpe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                                s.restSec != nil
                         }
-                        .map { s in
-                            InsertSet(
+                        .compactMap { s -> InsertSet? in
+                            let ws: [StrengthWeightSegWire]? = {
+                                guard s.segments.count >= 2 else { return nil }
+                                var out: [StrengthWeightSegWire] = []
+                                for seg in s.segments {
+                                    guard let r = seg.reps, r > 0 else { return nil }
+                                    let t = seg.weightKg.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard let w = Double(t) else { return nil }
+                                    out.append(StrengthWeightSegWire(reps: r, weight_kg: w))
+                                }
+                                return out.count >= 2 ? out : nil
+                            }()
+                            let firstRep = ws?.first?.reps ?? s.reps
+                            let firstKg: Double? = {
+                                if let w = ws?.first { return w.weight_kg }
+                                return s.weightKg.asDouble
+                            }()
+                            return InsertSet(
                                 workout_exercise_id: ex.workoutExerciseId,
                                 set_number: max(1, s.setNumber),
-                                reps: s.reps,
-                                weight_kg: s.weightKg.asDouble,
+                                reps: firstRep,
+                                weight_kg: firstKg,
                                 rpe: s.rpe.asDouble,
-                                rest_sec: s.restSec
+                                rest_sec: s.restSec,
+                                weight_segments: ws
                             )
                         }
                 }
@@ -1647,7 +1678,7 @@ struct EditWorkoutMetaSheet: View {
                         name: ex.name,
                         alias: "",
                         notes: "",
-                        sets: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil)]
+                        sets: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]
                     )
                 )
             }

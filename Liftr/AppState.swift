@@ -19,6 +19,7 @@ final class AppState: ObservableObject {
         case competitionDetail(competitionId: Int)
         case competitionReviews
         case challengeWeekly(instanceId: UUID)
+        case directMessage(conversationId: Int64, senderUserId: UUID?)
     }
     
     @Published var notificationDestination: NotificationDestination = .none
@@ -371,7 +372,24 @@ final class AppState: ObservableObject {
             } else {
                 notificationDestination = .none
             }
-            
+
+        case "dm_message":
+            let convoId: Int64?
+            if let s = data["conversation_id"] as? String { convoId = Int64(s) }
+            else if let n = data["conversation_id"] as? NSNumber { convoId = n.int64Value }
+            else if let i = data["conversation_id"] as? Int { convoId = Int64(i) }
+            else if let i = data["conversation_id"] as? Int64 { convoId = i }
+            else { convoId = nil }
+
+            let sender: UUID?
+            if let raw = data["sender_id"] as? String { sender = UUID(uuidString: raw) } else { sender = nil }
+
+            if let convoId {
+                notificationDestination = .directMessage(conversationId: convoId, senderUserId: sender)
+            } else {
+                notificationDestination = .none
+            }
+
         default:
             notificationDestination = .none
         }

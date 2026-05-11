@@ -6,6 +6,7 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.storage.Storage
 import io.github.jan.supabase.SupabaseClient
 
@@ -38,6 +39,7 @@ object LiftrSupabase {
                 install(Storage) { }
                 install(Auth) { }
                 install(Functions) { }
+                install(Realtime) { }
             }
         }.onSuccess { c ->
             client = c

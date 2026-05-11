@@ -50,11 +50,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.lilru.liftr.R
 import com.lilru.liftr.cardio.CardioRouteGeoJson
+import com.lilru.liftr.data.ChatRepository
+import com.lilru.liftr.ui.chat.SegmentShareSnapshot
+import com.lilru.liftr.ui.chat.ShareSegmentToChatSheetContent
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.home.workoutDetailScreenGradientModifier
@@ -95,11 +102,16 @@ private data class SegmentDetailUi(
 
 private data class SegmentLeaderUi(
     val rank: Int,
+    /** UUID del atleta (mismo formato que `auth`); para filtrar “tu mejor” en cliente. */
+    val userId: String,
     val username: String,
     val elapsedSec: Int,
     val workoutId: Int,
     val effortAtIso: String?,
-    val confidence: Double?
+    val confidence: Double?,
+    /** Fracción 0–1 del eje del segmento cubierta por la ruta (RPC v2). */
+    val routeCoverage: Double?,
+    val isSourceWorkout: Boolean?
 )
 
 private fun formatSegmentElapsedSec(sec: Int): String {
@@ -154,6 +166,8 @@ fun SegmentDetailScreen(
     var reloadTick by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val meId = supabase.auth.currentUserOrNull()?.id
+    val chatRepo = remember { ChatRepository(supabase) }
+    var shareSegmentSnapshot by remember { mutableStateOf<SegmentShareSnapshot?>(null) }
 
     LaunchedEffect(segmentId, reloadTick) {
         loading = true
@@ -216,17 +230,26 @@ fun SegmentDetailScreen(
                     add(
                         SegmentLeaderUi(
                             rank = r.optInt("rank", i + 1),
+                            userId = r.optString("user_id", "").trim(),
                             username = r.optNullableString("username")
                                 ?: r.optString("user_id").take(8) + "…",
                             elapsedSec = r.optInt("elapsed_sec", 0),
                             workoutId = r.optInt("workout_id", 0),
                             effortAtIso = r.optNullableString("effort_at"),
-                            confidence = r.optNullableDouble("confidence")
+                            confidence = r.optNullableDouble("confidence"),
+                            routeCoverage = r.optNullableDouble("route_coverage"),
+                            isSourceWorkout = if (r.has("is_source_workout") && !r.isNull("is_source_workout")) {
+                                r.optBoolean("is_source_workout", false)
+                            } else {
+                                null
+                            }
                         )
                     )
                 }
             }
             leaders = rows
+                .sortedBy { it.elapsedSec }
+                .mapIndexed { idx, r -> r.copy(rank = idx + 1) }
         }.onFailure { e ->
             error = e.message ?: "Error"
             detail = null
@@ -249,6 +272,32 @@ fun SegmentDetailScreen(
                     }
                 },
                 actions = {
+                    if (detail != null) {
+                        IconButton(
+                            onClick = {
+                                val d = detail!!
+                                scope.launch {
+                                    val prof = d.createdBy?.let { cb ->
+                                        runCatching { chatRepo.fetchProfile(cb) }.getOrNull()
+                                    }
+                                    shareSegmentSnapshot = SegmentShareSnapshot(
+                                        segmentId = segmentId.toString(),
+                                        name = d.name,
+                                        segmentLengthM = d.segmentLengthM,
+                                        leaderboardEffortCount = d.leaderboardEffortCount,
+                                        ownerUserId = d.createdBy,
+                                        ownerUsername = prof?.username,
+                                        ownerAvatarUrl = prof?.avatarUrl
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Filled.Send,
+                                contentDescription = stringResource(R.string.segment_share_chat_a11y)
+                            )
+                        }
+                    }
                     val d = detail
                     if (d != null && meId != null && d.createdBy == meId) {
                         Box {
@@ -425,8 +474,15 @@ fun SegmentDetailScreen(
                             Text(stringResource(R.string.segment_open_maps))
                         }
                     }
-                    val bestSec = d.viewerBestElapsedSec
-                    if (bestSec != null && bestSec > 0) {
+                    val viewerPb = remember(leaders, meId) {
+                        if (meId == null) {
+                            null
+                        } else {
+                            leaders.filter { it.userId.equals(meId, ignoreCase = true) }
+                                .minByOrNull { it.elapsedSec }
+                        }
+                    }
+                    if (viewerPb != null && viewerPb.elapsedSec > 0) {
                         Surface(
                             modifier = Modifier.fillMaxWidth(),
                             color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
@@ -439,7 +495,7 @@ fun SegmentDetailScreen(
                                     fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    formatSegmentElapsedSec(bestSec),
+                                    formatSegmentElapsedSec(viewerPb.elapsedSec),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Medium
                                 )
@@ -465,8 +521,7 @@ fun SegmentDetailScreen(
                     } else {
                         leaders.forEach { row ->
                             val dateLabel = formatEffortDateMedium(row.effortAtIso)
-                            val isViewerBest = d.viewerBestWorkoutId != null &&
-                                row.workoutId.toLong() == d.viewerBestWorkoutId
+                            val isViewerBest = viewerPb?.workoutId == row.workoutId
                             val rowModifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
@@ -513,15 +568,22 @@ fun SegmentDetailScreen(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
                                             )
                                         }
-                                        val c = row.confidence
-                                        if (c != null && c > 0 && c <= 1.0) {
+                                        val overlapFrac = row.routeCoverage ?: row.confidence
+                                        if (overlapFrac != null && overlapFrac > 0 && overlapFrac <= 1.0) {
                                             Text(
                                                 stringResource(
-                                                    R.string.segment_match_quality_row,
-                                                    kotlin.math.round(c * 100).toInt()
+                                                    R.string.segment_overlap_row,
+                                                    kotlin.math.round(overlapFrac * 100).toInt()
                                                 ),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
+                                            )
+                                        }
+                                        if (row.isSourceWorkout == true) {
+                                            Text(
+                                                stringResource(R.string.segment_defined_from_workout_row),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
@@ -625,6 +687,23 @@ fun SegmentDetailScreen(
                 }
             }
         )
+    }
+
+    if (shareSegmentSnapshot != null) {
+        val snap = shareSegmentSnapshot!!
+        Dialog(
+            onDismissRequest = { shareSegmentSnapshot = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Surface(Modifier.fillMaxSize()) {
+                ShareSegmentToChatSheetContent(
+                    supabase = supabase,
+                    snapshot = snap,
+                    onDone = { shareSegmentSnapshot = null },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
     }
     }
 }

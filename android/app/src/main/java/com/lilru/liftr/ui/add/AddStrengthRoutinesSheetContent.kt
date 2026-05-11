@@ -16,10 +16,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.UnfoldMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
@@ -170,8 +172,11 @@ private fun RoutineListRow(
     row: StrengthRoutineUi,
     busy: Boolean,
     updatedLabel: String?,
+    onPreview: () -> Unit,
     onApply: () -> Unit,
+    onShareRoutine: () -> Unit,
     neighbors: Pair<List<StrengthRoutineUi>, Int>?,
+    onEditRoutine: () -> Unit,
     onRenameRoutine: () -> Unit,
     onDuplicate: () -> Unit,
     onMoveUp: () -> Unit,
@@ -188,6 +193,7 @@ private fun RoutineListRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)
+            .clickable(enabled = !busy) { onPreview() }
     ) {
         Row(
             modifier = Modifier.padding(12.dp),
@@ -207,7 +213,17 @@ private fun RoutineListRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Text(
+                    stringResource(R.string.add_routine_tap_to_preview),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Box {
                 IconButton(
                     onClick = { menu = true },
@@ -222,6 +238,10 @@ private fun RoutineListRow(
                     expanded = menu,
                     onDismissRequest = { menu = false }
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.add_routine_sheet_menu_edit)) },
+                        onClick = { menu = false; onEditRoutine() }
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.add_routine_sheet_menu_rename)) },
                         onClick = { menu = false; onRenameRoutine() }
@@ -255,6 +275,15 @@ private fun RoutineListRow(
                     )
                 }
             }
+            IconButton(
+                onClick = onShareRoutine,
+                enabled = !busy
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Share,
+                    contentDescription = stringResource(R.string.add_routine_share_via_chat_content_description)
+                )
+            }
             TextButton(
                 onClick = onApply,
                 enabled = !busy
@@ -284,7 +313,10 @@ fun AddStrengthRoutinesSheetContent(
     onMoveRoutine: (Long, Int) -> Unit,
     onMoveRoutineToFolder: (Long, Long?) -> Unit,
     onDeleteRoutine: (Long) -> Unit,
-    onApplyRoutine: (Long) -> Unit
+    onPreviewRoutine: (Long) -> Unit,
+    onApplyRoutine: (Long) -> Unit,
+    onShareRoutine: (Long) -> Unit,
+    onEditRoutine: (Long, String) -> Unit
 ) {
     val ctx = LocalContext.current.applicationContext
     val persistScope = rememberCoroutineScope()
@@ -709,10 +741,14 @@ fun AddStrengthRoutinesSheetContent(
                         val copyOf = stringResource(R.string.add_routine_copy_of_format, row.name)
                         RoutineListRow(
                             row = row,
-                            busy = ui.managingRoutines || ui.applyingRoutine,
+                            busy = ui.managingRoutines || ui.applyingRoutine ||
+                                ui.strengthRoutineTemplateEdit?.saving == true,
                             updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
+                            onPreview = { onPreviewRoutine(row.id) },
                             onApply = { onApplyRoutine(row.id) },
+                            onShareRoutine = { onShareRoutine(row.id) },
                             neighbors = groupNeighbors(row),
+                            onEditRoutine = { onEditRoutine(row.id, row.name) },
                             onRenameRoutine = {
                                 routineToRename = row
                                 routineRenameDraft = row.name
@@ -771,10 +807,14 @@ fun AddStrengthRoutinesSheetContent(
                             val copyOf = stringResource(R.string.add_routine_copy_of_format, row.name)
                             RoutineListRow(
                                 row = row,
-                                busy = ui.managingRoutines || ui.applyingRoutine,
+                                busy = ui.managingRoutines || ui.applyingRoutine ||
+                                    ui.strengthRoutineTemplateEdit?.saving == true,
                                 updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
+                                onPreview = { onPreviewRoutine(row.id) },
                                 onApply = { onApplyRoutine(row.id) },
+                                onShareRoutine = { onShareRoutine(row.id) },
                                 neighbors = groupNeighbors(row),
+                                onEditRoutine = { onEditRoutine(row.id, row.name) },
                                 onRenameRoutine = {
                                     routineToRename = row
                                     routineRenameDraft = row.name

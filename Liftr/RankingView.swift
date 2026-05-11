@@ -2439,7 +2439,6 @@ struct RankingView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 NavigationLink {
                                     SegmentDetailView(segmentId: row.segment_id, onClose: nil)
-                                        .gradientBG()
                                 } label: {
                                     Text(row.name)
                                         .font(.subheadline.weight(.semibold))

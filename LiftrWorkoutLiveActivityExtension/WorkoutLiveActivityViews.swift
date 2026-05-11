@@ -44,11 +44,17 @@ struct WorkoutLiveActivityLockView: View {
     @ViewBuilder
     private var elapsingView: some View {
         let start = context.state.startTime
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            let sec = max(0, Int(Date().timeIntervalSince(start)))
-            Text(formatWorkoutElapsed(sec))
+        if context.state.isPaused {
+            Text(formatWorkoutElapsed(max(0, context.state.pausedElapsedSeconds)))
                 .font(.title3.weight(.semibold).monospacedDigit())
                 .foregroundStyle(.white)
+        } else {
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                let sec = max(0, Int(Date().timeIntervalSince(start)))
+                Text(formatWorkoutElapsed(sec))
+                    .font(.title3.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(.white)
+            }
         }
     }
 
@@ -77,10 +83,15 @@ struct WorkoutLiveActivityDynamicIsland: View {
             }
             DynamicIslandExpandedRegion(.bottom) {
                 let start = context.state.startTime
-                TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    let sec = max(0, Int(Date().timeIntervalSince(start)))
-                    Text(formatWorkoutElapsed(sec))
+                if context.state.isPaused {
+                    Text(formatWorkoutElapsed(max(0, context.state.pausedElapsedSeconds)))
                         .font(.title2.weight(.semibold).monospacedDigit())
+                } else {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        let sec = max(0, Int(Date().timeIntervalSince(start)))
+                        Text(formatWorkoutElapsed(sec))
+                            .font(.title2.weight(.semibold).monospacedDigit())
+                    }
                 }
             }
         } compactLeading: {
@@ -88,11 +99,17 @@ struct WorkoutLiveActivityDynamicIsland: View {
                 .font(.caption2.weight(.semibold))
         } compactTrailing: {
             let start = context.state.startTime
-            TimelineView(.periodic(from: .now, by: 1)) { _ in
-                let sec = max(0, Int(Date().timeIntervalSince(start)))
-                Text(formatWorkoutElapsedShort(sec))
+            if context.state.isPaused {
+                Text(formatWorkoutElapsedShort(max(0, context.state.pausedElapsedSeconds)))
                     .font(.caption2.weight(.semibold).monospacedDigit())
                     .minimumScaleFactor(0.7)
+            } else {
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    let sec = max(0, Int(Date().timeIntervalSince(start)))
+                    Text(formatWorkoutElapsedShort(sec))
+                        .font(.caption2.weight(.semibold).monospacedDigit())
+                        .minimumScaleFactor(0.7)
+                }
             }
         } minimal: {
             Image(systemName: "stopwatch")

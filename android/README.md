@@ -20,7 +20,7 @@ Cliente **nativo (Kotlin + Jetpack Compose)** para [Google Play](https://play.go
 ## Código
 
 - [app/src/main/java/com/lilru/liftr/data/LiftrSupabase.kt](app/src/main/java/com/lilru/liftr/data/LiftrSupabase.kt) — inicialización de **Supabase** (análogo conceptual a `Liftr/SupabaseManager.swift`).
-- En Android hace falta además el motor **Ktor** `ktor-client-android` (ya declarado en `app/build.gradle.kts`); sin eso, la app puede cerrarse al arrancar.
+- En Android hace falta además el motor **Ktor** `ktor-client-okhttp` (ya declarado en `app/build.gradle.kts`); sin eso, la app puede cerrarse al arrancar. **No** usar `ktor-client-android`: su engine no soporta WebSockets y rompería **Supabase Realtime** (chat en tiempo real, presencia "está escribiendo…").
 - **Auth (email/contraseña):** [AuthViewModel](app/src/main/java/com/lilru/liftr/auth/AuthViewModel.kt) + pantallas bajo `ui/auth/`; flujo alineado con iOS (login, registro con `precheck_signup`, fila en `profiles` si hay sesión inmediata). Navegación: [LiftrAppContent.kt](app/src/main/java/com/lilru/liftr/ui/LiftrAppContent.kt).
 - `applicationId` y namespace: `com.lilru.liftr`. Cambiarlos con cuidado si el ID en Play Console ya está fijado.
 

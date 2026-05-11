@@ -10,7 +10,8 @@ internal fun appendOneSetToExpandedSets(sets: List<ActiveStrengthSetLine>): List
                 reps = 10,
                 weightKg = 0.0,
                 rpe = null,
-                restSec = 60
+                restSec = 60,
+                segmentsInRow = 1
             )
         )
     }
@@ -37,14 +38,23 @@ internal fun updateBlockForExpandedIndex(
 ): List<ActiveStrengthSetLine> {
     val current = sets.getOrNull(expandedIndex) ?: return sets
     val configId = current.configId
-    val updated = sets.map { line ->
-        if (line.configId != configId) return@map line
-        line.copy(
-            reps = reps,
-            weightKg = weightKg,
-            rpe = rpe,
-            restSec = restSec
-        )
+    val configCount = sets.count { it.configId == configId }
+    val updated = if (current.segmentsInRow <= 1 || configCount <= 1) {
+        sets.map { line ->
+            if (line.configId != configId) line
+            else line.copy(reps = reps, weightKg = weightKg, rpe = rpe, restSec = restSec)
+        }
+    } else {
+        val lastIdxForConfig = sets.indexOfLast { it.configId == configId }
+        sets.mapIndexed { idx, line ->
+            if (idx != expandedIndex && idx != lastIdxForConfig) {
+                line
+            } else if (idx == expandedIndex) {
+                line.copy(reps = reps, weightKg = weightKg, rpe = rpe)
+            } else {
+                line.copy(rpe = rpe, restSec = restSec)
+            }
+        }
     }
     return renumberExpandedSets(updated)
 }

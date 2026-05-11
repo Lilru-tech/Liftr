@@ -13,7 +13,8 @@ import java.time.Instant
 @Serializable
 internal data class WorkoutNotesStateRow(
     val notes: String? = null,
-    val state: String? = null
+    val state: String? = null,
+    val started_at: String? = null
 )
 
 /**
@@ -23,9 +24,13 @@ internal data class WorkoutNotesStateRow(
 internal fun workoutFinishUpdateJson(
     endedAtIso: String,
     mergedNotes: String?,
-    currentState: String?
+    currentState: String?,
+    pausedSec: Int? = null
 ) = buildJsonObject {
     put("ended_at", endedAtIso)
+    if (pausedSec != null) {
+        put("paused_sec", pausedSec)
+    }
     if (currentState?.lowercase() == "planned") {
         put("state", "published")
     }

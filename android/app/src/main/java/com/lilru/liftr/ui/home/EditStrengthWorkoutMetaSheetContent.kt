@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.add.AddWorkoutIntensity
 import com.lilru.liftr.ui.add.StrengthExerciseDraft
+import com.lilru.liftr.ui.add.StrengthSegmentDraft
 import com.lilru.liftr.ui.add.StrengthSetDraft
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -274,51 +275,172 @@ fun EditStrengthWorkoutMetaSheetContent(
                             }
                         }
                     }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = st.repsText,
-                            onValueChange = { v -> patchSet { s -> s.copy(repsText = v) } },
-                            label = { Text(stringResource(R.string.add_reps_field_label)) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = st.weightText,
-                            onValueChange = { patchSet { s -> s.copy(weightText = it) } },
-                            label = { Text(stringResource(R.string.add_kg_field_label)) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Decimal
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        OutlinedTextField(
-                            value = st.rpeText,
-                            onValueChange = { patchSet { s -> s.copy(rpeText = it) } },
-                            label = { Text(stringResource(R.string.add_rpe_field_label)) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Decimal
-                            ),
-                            modifier = Modifier.weight(1f)
-                        )
-                        OutlinedTextField(
-                            value = st.restSecText,
-                            onValueChange = { patchSet { s -> s.copy(restSecText = it) } },
-                            label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            modifier = Modifier.weight(1f)
-                        )
+                    if (st.segments.size >= 2) {
+                        st.segments.forEachIndexed { segIdx, seg ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    stringResource(R.string.add_strength_drop_step_format, segIdx + 1),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(end = 4.dp)
+                                )
+                                OutlinedTextField(
+                                    value = seg.repsText,
+                                    onValueChange = { v ->
+                                        patchSet { s ->
+                                            s.copy(
+                                                segments = s.segments.mapIndexed { j, e ->
+                                                    if (j == segIdx) e.copy(repsText = v) else e
+                                                }
+                                            )
+                                        }
+                                    },
+                                    label = { Text(stringResource(R.string.add_reps_field_label)) },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = seg.weightText,
+                                    onValueChange = { v ->
+                                        patchSet { s ->
+                                            s.copy(
+                                                segments = s.segments.mapIndexed { j, e ->
+                                                    if (j == segIdx) e.copy(weightText = v) else e
+                                                }
+                                            )
+                                        }
+                                    },
+                                    label = { Text(stringResource(R.string.add_kg_field_label)) },
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    patchSet { s ->
+                                        s.copy(segments = s.segments + StrengthSegmentDraft())
+                                    }
+                                }
+                            ) {
+                                Text(stringResource(R.string.add_strength_drop_add_step))
+                            }
+                            TextButton(
+                                onClick = {
+                                    patchSet { s ->
+                                        if (s.segments.size > 2) {
+                                            s.copy(segments = s.segments.dropLast(1))
+                                        } else {
+                                            s
+                                        }
+                                    }
+                                },
+                                enabled = st.segments.size > 2
+                            ) {
+                                Text(stringResource(R.string.add_strength_drop_remove_step))
+                            }
+                            TextButton(
+                                onClick = { patchSet { s -> s.copy(segments = emptyList()) } }
+                            ) {
+                                Text(stringResource(R.string.add_strength_drop_clear))
+                            }
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = st.rpeText,
+                                onValueChange = { patchSet { s -> s.copy(rpeText = it) } },
+                                label = { Text(stringResource(R.string.add_rpe_field_label)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = st.restSecText,
+                                onValueChange = { patchSet { s -> s.copy(restSecText = it) } },
+                                label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    } else {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = st.repsText,
+                                onValueChange = { v -> patchSet { s -> s.copy(repsText = v) } },
+                                label = { Text(stringResource(R.string.add_reps_field_label)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = st.weightText,
+                                onValueChange = { patchSet { s -> s.copy(weightText = it) } },
+                                label = { Text(stringResource(R.string.add_kg_field_label)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Decimal
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            OutlinedTextField(
+                                value = st.rpeText,
+                                onValueChange = { patchSet { s -> s.copy(rpeText = it) } },
+                                label = { Text(stringResource(R.string.add_rpe_field_label)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Decimal
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = st.restSecText,
+                                onValueChange = { patchSet { s -> s.copy(restSecText = it) } },
+                                label = { Text(stringResource(R.string.add_rest_sec_field_label)) },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        TextButton(
+                            onClick = {
+                                patchSet { s ->
+                                    s.copy(
+                                        segments = listOf(
+                                            StrengthSegmentDraft(repsText = s.repsText, weightText = s.weightText),
+                                            StrengthSegmentDraft()
+                                        )
+                                    )
+                                }
+                            },
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            Text(stringResource(R.string.add_strength_drop_set))
+                        }
                     }
                 }
                 Column(Modifier.fillMaxWidth()) {

@@ -11,7 +11,30 @@ import kotlinx.serialization.json.Json
  * Devuelve pares (lat, lon) para [com.google.android.gms.maps.model.LatLng].
  */
 object CardioRouteGeoJson {
+    /** Misma magnitud que [Liftr.CardioWorkoutLocationTracker] `maxRoutePoints` — evita GeoJSON enorme en BD/RPC de segmentos. */
+    const val MAX_LINE_STRING_POINTS: Int = 2000
+
     private val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * Muestreo uniforme conservando el primer y último punto.
+     * PostGIS y `create_segment_from_workout_v1` escalan mal con miles de vértices.
+     */
+    fun decimateLatLngPairs(
+        points: List<Pair<Double, Double>>,
+        maxPoints: Int = MAX_LINE_STRING_POINTS
+    ): List<Pair<Double, Double>> {
+        if (points.size <= maxPoints) return points
+        if (maxPoints < 2) return points.take(2)
+        val n = points.size
+        val out = ArrayList<Pair<Double, Double>>(maxPoints)
+        val denom = maxPoints - 1
+        for (i in 0 until maxPoints) {
+            val idx = (i * (n - 1)) / denom
+            out.add(points[idx])
+        }
+        return out
+    }
 
     @Serializable
     private data class LineStringBody(

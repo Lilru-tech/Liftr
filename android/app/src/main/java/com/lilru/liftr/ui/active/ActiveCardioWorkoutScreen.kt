@@ -45,6 +45,7 @@ import com.lilru.liftr.R
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
 import com.lilru.liftr.prefs.CardioGpsProfile
+import com.lilru.liftr.ui.chat.MessagesFloatingButton
 import com.lilru.liftr.ui.map.CardioRouteFullscreenMapDialog
 import com.lilru.liftr.ui.map.CardioRouteMapBox
 import io.github.jan.supabase.SupabaseClient
@@ -133,19 +134,20 @@ fun ActiveCardioWorkoutScreen(
         }
     }
 
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.active_cardio_title)) },
-                navigationIcon = {
-                    TextButton(onClick = onClose) {
-                        Text(stringResource(R.string.active_strength_back))
+    Box(modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            topBar = {
+                TopAppBar(
+                    title = { Text(stringResource(R.string.active_cardio_title)) },
+                    navigationIcon = {
+                        TextButton(onClick = onClose) {
+                            Text(stringResource(R.string.active_strength_back))
+                        }
                     }
-                }
-            )
-        }
-    ) { padding ->
+                )
+            }
+        ) { padding ->
         when {
             ui.loading -> {
                 Column(
@@ -467,6 +469,10 @@ fun ActiveCardioWorkoutScreen(
                     }
                 }
             }
+        }
+    }
+        if (!ui.finishing) {
+            MessagesFloatingButton(supabase = supabase, modifier = Modifier.fillMaxSize())
         }
     }
 }
