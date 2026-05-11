@@ -153,6 +153,7 @@ func prettySubtype(from code: String, fallbackCategory: String) -> String {
     case c.hasPrefix("ski_"): return "Ski"
     case c.hasPrefix("challenge_"): return "Challenges"
     case c.hasPrefix("strength_drop_"): return "Drop sets"
+    case c.hasPrefix("strength_superset_"): return "Super series"
     default:
         return fallbackCategory.capitalized
     }
