@@ -26,6 +26,8 @@ struct NotificationSettingsRow: Codable {
     var pushCompetitionWorkoutRejected: Bool
     var pushSegmentYouAreFirst: Bool
     var pushSegmentLostFirst: Bool
+    var pushTerritoryCaptureFromUser: Bool
+    var pushTerritoryLostToUser: Bool
     var pushChallengeWon: Bool
     var pushChallengeWonWeekly: Bool
     var pushWorkoutKindInactive: Bool
@@ -55,6 +57,8 @@ struct NotificationSettingsRow: Codable {
         case pushCompetitionWorkoutRejected = "push_competition_workout_rejected"
         case pushSegmentYouAreFirst = "push_segment_you_are_first"
         case pushSegmentLostFirst = "push_segment_lost_first"
+        case pushTerritoryCaptureFromUser = "push_territory_capture_from_user"
+        case pushTerritoryLostToUser = "push_territory_lost_to_user"
         case pushChallengeWon = "push_challenge_won"
         case pushChallengeWonWeekly = "push_challenge_won_weekly"
         case pushWorkoutKindInactive = "push_workout_kind_inactive"
@@ -146,6 +150,8 @@ struct NotificationSettingsView: View {
                 Section("Segments & Challenges") {
                     toggleCard(title: "Segment: you are first", isOn: binding(\.pushSegmentYouAreFirst), enabled: pushMaster && !saving)
                     toggleCard(title: "Segment: lost first", isOn: binding(\.pushSegmentLostFirst), enabled: pushMaster && !saving)
+                    toggleCard(title: "Territory captured from others", isOn: binding(\.pushTerritoryCaptureFromUser), enabled: pushMaster && !saving)
+                    toggleCard(title: "Territory lost to others", isOn: binding(\.pushTerritoryLostToUser), enabled: pushMaster && !saving)
                     toggleCard(title: "Challenge won", isOn: binding(\.pushChallengeWon), enabled: pushMaster && !saving)
                     toggleCard(title: "Challenge won (weekly)", isOn: binding(\.pushChallengeWonWeekly), enabled: pushMaster && !saving)
                 }
@@ -279,6 +285,8 @@ struct NotificationSettingsView: View {
             let push_competition_workout_rejected: Bool
             let push_segment_you_are_first: Bool
             let push_segment_lost_first: Bool
+            let push_territory_capture_from_user: Bool
+            let push_territory_lost_to_user: Bool
             let push_challenge_won: Bool
             let push_challenge_won_weekly: Bool
             let push_workout_kind_inactive: Bool
@@ -308,6 +316,8 @@ struct NotificationSettingsView: View {
             push_competition_workout_rejected: row.pushCompetitionWorkoutRejected,
             push_segment_you_are_first: row.pushSegmentYouAreFirst,
             push_segment_lost_first: row.pushSegmentLostFirst,
+            push_territory_capture_from_user: row.pushTerritoryCaptureFromUser,
+            push_territory_lost_to_user: row.pushTerritoryLostToUser,
             push_challenge_won: row.pushChallengeWon,
             push_challenge_won_weekly: row.pushChallengeWonWeekly,
             push_workout_kind_inactive: row.pushWorkoutKindInactive

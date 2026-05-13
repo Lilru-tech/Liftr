@@ -47,6 +47,24 @@ struct RootView: View {
                 }
                 .badge(app.unreadNotificationsCount)
         }
+        .overlay(alignment: .top) {
+            if let message = app.territoryCaptureToast {
+                Text(message)
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.top, 8)
+                    .padding(.horizontal, 16)
+                    .onAppear {
+                        Task {
+                            try? await Task.sleep(nanoseconds: 4_000_000_000)
+                            await MainActor.run { app.territoryCaptureToast = nil }
+                        }
+                    }
+            }
+        }
         .onAppear {
             if !didRunUpdateCheck {
                 didRunUpdateCheck = true
@@ -103,6 +121,8 @@ struct RootView: View {
 
             case .directMessage:
                 app.selectedTab = .home
+            case .territoryMap:
+                app.selectedTab = .search
             }
         }
         .sheet(
@@ -193,6 +213,19 @@ struct RootView: View {
                         .environmentObject(app)
                 }
                 .gradientBG()
+
+            case .territoryMap:
+                NavigationStack {
+                    TerritoryMapView()
+                        .gradientBG()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Close") {
+                                    app.notificationDestination = .none
+                                }
+                            }
+                        }
+                }
             }
         }
         .alert("You need to log in", isPresented: $showAuthAlert) {

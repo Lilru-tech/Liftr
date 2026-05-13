@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import Supabase
 import UIKit
+import CoreLocation
 
 final class AppState: ObservableObject {
     @Published var selectedTab: Tab = .home
@@ -20,6 +21,7 @@ final class AppState: ObservableObject {
         case competitionReviews
         case challengeWeekly(instanceId: UUID)
         case directMessage(conversationId: Int64, senderUserId: UUID?)
+        case territoryMap
     }
     
     @Published var notificationDestination: NotificationDestination = .none
@@ -40,6 +42,8 @@ final class AppState: ObservableObject {
     private var tabBarAvatarURLString: String?
     private static let tabBarAvatarPointDiameter: CGFloat = 26
     @Published private(set) var unreadNotificationsCount: Int = 0
+    @Published var territoryCaptureToast: String?
+    @Published var territoryReferenceCoordinate: CLLocationCoordinate2D?
     
     private var authTask: Task<Void, Never>?
     
@@ -365,6 +369,9 @@ final class AppState: ObservableObject {
             } else {
                 notificationDestination = .none
             }
+
+        case "territory_capture_from_user", "territory_lost_to_user":
+            notificationDestination = .territoryMap
 
         case "challenge_won", "challenge_won_weekly":
             if let raw = data["challenge_instance_id"] as? String, let iid = UUID(uuidString: raw) {

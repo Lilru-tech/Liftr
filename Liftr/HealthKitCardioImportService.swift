@@ -162,6 +162,15 @@ final class HealthKitCardioImportService {
                     wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID)
                 }
                 if let wid {
+                    if !isTreadmill, routeGeoJSON != nil {
+                        if let summary = await TerritoryCaptureClient.applyCapture(workoutId: wid),
+                           let message = TerritoryCapturePresentation.message(for: summary) {
+                            TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: summary)
+                            await MainActor.run {
+                                AppState.shared.territoryCaptureToast = message
+                            }
+                        }
+                    }
                     await MainActor.run {
                         NotificationCenter.default.post(name: .workoutDidChange, object: wid)
                     }

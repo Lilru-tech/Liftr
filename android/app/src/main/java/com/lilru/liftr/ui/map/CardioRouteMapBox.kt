@@ -44,11 +44,14 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapUiSettings
+import com.google.maps.android.compose.Polygon
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
 import com.lilru.liftr.cardio.CardioRouteGeoJson
+import com.lilru.liftr.territory.TerritoryMapCellWire
+import com.lilru.liftr.territory.TerritoryOwnerColors
 
 /**
  * Abre la ruta en Google Maps (equivalente práctico a Apple Maps en iOS).
@@ -131,13 +134,82 @@ fun CardioRoutePolylinePreview(
 }
 
 @Composable
+fun TerritoryCellsMapPreview(
+    cells: List<TerritoryMapCellWire>,
+    modifier: Modifier = Modifier,
+    expandToFill: Boolean = false
+) {
+    val paintedCells = remember(cells) {
+        cells.mapNotNull { cell ->
+            val ring = cell.cellGeojson?.ringLatLng().orEmpty()
+            if (ring.size < 3) null else {
+                val ownerKey = cell.ownerUserId?.takeIf { it.isNotBlank() } ?: cell.cellId
+                Triple(cell, ownerKey, ring)
+            }
+        }
+    }
+    if (paintedCells.isEmpty()) return
+    val bg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+    val sizeMod = if (expandToFill) {
+        Modifier.fillMaxWidth().fillMaxHeight()
+    } else {
+        Modifier.fillMaxWidth().height(220.dp)
+    }
+    val clipMod = if (expandToFill) Modifier else Modifier.clip(RoundedCornerShape(16.dp))
+    Canvas(
+        modifier = modifier
+            .then(sizeMod)
+            .then(clipMod)
+            .background(bg)
+    ) {
+        val allPoints = paintedCells.flatMap { it.third }
+        val pad = 14.dp.toPx()
+        val w = (size.width - 2 * pad).coerceAtLeast(1f)
+        val h = (size.height - 2 * pad).coerceAtLeast(1f)
+        val minLat = allPoints.minOf { it.first }
+        val maxLat = allPoints.maxOf { it.first }
+        val minLon = allPoints.minOf { it.second }
+        val maxLon = allPoints.maxOf { it.second }
+        val dLat = (maxLat - minLat).coerceAtLeast(1e-8)
+        val dLon = (maxLon - minLon).coerceAtLeast(1e-8)
+        fun project(lat: Double, lon: Double): Offset {
+            val x = pad + ((lon - minLon) / dLon * w).toFloat()
+            val y = pad + ((maxLat - lat) / dLat * h).toFloat()
+            return Offset(x, y)
+        }
+        paintedCells.forEach { (cell, ownerKey, ring) ->
+            val path = Path().apply {
+                val first = project(ring[0].first, ring[0].second)
+                moveTo(first.x, first.y)
+                for (index in 1 until ring.size) {
+                    val point = project(ring[index].first, ring[index].second)
+                    lineTo(point.x, point.y)
+                }
+                close()
+            }
+            val isMine = cell.isMine == true
+            drawPath(
+                path = path,
+                color = TerritoryOwnerColors.fill(ownerKey, isMine)
+            )
+            drawPath(
+                path = path,
+                color = TerritoryOwnerColors.stroke(ownerKey, isMine),
+                style = Stroke(width = TerritoryOwnerColors.strokeWidth(isMine))
+            )
+        }
+    }
+}
+
+@Composable
 fun CardioRouteMapBox(
     /** Pares (lat, lon), al menos 2 para dibujar. */
     routePoints: List<Pair<Double, Double>>,
     modifier: Modifier = Modifier,
     mapHeightDp: Int = 220,
     expandToFill: Boolean = false,
-    useRichMapControls: Boolean = false
+    useRichMapControls: Boolean = false,
+    territoryPreviewRings: List<List<Pair<Double, Double>>> = emptyList()
 ) {
     if (routePoints.size < 2) return
     if (BuildConfig.MAPS_API_KEY.isBlank()) {
@@ -174,6 +246,16 @@ fun CardioRouteMapBox(
             myLocationButtonEnabled = false
         )
     ) {
+        territoryPreviewRings.forEach { ring ->
+            if (ring.size >= 3) {
+                Polygon(
+                    points = ring.map { (lat, lon) -> LatLng(lat, lon) },
+                    fillColor = Color(0x3800C853),
+                    strokeColor = Color(0xFF00C853),
+                    strokeWidth = 1f
+                )
+            }
+        }
         Polyline(
             points = latLngs,
             color = Color(0xE02196F3),

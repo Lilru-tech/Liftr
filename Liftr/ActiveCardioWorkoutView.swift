@@ -30,6 +30,10 @@ struct ActiveCardioWorkoutView: View {
     @State private var splitEndElapsedSec: [Int] = []
     @State private var lastSplitDistanceKm: Double = 0
     @State private var lastSplitElapsedSec: Int = 0
+    @State private var territoryPreviewCells: [TerritoryPreviewCell] = []
+    @State private var lastTerritoryPreviewAt = Date.distantPast
+    @State private var lastTerritoryPreviewPointCount = 0
+    @State private var territoryPreviewTask: Task<Void, Never>?
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -197,6 +201,13 @@ struct ActiveCardioWorkoutView: View {
                             if gpsTracker.routeCoordinates.count >= 2 {
                                 ZStack(alignment: .topTrailing) {
                                     Map(position: $mapCameraPosition) {
+                                        ForEach(territoryPreviewCells) { cell in
+                                            let ring = cell.cell_geojson?.ring ?? []
+                                            if ring.count >= 3 {
+                                                MapPolygon(coordinates: ring)
+                                                    .foregroundStyle(Color.green.opacity(0.22))
+                                            }
+                                        }
                                         MapPolyline(coordinates: gpsTracker.routeCoordinates)
                                             .stroke(.blue.opacity(0.88), lineWidth: 4)
                                     }
@@ -205,6 +216,7 @@ struct ActiveCardioWorkoutView: View {
                                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                                     .onChange(of: gpsTracker.routeCoordinates.count) { _, _ in
                                         fitMapToRouteIfNeeded()
+                                        scheduleTerritoryPreviewRefresh()
                                     }
                                     Button {
                                         fitMapToRouteIfNeeded()
@@ -437,6 +449,13 @@ struct ActiveCardioWorkoutView: View {
             NavigationStack {
                 ZStack {
                     Map(position: $mapCameraPosition) {
+                        ForEach(territoryPreviewCells) { cell in
+                            let ring = cell.cell_geojson?.ring ?? []
+                            if ring.count >= 3 {
+                                MapPolygon(coordinates: ring)
+                                    .foregroundStyle(Color.green.opacity(0.22))
+                            }
+                        }
                         MapPolyline(coordinates: gpsTracker.routeCoordinates)
                             .stroke(.blue.opacity(0.88), lineWidth: 4)
                     }
@@ -883,6 +902,16 @@ struct ActiveCardioWorkoutView: View {
 
             NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
 
+            if snap.usesGPSTracking, snap.routeGeoJSON != nil {
+                if let summary = await TerritoryCaptureClient.applyCapture(workoutId: workoutId),
+                   let message = TerritoryCapturePresentation.message(for: summary) {
+                    TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: summary)
+                    await MainActor.run {
+                        app.territoryCaptureToast = message
+                    }
+                }
+            }
+
             await MainActor.run {
                 isSaving = false
                 dismiss()
@@ -909,5 +938,27 @@ struct ActiveCardioWorkoutView: View {
     private func activityLabel(_ r: CardioRow) -> String {
         let code = (r.activity_code ?? r.modality ?? "cardio")
         return code.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    private func scheduleTerritoryPreviewRefresh() {
+        guard usesGPSTracking, isRunning else { return }
+        let pointCount = gpsTracker.routeCoordinates.count
+        guard pointCount >= 2 else { return }
+        let now = Date()
+        if now.timeIntervalSince(lastTerritoryPreviewAt) < 15,
+           pointCount - lastTerritoryPreviewPointCount < 8 {
+            return
+        }
+        lastTerritoryPreviewAt = now
+        lastTerritoryPreviewPointCount = pointCount
+        territoryPreviewTask?.cancel()
+        territoryPreviewTask = Task {
+            guard let routeJSON = gpsTracker.routeGeoJSONString() else { return }
+            let preview = await TerritoryCaptureClient.previewCapture(routeGeoJSON: routeJSON)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                territoryPreviewCells = preview?.cells ?? []
+            }
+        }
     }
 }

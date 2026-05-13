@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -43,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -246,6 +249,8 @@ fun ActiveStrengthWorkoutScreen(
     val ex = laneExercises.getOrNull(laneExerciseIndex)
     val currentSetIndex = ex?.let { laneProgressMap[it.workoutExerciseId] ?: 0 } ?: 0
     val set = ex?.sets?.getOrNull(currentSetIndex)
+    var editingExpandedIndex by remember { mutableStateOf<Int?>(null) }
+    var snapToCurrentSignal by remember(ex?.workoutExerciseId, activeLane) { mutableIntStateOf(0) }
     val guestRestSecByExerciseId = remember(ui.sessionElapsedSec, guestRestEndMsByExerciseId) {
         val n = System.currentTimeMillis()
         guestRestEndMsByExerciseId.mapValues { (_, endMs) ->
@@ -741,75 +746,220 @@ fun ActiveStrengthWorkoutScreen(
                                     fontWeight = FontWeight.Bold
                                 )
 
-                                Card(colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.72f))) {
-                                    Column(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .padding(14.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        if (!allSetsDoneCurrent && set != null) {
-                                            Text(
-                                                text = stringResource(
-                                                    R.string.active_strength_set_progress,
-                                                    currentSetIndex + 1,
-                                                    ex?.sets?.size ?: 0
-                                                ),
-                                                style = MaterialTheme.typography.titleMedium
-                                            )
-                                            val segs = set.weightSegments
-                                            if (segs != null && segs.size >= 2) {
-                                                Text("Drop set", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val laneCompletedMap = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+                                    emptyMap()
+                                } else {
+                                    ui.completedSetsByExerciseId
+                                }
+                                val totalSetsForEx = ex?.sets?.size ?: 0
+                                val sliderEnabled = ex != null && totalSetsForEx > 0 && !allSetsDoneCurrent
+                                var visitedSetIndexForActions by remember(ex?.workoutExerciseId, activeLane) {
+                                    mutableIntStateOf(currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1)))
+                                }
+                                val sliderEx = if (sliderEnabled) ex else null
+
+                                if (sliderEx != null) {
+                                    key(sliderEx.workoutExerciseId, activeLane) {
+                                        val pagerState = rememberPagerState(
+                                            initialPage = currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1)),
+                                            pageCount = { totalSetsForEx }
+                                        )
+                                        LaunchedEffect(currentSetIndex, totalSetsForEx) {
+                                            val target = currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1))
+                                            if (pagerState.currentPage != target) {
+                                                pagerState.animateScrollToPage(target)
+                                            }
+                                        }
+                                        LaunchedEffect(pagerState.currentPage) {
+                                            visitedSetIndexForActions = pagerState.currentPage
+                                        }
+                                        LaunchedEffect(snapToCurrentSignal) {
+                                            if (snapToCurrentSignal > 0) {
+                                                val target = currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1))
+                                                if (pagerState.currentPage != target) {
+                                                    pagerState.animateScrollToPage(target)
+                                                }
+                                            }
+                                        }
+
+                                        HorizontalPager(
+                                            state = pagerState,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { page ->
+                                            val plannedSet = sliderEx.sets.getOrNull(page)
+                                            val isPast = page < currentSetIndex
+                                            val isCurrent = page == currentSetIndex
+                                            val performed = laneCompletedMap[sliderEx.workoutExerciseId]?.getOrNull(page)
+                                            val displayReps: Int? = if (isPast) (performed?.reps ?: plannedSet?.reps) else plannedSet?.reps
+                                            val displayWeight: Double? = if (isPast) (performed?.weightKg ?: plannedSet?.weightKg) else plannedSet?.weightKg
+                                            val displayRpe: Double? = if (isPast) (performed?.rpe ?: plannedSet?.rpe) else plannedSet?.rpe
+                                            val displaySegs = if (isPast) (performed?.weightSegments ?: plannedSet?.weightSegments) else plannedSet?.weightSegments
+                                            val statusLabel = when {
+                                                isPast -> "Completed"
+                                                isCurrent -> "Current"
+                                                else -> "Upcoming"
+                                            }
+                                            val statusColor = when {
+                                                isPast -> Color(0xFF666666)
+                                                isCurrent -> MaterialTheme.colorScheme.primary
+                                                else -> Color(0xFFD08A1B)
+                                            }
+
+                                            Card(
+                                                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.72f)),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 4.dp)
+                                            ) {
                                                 Column(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(14.dp),
                                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                                                    modifier = Modifier.padding(top = 2.dp)
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    segs.forEach { el ->
-                                                        val o = el.jsonObject
-                                                        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                                                        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
                                                         Text(
-                                                            "$r reps · ${String.format(Locale.US, "%.1f", w)} kg",
-                                                            style = MaterialTheme.typography.titleLarge,
-                                                            textAlign = TextAlign.Center
+                                                            text = statusLabel.uppercase(),
+                                                            color = statusColor,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier
+                                                                .clip(CircleShape)
+                                                                .background(statusColor.copy(alpha = 0.15f))
+                                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = stringResource(
+                                                            R.string.active_strength_set_progress,
+                                                            page + 1,
+                                                            totalSetsForEx
+                                                        ),
+                                                        style = MaterialTheme.typography.titleMedium
+                                                    )
+                                                    if (displaySegs != null && displaySegs.size >= 2) {
+                                                        Text("Drop set", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Column(
+                                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        ) {
+                                                            displaySegs.forEach { el ->
+                                                                val o = el.jsonObject
+                                                                val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                                                val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+                                                                Text(
+                                                                    "$r reps · ${String.format(Locale.US, "%.1f", w)} kg",
+                                                                    style = MaterialTheme.typography.titleLarge,
+                                                                    textAlign = TextAlign.Center
+                                                                )
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Text(
+                                                            "${displayReps ?: 0} reps",
+                                                            style = MaterialTheme.typography.headlineSmall,
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        )
+                                                        Text(
+                                                            "${displayWeight?.let { String.format(Locale.US, "%.1f", it) } ?: "0.0"} kg",
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        )
+                                                    }
+                                                    displayRpe?.let {
+                                                        Text(
+                                                            "Target RPE ${String.format(Locale.US, "%.1f", it)}",
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    val plannedRest = plannedSet?.restSec ?: 0
+                                                    if (isCurrent && !laneIsResting && plannedRest > 0) {
+                                                        Text(
+                                                            "Rest ${plannedRest}s after set",
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
                                                     }
                                                 }
-                                            } else {
-                                                Text("${set.reps ?: 0} reps", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 2.dp))
-                                                Text(
-                                                    "${set.weightKg?.let { String.format(Locale.US, "%.1f", it) } ?: "0.0"} kg",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.padding(top = 2.dp)
+                                            }
+                                        }
+
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 4.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            for (i in 0 until totalSetsForEx) {
+                                                val isVisited = i == pagerState.currentPage
+                                                val isCurrentDot = i == currentSetIndex
+                                                val dotColor = when {
+                                                    isVisited -> MaterialTheme.colorScheme.primary
+                                                    isCurrentDot -> MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                                                    else -> Color.Black.copy(alpha = 0.25f)
+                                                }
+                                                Box(
+                                                    Modifier
+                                                        .padding(horizontal = 3.dp)
+                                                        .size(if (isCurrentDot || isVisited) 9.dp else 7.dp)
+                                                        .clip(CircleShape)
+                                                        .background(dotColor)
                                                 )
                                             }
-                                            set.rpe?.let {
-                                                Text(
-                                                    "Target RPE ${String.format("%.1f", it)}",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            val plannedRest = set.restSec ?: 0
-                                            if (!laneIsResting && plannedRest > 0) {
-                                                Text(
-                                                    "Rest ${plannedRest}s after set",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        } else {
+                                        }
+                                    }
+                                } else {
+                                    Card(colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.72f))) {
+                                        Column(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .padding(14.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
                                             Text(stringResource(R.string.active_strength_all_sets_done))
                                             Text("Great job! Move on when ready.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                 }
 
+                                val isVisitingCurrent = visitedSetIndexForActions == currentSetIndex
+                                val visitedIsPast = sliderEnabled && visitedSetIndexForActions < currentSetIndex
+
                                 if (!allSetsDoneCurrent) {
-                                    OutlinedButton(
-                                        onClick = { showEditSheet = true },
-                                        enabled = set != null && !laneIsResting && !ui.finishing,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) { Text("Edit reps, weight & rest") }
+                                    if (!visitedIsPast) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                editingExpandedIndex = visitedSetIndexForActions
+                                                val visitedSet = ex?.sets?.getOrNull(visitedSetIndexForActions)
+                                                if (visitedSet != null && !isGuestLaneActive) {
+                                                    vm.setEditRepsText(visitedSet.reps?.toString() ?: "")
+                                                    vm.setEditWeightText(
+                                                        visitedSet.weightKg?.let { v ->
+                                                            if (v == v.toInt().toDouble()) v.toInt().toString()
+                                                            else String.format(Locale.US, "%.1f", v)
+                                                        } ?: ""
+                                                    )
+                                                    vm.setEditRestText(visitedSet.restSec?.toString() ?: "")
+                                                    vm.setEditRpeText(visitedSet.rpe?.toString() ?: "")
+                                                } else if (visitedSet != null && isGuestLaneActive) {
+                                                    guestEditRepsText = visitedSet.reps?.toString() ?: ""
+                                                    guestEditWeightText = visitedSet.weightKg?.let { v ->
+                                                        if (v == v.toInt().toDouble()) v.toInt().toString()
+                                                        else String.format(Locale.US, "%.1f", v)
+                                                    } ?: ""
+                                                    guestEditRestText = visitedSet.restSec?.toString() ?: ""
+                                                }
+                                                showEditSheet = true
+                                            },
+                                            enabled = ex?.sets?.getOrNull(visitedSetIndexForActions) != null && !laneIsResting && !ui.finishing,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text("Edit reps, weight & rest") }
+                                    }
 
                                     if (laneIsResting) {
                                         Button(
@@ -827,6 +977,11 @@ fun ActiveStrengthWorkoutScreen(
                                             },
                                             modifier = Modifier.fillMaxWidth()
                                         ) { Text("Rest ${laneRestSec}s · Skip") }
+                                    } else if (!isVisitingCurrent && sliderEnabled) {
+                                        Button(
+                                            onClick = { snapToCurrentSignal += 1 },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text("Back to current set") }
                                     } else {
                                         Button(
                                             onClick = {
@@ -957,13 +1112,17 @@ fun ActiveStrengthWorkoutScreen(
                 }
             }
         }
-        if (showEditSheet && set != null) {
-        var showConvertToNormal by remember(showEditSheet, set.setId) { mutableStateOf(false) }
-        var convertNormalRepsText by remember(showEditSheet, set.setId) { mutableStateOf("") }
-        var convertNormalWeightText by remember(showEditSheet, set.setId) { mutableStateOf("") }
+        val editingSet = run {
+            val idx = editingExpandedIndex ?: currentSetIndex
+            ex?.sets?.getOrNull(idx) ?: set
+        }
+        if (showEditSheet && editingSet != null) {
+        var showConvertToNormal by remember(showEditSheet, editingSet.setId) { mutableStateOf(false) }
+        var convertNormalRepsText by remember(showEditSheet, editingSet.setId) { mutableStateOf("") }
+        var convertNormalWeightText by remember(showEditSheet, editingSet.setId) { mutableStateOf("") }
 
-        val initialDropSegs = remember(showEditSheet, set.setId) {
-            val arr = set.weightSegments
+        val initialDropSegs = remember(showEditSheet, editingSet.setId) {
+            val arr = editingSet.weightSegments
             if (arr == null || arr.size < 2) {
                 mutableListOf<Pair<String, String>>()
             } else {
@@ -975,7 +1134,7 @@ fun ActiveStrengthWorkoutScreen(
                 }.toMutableList()
             }
         }
-        var dropSegs by remember(showEditSheet, set.setId) { mutableStateOf(initialDropSegs) }
+        var dropSegs by remember(showEditSheet, editingSet.setId) { mutableStateOf(initialDropSegs) }
 
             Card(
                 modifier = Modifier
@@ -1032,8 +1191,8 @@ fun ActiveStrengthWorkoutScreen(
                     OutlinedButton(
                         onClick = {
                             val first = dropSegs.firstOrNull()
-                            convertNormalRepsText = first?.first ?: (set.reps?.toString() ?: "")
-                            convertNormalWeightText = first?.second ?: (set.weightKg?.toString() ?: "")
+                            convertNormalRepsText = first?.first ?: (editingSet.reps?.toString() ?: "")
+                            convertNormalWeightText = first?.second ?: (editingSet.weightKg?.toString() ?: "")
                             showConvertToNormal = true
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -1078,18 +1237,25 @@ fun ActiveStrengthWorkoutScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
-                val isWireDropSet = set.weightSegments != null && set.weightSegments.size >= 2
+                val isWireDropSet = editingSet.weightSegments != null && editingSet.weightSegments.size >= 2
                 if (!isGuestLaneActive && !isDropSet && !isWireDropSet) {
                         OutlinedButton(
                             onClick = {
-                                vm.convertCurrentSetToDropSet()
+                                vm.convertCurrentSetToDropSet(editingExpandedIndex)
                                 showEditSheet = false
+                                editingExpandedIndex = null
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Convert to drop set") }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { showEditSheet = false }, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(
+                            onClick = {
+                                showEditSheet = false
+                                editingExpandedIndex = null
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text("Cancel")
                         }
                         Button(
@@ -1097,7 +1263,9 @@ fun ActiveStrengthWorkoutScreen(
                                 if (isGuestLaneActive) {
                                     val exLocal = guestExercisesUi.getOrNull(guestCurrentExerciseIndex)
                                         ?: return@Button
-                                    val setIndex = (guestSetProgress[exLocal.workoutExerciseId] ?: 0)
+                                    val guestCurrent = guestSetProgress[exLocal.workoutExerciseId] ?: 0
+                                    val setIndex = (editingExpandedIndex ?: guestCurrent)
+                                        .coerceIn(0, exLocal.sets.lastIndex.coerceAtLeast(0))
                                     val reps = guestEditRepsText.trim().toIntOrNull()
                                     val weight = guestEditWeightText.trim().replace(',', '.').toDoubleOrNull()
                                     val rest = guestEditRestText.trim().toIntOrNull()?.coerceAtLeast(0)
@@ -1123,13 +1291,14 @@ fun ActiveStrengthWorkoutScreen(
                                         StrengthSegmentPayload(r, w)
                                     }
                                     if (segPayload.size >= 2) {
-                                        vm.applyCurrentDropSetEdits(segPayload)
+                                        vm.applyCurrentDropSetEdits(segPayload, editingExpandedIndex)
                                     }
                                 } else {
-                                    vm.applyCurrentSetEdits()
+                                    vm.applyCurrentSetEdits(editingExpandedIndex)
                                 }
                                 }
                                 showEditSheet = false
+                                editingExpandedIndex = null
                             },
                             modifier = Modifier.weight(1f)
                         ) { Text("Save") }
@@ -1170,9 +1339,10 @@ fun ActiveStrengthWorkoutScreen(
                             onClick = {
                                 val r = convertNormalRepsText.trim().toIntOrNull() ?: 10
                                 val w = convertNormalWeightText.trim().replace(',', '.').toDoubleOrNull() ?: 0.0
-                                vm.convertCurrentSetToNormalSet(r, w)
+                                vm.convertCurrentSetToNormalSet(r, w, editingExpandedIndex)
                                 showConvertToNormal = false
                                 showEditSheet = false
+                                editingExpandedIndex = null
                             },
                             modifier = Modifier.weight(1f)
                         ) { Text("Convert") }

@@ -62,7 +62,7 @@ data class ActiveStrengthExerciseLine(
     val sets: List<ActiveStrengthSetLine>
 )
 
-private data class CompletedSetLine(
+data class CompletedSetLine(
     val workoutExerciseId: Int,
     val configId: Int,
     val segmentsInRow: Int,
@@ -95,6 +95,8 @@ data class ActiveStrengthUiState(
     val currentExerciseIndex: Int = 0,
     val currentSetIndex: Int = 0,
     val currentSetIndexByExerciseId: Map<Int, Int> = emptyMap(),
+    /** Histórico de series completadas por workout_exercise_id en orden cronológico de finalización. */
+    val completedSetsByExerciseId: Map<Int, List<CompletedSetLine>> = emptyMap(),
     val isResting: Boolean = false,
     val restSecondsLeft: Int = 0,
     /** Descanso activo por ejercicio (burbuja) aunque el índice actual sea otro. */
@@ -411,10 +413,12 @@ class ActiveStrengthWorkoutViewModel(
         _ui.value = _ui.value.copy(editRestText = value)
     }
 
-    fun applyCurrentSetEdits() {
+    fun applyCurrentSetEdits(expandedIndexOverride: Int? = null) {
         val s = _ui.value
         val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
-        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
+        val setIndex = expandedIndexOverride
+            ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
+            ?: s.currentSetIndex
         val reps = s.editRepsText.trim().toIntOrNull()
         val weight = s.editWeightText.trim().replace(',', '.').toDoubleOrNull()
         val rpe = s.editRpeText.trim().replace(',', '.').toDoubleOrNull()
@@ -439,65 +443,63 @@ class ActiveStrengthWorkoutViewModel(
         )
     }
 
-    fun convertCurrentSetToDropSet() {
+    fun convertCurrentSetToDropSet(expandedIndexOverride: Int? = null) {
         val s = _ui.value
         if (s.loading || s.finishing || s.isResting) return
         val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
-        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
+        val setIndex = expandedIndexOverride
+            ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
+            ?: s.currentSetIndex
         val cur = ex.sets.getOrNull(setIndex) ?: return
         if (cur.weightSegments != null && cur.weightSegments.size >= 2) return
-        val cfgId = cur.configId
         val r0 = cur.reps ?: 10
         val w0 = cur.weightKg ?: 0.0
-        val rest = cur.restSec
-        val rpe = cur.rpe
-
-        fun transformForConfig(sets: List<ActiveStrengthSetLine>): List<ActiveStrengthSetLine> {
-            val k = 2
-            val ws = weightSegmentsToJsonArray(
-                listOf(
-                    StrengthSegmentPayload(r0, w0),
-                    StrengthSegmentPayload(r0, 0.0)
-                )
+        val ws = weightSegmentsToJsonArray(
+            listOf(
+                StrengthSegmentPayload(r0, w0),
+                StrengthSegmentPayload(r0, 0.0)
             )
-            val out = sets.map { line ->
-                if (line.configId != cfgId) line
-                else line.copy(
-                    reps = r0,
-                    weightKg = w0,
-                    rpe = rpe,
-                    restSec = rest,
-                    segmentsInRow = k,
-                    weightSegments = ws
-                )
-            }
-            return renumberExpandedSets(out)
+        )
+        val newConfigId = nextSyntheticConfigId(ex.sets)
+        val nextSets = ex.sets.mapIndexed { idx, line ->
+            if (idx != setIndex) line
+            else line.copy(
+                configId = newConfigId,
+                reps = r0,
+                weightKg = w0,
+                segmentsInRow = 2,
+                weightSegments = ws
+            )
         }
-
-        val nextSets = transformForConfig(ex.sets)
-        val nextEx = ex.copy(sets = nextSets)
+        val nextEx = ex.copy(sets = renumberExpandedSets(nextSets))
         val nextExercises = s.exercises.mapIndexed { idx, line ->
             if (idx == s.currentExerciseIndex) nextEx else line
         }
         _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
     }
 
-    fun applyCurrentDropSetEdits(segments: List<StrengthSegmentPayload>) {
+    fun applyCurrentDropSetEdits(
+        segments: List<StrengthSegmentPayload>,
+        expandedIndexOverride: Int? = null
+    ) {
         val s = _ui.value
         if (s.loading || s.finishing) return
         val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
-        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
-        val cur = ex.sets.getOrNull(setIndex) ?: return
+        val setIndex = expandedIndexOverride
+            ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
+            ?: s.currentSetIndex
+        if (ex.sets.getOrNull(setIndex) == null) return
         if (segments.size < 2) return
 
-        val cfgId = cur.configId
         val ws = weightSegmentsToJsonArray(segments)
         val r0 = segments.first().reps
         val w0 = segments.first().weightKg
 
-        val nextSets = ex.sets.map { line ->
-            if (line.configId != cfgId) line
+        val newConfigId = nextSyntheticConfigId(ex.sets)
+        val nextSets = ex.sets.mapIndexed { idx, line ->
+            if (idx != setIndex) line
             else line.copy(
+                configId = newConfigId,
                 reps = r0,
                 weightKg = w0,
                 segmentsInRow = segments.size,
@@ -511,17 +513,24 @@ class ActiveStrengthWorkoutViewModel(
         _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
     }
 
-    fun convertCurrentSetToNormalSet(reps: Int, weightKg: Double) {
+    fun convertCurrentSetToNormalSet(
+        reps: Int,
+        weightKg: Double,
+        expandedIndexOverride: Int? = null
+    ) {
         val s = _ui.value
         if (s.loading || s.finishing) return
         val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
-        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
-        val cur = ex.sets.getOrNull(setIndex) ?: return
-        val cfgId = cur.configId
+        val setIndex = expandedIndexOverride
+            ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
+            ?: s.currentSetIndex
+        if (ex.sets.getOrNull(setIndex) == null) return
 
-        val nextSets = ex.sets.map { line ->
-            if (line.configId != cfgId) line
+        val newConfigId = nextSyntheticConfigId(ex.sets)
+        val nextSets = ex.sets.mapIndexed { idx, line ->
+            if (idx != setIndex) line
             else line.copy(
+                configId = newConfigId,
                 reps = reps,
                 weightKg = weightKg,
                 segmentsInRow = 1,
@@ -598,21 +607,24 @@ class ActiveStrengthWorkoutViewModel(
         val weightKg = wRaw.toDoubleOrNull() ?: set.weightKg
         val rRaw = s.editRpeText.trim().replace(',', '.')
         val rpe = rRaw.toDoubleOrNull() ?: set.rpe
-        completedSetLines.add(
-            CompletedSetLine(
-                workoutExerciseId = ex.workoutExerciseId,
-                configId = set.configId,
-                segmentsInRow = set.segmentsInRow,
-                reps = reps,
-                weightKg = weightKg,
-                rpe = rpe,
-                restSec = set.restSec,
-                weightSegments = set.weightSegments
-            )
+        val completedLine = CompletedSetLine(
+            workoutExerciseId = ex.workoutExerciseId,
+            configId = set.configId,
+            segmentsInRow = set.segmentsInRow,
+            reps = reps,
+            weightKg = weightKg,
+            rpe = rpe,
+            restSec = set.restSec,
+            weightSegments = set.weightSegments
         )
+        completedSetLines.add(completedLine)
         val nextSetIndex = (setIndex + 1).coerceAtMost(ex.sets.size)
         val nextMap = s.currentSetIndexByExerciseId.toMutableMap().apply {
             put(ex.workoutExerciseId, nextSetIndex)
+        }
+        val nextCompletedMap = s.completedSetsByExerciseId.toMutableMap().apply {
+            val prior = this[ex.workoutExerciseId].orEmpty()
+            this[ex.workoutExerciseId] = prior + completedLine
         }
         val allDone = areAllExercisesCompleted(s.exercises, nextMap)
         val newEmphasisLock = s.navEmphasisLockWorkoutExerciseId ?: ex.workoutExerciseId
@@ -620,6 +632,7 @@ class ActiveStrengthWorkoutViewModel(
             s.copy(
                 currentSetIndex = nextSetIndex,
                 currentSetIndexByExerciseId = nextMap,
+                completedSetsByExerciseId = nextCompletedMap,
                 completedEntirely = allDone,
                 navEmphasisLockWorkoutExerciseId = newEmphasisLock
             )
@@ -687,6 +700,7 @@ class ActiveStrengthWorkoutViewModel(
                 currentExerciseIndex = 0,
                 currentSetIndex = 0,
                 currentSetIndexByExerciseId = map,
+                completedSetsByExerciseId = emptyMap(),
                 isResting = false,
                 restSecondsLeft = 0,
                 restSecondsLeftByExerciseId = emptyMap(),

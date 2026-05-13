@@ -49,6 +49,8 @@ object BackendContracts {
         const val SKI_SESSION_STATS = "ski_session_stats"
         const val SEGMENTS = "segments"
         const val SEGMENT_EFFORTS = "segment_efforts"
+        const val TERRITORY_CELLS = "territory_cells"
+        const val TERRITORY_CAPTURE_EVENTS = "territory_capture_events"
         const val SPORT_SESSIONS = "sport_sessions"
         const val STRENGTH_ROUTINES = "strength_routines"
         const val STRENGTH_ROUTINE_EXERCISES = "strength_routine_exercises"
@@ -140,6 +142,19 @@ object BackendContracts {
         const val LIST_SEGMENTS_POPULARITY_LEADERBOARD_V1 = "list_segments_popularity_leaderboard_v1"
         const val SEARCH_SEGMENTS_V1 = "search_segments_v1"
         const val MATCH_SEGMENT_EFFORTS_FOR_WORKOUT_V1 = "match_segment_efforts_for_workout_v1"
+        const val APPLY_TERRITORY_CAPTURE_V1 = "apply_territory_capture_v1"
+        const val PREVIEW_TERRITORY_CAPTURE_V1 = "preview_territory_capture_v1"
+        const val GET_TERRITORY_MAP_V1 = "get_territory_map_v1"
+        const val GET_MY_TERRITORY_SUMMARY_V1 = "get_my_territory_summary_v1"
+        const val GET_TERRITORY_SHARE_LEADERBOARD_V1 = "get_territory_share_leaderboard_v1"
+        const val LIST_TERRITORY_CITY_REGIONS_V1 = "list_territory_city_regions_v1"
+        const val GET_TERRITORY_CITY_SHARE_LEADERBOARD_V1 = "get_territory_city_share_leaderboard_v1"
+        const val BACKFILL_MY_TERRITORY_CAPTURES_V1 = "backfill_my_territory_captures_v1"
+        const val LIST_MY_TERRITORY_RECENT_TAKEOVERS_V1 = "list_my_territory_recent_takeovers_v1"
+        const val GET_TERRITORY_SUMMARY_V1 = "get_territory_summary_v1"
+        const val LIST_USER_TERRITORY_TOP_CITIES_V1 = "list_user_territory_top_cities_v1"
+        const val LIST_TERRITORY_RECENT_TAKEOVERS_V1 = "list_territory_recent_takeovers_v1"
+        const val BACKFILL_TERRITORY_MUNICIPALITY_ASSIGNMENTS_V1 = "backfill_territory_municipality_assignments_v1"
         const val LIST_ACTIVE_CHALLENGES_V1 = "list_active_challenges_v1"
         const val GET_CHALLENGE_INSTANCE_DETAIL_V1 = "get_challenge_instance_detail_v1"
         const val GET_CHALLENGE_INSTANCE_LEADERBOARD_V1 = "get_challenge_instance_leaderboard_v1"
@@ -159,5 +174,6 @@ object BackendContracts {
     /** Supabase Edge Functions (invoke con JWT de sesión), alineado con [Liftr/ProfileView.swift]. */
     object EdgeFunctions {
         const val DELETE_AUTH_USER = "delete-auth-user"
+        const val RESOLVE_TERRITORY_MUNICIPALITY = "resolve-territory-municipality"
     }
 }

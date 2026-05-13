@@ -14,6 +14,8 @@ supabase.anonKey=
 # alineado con el banner de feed en iOS; el shell solo hospeda snackbars/banners in-app (AppSnackbar).
 # admob.bannerId=ca-app-pub-XXXX/YYYY
 
-# Google Maps: clave con Maps SDK for Android habilitada (ruta en cardio activo y detalle). Sin clave, la app compila
-# y se muestra un texto de ayuda en lugar del mapa.
+# Google Maps: clave con Maps SDK for Android habilitada (ruta en cardio activo, detalle y territorio).
+# Sin clave, la app compila y se muestra un mapa vectorial de celdas en lugar de Google Maps.
+# Si ves el logo de Google pero el mapa de calles queda en blanco, en Google Cloud (proyecto settleit-569dd)
+# activa Maps SDK for Android, facturación, y restringe la clave a package com.lilru.liftr + SHA-1 debug/release.
 # maps.apiKey=YOUR_KEY

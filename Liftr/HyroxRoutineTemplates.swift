@@ -44,7 +44,7 @@ private struct HyroxRoutineFolderRow: Identifiable, Hashable, Decodable {
     let sort_order: Int?
 }
 
-private struct HyroxRoutineListRow: Identifiable, Decodable {
+struct HyroxRoutineListRow: Identifiable, Hashable, Decodable {
     let id: Int64
     let name: String
     let updated_at: Date?
@@ -439,6 +439,124 @@ func insertHyroxRoutineTemplate(
     return HyroxRoutinePersistOutcome(alsoHasAnotherRoutineWithSameProgram: dupCount > 0)
 }
 
+func updateHyroxRoutineTemplateInPlace(
+    client: SupabaseClient,
+    userId: UUID,
+    routineId: Int64,
+    sport: SportForm
+) async throws -> HyroxRoutinePersistOutcome {
+    guard sport.sport == .hyrox, !sport.hyExercises.isEmpty else {
+        throw NSError(
+            domain: "HyroxRoutine",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Add at least one Hyrox station before saving a routine."]
+        )
+    }
+
+    struct FolderIdRow: Decodable { let folder_id: Int64? }
+    let folderRes = try await client
+        .from("hyrox_routines")
+        .select("folder_id")
+        .eq("id", value: Int(routineId))
+        .eq("user_id", value: userId)
+        .single()
+        .execute()
+    let folderRow = try JSONDecoder.supabase().decode(FolderIdRow.self, from: folderRes.data)
+
+    let contentHash = hyroxRoutineContentFingerprint(from: sport)
+
+    struct HyroxRoutineRowUpdate: Encodable {
+        let content_hash: String
+        let division: String?
+        let category: String?
+        let age_group: String?
+        let official_time_sec: Int?
+        let penalty_time_sec: Int?
+        let no_reps: Int?
+        let rank_overall: Int?
+        let rank_category: Int?
+        let avg_hr: Int?
+        let max_hr: Int?
+    }
+
+    let headerUpdate = HyroxRoutineRowUpdate(
+        content_hash: contentHash,
+        division: sport.hyDivision.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+        category: sport.hyCategory.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+        age_group: sport.hyAgeGroup.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
+        official_time_sec: hyroxIntOrNil(sport.hyOfficialTimeSec),
+        penalty_time_sec: hyroxIntOrNil(sport.hyPenaltyTimeSec),
+        no_reps: hyroxIntOrNil(sport.hyNoReps),
+        rank_overall: hyroxIntOrNil(sport.hyRankOverall),
+        rank_category: hyroxIntOrNil(sport.hyRankCategory),
+        avg_hr: hyroxIntOrNil(sport.hyAvgHR),
+        max_hr: hyroxIntOrNil(sport.hyMaxHR)
+    )
+
+    _ = try await client
+        .from("hyrox_routines")
+        .update(headerUpdate)
+        .eq("id", value: Int(routineId))
+        .eq("user_id", value: userId)
+        .execute()
+
+    _ = try await client
+        .from("hyrox_routine_exercises")
+        .delete()
+        .eq("routine_id", value: Int(routineId))
+        .execute()
+
+    struct HyroxRoutineExerciseRowInsert: Encodable {
+        let routine_id: Int64
+        let exercise_code: String
+        let exercise_order: Int
+        let distance_m: Int?
+        let reps: Int?
+        let weight_kg: Double?
+        let duration_sec: Int?
+        let height_cm: Int?
+        let implement_count: Int?
+        let notes: String?
+        let exercise_display_name: String?
+    }
+
+    let ordered = sport.hyExercises.sorted { $0.exerciseOrder < $1.exerciseOrder }
+    let exerciseRows: [HyroxRoutineExerciseRowInsert] = ordered.enumerated().map { idx, ex in
+        let persisted = HyroxExerciseFormatting.persistedPayload(
+            exerciseCode: ex.exerciseCode,
+            customDisplayName: ex.customDisplayName,
+            notes: ex.notes
+        )
+        let noteTrim = ex.notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return HyroxRoutineExerciseRowInsert(
+            routine_id: routineId,
+            exercise_code: persisted.code,
+            exercise_order: idx + 1,
+            distance_m: hyroxIntOrNil(ex.distanceM),
+            reps: hyroxIntOrNil(ex.reps),
+            weight_kg: hyroxParseDouble(ex.weightKg),
+            duration_sec: hyroxIntOrNil(ex.durationSec),
+            height_cm: hyroxIntOrNil(ex.heightCm),
+            implement_count: hyroxIntOrNil(ex.implementCount),
+            notes: noteTrim.isEmpty ? nil : noteTrim,
+            exercise_display_name: persisted.displayName
+        )
+    }
+
+    if !exerciseRows.isEmpty {
+        _ = try await client.from("hyrox_routine_exercises").insert(exerciseRows).execute()
+    }
+
+    let dupCount = try await otherHyroxRoutinesWithSameContentCount(
+        client: client,
+        userId: userId,
+        folderId: folderRow.folder_id,
+        contentHash: contentHash,
+        excludingRoutineId: routineId
+    )
+    return HyroxRoutinePersistOutcome(alsoHasAnotherRoutineWithSameProgram: dupCount > 0)
+}
+
 func hyroxRoutineUserFacingSaveError(_ error: Error) -> String {
     let ns = error as NSError
     if ns.domain == "HyroxRoutine",
@@ -498,6 +616,7 @@ struct HyroxRoutinesPickerSheet: View {
     @State private var shareRoutineBuildError: String?
     @State private var routinePreviewToken: RoutinePreviewToken?
     @State private var previewBuildError: String?
+    @State private var routinePendingEdit: HyroxRoutineListRow?
 
     private struct HyroxShareRoutineChatToken: Identifiable {
         let id = UUID()
@@ -837,6 +956,13 @@ struct HyroxRoutinesPickerSheet: View {
                         }
                         ToolbarItemGroup(placement: .primaryAction) {
                             Menu {
+                                Button(String(localized: "Edit")) {
+                                    let row = token.row
+                                    routinePreviewToken = nil
+                                    DispatchQueue.main.async {
+                                        routinePendingEdit = row
+                                    }
+                                }
                                 Button(String(localized: "Rename")) {
                                     let row = token.row
                                     routinePreviewToken = nil
@@ -928,6 +1054,20 @@ struct HyroxRoutinesPickerSheet: View {
             ShareRoutineToChatSheet(snapshot: token.snapshot, onSent: {})
                 .environmentObject(app)
                 .gradientBG()
+        }
+        .sheet(item: $routinePendingEdit) { row in
+            EditSavedHyroxRoutineSheet(
+                routineId: row.id,
+                routineName: row.name,
+                onClose: { routinePendingEdit = nil },
+                onSaved: {
+                    routinePendingEdit = nil
+                    Task { await loadRoutines() }
+                }
+            )
+            .gradientBG()
+            .presentationDetents([.large])
+            .presentationBackground(.clear)
         }
         .alert(
             String(localized: "Couldn't share routine"),
@@ -1127,6 +1267,9 @@ struct HyroxRoutinesPickerSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 Menu {
+                    Button("Edit") {
+                        routinePendingEdit = row
+                    }
                     Button("Rename") {
                         renameRoutineId = row.id
                         renameRoutineFolderId = row.folder_id

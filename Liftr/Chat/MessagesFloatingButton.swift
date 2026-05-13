@@ -34,36 +34,39 @@ struct MessagesFloatingButton: View {
     var body: some View {
         GeometryReader { geo in
             let corner = FabCorner(rawValue: storedCorner) ?? .bottomLeading
-            ZStack {
-                ZStack(alignment: cornerAlignment) {
-                    Color.clear
-                    button
-                        .offset(x: dragging ? dragOffset.width : 0,
-                                y: dragging ? dragOffset.height : 0)
-                        .gesture(
-                            DragGesture(minimumDistance: 1)
-                                .onChanged { value in
-                                    if !chatFabDragHintSeen { chatFabDragHintSeen = true }
-                                    dragging = true
-                                    dragOffset = value.translation
+            let insets = geo.safeAreaInsets
+            let maxBubbleW = min(280, max(120, geo.size.width - insets.leading - insets.trailing - 24))
+
+            ZStack(alignment: cornerAlignment) {
+                Color.clear
+                button
+                    .offset(x: dragging ? dragOffset.width : 0,
+                            y: dragging ? dragOffset.height : 0)
+                    .gesture(
+                        DragGesture(minimumDistance: 1)
+                            .onChanged { value in
+                                if !chatFabDragHintSeen { chatFabDragHintSeen = true }
+                                dragging = true
+                                dragOffset = value.translation
+                            }
+                            .onEnded { value in
+                                let dropped = currentDropPoint(geo: geo, drag: value.translation)
+                                let nearest = nearestCorner(for: dropped, in: geo.size)
+                                storedCorner = nearest.rawValue
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
+                                    dragging = false
+                                    dragOffset = .zero
                                 }
-                                .onEnded { value in
-                                    let dropped = currentDropPoint(geo: geo, drag: value.translation)
-                                    let nearest = nearestCorner(for: dropped, in: geo.size)
-                                    storedCorner = nearest.rawValue
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                                        dragging = false
-                                        dragOffset = .zero
-                                    }
-                                }
-                        )
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
+                            }
+                    )
+
                 if !chatFabDragHintSeen {
-                    fabDragHintBubble(fabCenter: fabAnchorPoint(in: geo.size, corner: corner), containerSize: geo.size)
+                    fabDragHintBubbleContent(maxWidth: maxBubbleW)
+                        .offset(dragHintNudge(for: corner))
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 16)
         }
         .ignoresSafeArea(edges: [])
         .fullScreenCover(isPresented: $presentInbox) {
@@ -105,37 +108,27 @@ struct MessagesFloatingButton: View {
         }
     }
 
-    private func hintBubbleCenter(from fab: CGPoint, in size: CGSize) -> CGPoint {
-        let midX = size.width / 2
-        let midY = size.height / 2
-        let dx = midX - fab.x
-        let dy = midY - fab.y
-        let len = max(hypot(dx, dy), 1)
-        return CGPoint(x: fab.x + dx / len * 132, y: fab.y + dy / len * 96)
-    }
-
-    private func clampedHintBubbleCenter(from fab: CGPoint, in size: CGSize, maxBubbleW: CGFloat) -> CGPoint {
-        let edge: CGFloat = 12
-        let halfW = min((maxBubbleW + 28) / 2, size.width / 2 - edge - 1)
-        let halfH = min(108, size.height / 2 - edge - 1)
-        let raw = hintBubbleCenter(from: fab, in: size)
-        return CGPoint(
-            x: min(max(raw.x, halfW + edge), size.width - halfW - edge),
-            y: min(max(raw.y, halfH + edge), size.height - halfH - edge)
-        )
+    private func dragHintNudge(for corner: FabCorner) -> CGSize {
+        let fabApproxHeight: CGFloat = 58
+        let gap: CGFloat = 12
+        let lift = fabApproxHeight + gap
+        switch corner {
+        case .bottomLeading, .bottomTrailing:
+            return CGSize(width: 0, height: -lift)
+        case .topLeading, .topTrailing:
+            return CGSize(width: 0, height: lift)
+        }
     }
 
     @ViewBuilder
-    private func fabDragHintBubble(fabCenter: CGPoint, containerSize: CGSize) -> some View {
-        let maxBubbleW = min(268, max(120, containerSize.width - 24))
-        let c = clampedHintBubbleCenter(from: fabCenter, in: containerSize, maxBubbleW: maxBubbleW)
+    private func fabDragHintBubbleContent(maxWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(String(localized: "Drag this button to any corner of the screen."))
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: maxBubbleW, alignment: .leading)
+                .frame(maxWidth: maxWidth, alignment: .leading)
             Button {
                 chatFabDragHintSeen = true
             } label: {
@@ -145,6 +138,7 @@ struct MessagesFloatingButton: View {
             }
             .buttonStyle(.borderedProminent)
         }
+        .frame(maxWidth: maxWidth, alignment: .leading)
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -152,7 +146,6 @@ struct MessagesFloatingButton: View {
                 .stroke(.white.opacity(0.18), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 6)
-        .position(x: c.x, y: c.y)
         .allowsHitTesting(true)
         .transition(.opacity.combined(with: .scale(scale: 0.94)))
     }

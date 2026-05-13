@@ -31,6 +31,10 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.TextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Flag
@@ -42,6 +46,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -67,6 +74,7 @@ import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
+import com.lilru.liftr.territory.TerritoryCaptureClient
 import io.github.jan.supabase.SupabaseClient
 import java.util.UUID
 
@@ -102,6 +110,7 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.CARDIO_ELEVATION -> stringResource(R.string.ranking_metric_cardio_elevation)
     RankingMetric.CARDIO_DURATION -> stringResource(R.string.ranking_metric_cardio_duration)
     RankingMetric.CARDIO_BEST_PACE -> stringResource(R.string.ranking_metric_cardio_best_pace)
+    RankingMetric.TERRITORY_SHARE -> stringResource(R.string.ranking_metric_territory_share)
     RankingMetric.SPORT_MATCH_WINS -> stringResource(R.string.ranking_metric_sport_wins)
     RankingMetric.SPORT_WIN_RATE -> stringResource(R.string.ranking_metric_sport_win_rate)
     RankingMetric.SPORT_DURATION -> stringResource(R.string.ranking_metric_sport_duration)
@@ -265,7 +274,8 @@ fun RankingTabScreen(
                     val showPeriod = when (ui.metric) {
                         RankingMetric.LEVEL,
                         RankingMetric.GOALS_COMPLETED,
-                        RankingMetric.DUELS_WON -> false
+                        RankingMetric.DUELS_WON,
+                        RankingMetric.TERRITORY_SHARE -> false
                         else -> true
                     }
                     val showKind = when (ui.metric) {
@@ -273,7 +283,8 @@ fun RankingTabScreen(
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON,
                         RankingMetric.CHALLENGE_PODIUMS,
-                        RankingMetric.SEGMENT_POPULARITY -> false
+                        RankingMetric.SEGMENT_POPULARITY,
+                        RankingMetric.TERRITORY_SHARE -> false
                         else -> true
                     }
                     if (showScope) {
@@ -330,6 +341,51 @@ fun RankingTabScreen(
                                 imageVector = Icons.Filled.UnfoldMore,
                                 contentDescription = stringResource(R.string.ranking_metric_picker_hint)
                             )
+                        }
+                    }
+                    if (ui.metric == RankingMetric.TERRITORY_SHARE) {
+                        if (ui.territoryCities.size > 1) {
+                            var cityMenuExpanded by remember { mutableStateOf(false) }
+                            val selectedCity = ui.territoryCities.firstOrNull { it.cityKey == ui.territoryCityKey }
+                            ExposedDropdownMenuBox(
+                                expanded = cityMenuExpanded,
+                                onExpandedChange = { cityMenuExpanded = it },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                TextField(
+                                    value = selectedCity?.let(TerritoryCaptureClient::citySummaryLabel) ?: "City",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("City") },
+                                    trailingIcon = {
+                                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = cityMenuExpanded)
+                                    },
+                                    modifier = Modifier
+                                        .menuAnchor()
+                                        .fillMaxWidth()
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = cityMenuExpanded,
+                                    onDismissRequest = { cityMenuExpanded = false }
+                                ) {
+                                    ui.territoryCities.forEach { city ->
+                                        DropdownMenuItem(
+                                            text = { Text(TerritoryCaptureClient.citySummaryLabel(city)) },
+                                            onClick = {
+                                                city.cityKey?.let(vm::setTerritoryCityKey)
+                                                cityMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            ui.territoryCities.firstOrNull()?.let { city ->
+                                Text(
+                                    text = TerritoryCaptureClient.citySummaryLabel(city),
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
                         }
                     }
                     if (showPeriod) {

@@ -286,7 +286,7 @@ struct ProfileView: View {
                 Text("Calendar").tag(Tab.calendar)
                 Text("PRs").tag(Tab.prs)
                 Text("Progress").tag(Tab.progress)
-                Text("Segments").tag(Tab.segments)
+                Text("Explore").tag(Tab.segments)
                 if isOwnProfile {
                     Text("Settings").tag(Tab.settings)
                 }
@@ -341,48 +341,64 @@ struct ProfileView: View {
     }
 
     private var mySegmentsTabContent: some View {
-        Group {
-            if mySegmentsLoading && mySegments.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let err = mySegmentsError {
-                Text(err)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else if mySegments.isEmpty {
-                Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else {
-                List(mySegments) { row in
-                    NavigationLink {
-                        SegmentDetailView(segmentId: row.id, onClose: nil)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(row.name)
-                                .font(.body.weight(.semibold))
-                            HStack(spacing: 6) {
-                                Text(row.status.capitalized)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("·")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                                Text("Buffer \(Int(row.buffer_m)) m")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let profileUserId = viewingUserId {
+                    TerritoryProfileHubView(profileUserId: profileUserId, isOwnProfile: isOwnProfile)
+                }
+
+                Text(isOwnProfile ? "Your segments" : "Segments")
+                    .font(.headline)
+                    .padding(.horizontal)
+
+                if mySegmentsLoading && mySegments.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 24)
+                } else if let err = mySegmentsError {
+                    Text(err)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                } else if mySegments.isEmpty {
+                    Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(mySegments) { row in
+                            NavigationLink {
+                                SegmentDetailView(segmentId: row.id, onClose: nil)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(row.name)
+                                        .font(.body.weight(.semibold))
+                                    HStack(spacing: 6) {
+                                        Text(row.status.capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("·")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                        Text("Buffer \(Int(row.buffer_m)) m")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .listRowBackground(Color.clear)
+                    .padding(.horizontal)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
+            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: "\(tab.rawValue)-\(viewingUserId?.uuidString ?? "none")") {

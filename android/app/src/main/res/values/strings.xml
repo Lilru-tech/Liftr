@@ -93,6 +93,7 @@
     <string name="ranking_metric_cardio_elevation">Cardio ascent (m)</string>
     <string name="ranking_metric_cardio_duration">Cardio time</string>
     <string name="ranking_metric_cardio_best_pace">Cardio best pace</string>
+    <string name="ranking_metric_territory_share">Territory %</string>
     <string name="ranking_metric_sport_wins">Sport wins</string>
     <string name="ranking_metric_sport_win_rate">Sport win %</string>
     <string name="ranking_metric_sport_duration">Sport play time</string>
@@ -516,6 +517,8 @@
     <string name="notifications_settings_segments_challenges">Segments &amp; challenges</string>
     <string name="notifications_settings_segment_first">Segment: you are first</string>
     <string name="notifications_settings_segment_lost">Segment: lost first</string>
+    <string name="notifications_settings_territory_capture">Territory captured from others</string>
+    <string name="notifications_settings_territory_lost">Territory lost to others</string>
     <string name="notifications_settings_challenge_won">Challenge won</string>
     <string name="notifications_settings_challenge_won_weekly">Challenge won (weekly)</string>
     <string name="notifications_settings_reminders">Reminders</string>
@@ -665,8 +668,11 @@
     <string name="profile_personal_saved">Profile updated!</string>
     <string name="profile_saving">Saving…</string>
     <string name="profile_tab_calendar">Calendar</string>
+    <string name="profile_tab_explore">Explore</string>
+    <string name="profile_your_segments">Your segments</string>
     <string name="profile_tab_segments">Segments</string>
     <string name="profile_my_segments_empty">You have not created any segments yet.</string>
+    <string name="profile_other_segments_empty">This user has not created any segments yet.</string>
     <string name="profile_my_segments_buffer">Buffer %1$d m</string>
     <string name="profile_tab_prs">PRs</string>
     <string name="profile_tab_progress">Progress</string>
@@ -926,6 +932,9 @@
     <string name="active_cardio_distance_km">Distance (km)</string>
     <string name="active_cardio_route_label">Route</string>
     <string name="active_cardio_maps_key_hint">Map: set maps.apiKey in local.properties (Google Maps SDK).</string>
+    <string name="territory_map_tiles_setup_hint">If the street map stays blank, enable Maps SDK for Android on this Google Cloud key in project settleit-569dd, turn on billing, and allow app package com.lilru.liftr with your debug or release SHA-1.</string>
+    <string name="territory_map_debug_status">Debug: %1$d cells in view · map loaded %2$s · key ends %3$s</string>
+    <string name="territory_map_debug_logcat_hint">In Android Studio Logcat, filter by LiftrTerritoryMap or Authorization failure, then open the Map tab again.</string>
     <string name="home_detail_cardio_route">Route</string>
     <string name="segment_create_button">Create segment</string>
     <string name="segment_create_dialog_title">Create segment from route</string>
@@ -1028,11 +1037,12 @@
     <string name="home_detail_notes_title">Notes</string>
     <string name="search_query_label">Search users or workouts</string>
     <string name="search_scope_users">Users</string>
-    <string name="search_scope_segments">Segments</string>
+    <string name="search_scope_map">Map</string>
     <string name="search_segments_title">Segments</string>
     <string name="search_segments_empty">No segments found</string>
     <string name="search_segment_buffer_m">Buffer %1$d m</string>
     <string name="search_scope_workouts">Workouts</string>
+    <string name="search_scope_segments">Segments</string>
     <string name="search_action">Search</string>
     <string name="search_clear">Reset</string>
     <string name="search_clear_recents">Clear recents</string>
@@ -1067,6 +1077,10 @@
     <string name="add_mode_add_sub">Log a completed or in-progress session (normal upload).</string>
     <string name="add_mode_plan">Plan</string>
     <string name="add_mode_plan_sub">Save a planned session to start later (state planned; shows in “My planned” on Home).</string>
+    <string name="add_mode_plan_tooltip_title">Tip: choose Plan to save this workout for later.</string>
+    <string name="add_mode_plan_tooltip_body">When you open the planned workout, you can start it as an Active Workout.</string>
+    <string name="add_mode_plan_tooltip_ok">Got it</string>
+    <string name="add_mode_plan_tooltip_dismiss">Dismiss Plan tip</string>
     <string name="add_field_started_at">Started at</string>
     <string name="add_field_finished">Finished</string>
     <string name="add_field_ended_at">Ended at</string>

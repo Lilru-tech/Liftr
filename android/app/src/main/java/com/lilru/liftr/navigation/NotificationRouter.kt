@@ -131,6 +131,8 @@ object NotificationRouter {
                 val u = runCatching { UUID.fromString(sid) }.getOrNull() ?: return null
                 MainOverlay.SegmentDetail(u)
             }
+            "territory_capture_from_user",
+            "territory_lost_to_user" -> MainOverlay.TerritoryMap
             "challenge_won",
             "challenge_won_weekly" -> {
                 val cid = map["challenge_instance_id"]?.trim()?.takeIf { it.isNotEmpty() }

@@ -67,6 +67,8 @@ private data class NotificationSettingsRow(
     @SerialName("push_competition_workout_rejected") val pushCompetitionWorkoutRejected: Boolean,
     @SerialName("push_segment_you_are_first") val pushSegmentYouAreFirst: Boolean,
     @SerialName("push_segment_lost_first") val pushSegmentLostFirst: Boolean,
+    @SerialName("push_territory_capture_from_user") val pushTerritoryCaptureFromUser: Boolean,
+    @SerialName("push_territory_lost_to_user") val pushTerritoryLostToUser: Boolean,
     @SerialName("push_challenge_won") val pushChallengeWon: Boolean,
     @SerialName("push_challenge_won_weekly") val pushChallengeWonWeekly: Boolean,
     @SerialName("push_workout_kind_inactive") val pushWorkoutKindInactive: Boolean
@@ -340,6 +342,20 @@ fun NotificationSettingsScreen(
                     checked = r.pushSegmentLostFirst,
                     enabled = enabled,
                     onToggle = { v -> save(mapOf("push_segment_lost_first" to v)) }
+                )
+                SettingsCard(
+                    title = stringResource(R.string.notifications_settings_territory_capture),
+                    subtitle = null,
+                    checked = r.pushTerritoryCaptureFromUser,
+                    enabled = enabled,
+                    onToggle = { v -> save(mapOf("push_territory_capture_from_user" to v)) }
+                )
+                SettingsCard(
+                    title = stringResource(R.string.notifications_settings_territory_lost),
+                    subtitle = null,
+                    checked = r.pushTerritoryLostToUser,
+                    enabled = enabled,
+                    onToggle = { v -> save(mapOf("push_territory_lost_to_user" to v)) }
                 )
                 SettingsCard(
                     title = stringResource(R.string.notifications_settings_challenge_won),

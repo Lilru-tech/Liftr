@@ -1380,6 +1380,58 @@ struct EditWorkoutMetaSheet: View {
         await loadParticipants()
     }
     
+    private func strengthExerciseSaveInputs() -> [StrengthWorkoutExerciseSaveInput] {
+        s_items.map { ex in
+            let sets: [StrengthWorkoutSetSaveInput] = ex.sets
+                .filter { s in
+                    if s.segments.count >= 2 {
+                        return s.segments.allSatisfy { seg in
+                            guard let r = seg.reps, r > 0 else { return false }
+                            let t = seg.weightKg.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
+                            return Double(t) != nil
+                        }
+                    }
+                    return s.reps != nil ||
+                        !s.weightKg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        !s.rpe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                        s.restSec != nil
+                }
+                .compactMap { s -> StrengthWorkoutSetSaveInput? in
+                    let ws: [StrengthWeightSegWire]? = {
+                        guard s.segments.count >= 2 else { return nil }
+                        var out: [StrengthWeightSegWire] = []
+                        for seg in s.segments {
+                            guard let r = seg.reps, r > 0 else { return nil }
+                            let t = seg.weightKg.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard let w = Double(t) else { return nil }
+                            out.append(StrengthWeightSegWire(reps: r, weight_kg: w))
+                        }
+                        return out.count >= 2 ? out : nil
+                    }()
+                    let firstRep = ws?.first?.reps ?? s.reps
+                    let firstKg: Double? = {
+                        if let w = ws?.first { return w.weight_kg }
+                        return s.weightKg.asDouble
+                    }()
+                    return StrengthWorkoutSetSaveInput(
+                        set_number: max(1, s.setNumber),
+                        reps: firstRep,
+                        weight_kg: firstKg,
+                        rpe: s.rpe.asDouble,
+                        rest_sec: s.restSec,
+                        weight_segments: ws
+                    )
+                }
+            return StrengthWorkoutExerciseSaveInput(
+                workout_exercise_id: ex.workoutExerciseId,
+                exercise_id: ex.exerciseId,
+                notes: ex.notes.trimmedOrNil,
+                custom_name: ex.alias.trimmedOrNil,
+                sets: sets
+            )
+        }
+    }
+
     private func saveAll() async {
         error = nil; saving = true; defer { saving = false }
         do {
@@ -1401,7 +1453,7 @@ struct EditWorkoutMetaSheet: View {
                 ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
                 perceived_intensity: perceived.rawValue
             )
-            if kind.lowercased() != "sport" {
+            if kind.lowercased() != "sport" && kind.lowercased() != "strength" {
                 _ = try await SupabaseManager.shared.client
                     .from("workouts")
                     .update(common)
@@ -1516,87 +1568,52 @@ struct EditWorkoutMetaSheet: View {
                 }
                 
             case "strength":
-                for ex in s_items {
-                    struct ExPayload: Encodable { let exercise_id: Int; let notes: String?; let custom_name: String? }
-                    _ = try await SupabaseManager.shared.client
-                        .from("workout_exercises")
-                        .update(ExPayload(
-                            exercise_id: ex.exerciseId,
-                            notes: ex.notes.trimmedOrNil,
-                            custom_name: ex.alias.trimmedOrNil
-                        ))
-                        .eq("id", value: ex.workoutExerciseId)
-                        .execute()
+                WorkoutSavePerf.begin(.editStrength)
+                let exerciseInputs = strengthExerciseSaveInputs()
+                let setCount = exerciseInputs.reduce(0) { $0 + $1.sets.count }
+                WorkoutSavePerf.mark(
+                    .editStrength,
+                    "payload_built",
+                    exerciseCount: exerciseInputs.count,
+                    setCount: setCount
+                )
+                let saved = try await WorkoutSavePerf.measure(
+                    .editStrength,
+                    "update_strength_workout_v1",
+                    exerciseCount: exerciseInputs.count,
+                    setCount: setCount
+                ) {
+                    try await StrengthWorkoutSaveRPC.updateStrengthWorkoutV1(
+                        client: SupabaseManager.shared.client,
+                        workoutId: workoutId,
+                        title: common.title,
+                        notes: common.notes,
+                        startedAt: common.started_at ?? iso.string(from: startedAt),
+                        endedAt: common.ended_at,
+                        perceivedIntensity: common.perceived_intensity,
+                        exercises: exerciseInputs
+                    )
                 }
-                
-                let exIds = s_items.map { $0.workoutExerciseId }
-                if !exIds.isEmpty {
-                    _ = try await SupabaseManager.shared.client
-                        .from("exercise_sets")
-                        .delete()
-                        .in("workout_exercise_id", values: exIds)
-                        .execute()
-                }
-                
-                struct InsertSet: Encodable {
-                    let workout_exercise_id: Int
-                    let set_number: Int
-                    let reps: Int?
-                    let weight_kg: Double?
-                    let rpe: Double?
-                    let rest_sec: Int?
-                    let weight_segments: [StrengthWeightSegWire]?
-                }
-                let payload: [InsertSet] = s_items.flatMap { ex in
-                    ex.sets
-                        .filter { s in
-                            if s.segments.count >= 2 {
-                                return s.segments.allSatisfy { seg in
-                                    guard let r = seg.reps, r > 0 else { return false }
-                                    let t = seg.weightKg.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
-                                    return Double(t) != nil
-                                }
-                            }
-                            return s.reps != nil ||
-                                !s.weightKg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                                !s.rpe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                                s.restSec != nil
-                        }
-                        .compactMap { s -> InsertSet? in
-                            let ws: [StrengthWeightSegWire]? = {
-                                guard s.segments.count >= 2 else { return nil }
-                                var out: [StrengthWeightSegWire] = []
-                                for seg in s.segments {
-                                    guard let r = seg.reps, r > 0 else { return nil }
-                                    let t = seg.weightKg.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
-                                    guard let w = Double(t) else { return nil }
-                                    out.append(StrengthWeightSegWire(reps: r, weight_kg: w))
-                                }
-                                return out.count >= 2 ? out : nil
-                            }()
-                            let firstRep = ws?.first?.reps ?? s.reps
-                            let firstKg: Double? = {
-                                if let w = ws?.first { return w.weight_kg }
-                                return s.weightKg.asDouble
-                            }()
-                            return InsertSet(
-                                workout_exercise_id: ex.workoutExerciseId,
-                                set_number: max(1, s.setNumber),
-                                reps: firstRep,
-                                weight_kg: firstKg,
-                                rpe: s.rpe.asDouble,
-                                rest_sec: s.restSec,
-                                weight_segments: ws
-                            )
-                        }
-                }
-                if !payload.isEmpty {
-                    _ = try await SupabaseManager.shared.client
-                        .from("exercise_sets")
-                        .insert(payload)
-                        .execute()
-                }
-                
+                WorkoutSavePerf.end(.editStrength)
+                NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
+                let scorePayload: Any = saved.score.map { $0 as Any } ?? NSNull()
+                NotificationCenter.default.post(
+                    name: .workoutUpdated,
+                    object: workoutId,
+                    userInfo: [
+                        "id": saved.workout_id,
+                        "user_id": saved.user_id,
+                        "kind": saved.kind,
+                        "title": saved.title as Any,
+                        "started_at": saved.started_at ?? NSNull(),
+                        "ended_at": saved.ended_at ?? NSNull(),
+                        "score": scorePayload
+                    ]
+                )
+                try await applyParticipantsChanges()
+                await onSaved()
+                dismiss()
+                return
             default: break
             }
             

@@ -100,11 +100,14 @@ import android.widget.Toast
 import com.lilru.liftr.LiftrApplication
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.SupabaseResponseDecoding
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.components.LiftrBackTopBar
+import com.lilru.liftr.ui.territory.TerritoryMapScreen
+import com.lilru.liftr.ui.territory.TerritoryProfileHubCard
 import com.lilru.liftr.util.AvatarImageUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -124,7 +127,10 @@ import com.lilru.liftr.ui.ranking.RankingTabScreen
 import com.lilru.liftr.ui.health.HealthConnectImportScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.auth.auth
 import java.text.DateFormat
 import java.time.Instant
@@ -134,6 +140,8 @@ import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.json.JSONArray
@@ -143,6 +151,14 @@ private data class ProfileMySegmentRow(
     val id: String,
     val name: String,
     val bufferM: Double,
+    val status: String
+)
+
+@Serializable
+private data class ProfilePublishedSegmentWire(
+    val id: String,
+    val name: String,
+    @SerialName("buffer_m") val bufferM: Double,
     val status: String
 )
 
@@ -630,6 +646,7 @@ fun ProfileTabScreen(
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
     var showCompetitions by rememberSaveable { mutableStateOf(false) }
     var showRanking by rememberSaveable { mutableStateOf(false) }
+    var showTerritoryMap by rememberSaveable { mutableStateOf(false) }
     var showCreateCompetition by rememberSaveable { mutableStateOf(false) }
     var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
@@ -703,6 +720,20 @@ fun ProfileTabScreen(
             embedBack = { showRanking = false },
             modifier = modifier
         )
+        return
+    }
+
+    if (showTerritoryMap) {
+        Column(modifier = modifier.fillMaxSize()) {
+            LiftrBackTopBar(
+                title = "Territory map",
+                onBack = { showTerritoryMap = false }
+            )
+            TerritoryMapScreen(
+                supabase = supabase,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         return
     }
 
@@ -864,12 +895,12 @@ fun ProfileTabScreen(
         return
     }
 
-    val tabEntries = remember(ui.isOwnProfile) {
+    val tabEntries = remember(ui.isOwnProfile, profileUserId) {
         buildList {
             add(ProfileMainTab.Calendar)
             add(ProfileMainTab.Prs)
             add(ProfileMainTab.Progress)
-            if (ui.isOwnProfile) add(ProfileMainTab.Segments)
+            if (profileUserId != null) add(ProfileMainTab.Segments)
             if (ui.isOwnProfile) add(ProfileMainTab.Settings)
         }
     }
@@ -959,7 +990,7 @@ fun ProfileTabScreen(
                                         ProfileMainTab.Calendar -> R.string.profile_tab_calendar
                                         ProfileMainTab.Prs -> R.string.profile_tab_prs
                                         ProfileMainTab.Progress -> R.string.profile_tab_progress
-                                        ProfileMainTab.Segments -> R.string.profile_tab_segments
+                                        ProfileMainTab.Segments -> R.string.profile_tab_explore
                                         ProfileMainTab.Settings -> R.string.profile_tab_settings
                                     }
                                 ),
@@ -1030,32 +1061,55 @@ fun ProfileTabScreen(
                         }
                     }
                     ProfileMainTab.Segments -> {
-                        if (profileUserId != null && ui.isOwnProfile) {
-                            var rows by remember(profileUserId) { mutableStateOf<List<ProfileMySegmentRow>>(emptyList()) }
+                        if (profileUserId != null) {
+                            var rows by remember(profileUserId, ui.isOwnProfile) { mutableStateOf<List<ProfileMySegmentRow>>(emptyList()) }
                             var busy by remember { mutableStateOf(true) }
                             var loadErr by remember { mutableStateOf<String?>(null) }
-                            LaunchedEffect(profileUserId) {
+                            LaunchedEffect(profileUserId, ui.isOwnProfile) {
                                 busy = true
                                 loadErr = null
                                 runCatching {
-                                    val res = supabase.postgrest.rpc(
-                                        BackendContracts.Rpc.LIST_MY_SEGMENTS_V1,
-                                        buildJsonObject { put("p_limit", 100) }
-                                    ) { }
-                                    val arr = JSONArray(res.data)
-                                    val out = ArrayList<ProfileMySegmentRow>(arr.length())
-                                    for (i in 0 until arr.length()) {
-                                        val o = arr.optJSONObject(i) ?: continue
-                                        out.add(
-                                            ProfileMySegmentRow(
-                                                id = o.optString("id"),
-                                                name = o.optString("name"),
-                                                bufferM = o.optDouble("buffer_m"),
-                                                status = o.optString("status")
+                                    rows = if (ui.isOwnProfile) {
+                                        val res = supabase.postgrest.rpc(
+                                            BackendContracts.Rpc.LIST_MY_SEGMENTS_V1,
+                                            buildJsonObject { put("p_limit", 100) }
+                                        ) { }
+                                        val arr = JSONArray(res.data)
+                                        val out = ArrayList<ProfileMySegmentRow>(arr.length())
+                                        for (i in 0 until arr.length()) {
+                                            val o = arr.optJSONObject(i) ?: continue
+                                            out.add(
+                                                ProfileMySegmentRow(
+                                                    id = o.optString("id"),
+                                                    name = o.optString("name"),
+                                                    bufferM = o.optDouble("buffer_m"),
+                                                    status = o.optString("status")
+                                                )
                                             )
-                                        )
+                                        }
+                                        out
+                                    } else {
+                                        supabase.from(BackendContracts.Tables.SEGMENTS)
+                                            .select(columns = Columns.raw("id, name, buffer_m, status")) {
+                                                filter {
+                                                    eq("created_by", profileUserId)
+                                                    eq("status", "published")
+                                                }
+                                                order("created_at", Order.DESCENDING)
+                                                limit(100)
+                                            }
+                                            .let { res ->
+                                                SupabaseResponseDecoding.decodeListOrObject<ProfilePublishedSegmentWire>(res.data)
+                                            }
+                                            .map {
+                                                ProfileMySegmentRow(
+                                                    id = it.id,
+                                                    name = it.name,
+                                                    bufferM = it.bufferM,
+                                                    status = it.status
+                                                )
+                                            }
                                     }
-                                    rows = out
                                 }.onFailure { loadErr = it.message }
                                 busy = false
                             }
@@ -1066,6 +1120,24 @@ fun ProfileTabScreen(
                                     .padding(vertical = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                TerritoryProfileHubCard(
+                                    supabase = supabase,
+                                    profileUserId = profileUserId,
+                                    isOwnProfile = ui.isOwnProfile,
+                                    onOpenMap = { showTerritoryMap = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text(
+                                    text = stringResource(
+                                        if (ui.isOwnProfile) {
+                                            R.string.profile_your_segments
+                                        } else {
+                                            R.string.profile_tab_segments
+                                        }
+                                    ),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                                 if (busy && rows.isEmpty()) {
                                     LinearProgressIndicator(Modifier.fillMaxWidth())
                                 }
@@ -1078,7 +1150,13 @@ fun ProfileTabScreen(
                                 }
                                 if (!busy && rows.isEmpty() && loadErr == null) {
                                     Text(
-                                        text = stringResource(R.string.profile_my_segments_empty),
+                                        text = stringResource(
+                                            if (ui.isOwnProfile) {
+                                                R.string.profile_my_segments_empty
+                                            } else {
+                                                R.string.profile_other_segments_empty
+                                            }
+                                        ),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
