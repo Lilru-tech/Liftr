@@ -58,6 +58,8 @@ private val defaultTerritoryCenter = LatLng(41.1189, 1.2445)
 fun TerritoryMapScreen(
     supabase: SupabaseClient,
     onOpenProfile: (UUID) -> Unit = {},
+    initialLatitude: Double? = null,
+    initialLongitude: Double? = null,
     modifier: Modifier = Modifier
 ) {
     var cells by remember { mutableStateOf<List<TerritoryMapCellWire>>(emptyList()) }
@@ -71,10 +73,22 @@ fun TerritoryMapScreen(
     var hasFramedCells by remember { mutableStateOf(false) }
     val cellSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
-    val referenceCoordinate = remember(context) { LiftrPreferences.territoryReferenceCoordinate(context) }
+    val referenceCoordinate = remember(context, initialLatitude, initialLongitude) {
+        if (initialLatitude != null && initialLongitude != null) {
+            initialLatitude to initialLongitude
+        } else {
+            LiftrPreferences.territoryReferenceCoordinate(context)
+        }
+    }
     val cameraPositionState = rememberCameraPositionState {
         val center = referenceCoordinate?.let { (lat, lon) -> LatLng(lat, lon) } ?: defaultTerritoryCenter
         position = CameraPosition.fromLatLngZoom(center, 12f)
+    }
+
+    LaunchedEffect(initialLatitude, initialLongitude) {
+        val center = referenceCoordinate?.let { (lat, lon) -> LatLng(lat, lon) } ?: return@LaunchedEffect
+        LiftrPreferences.setTerritoryReferenceCoordinate(context, center.latitude, center.longitude)
+        cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(center, 12f))
     }
 
     suspend fun refreshForCamera() {

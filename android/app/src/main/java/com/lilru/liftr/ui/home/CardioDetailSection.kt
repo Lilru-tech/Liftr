@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.cardio.CardioRouteGeoJson
+import com.lilru.liftr.territory.TerritoryCaptureClient
 import com.lilru.liftr.ui.map.CardioRouteMapFromGeoJson
 import com.lilru.liftr.ui.map.CardioRouteSegmentTapMap
 import com.lilru.liftr.ui.segment.SegmentDuplicateException
@@ -70,6 +71,14 @@ fun CardioDetailSection(
     var nextMapTapSetsStart by remember { mutableStateOf(true) }
     val routePts = remember(detail.routeGeojson) {
         CardioRouteGeoJson.parseLineStringLatLng(detail.routeGeojson)
+    }
+    val territoryDetailValue = remember(detail.territoryCellsGained, detail.territoryCellsTaken) {
+        val gained = detail.territoryCellsGained ?: 0
+        if (gained <= 0) {
+            null
+        } else {
+            TerritoryCaptureClient.workoutDetailLabel(gained, detail.territoryCellsTaken ?: 0)
+        }
     }
     val canOfferSegment =
         isOwner &&
@@ -140,6 +149,12 @@ fun CardioDetailSection(
                 stringResource(R.string.home_detail_cardio_m, detail.elevationGainM)
             )
         }
+        if (routePts.size < 2 && territoryDetailValue != null) {
+            CardioInfoRow(
+                stringResource(R.string.home_detail_cardio_label_territory),
+                territoryDetailValue
+            )
+        }
         if (!detail.routeGeojson.isNullOrBlank()) {
             Text(
                 stringResource(R.string.home_detail_cardio_route),
@@ -151,8 +166,15 @@ fun CardioDetailSection(
                 routeGeojson = detail.routeGeojson,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 6.dp)
+                    .padding(top = 6.dp),
+                territoryPreviewRings = detail.territoryPreviewRings
             )
+            if (territoryDetailValue != null) {
+                CardioInfoRow(
+                    stringResource(R.string.home_detail_cardio_label_territory),
+                    territoryDetailValue
+                )
+            }
             if (canOfferSegment) {
                 Button(
                     onClick = {

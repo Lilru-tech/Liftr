@@ -2270,12 +2270,20 @@ private enum CardioRouteGeoJSONParser {
 
 private struct CardioRouteMapMini: View {
     let coordinates: [CLLocationCoordinate2D]
+    let territoryCells: [TerritoryPreviewCell]
     @State private var position: MapCameraPosition = .automatic
     @State private var showExpanded = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Map(position: $position) {
+                ForEach(territoryCells) { cell in
+                    let ring = cell.cell_geojson?.ring ?? []
+                    if ring.count >= 3 {
+                        MapPolygon(coordinates: ring)
+                            .foregroundStyle(Color.green.opacity(0.22))
+                    }
+                }
                 MapPolyline(coordinates: coordinates)
                     .stroke(.blue.opacity(0.88), lineWidth: 4)
             }
@@ -2302,6 +2310,13 @@ private struct CardioRouteMapMini: View {
             NavigationStack {
                 ZStack {
                     Map(position: $position) {
+                        ForEach(territoryCells) { cell in
+                            let ring = cell.cell_geojson?.ring ?? []
+                            if ring.count >= 3 {
+                                MapPolygon(coordinates: ring)
+                                    .foregroundStyle(Color.green.opacity(0.22))
+                            }
+                        }
                         MapPolyline(coordinates: coordinates)
                             .stroke(.blue.opacity(0.88), lineWidth: 4)
                     }
@@ -2387,9 +2402,19 @@ private struct CardioDetailBlock: View {
     }
     @State private var extras: CardioExtras?
     @State private var kmPaceSplitsExpanded = false
+    @State private var captureEvent: TerritoryCaptureEventRow?
+    @State private var territoryPreviewCells: [TerritoryPreviewCell] = []
 
     private var routeCoordinates: [CLLocationCoordinate2D] {
         CardioRouteGeoJSONParser.coordinates(from: row?.route_geojson)
+    }
+
+    private var territoryDetailValue: String? {
+        guard let gained = captureEvent?.cells_gained, gained > 0 else { return nil }
+        return TerritoryCapturePresentation.workoutDetailLabel(
+            gained: gained,
+            taken: captureEvent?.cells_taken ?? 0
+        )
     }
     
     var body: some View {
@@ -2407,11 +2432,20 @@ private struct CardioDetailBlock: View {
                 if let ah = r.avg_hr { info("Avg HR", "\(ah) bpm") }
                 if let mh = r.max_hr { info("Max HR", "\(mh) bpm") }
                 if let elev = r.elevation_gain_m { info("Elevation gain", "\(elev) m") }
+                if routeCoordinates.count < 2, let territoryDetailValue {
+                    info("Territory", territoryDetailValue)
+                }
                 if routeCoordinates.count >= 2 {
                     Text("Route")
                         .font(.subheadline.weight(.semibold))
                         .padding(.top, 2)
-                    CardioRouteMapMini(coordinates: routeCoordinates)
+                    CardioRouteMapMini(
+                        coordinates: routeCoordinates,
+                        territoryCells: territoryPreviewCells
+                    )
+                    if let territoryDetailValue {
+                        info("Territory", territoryDetailValue)
+                    }
                     if canEdit && workoutState == "published" {
                         Button {
                             showCreateSegment = true
@@ -2452,6 +2486,8 @@ private struct CardioDetailBlock: View {
         .task { await load() }
         .onChange(of: reloadKey) { _, _ in
             kmPaceSplitsExpanded = false
+            captureEvent = nil
+            territoryPreviewCells = []
             Task { await load() }
         }
         .sheet(isPresented: $showCreateSegment) {
@@ -2505,8 +2541,26 @@ private struct CardioDetailBlock: View {
             } catch {
                 await MainActor.run { self.extras = nil }
             }
+            let capture = await TerritoryCaptureClient.fetchCaptureEvent(workoutId: workoutId)
+            let previewCells: [TerritoryPreviewCell]
+            if (capture?.cells_gained ?? 0) > 0,
+               let routeGeoJSON = r.route_geojson,
+               !routeGeoJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                previewCells = await TerritoryCaptureClient.fetchTerritoryPreviewCells(routeGeoJSON: routeGeoJSON)
+            } else {
+                previewCells = []
+            }
+            await MainActor.run {
+                self.captureEvent = capture
+                self.territoryPreviewCells = previewCells
+            }
         } catch {
-            await MainActor.run { self.row = nil; self.error = error.localizedDescription }
+            await MainActor.run {
+                self.row = nil
+                self.captureEvent = nil
+                self.territoryPreviewCells = []
+                self.error = error.localizedDescription
+            }
         }
     }
     

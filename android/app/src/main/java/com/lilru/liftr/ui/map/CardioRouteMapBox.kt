@@ -388,7 +388,8 @@ fun CardioRouteFullscreenMapDialog(
     visible: Boolean,
     onDismiss: () -> Unit,
     routePoints: List<Pair<Double, Double>>,
-    showOpenInGoogleMaps: Boolean = false
+    showOpenInGoogleMaps: Boolean = false,
+    territoryPreviewRings: List<List<Pair<Double, Double>>> = emptyList()
 ) {
     if (!visible || routePoints.size < 2) return
     val ctx = LocalContext.current
@@ -421,7 +422,8 @@ fun CardioRouteFullscreenMapDialog(
                         .weight(1f)
                         .fillMaxWidth(),
                     expandToFill = true,
-                    useRichMapControls = true
+                    useRichMapControls = true,
+                    territoryPreviewRings = territoryPreviewRings
                 )
                 if (showOpenInGoogleMaps) {
                     TextButton(
@@ -443,7 +445,8 @@ fun CardioRouteFullscreenMapDialog(
 fun CardioRouteMapFromGeoJson(
     routeGeojson: String?,
     modifier: Modifier = Modifier,
-    mapHeightDp: Int = 220
+    mapHeightDp: Int = 220,
+    territoryPreviewRings: List<List<Pair<Double, Double>>> = emptyList()
 ) {
     val pts = remember(routeGeojson) { CardioRouteGeoJson.parseLineStringLatLng(routeGeojson) }
     if (pts.size < 2) return
@@ -451,7 +454,12 @@ fun CardioRouteMapFromGeoJson(
     var showFullscreen by remember { mutableStateOf(false) }
     Column(modifier = modifier.fillMaxWidth()) {
         Box(modifier = Modifier.fillMaxWidth()) {
-            CardioRouteMapBox(pts, modifier = Modifier.fillMaxWidth(), mapHeightDp = mapHeightDp)
+            CardioRouteMapBox(
+                pts,
+                modifier = Modifier.fillMaxWidth(),
+                mapHeightDp = mapHeightDp,
+                territoryPreviewRings = territoryPreviewRings
+            )
             TextButton(
                 onClick = { showFullscreen = true },
                 modifier = Modifier
@@ -472,6 +480,7 @@ fun CardioRouteMapFromGeoJson(
         visible = showFullscreen,
         onDismiss = { showFullscreen = false },
         routePoints = pts,
-        showOpenInGoogleMaps = true
+        showOpenInGoogleMaps = true,
+        territoryPreviewRings = territoryPreviewRings
     )
 }

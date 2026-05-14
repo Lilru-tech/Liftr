@@ -19,6 +19,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -26,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +41,7 @@ import com.lilru.liftr.territory.TerritoryShareLeaderRowWire
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradientOpaque
 import io.github.jan.supabase.SupabaseClient
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,7 +49,8 @@ fun TerritoryShareLeaderboardSheet(
     supabase: SupabaseClient,
     onDismiss: () -> Unit,
     initialLatitude: Double? = null,
-    initialLongitude: Double? = null
+    initialLongitude: Double? = null,
+    onViewOnMap: ((Double, Double) -> Unit)? = null
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
@@ -55,15 +59,30 @@ fun TerritoryShareLeaderboardSheet(
     var rows by remember { mutableStateOf<List<TerritoryShareLeaderRowWire>>(emptyList()) }
     var cities by remember { mutableStateOf<List<TerritoryCityRegionRowWire>>(emptyList()) }
     var selectedCityKey by remember { mutableStateOf<String?>(null) }
-    var cityMenuExpanded by remember { mutableStateOf(false) }
+    var cityPickerOpen by remember { mutableStateOf(false) }
+    var pendingRefreshStarted by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
+    val coroutineScope = rememberCoroutineScope()
+    val selectedCity = remember(cities, selectedCityKey, initialLatitude, initialLongitude) {
+        TerritoryCaptureClient.selectedTerritoryCity(
+            cities = cities,
+            preferredKey = selectedCityKey,
+            referenceLatitude = initialLatitude,
+            referenceLongitude = initialLongitude
+        )
+    }
 
     LaunchedEffect(scope, selectedCityKey, initialLatitude, initialLongitude) {
         loading = true
+        val citiesStarted = System.currentTimeMillis()
         var fetchedCities = cities
         if (fetchedCities.isEmpty()) {
             fetchedCities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
             cities = fetchedCities
+            val pendingCount = fetchedCities.count { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }
+            TerritoryCaptureClient.logTerritoryShare(
+                "load cities count=${fetchedCities.size} pending=$pendingCount elapsedMs=${System.currentTimeMillis() - citiesStarted}"
+            )
         }
         var cityKey = selectedCityKey
         if (cityKey.isNullOrBlank()) {
@@ -78,16 +97,31 @@ fun TerritoryShareLeaderboardSheet(
             }
         }
         if (cityKey.isNullOrBlank()) {
+            TerritoryCaptureClient.logTerritoryShare("load leaderboard skipped missing cityKey")
             rows = emptyList()
             loading = false
             return@LaunchedEffect
         }
+        TerritoryCaptureClient.recordRecentTerritoryCityKey(context, cityKey)
+        val leaderboardStarted = System.currentTimeMillis()
         rows = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
             supabase = supabase,
             cityKey = cityKey,
             scope = scope
         )
+        TerritoryCaptureClient.logTerritoryShare(
+            "load leaderboard cityKey=$cityKey scope=$scope rows=${rows.size} elapsedMs=${System.currentTimeMillis() - leaderboardStarted}"
+        )
         loading = false
+        if (!pendingRefreshStarted && fetchedCities.any { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }) {
+            pendingRefreshStarted = true
+            TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground(
+                supabase = supabase,
+                scope = coroutineScope
+            ) { updated ->
+                cities = updated
+            }
+        }
     }
 
     ModalBottomSheet(
@@ -112,39 +146,11 @@ fun TerritoryShareLeaderboardSheet(
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
                 if (cities.size > 1) {
-                    val selectedCity = cities.firstOrNull { it.cityKey == selectedCityKey }
-                    ExposedDropdownMenuBox(
-                        expanded = cityMenuExpanded,
-                        onExpandedChange = { cityMenuExpanded = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                    ) {
-                        TextField(
-                            value = selectedCity?.let(TerritoryCaptureClient::citySummaryLabel) ?: "City",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("City") },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = cityMenuExpanded) },
-                            modifier = Modifier
-                                .menuAnchor()
-                                .fillMaxWidth()
-                        )
-                        ExposedDropdownMenu(
-                            expanded = cityMenuExpanded,
-                            onDismissRequest = { cityMenuExpanded = false }
-                        ) {
-                            cities.forEach { city ->
-                                DropdownMenuItem(
-                                    text = { Text(TerritoryCaptureClient.citySummaryLabel(city)) },
-                                    onClick = {
-                                        selectedCityKey = city.cityKey
-                                        cityMenuExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
+                    TerritoryCityPickerButton(
+                        selectedCity = selectedCity,
+                        onClick = { cityPickerOpen = true },
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
                 } else {
                     cities.firstOrNull()?.let { city ->
                         Text(
@@ -152,6 +158,15 @@ fun TerritoryShareLeaderboardSheet(
                             style = MaterialTheme.typography.titleSmall,
                             modifier = Modifier.padding(bottom = 12.dp)
                         )
+                    }
+                }
+                val mapLat = selectedCity?.centerLat
+                val mapLon = selectedCity?.centerLon
+                if (onViewOnMap != null && mapLat != null && mapLon != null &&
+                    !TerritoryCaptureClient.isPendingTerritoryCityKey(selectedCity?.cityKey)
+                ) {
+                    TextButton(onClick = { onViewOnMap(mapLat, mapLon) }) {
+                        Text("View on map")
                     }
                 }
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
@@ -223,5 +238,19 @@ fun TerritoryShareLeaderboardSheet(
                 }
             }
         }
+    }
+
+    if (cityPickerOpen) {
+        TerritoryCitySearchSheet(
+            supabase = supabase,
+            selectedCityKey = selectedCityKey,
+            referenceLatitude = initialLatitude,
+            referenceLongitude = initialLongitude,
+            onDismiss = { cityPickerOpen = false },
+            onSelect = { city ->
+                selectedCityKey = city.cityKey
+                cityPickerOpen = false
+            }
+        )
     }
 }

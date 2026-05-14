@@ -32,6 +32,8 @@ import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
@@ -124,6 +126,8 @@ import com.lilru.liftr.ui.ranking.RankingInitial
 import com.lilru.liftr.ui.ranking.RankingMetric
 import com.lilru.liftr.ui.ranking.RankingScope
 import com.lilru.liftr.ui.ranking.RankingTabScreen
+import com.lilru.liftr.ui.bodyweight.BodyWeightHistoryScreen
+import com.lilru.liftr.ui.bodyweight.HealthConnectBodyWeightImportScreen
 import com.lilru.liftr.ui.health.HealthConnectImportScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
@@ -641,6 +645,8 @@ fun ProfileTabScreen(
     var showFeatureRequests by rememberSaveable { mutableStateOf(false) }
     var showFaqs by rememberSaveable { mutableStateOf(false) }
     var showHealthConnect by rememberSaveable { mutableStateOf(false) }
+    var showBodyWeightHistory by rememberSaveable { mutableStateOf(false) }
+    var showHealthConnectWeight by rememberSaveable { mutableStateOf(false) }
     var showGoals by rememberSaveable { mutableStateOf(false) }
     var showAchievements by rememberSaveable { mutableStateOf(false) }
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
@@ -779,6 +785,24 @@ fun ProfileTabScreen(
     if (showFaqs) {
         FaqsScreen(
             onBack = { showFaqs = false },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showHealthConnectWeight) {
+        HealthConnectBodyWeightImportScreen(
+            supabase = supabase,
+            onBack = { showHealthConnectWeight = false },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showBodyWeightHistory) {
+        BodyWeightHistoryScreen(
+            supabase = supabase,
+            onBack = { showBodyWeightHistory = false },
             modifier = modifier
         )
         return
@@ -1339,6 +1363,8 @@ fun ProfileTabScreen(
                             ProfilePersonalInformationCard(
                                 ui = ui,
                                 vm = vm,
+                                onOpenBodyWeightHistory = { showBodyWeightHistory = true },
+                                onOpenHealthConnectWeight = { showHealthConnectWeight = true },
                                 onSaved = {
                                     Toast.makeText(
                                         context,
@@ -1532,9 +1558,12 @@ fun ProfileTabScreen(
 private fun ProfilePersonalInformationCard(
     ui: ProfileUiState,
     vm: ProfileViewModel,
+    onOpenBodyWeightHistory: () -> Unit,
+    onOpenHealthConnectWeight: () -> Unit,
     onSaved: () -> Unit
 ) {
     var showDobPicker by remember { mutableStateOf(false) }
+    var editingPersonalInfo by remember { mutableStateOf(false) }
     val defaultDobMillis = remember {
         val cal = java.util.Calendar.getInstance()
         cal.add(java.util.Calendar.YEAR, -20)
@@ -1548,94 +1577,154 @@ private fun ProfilePersonalInformationCard(
         val now = LocalDate.now(ZoneId.systemDefault())
         ChronoUnit.YEARS.between(birth, now).toInt()
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 stringResource(R.string.profile_personal_info_section),
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f)
             )
-            OutlinedTextField(
-                value = ui.heightCmDraft,
-                onValueChange = vm::setHeightCmDraft,
-                label = { Text(stringResource(R.string.profile_height_cm)) },
-                singleLine = true,
-                enabled = !ui.saveProfileMetricsBusy,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = ui.weightKgDraft,
-                onValueChange = vm::setWeightKgDraft,
-                label = { Text(stringResource(R.string.profile_weight_kg)) },
-                singleLine = true,
-                enabled = !ui.saveProfileMetricsBusy,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            IconButton(
+                onClick = { editingPersonalInfo = !editingPersonalInfo },
+                enabled = !ui.saveProfileMetricsBusy
             ) {
-                Text(
-                    stringResource(R.string.profile_show_birth_date),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = ui.hasBirthDate,
-                    onCheckedChange = vm::setHasBirthDate,
-                    enabled = !ui.saveProfileMetricsBusy
-                )
-            }
-            if (ui.hasBirthDate) {
-                OutlinedButton(
-                    onClick = { showDobPicker = true },
-                    enabled = !ui.saveProfileMetricsBusy,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        if (dobLabel != null) {
-                            dobLabel
-                        } else {
-                            stringResource(R.string.profile_pick_birth_date)
-                        }
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(stringResource(R.string.profile_age))
-                Text(
-                    text = ageYears?.toString()
-                        ?: stringResource(R.string.profile_age_emdash),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-            FilledTonalButton(
-                onClick = { vm.saveProfileMetrics(onSaved) },
-                enabled = !ui.saveProfileMetricsBusy &&
-                    !ui.uploadAvatarBusy && !ui.saveBioBusy,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    if (ui.saveProfileMetricsBusy) {
-                        stringResource(R.string.profile_saving)
-                    } else {
-                        stringResource(R.string.profile_save_personal)
-                    }
+                Icon(
+                    imageVector = if (editingPersonalInfo) Icons.Filled.Check else Icons.Filled.Edit,
+                    contentDescription = stringResource(R.string.workout_detail_menu_edit)
                 )
             }
         }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (editingPersonalInfo) {
+                    OutlinedTextField(
+                        value = ui.heightCmDraft,
+                        onValueChange = vm::setHeightCmDraft,
+                        label = { Text(stringResource(R.string.profile_height_cm)) },
+                        singleLine = true,
+                        enabled = !ui.saveProfileMetricsBusy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_height_cm),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = ui.heightCmDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        stringResource(R.string.profile_weight_kg),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = ui.weightKgDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                OutlinedButton(
+                    onClick = onOpenBodyWeightHistory,
+                    enabled = !ui.saveProfileMetricsBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.profile_body_weight_history))
+                }
+                OutlinedButton(
+                    onClick = onOpenHealthConnectWeight,
+                    enabled = !ui.saveProfileMetricsBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.profile_health_connect_weight))
+                }
+                if (editingPersonalInfo) {
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_show_birth_date),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = ui.hasBirthDate,
+                            onCheckedChange = vm::setHasBirthDate,
+                            enabled = !ui.saveProfileMetricsBusy
+                        )
+                    }
+                    if (ui.hasBirthDate) {
+                        OutlinedButton(
+                            onClick = { showDobPicker = true },
+                            enabled = !ui.saveProfileMetricsBusy,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (dobLabel != null) {
+                                    dobLabel
+                                } else {
+                                    stringResource(R.string.profile_pick_birth_date)
+                                }
+                            )
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(stringResource(R.string.profile_age))
+                    Text(
+                        text = ageYears?.toString()
+                            ?: stringResource(R.string.profile_age_emdash),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                if (editingPersonalInfo) {
+                    FilledTonalButton(
+                        onClick = { vm.saveProfileMetrics(onSaved) },
+                        enabled = !ui.saveProfileMetricsBusy &&
+                            !ui.uploadAvatarBusy && !ui.saveBioBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (ui.saveProfileMetricsBusy) {
+                                stringResource(R.string.profile_saving)
+                            } else {
+                                stringResource(R.string.profile_save_personal)
+                            }
+                        )
+                    }
+                }
+            }
+        }
     }
-    if (showDobPicker && ui.hasBirthDate) {
+    if (showDobPicker && editingPersonalInfo && ui.hasBirthDate) {
         val state = rememberDatePickerState(
             initialSelectedDateMillis = ui.birthDateMillis ?: defaultDobMillis
         )

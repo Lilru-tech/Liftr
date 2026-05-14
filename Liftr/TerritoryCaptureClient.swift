@@ -119,6 +119,11 @@ struct TerritoryRecentTakeoverRow: Decodable, Identifiable, Hashable {
     var id: String { "\(workout_id ?? 0)-\(other_user_id?.uuidString ?? "user")" }
 }
 
+struct TerritoryCaptureEventRow: Decodable, Hashable {
+    let cells_gained: Int?
+    let cells_taken: Int?
+}
+
 enum TerritoryCaptureClient {
     private struct WorkoutIdParams: Encodable {
         let p_workout_id: Int64
@@ -172,6 +177,36 @@ enum TerritoryCaptureClient {
                 AppState.shared.territoryCaptureToast = TerritoryCapturePresentation.failureMessage(for: error)
             }
             return nil
+        }
+    }
+
+    static func fetchCaptureEvent(workoutId: Int) async -> TerritoryCaptureEventRow? {
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("territory_capture_events")
+                .select("cells_gained, cells_taken")
+                .eq("workout_id", value: workoutId)
+                .limit(1)
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([TerritoryCaptureEventRow].self, from: res.data)
+            guard let row = rows.first, (row.cells_gained ?? 0) > 0 else { return nil }
+            return row
+        } catch {
+            return nil
+        }
+    }
+
+    static func fetchTerritoryPreviewCells(routeGeoJSON: String) async -> [TerritoryPreviewCell] {
+        let params = RouteGeoJSONParams(p_route_geojson: routeGeoJSON)
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("preview_territory_capture_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode(TerritoryPreviewResponse.self, from: res.data)
+            guard decoded.ok != false else { return [] }
+            return decoded.cells ?? []
+        } catch {
+            return []
         }
     }
 
@@ -303,14 +338,216 @@ enum TerritoryCaptureClient {
         }
     }
 
-    static func fetchTerritoryCityRegions() async -> [TerritoryCityRegionRow] {
+    static func fetchTerritoryCityRegions(
+        query: String? = nil,
+        ownedFirst: Bool = true,
+        limit: Int = 200
+    ) async -> [TerritoryCityRegionRow] {
+        struct Params: Encodable {
+            let p_query: String?
+            let p_limit: Int
+            let p_owned_first: Bool
+        }
         do {
             let res = try await SupabaseManager.shared.client
-                .rpc("list_territory_city_regions_v1")
+                .rpc(
+                    "list_territory_city_regions_v1",
+                    params: Params(
+                        p_query: query?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true ? nil : query,
+                        p_limit: limit,
+                        p_owned_first: ownedFirst
+                    )
+                )
                 .execute()
             return try JSONDecoder.supabase().decode([TerritoryCityRegionRow].self, from: res.data)
         } catch {
+            logTerritoryShare("city regions fetch failed error=\(error.localizedDescription)")
             return []
+        }
+    }
+
+    static func filterTerritoryCities(_ cities: [TerritoryCityRegionRow], query: String) -> [TerritoryCityRegionRow] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return cities }
+        return cities.filter { city in
+            let name = city.display_name?.lowercased() ?? ""
+            let key = city.city_key?.lowercased() ?? ""
+            return name.contains(needle) || key.contains(needle)
+        }
+    }
+
+    static func selectedTerritoryCity(
+        from cities: [TerritoryCityRegionRow],
+        preferredKey: String?,
+        referenceLatitude: Double?,
+        referenceLongitude: Double?
+    ) -> TerritoryCityRegionRow? {
+        if let preferredKey,
+           let match = cities.first(where: { $0.city_key == preferredKey }) {
+            return match
+        }
+        if let referenceLatitude, let referenceLongitude,
+           let key = nearestCityKey(to: referenceLatitude, longitude: referenceLongitude, from: cities),
+           let match = cities.first(where: { $0.city_key == key }) {
+            return match
+        }
+        if let key = preferredCityKey(latitude: referenceLatitude, longitude: referenceLongitude, from: cities),
+           let match = cities.first(where: { $0.city_key == key }) {
+            return match
+        }
+        return cities.first
+    }
+
+    static let recentTerritoryCityKeysKey = "recentTerritoryCityKeysV1"
+    static let recentTerritoryCityKeysLimit = 5
+
+    static func recentTerritoryCityKeys() -> [String] {
+        UserDefaults.standard.stringArray(forKey: recentTerritoryCityKeysKey) ?? []
+    }
+
+    static func recordRecentTerritoryCityKey(_ cityKey: String?) {
+        guard let cityKey, !cityKey.isEmpty, !isPendingTerritoryCityKey(cityKey) else { return }
+        var keys = recentTerritoryCityKeys().filter { $0 != cityKey }
+        keys.insert(cityKey, at: 0)
+        if keys.count > recentTerritoryCityKeysLimit {
+            keys = Array(keys.prefix(recentTerritoryCityKeysLimit))
+        }
+        UserDefaults.standard.set(keys, forKey: recentTerritoryCityKeysKey)
+    }
+
+    static func fetchTerritoryTotalCellsLeaderboard(
+        scope: String = "global",
+        limit: Int = 100
+    ) async -> [TerritoryShareLeaderRow] {
+        struct Params: Encodable {
+            let p_scope: String
+            let p_limit: Int
+        }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc(
+                    "get_territory_total_cells_leaderboard_v1",
+                    params: Params(p_scope: scope, p_limit: limit)
+                )
+                .execute()
+            return try JSONDecoder.supabase().decode([TerritoryShareLeaderRow].self, from: res.data)
+        } catch {
+            return []
+        }
+    }
+
+    static func isPendingTerritoryCityKey(_ cityKey: String?) -> Bool {
+        cityKey?.hasPrefix("pending:") == true
+    }
+
+    static func pendingResolveCoordinates(for city: TerritoryCityRegionRow) -> (lat: Double, lon: Double)? {
+        if let cityKey = city.city_key, isPendingTerritoryCityKey(cityKey) {
+            let parts = cityKey.split(separator: ":", omittingEmptySubsequences: false)
+            if parts.count >= 3,
+               let lat = Double(parts[1]),
+               let lon = Double(parts[2]) {
+                return (lat, lon)
+            }
+        }
+        if let lat = city.center_lat, let lon = city.center_lon {
+            return (lat, lon)
+        }
+        return nil
+    }
+
+    static func pendingBucketCoordinates(for city: TerritoryCityRegionRow) -> (lat: Double, lon: Double)? {
+        guard let cityKey = city.city_key, isPendingTerritoryCityKey(cityKey) else { return nil }
+        let parts = cityKey.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count >= 3,
+              let lat = Double(parts[1]),
+              let lon = Double(parts[2]) else { return nil }
+        return (lat, lon)
+    }
+
+    static func logTerritoryShare(_ message: String) {
+        print("[TerritoryShare] \(message)")
+    }
+
+    private actor TerritoryMunicipalityRefreshGate {
+        static let shared = TerritoryMunicipalityRefreshGate()
+        private var activeRefresh: Task<[TerritoryCityRegionRow], Never>?
+
+        func run(_ operation: @escaping () async -> [TerritoryCityRegionRow]) async -> [TerritoryCityRegionRow] {
+            if let activeRefresh {
+                return await activeRefresh.value
+            }
+            let task = Task {
+                await operation()
+            }
+            activeRefresh = task
+            let result = await task.value
+            activeRefresh = nil
+            return result
+        }
+    }
+
+    static func refreshPendingTerritoryCityRegions(
+        maxResolveItems: Int = 2,
+        maxBatches: Int = 8,
+        timeBudgetSeconds: TimeInterval = 60,
+        onUpdate: (@MainActor ([TerritoryCityRegionRow]) -> Void)? = nil
+    ) async -> [TerritoryCityRegionRow] {
+        let started = Date()
+        let deadline = started.addingTimeInterval(timeBudgetSeconds)
+        var refreshed = await fetchTerritoryCityRegions()
+        var batchesRun = 0
+        while batchesRun < maxBatches, Date() < deadline {
+            let pending = refreshed.filter { isPendingTerritoryCityKey($0.city_key) }
+            logTerritoryShare("refresh batch=\(batchesRun + 1) total=\(refreshed.count) pending=\(pending.count)")
+            guard !pending.isEmpty else { break }
+            let resolveLimit = max(1, min(maxResolveItems, pending.count))
+            for (index, city) in pending.prefix(resolveLimit).enumerated() {
+                guard let coordinates = pendingResolveCoordinates(for: city) else {
+                    logTerritoryShare("resolve skipped missing coordinates key=\(city.city_key ?? "")")
+                    continue
+                }
+                let bucket = pendingBucketCoordinates(for: city)
+                logTerritoryShare("resolve batch=\(batchesRun + 1) item=\(index + 1)/\(resolveLimit) lat=\(coordinates.lat) lon=\(coordinates.lon) key=\(city.city_key ?? "")")
+                await resolveMunicipalityAt(
+                    latitude: coordinates.lat,
+                    longitude: coordinates.lon,
+                    bucketLatitude: bucket?.lat,
+                    bucketLongitude: bucket?.lon
+                )
+                if index + 1 < resolveLimit {
+                    try? await Task.sleep(nanoseconds: 800_000_000)
+                }
+            }
+            await invokeTerritoryMunicipalityResolve(
+                limit: 1,
+                processQueue: true,
+                runAssignmentBackfill: false
+            )
+            refreshed = await fetchTerritoryCityRegions()
+            if let onUpdate {
+                await onUpdate(refreshed)
+            }
+            batchesRun += 1
+        }
+        let remainingPending = refreshed.filter { isPendingTerritoryCityKey($0.city_key) }.count
+        let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+        logTerritoryShare("refresh finished batches=\(batchesRun) elapsedMs=\(elapsedMs) pending=\(remainingPending)")
+        return refreshed
+    }
+
+    static func refreshPendingTerritoryCityRegionsInBackground(
+        maxResolveItems: Int = 2,
+        maxBatches: Int = 8,
+        onUpdate: @escaping @MainActor ([TerritoryCityRegionRow]) -> Void
+    ) {
+        Task.detached(priority: .utility) {
+            _ = await TerritoryMunicipalityRefreshGate.shared.run {
+                await refreshPendingTerritoryCityRegions(
+                    maxResolveItems: maxResolveItems,
+                    maxBatches: maxBatches,
+                    onUpdate: onUpdate
+                )
+            }
         }
     }
 
@@ -379,14 +616,20 @@ enum TerritoryCaptureClient {
         return nearestCityKey(to: latitude, longitude: longitude, from: pool)
     }
 
-    static func backfillHistoricalCaptures(batchSize: Int = 5, maxBatches: Int = 8) async {
-        if UserDefaults.standard.bool(forKey: "territoryHistoricalBackfillDone") {
+    static let historicalBackfillDoneKey = "territoryHistoricalBackfillCompletedV2"
+
+    static func shouldMarkHistoricalBackfillDone(hasMore: Bool) -> Bool {
+        !hasMore
+    }
+
+    static func backfillHistoricalCaptures(batchSize: Int = 5, maxBatchesPerVisit: Int = 40) async {
+        if UserDefaults.standard.bool(forKey: historicalBackfillDoneKey) {
             refreshTerritoryMunicipalitiesInBackground()
             return
         }
         let params = BackfillParams(p_limit: batchSize)
-        var processedAny = false
-        for _ in 0..<maxBatches {
+        var shouldMarkDone = false
+        for _ in 0..<maxBatchesPerVisit {
             do {
                 let res = try await SupabaseManager.shared.client
                     .rpc("backfill_my_territory_captures_v1", params: params)
@@ -395,55 +638,108 @@ enum TerritoryCaptureClient {
                 guard batch.ok else { break }
                 let processed = batch.processed ?? 0
                 if processed == 0 { break }
-                processedAny = processedAny || processed > 0
-                if batch.has_more != true { break }
+                if shouldMarkHistoricalBackfillDone(hasMore: batch.has_more == true) {
+                    shouldMarkDone = true
+                    break
+                }
             } catch {
                 break
             }
         }
-        if processedAny {
-            UserDefaults.standard.set(true, forKey: "territoryHistoricalBackfillDone")
+        if shouldMarkDone {
+            UserDefaults.standard.set(true, forKey: historicalBackfillDoneKey)
         }
         refreshTerritoryMunicipalitiesInBackground()
     }
 
     static func refreshTerritoryMunicipalitiesInBackground(limit: Int = 1) {
         Task.detached(priority: .utility) {
-            await invokeTerritoryMunicipalityResolve(limit: limit, timeoutSeconds: 8)
+            await invokeTerritoryMunicipalityResolve(
+                limit: limit,
+                processQueue: true,
+                runAssignmentBackfill: false
+            )
         }
     }
 
-    private static func invokeTerritoryMunicipalityResolve(limit: Int, timeoutSeconds: UInt64) async {
+    private static func resolveMunicipalityAt(
+        latitude: Double,
+        longitude: Double,
+        bucketLatitude: Double? = nil,
+        bucketLongitude: Double? = nil
+    ) async {
+        await invokeTerritoryMunicipalityResolve(
+            limit: 1,
+            processQueue: false,
+            runAssignmentBackfill: false,
+            latitude: latitude,
+            longitude: longitude,
+            bucketLatitude: bucketLatitude,
+            bucketLongitude: bucketLongitude
+        )
+    }
+
+    private static func invokeTerritoryMunicipalityResolve(
+        limit: Int,
+        processQueue: Bool,
+        runAssignmentBackfill: Bool,
+        latitude: Double? = nil,
+        longitude: Double? = nil,
+        bucketLatitude: Double? = nil,
+        bucketLongitude: Double? = nil
+    ) async {
         struct Payload: Encodable {
-            let limit: Int
-            let max_items: Int
+            let limit: Int?
+            let max_items: Int?
             let process_queue: Bool
             let run_assignment_backfill: Bool
+            let lat: Double?
+            let lon: Double?
+            let bucket_lat: Double?
+            let bucket_lon: Double?
         }
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                do {
-                    _ = try await SupabaseManager.shared.client.functions
-                        .invoke(
-                            "resolve-territory-municipality",
-                            options: .init(
-                                body: Payload(
-                                    limit: limit,
-                                    max_items: limit,
-                                    process_queue: true,
-                                    run_assignment_backfill: false
-                                )
-                            )
+        struct ResolveResponse: Decodable {
+            let ok: Bool?
+            let error: String?
+            struct ResolveError: Decodable {
+                let error: String?
+            }
+            let errors: [ResolveError]?
+        }
+        do {
+            let response: ResolveResponse = try await SupabaseManager.shared.client.functions
+                .invoke(
+                    "resolve-territory-municipality",
+                    options: .init(
+                        body: Payload(
+                            limit: limit,
+                            max_items: limit,
+                            process_queue: processQueue,
+                            run_assignment_backfill: runAssignmentBackfill,
+                            lat: latitude,
+                            lon: longitude,
+                            bucket_lat: bucketLatitude,
+                            bucket_lon: bucketLongitude
                         )
-                } catch {
-                }
+                    )
+                )
+            if response.ok == false {
+                logTerritoryShare("municipality resolve failed error=\(response.error ?? "unknown")")
+            } else if let errors = response.errors, !errors.isEmpty {
+                let messages = errors.compactMap(\.error).joined(separator: "; ")
+                logTerritoryShare("municipality resolve partial errors=\(messages)")
             }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
-            }
-            _ = await group.next()
-            group.cancelAll()
+        } catch {
+            logTerritoryShare("municipality resolve failed error=\(error.localizedDescription)")
         }
+    }
+
+    private static func invokeTerritoryMunicipalityResolve(limit: Int) async {
+        await invokeTerritoryMunicipalityResolve(
+            limit: limit,
+            processQueue: true,
+            runAssignmentBackfill: false
+        )
     }
 
     static func citySummaryLabel(for city: TerritoryCityRegionRow) -> String {
@@ -457,6 +753,13 @@ enum TerritoryCaptureClient {
 }
 
 enum TerritoryCapturePresentation {
+    static func workoutDetailLabel(gained: Int, taken: Int) -> String {
+        if taken > 0 {
+            return "\(gained) cells (\(taken) from others)"
+        }
+        return "\(gained) cells"
+    }
+
     static func message(for summary: TerritoryCaptureSummary) -> String? {
         guard summary.ok else {
             return failureMessage(reason: summary.reason)

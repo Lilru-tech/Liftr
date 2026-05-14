@@ -189,7 +189,13 @@ class ChatThreadViewModel(
     // MARK: - Replying / editing UI state
 
     fun startReply(message: ChatMessageWire) {
-        _uiState.update { it.copy(replyingTo = message, actionSheetMessage = null) }
+        _uiState.update {
+            it.copy(
+                replyingTo = message,
+                editingMessage = null,
+                actionSheetMessage = null
+            )
+        }
     }
 
     fun cancelReply() {
@@ -198,12 +204,18 @@ class ChatThreadViewModel(
 
     fun startEdit(message: ChatMessageWire) {
         _uiState.update {
-            it.copy(editingMessage = message, actionSheetMessage = null)
+            it.copy(
+                editingMessage = message,
+                replyingTo = null,
+                draft = message.body.orEmpty(),
+                actionSheetMessage = null
+            )
         }
     }
 
     fun cancelEdit() {
-        _uiState.update { it.copy(editingMessage = null) }
+        _uiState.update { it.copy(editingMessage = null, draft = "") }
+        typing?.setTyping(false)
     }
 
     fun showActionSheet(message: ChatMessageWire) {
@@ -251,8 +263,8 @@ class ChatThreadViewModel(
     fun submitEdit(newBody: String) {
         val target = _uiState.value.editingMessage ?: return
         val trimmed = newBody.trim()
-        if (trimmed.isEmpty() || trimmed == target.body) {
-            _uiState.update { it.copy(editingMessage = null) }
+        if (trimmed.isEmpty() || trimmed == target.body?.trim()) {
+            _uiState.update { it.copy(editingMessage = null, draft = "") }
             return
         }
         viewModelScope.launch {
@@ -266,7 +278,8 @@ class ChatThreadViewModel(
                                     editedAt = java.time.OffsetDateTime.now().toString()
                                 ) else it
                             },
-                            editingMessage = null
+                            editingMessage = null,
+                            draft = ""
                         )
                     }
                 }

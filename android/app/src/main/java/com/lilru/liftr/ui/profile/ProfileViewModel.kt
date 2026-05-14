@@ -413,19 +413,12 @@ class ProfileViewModel(
             if (me != s.userId) return@launch
             _uiState.value = s.copy(saveProfileMetricsBusy = true, error = null)
             val hText = s.heightCmDraft.trim()
-            val wText = s.weightKgDraft.replace(',', '.').trim()
             runCatching {
                 val heightForPayload: Int? = if (hText.isEmpty()) {
                     null
                 } else {
                     hText.toIntOrNull()?.takeIf { it > 0 }
                         ?: error("Height must be a positive whole number, or leave empty.")
-                }
-                val weightForPayload: Double? = if (wText.isEmpty()) {
-                    null
-                } else {
-                    wText.toDoubleOrNull()?.takeIf { it > 0 }
-                        ?: error("Weight must be a positive number, or leave empty.")
                 }
                 if (s.hasBirthDate && s.birthDateMillis == null) {
                     error("Choose a birth date or turn off “Show birth date”.")
@@ -435,11 +428,6 @@ class ProfileViewModel(
                         put("height_cm", JsonNull)
                     } else {
                         put("height_cm", JsonPrimitive(heightForPayload!!))
-                    }
-                    if (wText.isEmpty()) {
-                        put("weight_kg", JsonNull)
-                    } else {
-                        put("weight_kg", JsonPrimitive(weightForPayload!!))
                     }
                     if (s.hasBirthDate) {
                         val d = Instant.ofEpochMilli(s.birthDateMillis!!).atZone(ZoneId.systemDefault())
@@ -453,15 +441,9 @@ class ProfileViewModel(
                     filter { eq("user_id", me) }
                 }
                 val newH = if (hText.isEmpty()) "" else "${heightForPayload!!}"
-                val newW = if (wText.isEmpty()) {
-                    ""
-                } else {
-                    String.format(Locale.US, "%.1f", weightForPayload!!)
-                }
                 _uiState.value = _uiState.value.copy(
                     saveProfileMetricsBusy = false,
                     heightCmDraft = newH,
-                    weightKgDraft = newW,
                     hasBirthDate = s.hasBirthDate,
                     birthDateMillis = s.birthDateMillis
                 )

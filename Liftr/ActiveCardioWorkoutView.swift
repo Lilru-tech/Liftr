@@ -22,7 +22,6 @@ struct ActiveCardioWorkoutView: View {
     @State private var remainingSec: Int = 0
     @State private var initialTargetSec: Int = 0
     @State private var distanceText: String = ""
-    @State private var distanceFieldUserEdited = false
     @State private var hasTargetTime: Bool = false
     @State private var mode: TimerMode = .stopwatch
     @State private var mapCameraPosition: MapCameraPosition = .automatic
@@ -83,12 +82,13 @@ struct ActiveCardioWorkoutView: View {
     private var effectiveDistanceKm: Double {
         guard cardio != nil else { return 0 }
         if usesGPSTracking {
-            if distanceFieldUserEdited {
-                return parseDistanceKm(distanceText) ?? 0
-            }
             return gpsTracker.distanceKm
         }
         return parseDistanceKm(distanceText) ?? 0
+    }
+
+    private var gpsDistanceFormatted: String {
+        String(format: "%.2f km", gpsTracker.distanceKm)
     }
 
     private var livePaceFormatted: String {
@@ -164,34 +164,42 @@ struct ActiveCardioWorkoutView: View {
                     }
 
                     if cardio != nil {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Actual distance")
-                                .font(.subheadline.weight(.semibold))
-                            TextField("Distance (km)", text: Binding(
-                                get: { distanceText },
-                                set: { new in
-                                    distanceText = new
-                                    distanceFieldUserEdited = true
+                        if usesGPSTracking {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Actual distance")
+                                        .font(.subheadline.weight(.semibold))
+                                    Spacer()
+                                    Text(gpsDistanceFormatted)
+                                        .font(.title3.weight(.bold).monospacedDigit())
                                 }
-                            ))
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(.roundedBorder)
-                            if usesGPSTracking {
-                                Text("Updates from GPS while the timer runs. Edit the field anytime to override.")
+                                Text("Updates from GPS while the timer runs.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if gpsTracker.authorizationStatus == .denied
                                     || gpsTracker.authorizationStatus == .restricted {
-                                    Text("Location is off. Enable it in Settings or type distance manually.")
+                                    Text("Location is off. Enable it in Settings to track distance.")
                                         .font(.caption)
                                         .foregroundStyle(.orange)
                                 }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
+                        } else {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Actual distance")
+                                    .font(.subheadline.weight(.semibold))
+                                TextField("Distance (km)", text: $distanceText)
+                                    .keyboardType(.decimalPad)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(16)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                            .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(16)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.12)))
                     }
 
                     if usesGPSTracking {
@@ -297,7 +305,6 @@ struct ActiveCardioWorkoutView: View {
                             isRunning = false
                             if usesGPSTracking {
                                 gpsTracker.fullReset()
-                                distanceFieldUserEdited = false
                                 splitEndElapsedSec = []
                                 lastSplitDistanceKm = 0
                                 lastSplitElapsedSec = 0
@@ -352,7 +359,7 @@ struct ActiveCardioWorkoutView: View {
                     .padding(.top, 4)
                     .padding(.bottom, 12)
                 }
-                .scrollDismissesKeyboard(.interactively)
+                .scrollDismissesKeyboard(cardio != nil && !usesGPSTracking ? .interactively : .never)
 
                 if isSaving {
                     Color.black.opacity(0.4)
@@ -441,8 +448,7 @@ struct ActiveCardioWorkoutView: View {
             playKmSplitFeedback()
         }
         .onReceive(gpsTracker.$distanceKm) { _ in
-            guard usesGPSTracking, !distanceFieldUserEdited else { return }
-            distanceText = String(format: "%.2f", gpsTracker.distanceKm)
+            guard usesGPSTracking else { return }
             syncKmSplitMarkersWithDistance()
         }
         .fullScreenCover(isPresented: $showExpandedRouteMap) {
@@ -528,9 +534,8 @@ struct ActiveCardioWorkoutView: View {
 
     private func applyInitialDistanceFromCardio(_ row: CardioRow) {
         let t = cardioActivityType(for: row)
-        if t.prefersGPSTracking {
-            distanceText = "0.00"
-        } else if let d = row.distance_km {
+        guard !t.prefersGPSTracking else { return }
+        if let d = row.distance_km {
             distanceText = String(
                 format: "%.2f",
                 NSDecimalNumber(decimal: d).doubleValue
@@ -706,7 +711,6 @@ struct ActiveCardioWorkoutView: View {
                 }
 
                 self.applyInitialDistanceFromCardio(row)
-                self.distanceFieldUserEdited = false
                 if self.cardioActivityType(for: row).prefersGPSTracking {
                     self.gpsTracker.requestWhenInUseIfNeeded()
                     if let p = CardioGPSProfile(rawValue: self.cardioGPSProfileRaw) {
@@ -771,7 +775,6 @@ struct ActiveCardioWorkoutView: View {
     private struct CardioFinishSnapshot {
         let elapsedSec: Int
         let distanceText: String
-        let distanceFieldUserEdited: Bool
         let splitEndElapsedSec: [Int]
         let usesGPSTracking: Bool
         let routeGeoJSON: String?
@@ -786,7 +789,6 @@ struct ActiveCardioWorkoutView: View {
             return CardioFinishSnapshot(
                 elapsedSec: elapsedSec,
                 distanceText: distanceText,
-                distanceFieldUserEdited: distanceFieldUserEdited,
                 splitEndElapsedSec: splitEndElapsedSec,
                 usesGPSTracking: usesGPSTracking,
                 routeGeoJSON: gpsTracker.routeGeoJSONString(),
@@ -801,18 +803,24 @@ struct ActiveCardioWorkoutView: View {
                 let route_geojson: String?
             }
 
-            let trimmed = snap.distanceText
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingOccurrences(of: ",", with: ".")
-
             let distanceDecimal: Decimal?
-            if trimmed.isEmpty {
-                distanceDecimal = nil
+            let manualKm: Double
+            if snap.usesGPSTracking {
+                let gpsDistanceText = String(format: "%.2f", snap.gpsKm)
+                distanceDecimal = Decimal(string: gpsDistanceText)
+                manualKm = snap.gpsKm
             } else {
-                distanceDecimal = Decimal(string: trimmed)
+                let trimmed = snap.distanceText
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: ",", with: ".")
+                if trimmed.isEmpty {
+                    distanceDecimal = nil
+                    manualKm = 0
+                } else {
+                    distanceDecimal = Decimal(string: trimmed)
+                    manualKm = Double(trimmed) ?? 0
+                }
             }
-
-            let manualKm = Double(trimmed) ?? snap.gpsKm
 
             let withRoute = UpdatePayload(
                 duration_sec: snap.elapsedSec,
@@ -840,7 +848,7 @@ struct ActiveCardioWorkoutView: View {
 
             let kmSplits = Self.kmPaceSplitSecondsPerKm(
                 usesGPS: snap.usesGPSTracking,
-                distanceFieldUserEdited: snap.distanceFieldUserEdited,
+                distanceFieldUserEdited: false,
                 manualKm: manualKm,
                 gpsKm: snap.gpsKm,
                 elapsedSec: snap.elapsedSec,

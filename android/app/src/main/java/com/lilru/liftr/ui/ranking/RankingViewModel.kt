@@ -48,7 +48,8 @@ enum class RankingMetric {
     FOOTBALL_GOALS,
     SKI_DISTANCE_KPI,
     SEGMENT_POPULARITY,
-    TERRITORY_SHARE
+    TERRITORY_SHARE,
+    TERRITORY_CELLS
 }
 
 private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this) {
@@ -60,7 +61,8 @@ private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this)
     RankingMetric.CARDIO_ELEVATION,
     RankingMetric.CARDIO_DURATION,
     RankingMetric.CARDIO_BEST_PACE,
-    RankingMetric.TERRITORY_SHARE -> kind == RankingKind.ALL || kind == RankingKind.CARDIO
+    RankingMetric.TERRITORY_SHARE,
+    RankingMetric.TERRITORY_CELLS -> kind == RankingKind.ALL || kind == RankingKind.CARDIO
     RankingMetric.SPORT_MATCH_WINS,
     RankingMetric.SPORT_WIN_RATE,
     RankingMetric.SPORT_DURATION,
@@ -276,6 +278,7 @@ class RankingViewModel(
                         emptyList<RankingUserRow>() to emptyList()
                     }
                     RankingMetric.TERRITORY_SHARE -> fetchTerritoryShare(st) to emptyList()
+                    RankingMetric.TERRITORY_CELLS -> fetchTerritoryTotalCells(st) to emptyList()
                 }
             }.onSuccess { (users, workouts) ->
                 _uiState.value = _uiState.value.copy(
@@ -324,7 +327,12 @@ class RankingViewModel(
     }
 
     private suspend fun fetchTerritoryShare(st: RankingUiState): List<RankingUserRow> {
+        val citiesStarted = System.currentTimeMillis()
         val cities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+        val pendingCount = cities.count { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }
+        TerritoryCaptureClient.logTerritoryShare(
+            "ranking cities count=${cities.size} pending=$pendingCount elapsedMs=${System.currentTimeMillis() - citiesStarted}"
+        )
         val cityKey = st.territoryCityKey
             ?: TerritoryCaptureClient.preferredCityKey(null, null, cities)
         if (cityKey.isNullOrBlank()) {
@@ -338,7 +346,8 @@ class RankingViewModel(
             territoryCities = cities,
             territoryCityKey = cityKey
         )
-        return TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+        val leaderboardStarted = System.currentTimeMillis()
+        val rows = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
             supabase = supabase,
             cityKey = cityKey,
             scope = mapScope(st.scope)
@@ -350,6 +359,42 @@ class RankingViewModel(
                 avatarUrl = row.avatarUrl,
                 primary = String.format("%.2f%%", row.territorySharePct ?: 0.0),
                 secondary = "Cells: ${row.ownedCells ?: 0}"
+            )
+        }
+        TerritoryCaptureClient.logTerritoryShare(
+            "ranking leaderboard cityKey=$cityKey scope=${mapScope(st.scope)} rows=${rows.size} elapsedMs=${System.currentTimeMillis() - leaderboardStarted}"
+        )
+        if (pendingCount > 0) {
+            TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground(
+                supabase = supabase,
+                scope = viewModelScope
+            ) { updated ->
+                val remainingPending = updated.count { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }
+                TerritoryCaptureClient.logTerritoryShare(
+                    "ranking background cities count=${updated.size} pending=$remainingPending"
+                )
+                _uiState.value = _uiState.value.copy(territoryCities = updated)
+            }
+        }
+        return rows
+    }
+
+    private suspend fun fetchTerritoryTotalCells(st: RankingUiState): List<RankingUserRow> {
+        _uiState.value = _uiState.value.copy(
+            territoryCities = emptyList(),
+            territoryCityKey = null
+        )
+        return TerritoryCaptureClient.fetchTerritoryTotalCellsLeaderboard(
+            supabase = supabase,
+            scope = mapScope(st.scope)
+        ).map { row ->
+            RankingUserRow(
+                rank = row.rank,
+                userId = row.userId,
+                username = row.username,
+                avatarUrl = row.avatarUrl,
+                primary = "${row.ownedCells ?: 0}",
+                secondary = String.format("%.2f%% global share", row.territorySharePct ?: 0.0)
             )
         }
     }

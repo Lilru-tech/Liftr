@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-05-14
+
+### Added
+- **Territories** — During **cardio** workouts, users **capture territories** and can **take over** other users’ territories.
+- **Hyrox routines** — Saved **Hyrox** routines can now be **edited**.
+- **Active strength** — Users can see **all sets** for an exercise in **Active Strength Workout**.
+- **Plan** — **Tooltip** for new users explaining how to use **Active Workouts**.
+- **Profile / body weight** — **Import weight data** and view **weight history**.
+
+### Changed
+- **Workouts — saving** — Faster saves when **editing a workout** and when **finishing** an active workout.
+- **Chat — compose** — Polished **message input** UI.
+
+### Fixed
+- **Chat — tooltips** — Tooltip **messages** display correctly again.
+- **Active cardio** — **Distance** is no longer editable in a way that **stops** the live **distance tracker** or allows arbitrary values.
+
 ## [1.12.0] - 2026-05-11
 
 ### Added
@@ -70,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.13.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.13.0
 [1.12.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.12.0
 [1.11.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.11.0
 

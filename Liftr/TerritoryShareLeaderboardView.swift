@@ -2,11 +2,15 @@ import SwiftUI
 
 struct TerritoryShareLeaderboardView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var app: AppState
     @State private var scope: LBScope = .global
     @State private var rows: [TerritoryShareLeaderRow] = []
     @State private var cities: [TerritoryCityRegionRow] = []
     @State private var selectedCityKey: String?
     @State private var loading = true
+    @State private var pendingRefreshStarted = false
+    @State private var cityPickerOpen = false
+    @State private var showMap = false
 
     private let initialLatitude: Double?
     private let initialLongitude: Double?
@@ -16,27 +20,29 @@ struct TerritoryShareLeaderboardView: View {
         self.initialLongitude = initialLongitude
     }
 
+    private var selectedCity: TerritoryCityRegionRow? {
+        TerritoryCaptureClient.selectedTerritoryCity(
+            from: cities,
+            preferredKey: selectedCityKey,
+            referenceLatitude: initialLatitude,
+            referenceLongitude: initialLongitude
+        )
+    }
+
+    private var canOpenSelectedCityOnMap: Bool {
+        guard let cityKey = selectedCity?.city_key else { return false }
+        return !TerritoryCaptureClient.isPendingTerritoryCityKey(cityKey)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 GradientBackground()
                 VStack(spacing: 12) {
                     if cities.count > 1 {
-                        Picker("City", selection: Binding(
-                            get: {
-                                selectedCityKey
-                                    ?? cities.first?.city_key
-                                    ?? cities.first?.id
-                                    ?? ""
-                            },
-                            set: { selectedCityKey = $0 }
-                        )) {
-                            ForEach(cities) { city in
-                                Text(TerritoryCaptureClient.citySummaryLabel(for: city))
-                                    .tag(city.city_key ?? city.id)
-                            }
+                        TerritoryCityPickerButton(selectedCity: selectedCity) {
+                            cityPickerOpen = true
                         }
-                        .pickerStyle(.menu)
                         .padding(.horizontal)
                     } else if let city = cities.first {
                         Text(TerritoryCaptureClient.citySummaryLabel(for: city))
@@ -79,7 +85,7 @@ struct TerritoryShareLeaderboardView: View {
                                     .font(.headline)
                                     .monospacedDigit()
                             }
-                            .listRowBackground(Color.clear)
+                            .listRowBackground(row.user_id == app.userId ? Color.white.opacity(0.12) : Color.clear)
                         }
                         .listStyle(.plain)
                         .scrollContentBackground(.hidden)
@@ -88,6 +94,13 @@ struct TerritoryShareLeaderboardView: View {
             }
             .navigationTitle("Territory share")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if canOpenSelectedCityOnMap {
+                        Button("View on map") {
+                            showMap = true
+                        }
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -95,44 +108,88 @@ struct TerritoryShareLeaderboardView: View {
             .task(id: "\(scope.rawValue)|\(selectedCityKey ?? "")") {
                 await loadLeaderboard()
             }
+            .sheet(isPresented: $cityPickerOpen) {
+                TerritoryCitySearchSheet(
+                    selectedCityKey: $selectedCityKey,
+                    referenceLatitude: initialLatitude,
+                    referenceLongitude: initialLongitude
+                ) { city in
+                    selectedCityKey = city.city_key
+                    Task { await loadLeaderboard() }
+                }
+                .presentationDetents([.medium, .large])
+            }
+            .fullScreenCover(isPresented: $showMap) {
+                NavigationStack {
+                    TerritoryMapView(
+                        initialLatitude: selectedCity?.center_lat,
+                        initialLongitude: selectedCity?.center_lon
+                    )
+                    .environmentObject(app)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Close") { showMap = false }
+                        }
+                    }
+                }
+            }
         }
         .presentationBackground(.clear)
     }
 
     private func loadLeaderboard() async {
         await MainActor.run { loading = true }
-        let fetchedCities = await TerritoryCaptureClient.fetchTerritoryCityRegions()
+        let started = Date()
+        let fetchedCities: [TerritoryCityRegionRow]
+        if cities.isEmpty {
+            fetchedCities = await TerritoryCaptureClient.fetchTerritoryCityRegions()
+            let pendingCount = fetchedCities.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
+            let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
+            TerritoryCaptureClient.logTerritoryShare("load cities count=\(fetchedCities.count) pending=\(pendingCount) elapsedMs=\(elapsedMs)")
+        } else {
+            fetchedCities = cities
+        }
         let cityKey = await MainActor.run { () -> String? in
             cities = fetchedCities
             if selectedCityKey == nil {
-                if let initialLatitude, let initialLongitude {
-                    selectedCityKey = TerritoryCaptureClient.nearestCityKey(
-                        to: initialLatitude,
-                        longitude: initialLongitude,
-                        from: fetchedCities
-                    )
-                }
-                if selectedCityKey == nil {
-                    selectedCityKey = fetchedCities.first?.city_key
-                }
+                selectedCityKey = TerritoryCaptureClient.selectedTerritoryCity(
+                    from: fetchedCities,
+                    preferredKey: nil,
+                    referenceLatitude: initialLatitude,
+                    referenceLongitude: initialLongitude
+                )?.city_key
             }
             return selectedCityKey ?? fetchedCities.first?.city_key
         }
         guard let cityKey, !cityKey.isEmpty else {
+            TerritoryCaptureClient.logTerritoryShare("load leaderboard skipped missing cityKey")
             await MainActor.run {
                 rows = []
                 loading = false
             }
             return
         }
+        TerritoryCaptureClient.recordRecentTerritoryCityKey(cityKey)
+        let leaderboardStarted = Date()
         let scopeValue = scope == .global ? "global" : "friends"
         let fetched = await TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
             cityKey: cityKey,
             scope: scopeValue
         )
+        let leaderboardElapsedMs = Int(Date().timeIntervalSince(leaderboardStarted) * 1000)
+        TerritoryCaptureClient.logTerritoryShare("load leaderboard cityKey=\(cityKey) scope=\(scopeValue) rows=\(fetched.count) elapsedMs=\(leaderboardElapsedMs)")
         await MainActor.run {
             rows = fetched
             loading = false
+        }
+        if !pendingRefreshStarted,
+           fetchedCities.contains(where: { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }) {
+            pendingRefreshStarted = true
+            TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground { updated in
+                let pendingCount = updated.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
+                TerritoryCaptureClient.logTerritoryShare("background cities count=\(updated.count) pending=\(pendingCount)")
+                cities = updated
+            }
         }
     }
 

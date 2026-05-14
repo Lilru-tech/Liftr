@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ fun TerritoryProfileHubCard(
     var cities by remember { mutableStateOf<List<TerritoryCityRegionRowWire>>(emptyList()) }
     var takeovers by remember { mutableStateOf<List<TerritoryRecentTakeoverRowWire>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    val coroutineScope = rememberCoroutineScope()
 
     val topCities = cities
         .filter { (it.myOwnedCells ?: it.ownedCells ?: 0) > 0 }
@@ -48,8 +50,17 @@ fun TerritoryProfileHubCard(
         loading = true
         if (isOwnProfile) {
             summary = TerritoryCaptureClient.fetchTerritorySummary(supabase, userId = null)
-            cities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+            val loadedCities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+            cities = loadedCities
             takeovers = TerritoryCaptureClient.fetchRecentTakeovers(supabase, userId = null, limit = 3)
+            if (loadedCities.any { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }) {
+                TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground(
+                    supabase = supabase,
+                    scope = coroutineScope
+                ) { updated ->
+                    cities = updated
+                }
+            }
         } else {
             summary = TerritoryCaptureClient.fetchTerritorySummary(supabase, userId = profileUserId)
             cities = TerritoryCaptureClient.fetchUserTerritoryTopCities(supabase, profileUserId)

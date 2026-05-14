@@ -20,6 +20,28 @@ class TerritoryCaptureClientTest {
     }
 
     @Test
+    fun workoutDetailLabelWhenCellsTaken() {
+        assertEquals(
+            "12 cells (4 from others)",
+            TerritoryCaptureClient.workoutDetailLabel(12, 4)
+        )
+    }
+
+    @Test
+    fun workoutDetailLabelWhenOnlyGained() {
+        assertEquals(
+            "8 cells",
+            TerritoryCaptureClient.workoutDetailLabel(8, 0)
+        )
+    }
+
+    @Test
+    fun historicalBackfillDoneOnlyWhenQueueEmpty() {
+        assertEquals(true, TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(false))
+        assertEquals(false, TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(true))
+    }
+
+    @Test
     fun backfillResponseDecodes() {
         val decoded = Json { ignoreUnknownKeys = true }.decodeFromString<TerritoryBackfillResponseWire>(
             """{"ok":true,"processed":3,"cells_gained":42,"cells_taken":1,"has_more":false}"""
@@ -138,6 +160,53 @@ class TerritoryCaptureClientTest {
             "Resolving area · 41.55, 2.12 · 105 cells",
             TerritoryCaptureClient.citySummaryLabel(decoded[0])
         )
+    }
+
+    @Test
+    fun pendingTerritoryCityKeyDetection() {
+        assert(TerritoryCaptureClient.isPendingTerritoryCityKey("pending:41.55:2.12"))
+        assert(!TerritoryCaptureClient.isPendingTerritoryCityKey("osm:relation:12345"))
+        assert(!TerritoryCaptureClient.isPendingTerritoryCityKey(null))
+    }
+
+    @Test
+    fun filterTerritoryCitiesMatchesDisplayName() {
+        val cities = listOf(
+            TerritoryCityRegionRowWire(
+                cityKey = "osm:relation:1",
+                displayName = "Tarragona",
+                centerLat = 41.12,
+                centerLon = 1.24,
+                capturedCells = 10,
+                totalCaptureCells = 100,
+                myOwnedCells = 5
+            ),
+            TerritoryCityRegionRowWire(
+                cityKey = "osm:relation:2",
+                displayName = "Sabadell",
+                centerLat = 41.55,
+                centerLon = 2.11,
+                capturedCells = 8,
+                totalCaptureCells = 80,
+                myOwnedCells = 0
+            )
+        )
+        val filtered = TerritoryCaptureClient.filterTerritoryCities(cities, "saba")
+        assertEquals(1, filtered.size)
+        assertEquals("osm:relation:2", filtered.first().cityKey)
+    }
+
+    @Test
+    fun pendingResolveCoordinatesPreferBucketKey() {
+        val city = Json { ignoreUnknownKeys = true }.decodeFromString<TerritoryCityRegionRowWire>(
+            """{"city_key":"pending:36.28:-6.10","display_name":"Resolving area · 36.28, -6.10","center_lat":36.2800834012035,"center_lon":-6.09945049492908,"captured_cells":99,"my_owned_cells":99}"""
+        )
+        val coordinates = TerritoryCaptureClient.pendingResolveCoordinates(city)
+        assertEquals(36.28, coordinates?.first)
+        assertEquals(-6.10, coordinates?.second)
+        val bucket = TerritoryCaptureClient.pendingBucketCoordinates(city)
+        assertEquals(36.28, bucket?.first)
+        assertEquals(-6.10, bucket?.second)
     }
 
     @Test

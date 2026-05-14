@@ -23,6 +23,13 @@ type NominatimReverse = {
   address?: Record<string, string | undefined>;
 };
 
+type IngestRequest = {
+  lat: number;
+  lon: number;
+  bucket_lat?: number;
+  bucket_lon?: number;
+};
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -79,14 +86,16 @@ function bboxFromReverse(payload: NominatimReverse) {
   return { south, north, west, east };
 }
 
-async function reverseGeocode(lat: number, lon: number): Promise<NominatimReverse> {
+async function reverseGeocode(lat: number, lon: number, includePolygon: boolean): Promise<NominatimReverse> {
   const url = new URL(`${NOMINATIM_BASE}/reverse`);
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("lat", String(lat));
   url.searchParams.set("lon", String(lon));
-  url.searchParams.set("zoom", "10");
+  url.searchParams.set("zoom", "14");
   url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("polygon_geojson", "1");
+  if (includePolygon) {
+    url.searchParams.set("polygon_geojson", "1");
+  }
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -102,15 +111,63 @@ async function reverseGeocode(lat: number, lon: number): Promise<NominatimRevers
   return await response.json() as NominatimReverse;
 }
 
+function municipalityTownName(address: Record<string, string | undefined> | undefined) {
+  const candidates = [
+    address?.city,
+    address?.town,
+    address?.village,
+    address?.municipality,
+  ];
+  for (const candidate of candidates) {
+    if (candidate && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+async function resolveCityKey(
+  admin: ReturnType<typeof createClient>,
+  payload: NominatimReverse,
+  label: string,
+  countryCode: string,
+) {
+  if (payload.osm_type === "relation" && payload.osm_id) {
+    return `osm:${payload.osm_type}:${payload.osm_id}`;
+  }
+
+  const townName = municipalityTownName(payload.address);
+  if (townName) {
+    const { data, error } = await admin
+      .from("territory_municipalities")
+      .select("city_key")
+      .ilike("display_name", townName)
+      .limit(1);
+    if (!error && data?.[0]?.city_key) {
+      return data[0].city_key as string;
+    }
+  }
+
+  return cityKeyFromReverse(payload, label, countryCode);
+}
+
 async function ingestMunicipality(
   admin: ReturnType<typeof createClient>,
-  lat: number,
-  lon: number,
+  request: IngestRequest,
 ) {
-  const payload = await reverseGeocode(lat, lon);
+  const { lat, lon, bucket_lat: bucketLat, bucket_lon: bucketLon } = request;
+  let payload: NominatimReverse;
+  try {
+    payload = await reverseGeocode(lat, lon, true);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown";
+    console.error("[resolve-territory-municipality] nominatim polygon failed", { lat, lon, error: message });
+    payload = await reverseGeocode(lat, lon, false);
+  }
+
   const label = municipalityLabel(payload.address, payload.display_name ?? "Unknown city");
   const countryCode = (payload.address?.country_code ?? "").toLowerCase();
-  const cityKey = cityKeyFromReverse(payload, label, countryCode);
+  const cityKey = await resolveCityKey(admin, payload, label, countryCode);
   const bbox = bboxFromReverse(payload);
   const centerLat = Number(payload.lat ?? lat);
   const centerLon = Number(payload.lon ?? lon);
@@ -130,9 +187,40 @@ async function ingestMunicipality(
     p_center_lon: centerLon,
     p_geocode_source: "nominatim",
     p_display_name_override: null,
+    p_bucket_lat: bucketLat ?? null,
+    p_bucket_lon: bucketLon ?? null,
   });
 
   if (error) {
+    if (boundaryGeojson) {
+      console.error("[resolve-territory-municipality] ingest polygon failed, retrying bbox", {
+        lat,
+        lon,
+        cityKey,
+        error: error.message,
+      });
+      const { data: retryData, error: retryError } = await admin.rpc("ingest_territory_municipality_v1", {
+        p_city_key: cityKey,
+        p_display_name: label,
+        p_country_code: countryCode,
+        p_admin_level: null,
+        p_boundary_geojson: null,
+        p_min_lat: bbox?.south ?? centerLat - 0.15,
+        p_min_lon: bbox?.west ?? centerLon - 0.15,
+        p_max_lat: bbox?.north ?? centerLat + 0.15,
+        p_max_lon: bbox?.east ?? centerLon + 0.15,
+        p_center_lat: centerLat,
+        p_center_lon: centerLon,
+        p_geocode_source: "nominatim",
+        p_display_name_override: null,
+        p_bucket_lat: bucketLat ?? null,
+        p_bucket_lon: bucketLon ?? null,
+      });
+      if (retryError) {
+        throw new Error(retryError.message);
+      }
+      return retryData;
+    }
     throw new Error(error.message);
   }
 
@@ -141,14 +229,15 @@ async function ingestMunicipality(
 
 async function runAssignmentBackfill(
   admin: ReturnType<typeof createClient>,
-  batchLimit = 1000,
+  batchLimit = 200,
 ) {
-  const { error } = await admin.rpc("backfill_territory_municipality_assignments_v1", {
+  const { data, error } = await admin.rpc("backfill_territory_municipality_assignments_v1", {
     p_limit: batchLimit,
   });
   if (error) {
     throw new Error(error.message);
   }
+  return data as { ok?: boolean; updated?: number; has_more?: boolean } | null;
 }
 
 Deno.serve(async (req) => {
@@ -196,7 +285,8 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}));
     const processed: unknown[] = [];
-    const errors: Array<{ bucket_lat?: number; bucket_lon?: number; error: string }> = [];
+    const errors: Array<{ bucket_lat?: number; bucket_lon?: number; lat?: number; lon?: number; error: string }> = [];
+    let assignmentBackfill: { updated?: number; has_more?: boolean } | null = null;
     const processQueue = body.process_queue !== false;
     const runAssignmentBackfillFlag = body.run_assignment_backfill === true;
     const isBulkOperator = maintenanceAuthorized || serviceAuthorized;
@@ -206,8 +296,32 @@ Deno.serve(async (req) => {
       : Math.max(1, Math.min(requestedItems, 1));
 
     if (typeof body.lat === "number" && typeof body.lon === "number") {
-      const result = await ingestMunicipality(admin, body.lat, body.lon);
-      processed.push(result);
+      try {
+        const result = await ingestMunicipality(admin, {
+          lat: body.lat,
+          lon: body.lon,
+          bucket_lat: typeof body.bucket_lat === "number" ? body.bucket_lat : undefined,
+          bucket_lon: typeof body.bucket_lon === "number" ? body.bucket_lon : undefined,
+        });
+        console.log("[resolve-territory-municipality] point ingest ok", result);
+        processed.push(result);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown";
+        console.error("[resolve-territory-municipality] point ingest failed", {
+          lat: body.lat,
+          lon: body.lon,
+          bucket_lat: body.bucket_lat,
+          bucket_lon: body.bucket_lon,
+          error: message,
+        });
+        errors.push({
+          lat: body.lat,
+          lon: body.lon,
+          bucket_lat: typeof body.bucket_lat === "number" ? body.bucket_lat : undefined,
+          bucket_lon: typeof body.bucket_lon === "number" ? body.bucket_lon : undefined,
+          error: message,
+        });
+      }
     } else if (processQueue) {
       const { data: queue, error: queueError } = await admin.rpc("list_territory_geocode_queue_v1", {
         p_limit: maxItems,
@@ -218,13 +332,32 @@ Deno.serve(async (req) => {
 
       for (const row of (queue ?? []) as QueueRow[]) {
         try {
-          const result = await ingestMunicipality(admin, row.sample_lat, row.sample_lon);
+          const result = await ingestMunicipality(admin, {
+            lat: row.sample_lat,
+            lon: row.sample_lon,
+            bucket_lat: Number(row.bucket_lat),
+            bucket_lon: Number(row.bucket_lon),
+          });
+          console.log("[resolve-territory-municipality] queue ingest ok", {
+            bucket_lat: row.bucket_lat,
+            bucket_lon: row.bucket_lon,
+            result,
+          });
           processed.push(result);
         } catch (error) {
           const message = error instanceof Error ? error.message : "unknown";
+          console.error("[resolve-territory-municipality] queue ingest failed", {
+            bucket_lat: row.bucket_lat,
+            bucket_lon: row.bucket_lon,
+            lat: row.sample_lat,
+            lon: row.sample_lon,
+            error: message,
+          });
           errors.push({
             bucket_lat: row.bucket_lat,
             bucket_lon: row.bucket_lon,
+            lat: row.sample_lat,
+            lon: row.sample_lon,
             error: message,
           });
           await admin.rpc("mark_territory_geocode_queue_error_v1", {
@@ -237,14 +370,22 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (processed.length > 0 || runAssignmentBackfillFlag) {
-      await runAssignmentBackfill(admin);
+    if (runAssignmentBackfillFlag) {
+      try {
+        assignmentBackfill = await runAssignmentBackfill(admin);
+        console.log("[resolve-territory-municipality] assignment backfill ok", assignmentBackfill);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown";
+        console.error("[resolve-territory-municipality] assignment backfill failed", { error: message });
+        errors.push({ error: message });
+      }
     }
 
     return new Response(JSON.stringify({
       ok: true,
       processed,
       errors,
+      assignment_backfill: assignmentBackfill,
       max_items: maxItems,
       run_assignment_backfill: runAssignmentBackfillFlag,
     }), {
@@ -253,6 +394,7 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
+    console.error("[resolve-territory-municipality] fatal", { error: message });
     return new Response(JSON.stringify({ ok: false, error: message }), {
       status: 500,
       headers: { "Content-Type": "application/json" },

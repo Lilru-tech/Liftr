@@ -92,6 +92,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             }
         }
 
+        Task {
+            await HealthKitBodyWeightSyncService.shared.handleAppForegroundIfNeeded()
+        }
+
         return true
     }
 

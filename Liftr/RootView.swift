@@ -85,6 +85,9 @@ struct RootView: View {
                     app.pendingNotification = nil
                 }
             }
+            Task {
+                await HealthKitBodyWeightSyncService.shared.handleAppForegroundIfNeeded()
+            }
         }
         .onReceive(app.$pendingNotification) { pending in
             guard let pending else { return }

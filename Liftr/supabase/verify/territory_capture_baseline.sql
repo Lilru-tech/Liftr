@@ -99,14 +99,28 @@ select
   captured_cells,
   total_capture_cells,
   my_owned_cells
-from public.list_territory_city_regions_v1()
+from public.list_territory_city_regions_v1(null, 200, true)
 order by captured_cells desc, display_name
 limit 20;
 
 select
   count(*) filter (where city_key like 'pending:%') as pending_city_rows,
   coalesce(sum(captured_cells) filter (where city_key like 'pending:%'), 0) as pending_captured_cells
-from public.list_territory_city_regions_v1();
+from public.list_territory_city_regions_v1(null, 200, true);
+
+select
+  count(*)::integer as geocode_queue_rows,
+  count(*) filter (where last_error is not null)::integer as geocode_queue_rows_with_error
+from public.territory_city_geocode_queue;
+
+select
+  bucket_lat,
+  bucket_lon,
+  attempts,
+  last_error
+from public.territory_city_geocode_queue
+order by attempts desc, queued_at
+limit 10;
 
 select
   p.username,
@@ -122,3 +136,65 @@ group by p.username;
 select
   has_function_privilege('authenticated', 'public.get_territory_share_leaderboard_v1(text, integer)', 'execute') as authenticated_can_call_legacy_share_rpc,
   has_function_privilege('authenticated', 'public.backfill_territory_municipality_assignments_v1(integer)', 'execute') as authenticated_can_call_assignment_backfill;
+
+select
+  count(*)::integer as cardio_with_route_missing_capture_event
+from public.workouts w
+where
+  lower(coalesce(w.kind::text, '')) = 'cardio'
+  and w.ended_at is not null
+  and public._liftr_workout_route_geojson_text(w.id) is not null
+  and not exists (
+    select 1
+    from public.territory_capture_events e
+    where e.workout_id = w.id
+  );
+
+select
+  to_regprocedure('public.assign_territory_cells_for_geocode_bucket_v1(numeric,numeric,text)') is not null as has_bucket_assign_rpc;
+
+select
+  count(*)::integer as unassigned_cells,
+  bucket.bucket_lat,
+  bucket.bucket_lon
+from public.territory_cells tc
+  cross join lateral public._liftr_territory_city_geocode_bucket(
+    st_y(st_centroid(tc.cell_geog::geometry)),
+    st_x(st_centroid(tc.cell_geog::geometry))
+  ) bucket
+where
+  (
+    tc.city_key is null
+    or tc.city_key like 'grid:%'
+  )
+  and bucket.bucket_lat in (36.27, 36.28, 36.29)
+  and bucket.bucket_lon in (-6.10, -6.11)
+group by bucket.bucket_lat, bucket.bucket_lon
+order by unassigned_cells desc;
+
+select
+  public.backfill_territory_municipality_assignments_v1(1) as assignment_backfill_sample;
+
+select
+  to_regprocedure('public.list_territory_city_regions_v1(text,integer,boolean)') is not null as has_searchable_city_regions_rpc,
+  to_regprocedure('public.get_territory_total_cells_leaderboard_v1(text,integer)') is not null as has_total_cells_leaderboard_rpc;
+
+select
+  city_key,
+  display_name,
+  my_owned_cells,
+  captured_cells
+from public.list_territory_city_regions_v1(null, 10, true)
+order by my_owned_cells desc, captured_cells desc
+limit 10;
+
+select
+  rank,
+  username,
+  owned_cells,
+  territory_share_pct
+from public.get_territory_total_cells_leaderboard_v1('global', 10);
+
+select
+  has_function_privilege('authenticated', 'public.list_territory_city_regions_v1(text,integer,boolean)', 'execute') as authenticated_can_search_city_regions,
+  has_function_privilege('authenticated', 'public.get_territory_total_cells_leaderboard_v1(text,integer)', 'execute') as authenticated_can_call_total_cells_leaderboard;

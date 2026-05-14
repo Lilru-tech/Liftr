@@ -1,17 +1,22 @@
 package com.lilru.liftr.territory
 
 import android.content.Context
+import android.util.Log
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.AppSnackbar
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.functions.functions
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -129,8 +134,16 @@ data class TerritoryRecentTakeoverRowWire(
     @SerialName("created_at") val createdAt: String? = null
 )
 
+@Serializable
+data class TerritoryCaptureEventRowWire(
+    @SerialName("cells_gained") val cellsGained: Int? = null,
+    @SerialName("cells_taken") val cellsTaken: Int? = null
+)
+
 object TerritoryCaptureClient {
+    private const val LOG_TAG = "TerritoryShare"
     private val json = Json { ignoreUnknownKeys = true }
+    private val municipalityRefreshMutex = Mutex()
     private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     suspend fun applyCapture(supabase: SupabaseClient, workoutId: Int): TerritoryCaptureSummaryWire? {
@@ -143,6 +156,42 @@ object TerritoryCaptureClient {
         }.onFailure { error ->
             AppSnackbar.showError(captureFailureMessage(error))
         }.getOrNull()
+    }
+
+    suspend fun fetchCaptureEvent(
+        supabase: SupabaseClient,
+        workoutId: Int
+    ): TerritoryCaptureEventRowWire? {
+        return runCatching {
+            val res = supabase
+                .from(BackendContracts.Tables.TERRITORY_CAPTURE_EVENTS)
+                .select(columns = Columns.raw("cells_gained, cells_taken")) {
+                    filter { eq("workout_id", workoutId) }
+                    limit(1)
+                }
+            val row = json.decodeFromString<List<TerritoryCaptureEventRowWire>>(res.data).firstOrNull()
+            if (row == null || (row.cellsGained ?: 0) <= 0) null else row
+        }.getOrNull()
+    }
+
+    suspend fun fetchTerritoryPreviewRings(
+        supabase: SupabaseClient,
+        routeGeoJson: String
+    ): List<List<Pair<Double, Double>>> {
+        return runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.PREVIEW_TERRITORY_CAPTURE_V1,
+                buildJsonObject { put("p_route_geojson", routeGeoJson) }
+            )
+            val decoded = json.decodeFromString<TerritoryPreviewResponseWire>(res.data)
+            if (!decoded.ok) {
+                emptyList()
+            } else {
+                decoded.cells.mapNotNull { cell ->
+                    cell.cellGeojson?.ringLatLng()?.takeIf { it.size >= 3 }
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 
     suspend fun previewCapture(supabase: SupabaseClient, routeGeoJson: String): TerritoryPreviewResponseWire? {
@@ -261,11 +310,198 @@ object TerritoryCaptureClient {
         }.getOrDefault(emptyList())
     }
 
-    suspend fun fetchTerritoryCityRegions(supabase: SupabaseClient): List<TerritoryCityRegionRowWire> {
+    suspend fun fetchTerritoryCityRegions(
+        supabase: SupabaseClient,
+        query: String? = null,
+        ownedFirst: Boolean = true,
+        limit: Int = 200
+    ): List<TerritoryCityRegionRowWire> {
         return runCatching {
-            val res = supabase.postgrest.rpc(BackendContracts.Rpc.LIST_TERRITORY_CITY_REGIONS_V1)
+            val trimmedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.LIST_TERRITORY_CITY_REGIONS_V1,
+                buildJsonObject {
+                    trimmedQuery?.let { put("p_query", it) }
+                    put("p_limit", limit)
+                    put("p_owned_first", ownedFirst)
+                }
+            )
             json.decodeFromString<List<TerritoryCityRegionRowWire>>(res.data)
+        }.onFailure { error ->
+            logTerritoryShare("city regions fetch failed error=${error.message}")
         }.getOrDefault(emptyList())
+    }
+
+    fun filterTerritoryCities(
+        cities: List<TerritoryCityRegionRowWire>,
+        query: String
+    ): List<TerritoryCityRegionRowWire> {
+        val needle = query.trim().lowercase()
+        if (needle.isEmpty()) return cities
+        return cities.filter { city ->
+            val name = city.displayName?.lowercase().orEmpty()
+            val key = city.cityKey?.lowercase().orEmpty()
+            name.contains(needle) || key.contains(needle)
+        }
+    }
+
+    fun selectedTerritoryCity(
+        cities: List<TerritoryCityRegionRowWire>,
+        preferredKey: String?,
+        referenceLatitude: Double?,
+        referenceLongitude: Double?
+    ): TerritoryCityRegionRowWire? {
+        preferredKey?.let { key ->
+            cities.firstOrNull { it.cityKey == key }?.let { return it }
+        }
+        nearestCityKey(referenceLatitude, referenceLongitude, cities)?.let { key ->
+            cities.firstOrNull { it.cityKey == key }?.let { return it }
+        }
+        preferredCityKey(referenceLatitude, referenceLongitude, cities)?.let { key ->
+            cities.firstOrNull { it.cityKey == key }?.let { return it }
+        }
+        return cities.firstOrNull()
+    }
+
+    private const val RECENT_TERRITORY_CITY_KEYS = "recentTerritoryCityKeysV1"
+    private const val RECENT_TERRITORY_CITY_KEYS_LIMIT = 5
+
+    fun recentTerritoryCityKeys(context: Context): List<String> {
+        return LiftrPreferences.getStringList(context, RECENT_TERRITORY_CITY_KEYS)
+    }
+
+    fun recordRecentTerritoryCityKey(context: Context, cityKey: String?) {
+        if (cityKey.isNullOrBlank() || isPendingTerritoryCityKey(cityKey)) return
+        val keys = recentTerritoryCityKeys(context).filter { it != cityKey }.toMutableList()
+        keys.add(0, cityKey)
+        while (keys.size > RECENT_TERRITORY_CITY_KEYS_LIMIT) {
+            keys.removeAt(keys.lastIndex)
+        }
+        LiftrPreferences.setStringList(context, RECENT_TERRITORY_CITY_KEYS, keys)
+    }
+
+    suspend fun fetchTerritoryTotalCellsLeaderboard(
+        supabase: SupabaseClient,
+        scope: String = "global",
+        limit: Int = 100
+    ): List<TerritoryShareLeaderRowWire> {
+        return runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.GET_TERRITORY_TOTAL_CELLS_LEADERBOARD_V1,
+                buildJsonObject {
+                    put("p_scope", scope)
+                    put("p_limit", limit)
+                }
+            )
+            json.decodeFromString<List<TerritoryShareLeaderRowWire>>(res.data)
+        }.getOrDefault(emptyList())
+    }
+
+    fun isPendingTerritoryCityKey(cityKey: String?): Boolean {
+        return cityKey?.startsWith("pending:") == true
+    }
+
+    fun pendingResolveCoordinates(city: TerritoryCityRegionRowWire): Pair<Double, Double>? {
+        val key = city.cityKey
+        if (key != null && isPendingTerritoryCityKey(key)) {
+            val parts = key.split(":")
+            if (parts.size >= 3) {
+                val lat = parts[1].toDoubleOrNull()
+                val lon = parts[2].toDoubleOrNull()
+                if (lat != null && lon != null) {
+                    return lat to lon
+                }
+            }
+        }
+        val lat = city.centerLat
+        val lon = city.centerLon
+        return if (lat != null && lon != null) lat to lon else null
+    }
+
+    fun pendingBucketCoordinates(city: TerritoryCityRegionRowWire): Pair<Double, Double>? {
+        val key = city.cityKey ?: return null
+        if (!isPendingTerritoryCityKey(key)) return null
+        val parts = key.split(":")
+        if (parts.size < 3) return null
+        val lat = parts[1].toDoubleOrNull() ?: return null
+        val lon = parts[2].toDoubleOrNull() ?: return null
+        return lat to lon
+    }
+
+    fun logTerritoryShare(message: String) {
+        Log.d(LOG_TAG, message)
+    }
+
+    suspend fun refreshPendingTerritoryCityRegions(
+        supabase: SupabaseClient,
+        maxResolveItems: Int = 2,
+        maxBatches: Int = 8,
+        timeBudgetMillis: Long = 60_000,
+        onUpdate: ((List<TerritoryCityRegionRowWire>) -> Unit)? = null
+    ): List<TerritoryCityRegionRowWire> {
+        val started = System.currentTimeMillis()
+        val deadline = started + timeBudgetMillis
+        var refreshed = fetchTerritoryCityRegions(supabase)
+        var batchesRun = 0
+        while (batchesRun < maxBatches && System.currentTimeMillis() < deadline) {
+            val pending = refreshed.filter { isPendingTerritoryCityKey(it.cityKey) }
+            logTerritoryShare("refresh batch=${batchesRun + 1} total=${refreshed.size} pending=${pending.size}")
+            if (pending.isEmpty()) break
+            val resolveLimit = maxOf(1, minOf(maxResolveItems, pending.size))
+            pending.take(resolveLimit).forEachIndexed { index, city ->
+                val coordinates = pendingResolveCoordinates(city) ?: run {
+                    logTerritoryShare("resolve skipped missing coordinates key=${city.cityKey}")
+                    return@forEachIndexed
+                }
+                val bucket = pendingBucketCoordinates(city)
+                logTerritoryShare(
+                    "resolve batch=${batchesRun + 1} item=${index + 1}/$resolveLimit lat=${coordinates.first} lon=${coordinates.second} key=${city.cityKey}"
+                )
+                resolveMunicipalityAt(
+                    supabase = supabase,
+                    latitude = coordinates.first,
+                    longitude = coordinates.second,
+                    bucketLatitude = bucket?.first,
+                    bucketLongitude = bucket?.second
+                )
+                if (index + 1 < resolveLimit) {
+                    delay(800)
+                }
+            }
+            invokeTerritoryMunicipalityResolve(
+                supabase = supabase,
+                limit = 1,
+                processQueue = true,
+                runAssignmentBackfill = false
+            )
+            refreshed = fetchTerritoryCityRegions(supabase)
+            onUpdate?.invoke(refreshed)
+            batchesRun += 1
+        }
+        val remainingPending = refreshed.count { isPendingTerritoryCityKey(it.cityKey) }
+        logTerritoryShare(
+            "refresh finished batches=$batchesRun elapsedMs=${System.currentTimeMillis() - started} pending=$remainingPending"
+        )
+        return refreshed
+    }
+
+    fun refreshPendingTerritoryCityRegionsInBackground(
+        supabase: SupabaseClient,
+        scope: CoroutineScope,
+        maxResolveItems: Int = 2,
+        maxBatches: Int = 8,
+        onUpdate: (List<TerritoryCityRegionRowWire>) -> Unit
+    ) {
+        scope.launch {
+            municipalityRefreshMutex.withLock {
+                refreshPendingTerritoryCityRegions(
+                    supabase = supabase,
+                    maxResolveItems = maxResolveItems,
+                    maxBatches = maxBatches,
+                    onUpdate = onUpdate
+                )
+            }
+        }
     }
 
     suspend fun fetchTerritoryCityShareLeaderboard(
@@ -324,31 +560,35 @@ object TerritoryCaptureClient {
         return fetchTerritoryCityShareLeaderboard(supabase, cityKey, scope, limit)
     }
 
+    fun shouldMarkHistoricalBackfillDone(hasMore: Boolean): Boolean = !hasMore
+
     suspend fun backfillHistoricalCaptures(
         supabase: SupabaseClient,
         context: Context,
         batchSize: Int = 5,
-        maxBatches: Int = 8
+        maxBatchesPerVisit: Int = 40
     ) {
         if (LiftrPreferences.territoryHistoricalBackfillDone(context)) {
             refreshTerritoryMunicipalitiesInBackground(supabase)
             return
         }
-        var processedAny = false
-        repeat(maxBatches) {
+        var shouldMarkDone = false
+        batchLoop@ for (_i in 0 until maxBatchesPerVisit) {
             val batch = runCatching {
                 val res = supabase.postgrest.rpc(
                     BackendContracts.Rpc.BACKFILL_MY_TERRITORY_CAPTURES_V1,
                     buildJsonObject { put("p_limit", batchSize) }
                 )
                 json.decodeFromString<TerritoryBackfillResponseWire>(res.data)
-            }.getOrNull() ?: return
-            if (!batch.ok) return
-            if ((batch.processed ?: 0) == 0) return
-            processedAny = processedAny || (batch.processed ?: 0) > 0
-            if (batch.hasMore != true) return
+            }.getOrNull() ?: break@batchLoop
+            if (!batch.ok) break@batchLoop
+            if ((batch.processed ?: 0) == 0) break@batchLoop
+            if (shouldMarkHistoricalBackfillDone(batch.hasMore == true)) {
+                shouldMarkDone = true
+                break@batchLoop
+            }
         }
-        if (processedAny) {
+        if (shouldMarkDone) {
             LiftrPreferences.setTerritoryHistoricalBackfillDone(context, true)
         }
         refreshTerritoryMunicipalitiesInBackground(supabase)
@@ -356,23 +596,60 @@ object TerritoryCaptureClient {
 
     fun refreshTerritoryMunicipalitiesInBackground(supabase: SupabaseClient, limit: Int = 1) {
         backgroundScope.launch {
-            withTimeoutOrNull(8_000) {
-                invokeTerritoryMunicipalityResolve(supabase, limit)
-            }
+            invokeTerritoryMunicipalityResolve(
+                supabase = supabase,
+                limit = limit,
+                processQueue = true,
+                runAssignmentBackfill = false
+            )
         }
     }
 
-    private suspend fun invokeTerritoryMunicipalityResolve(supabase: SupabaseClient, limit: Int) {
+    private suspend fun resolveMunicipalityAt(
+        supabase: SupabaseClient,
+        latitude: Double,
+        longitude: Double,
+        bucketLatitude: Double? = null,
+        bucketLongitude: Double? = null
+    ) {
+        invokeTerritoryMunicipalityResolve(
+            supabase = supabase,
+            limit = 1,
+            processQueue = false,
+            runAssignmentBackfill = false,
+            latitude = latitude,
+            longitude = longitude,
+            bucketLatitude = bucketLatitude,
+            bucketLongitude = bucketLongitude
+        )
+    }
+
+    private suspend fun invokeTerritoryMunicipalityResolve(
+        supabase: SupabaseClient,
+        limit: Int,
+        processQueue: Boolean,
+        runAssignmentBackfill: Boolean,
+        latitude: Double? = null,
+        longitude: Double? = null,
+        bucketLatitude: Double? = null,
+        bucketLongitude: Double? = null
+    ) {
         runCatching {
             supabase.functions.invoke(
                 BackendContracts.EdgeFunctions.RESOLVE_TERRITORY_MUNICIPALITY,
                 body = buildJsonObject {
                     put("limit", limit)
                     put("max_items", limit)
-                    put("process_queue", true)
-                    put("run_assignment_backfill", false)
+                    put("process_queue", processQueue)
+                    put("run_assignment_backfill", runAssignmentBackfill)
+                    latitude?.let { put("lat", it) }
+                    longitude?.let { put("lon", it) }
+                    bucketLatitude?.let { put("bucket_lat", it) }
+                    bucketLongitude?.let { put("bucket_lon", it) }
                 }
             )
+        }.onFailure { error ->
+            logTerritoryShare("municipality resolve failed error=${error.message}")
         }
     }
 
@@ -403,6 +680,14 @@ object TerritoryCaptureClient {
             parts += "near ${"%.3f".format(lat)}, ${"%.3f".format(lon)}"
         }
         return parts.joinToString(", ") + "."
+    }
+
+    fun workoutDetailLabel(gained: Int, taken: Int): String {
+        return if (taken > 0) {
+            "$gained cells ($taken from others)"
+        } else {
+            "$gained cells"
+        }
     }
 
     fun captureFailureMessage(reason: String?): String = when (reason) {

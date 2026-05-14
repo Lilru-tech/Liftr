@@ -30,6 +30,19 @@ struct TerritoryCaptureRegressionTests {
         #expect(TerritoryCapturePresentation.message(for: summary) == "Captured 8 map cells.")
     }
 
+    @Test func workoutDetailLabelWhenCellsTaken() {
+        #expect(TerritoryCapturePresentation.workoutDetailLabel(gained: 12, taken: 4) == "12 cells (4 from others)")
+    }
+
+    @Test func workoutDetailLabelWhenOnlyGained() {
+        #expect(TerritoryCapturePresentation.workoutDetailLabel(gained: 8, taken: 0) == "8 cells")
+    }
+
+    @Test func historicalBackfillDoneOnlyWhenQueueEmpty() {
+        #expect(TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(hasMore: false))
+        #expect(!TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(hasMore: true))
+    }
+
     @Test func polygonRingParsesGeoJson() {
         let polygon = TerritoryGeoJSONPolygon(
             type: "Polygon",
@@ -69,7 +82,8 @@ struct TerritoryCaptureRegressionTests {
             center_lon: 1.24,
             captured_cells: 571,
             total_capture_cells: 65309,
-            my_owned_cells: 363
+            my_owned_cells: 363,
+            owned_cells: 363
         )
         #expect(TerritoryCaptureClient.citySummaryLabel(for: city) == "Tarragona · 571 / 65309 cells")
     }
@@ -83,7 +97,8 @@ struct TerritoryCaptureRegressionTests {
                 center_lon: 0.0,
                 captured_cells: 1,
                 total_capture_cells: 10,
-                my_owned_cells: 0
+                my_owned_cells: 0,
+                owned_cells: 0
             ),
             TerritoryCityRegionRow(
                 city_key: "near",
@@ -92,7 +107,8 @@ struct TerritoryCaptureRegressionTests {
                 center_lon: 1.2445,
                 captured_cells: 2,
                 total_capture_cells: 20,
-                my_owned_cells: 2
+                my_owned_cells: 2,
+                owned_cells: 2
             )
         ]
         #expect(
@@ -109,7 +125,8 @@ struct TerritoryCaptureRegressionTests {
                 center_lon: 0.0,
                 captured_cells: 100,
                 total_capture_cells: 1000,
-                my_owned_cells: 0
+                my_owned_cells: 0,
+                owned_cells: 0
             ),
             TerritoryCityRegionRow(
                 city_key: "mine",
@@ -118,7 +135,8 @@ struct TerritoryCaptureRegressionTests {
                 center_lon: 1.2445,
                 captured_cells: 2,
                 total_capture_cells: 20,
-                my_owned_cells: 2
+                my_owned_cells: 2,
+                owned_cells: 2
             )
         ]
         #expect(
@@ -158,6 +176,85 @@ struct TerritoryCaptureRegressionTests {
         #expect(decoded.count == 1)
         #expect(decoded[0].city_key == "pending:41.55:2.12")
         #expect(TerritoryCaptureClient.citySummaryLabel(for: decoded[0]) == "Resolving area · 41.55, 2.12 · 105 cells")
+    }
+
+    @Test func pendingTerritoryCityKeyDetection() {
+        #expect(TerritoryCaptureClient.isPendingTerritoryCityKey("pending:41.55:2.12"))
+        #expect(!TerritoryCaptureClient.isPendingTerritoryCityKey("osm:relation:12345"))
+        #expect(!TerritoryCaptureClient.isPendingTerritoryCityKey(nil))
+    }
+
+    @Test func filterTerritoryCitiesMatchesDisplayName() {
+        let cities = [
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:1",
+                display_name: "Tarragona",
+                center_lat: 41.12,
+                center_lon: 1.24,
+                captured_cells: 10,
+                total_capture_cells: 100,
+                my_owned_cells: 5,
+                owned_cells: 5
+            ),
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:2",
+                display_name: "Sabadell",
+                center_lat: 41.55,
+                center_lon: 2.11,
+                captured_cells: 8,
+                total_capture_cells: 80,
+                my_owned_cells: 0,
+                owned_cells: 0
+            )
+        ]
+        let filtered = TerritoryCaptureClient.filterTerritoryCities(cities, query: "saba")
+        #expect(filtered.count == 1)
+        #expect(filtered.first?.city_key == "osm:relation:2")
+    }
+
+    @Test func selectedTerritoryCityPrefersOwnedPool() {
+        let cities = [
+            TerritoryCityRegionRow(
+                city_key: "far",
+                display_name: "Far",
+                center_lat: 40.0,
+                center_lon: 0.0,
+                captured_cells: 1,
+                total_capture_cells: 10,
+                my_owned_cells: 0,
+                owned_cells: 0
+            ),
+            TerritoryCityRegionRow(
+                city_key: "mine",
+                display_name: "Mine",
+                center_lat: 41.12,
+                center_lon: 1.24,
+                captured_cells: 2,
+                total_capture_cells: 20,
+                my_owned_cells: 2,
+                owned_cells: 2
+            )
+        ]
+        let selected = TerritoryCaptureClient.selectedTerritoryCity(
+            from: cities,
+            preferredKey: nil,
+            referenceLatitude: 41.12,
+            referenceLongitude: 1.24
+        )
+        #expect(selected?.city_key == "mine")
+    }
+
+    @Test func pendingResolveCoordinatesPreferBucketKey() throws {
+        let data = Data("""
+        [{"city_key":"pending:36.28:-6.10","display_name":"Resolving area · 36.28, -6.10","center_lat":36.2800834012035,"center_lon":-6.09945049492908,"captured_cells":99,"my_owned_cells":99}]
+        """.utf8)
+        let decoded = try JSONDecoder().decode([TerritoryCityRegionRow].self, from: data)
+        let coordinates = TerritoryCaptureClient.pendingResolveCoordinates(for: decoded[0])
+        #expect(coordinates?.lat == 36.28)
+        #expect(coordinates?.lon == -6.10)
+        let bucket = TerritoryCaptureClient.pendingBucketCoordinates(for: decoded[0])
+        #expect(bucket?.lat == 36.28)
+        #expect(bucket?.lon == -6.10)
     }
 
     @Test func ownerColorsDifferForDistinctOwners() {

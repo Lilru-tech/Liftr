@@ -239,11 +239,6 @@ fun HealthConnectImportScreen(
             stringResource(R.string.health_connect_body),
             style = MaterialTheme.typography.bodyMedium
         )
-        Text(
-            stringResource(R.string.health_connect_apple_note),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
         Card(
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)

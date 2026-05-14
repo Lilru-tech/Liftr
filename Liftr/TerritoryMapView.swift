@@ -10,6 +10,20 @@ struct TerritoryMapView: View {
         span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
     )
 
+    private let initialLatitude: Double?
+    private let initialLongitude: Double?
+    private let initialSpan: Double
+
+    init(
+        initialLatitude: Double? = nil,
+        initialLongitude: Double? = nil,
+        initialSpan: Double = 0.12
+    ) {
+        self.initialLatitude = initialLatitude
+        self.initialLongitude = initialLongitude
+        self.initialSpan = initialSpan
+    }
+
     @State private var mapCameraPosition: MapCameraPosition = .region(defaultRegion)
     @State private var visibleRegion = defaultRegion
     @State private var cells: [TerritoryMapCellRow] = []
@@ -17,8 +31,7 @@ struct TerritoryMapView: View {
     @State private var loading = false
     @State private var lastFetchKey = ""
     @State private var selectedCell: TerritoryMapCellRow?
-    @State private var profileUserId: UUID?
-    @State private var showProfile = false
+    @State private var profileUser: TerritoryProfileUser?
     @State private var showLeaderboard = false
     @State private var showMineOnly = false
     @State private var loadError: String?
@@ -116,9 +129,17 @@ struct TerritoryMapView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
-            let initialRegion = Self.region(around: app.territoryReferenceCoordinate)
+            let center = Self.coordinate(
+                latitude: initialLatitude,
+                longitude: initialLongitude,
+                fallback: app.territoryReferenceCoordinate
+            )
+            let initialRegion = Self.region(around: center, span: initialSpan)
             mapCameraPosition = .region(initialRegion)
             visibleRegion = initialRegion
+            if let center {
+                app.territoryReferenceCoordinate = center
+            }
             async let summaryLoad: Void = loadSummary()
             async let cellsLoad: Void = refreshVisibleCells(for: initialRegion)
             _ = await summaryLoad
@@ -134,9 +155,8 @@ struct TerritoryMapView: View {
             TerritoryCellDetailSheet(
                 cell: cell,
                 onViewProfile: { userId in
+                    profileUser = TerritoryProfileUser(id: userId)
                     selectedCell = nil
-                    profileUserId = userId
-                    showProfile = true
                 }
             )
             .presentationDetents([.height(220)])
@@ -147,30 +167,43 @@ struct TerritoryMapView: View {
                 initialLongitude: visibleRegion.center.longitude
             )
         }
-        .fullScreenCover(isPresented: $showProfile) {
-            if let userId = profileUserId {
-                NavigationStack {
-                    ProfileView(userId: userId)
-                        .gradientBG()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("Close") {
-                                    showProfile = false
-                                    profileUserId = nil
-                                }
+        .fullScreenCover(item: $profileUser) { profile in
+            NavigationStack {
+                ProfileView(userId: profile.id)
+                    .environmentObject(app)
+                    .gradientBG()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Close") {
+                                profileUser = nil
                             }
                         }
-                }
+                    }
             }
         }
     }
 
-    private static func region(around coordinate: CLLocationCoordinate2D?) -> MKCoordinateRegion {
+    private static func coordinate(
+        latitude: Double?,
+        longitude: Double?,
+        fallback: CLLocationCoordinate2D?
+    ) -> CLLocationCoordinate2D? {
+        if let latitude, let longitude {
+            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        }
+        return fallback
+    }
+
+    private static func region(around coordinate: CLLocationCoordinate2D?, span: Double) -> MKCoordinateRegion {
         guard let coordinate else { return defaultRegion }
         return MKCoordinateRegion(
             center: coordinate,
-            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
+            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)
         )
+    }
+
+    private static func region(around coordinate: CLLocationCoordinate2D?) -> MKCoordinateRegion {
+        region(around: coordinate, span: 0.12)
     }
 
     private func loadSummary() async {
@@ -205,6 +238,10 @@ struct TerritoryMapView: View {
             loading = false
         }
     }
+}
+
+private struct TerritoryProfileUser: Identifiable {
+    let id: UUID
 }
 
 private struct TerritoryCellDetailSheet: View {
