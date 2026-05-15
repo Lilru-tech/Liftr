@@ -237,7 +237,9 @@ select
     'public.assign_territory_cells_for_geocode_bucket_v1(numeric,numeric,text)',
     'execute'
   ) as authenticated_can_call_bucket_assign,
-  has_function_privilege('service_role', 'public.backfill_territory_municipality_assignments_v1(integer)', 'execute') as service_role_can_call_assignment_backfill;
+  has_function_privilege('service_role', 'public.backfill_territory_municipality_assignments_v1(integer)', 'execute') as service_role_can_call_assignment_backfill,
+  has_function_privilege('authenticated', 'public._liftr_apply_territory_capture_for_workout(bigint)', 'execute') as authenticated_can_call_internal_apply_capture,
+  has_function_privilege('authenticated', 'public.apply_territory_capture_v1(bigint)', 'execute') as authenticated_can_call_apply_capture;
 
 select
   count(*)::integer as cardio_with_route_missing_capture_event
