@@ -524,28 +524,17 @@ enum TerritoryCaptureClient {
             logTerritoryShare("refresh batch=\(batchesRun + 1) total=\(refreshed.count) pending=\(pending.count)")
             guard !pending.isEmpty else { break }
             let resolveLimit = max(1, min(maxResolveItems, pending.count))
-            for (index, city) in pending.prefix(resolveLimit).enumerated() {
-                guard let coordinates = pendingResolveCoordinates(for: city) else {
-                    logTerritoryShare("resolve skipped missing coordinates key=\(city.city_key ?? "")")
-                    continue
-                }
-                let bucket = pendingBucketCoordinates(for: city)
-                logTerritoryShare("resolve batch=\(batchesRun + 1) item=\(index + 1)/\(resolveLimit) lat=\(coordinates.lat) lon=\(coordinates.lon) key=\(city.city_key ?? "")")
-                await resolveMunicipalityAt(
-                    latitude: coordinates.lat,
-                    longitude: coordinates.lon,
-                    bucketLatitude: bucket?.lat,
-                    bucketLongitude: bucket?.lon
+            for index in 0..<resolveLimit {
+                logTerritoryShare("resolve batch=\(batchesRun + 1) queue item=\(index + 1)/\(resolveLimit)")
+                await invokeTerritoryMunicipalityResolve(
+                    limit: 1,
+                    processQueue: true,
+                    runAssignmentBackfill: false
                 )
                 if index + 1 < resolveLimit {
                     try? await Task.sleep(nanoseconds: 800_000_000)
                 }
             }
-            await invokeTerritoryMunicipalityResolve(
-                limit: 1,
-                processQueue: true,
-                runAssignmentBackfill: false
-            )
             refreshed = await fetchTerritoryCityRegions()
             if let onUpdate {
                 await onUpdate(refreshed)
@@ -683,23 +672,6 @@ enum TerritoryCaptureClient {
                 runAssignmentBackfill: false
             )
         }
-    }
-
-    private static func resolveMunicipalityAt(
-        latitude: Double,
-        longitude: Double,
-        bucketLatitude: Double? = nil,
-        bucketLongitude: Double? = nil
-    ) async {
-        await invokeTerritoryMunicipalityResolve(
-            limit: 1,
-            processQueue: false,
-            runAssignmentBackfill: false,
-            latitude: latitude,
-            longitude: longitude,
-            bucketLatitude: bucketLatitude,
-            bucketLongitude: bucketLongitude
-        )
     }
 
     private static func invokeTerritoryMunicipalityResolve(

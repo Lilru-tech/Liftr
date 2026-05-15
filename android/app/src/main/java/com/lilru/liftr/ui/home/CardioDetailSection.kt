@@ -439,6 +439,13 @@ fun CardioDetailSection(
             }
         }
     }
+    if (showTerritoryTakeoversSheet) {
+        TerritoryTakeoversSheet(
+            takeovers = detail.territoryTakeovers,
+            onOpenProfile = onOpenProfile,
+            onDismiss = { showTerritoryTakeoversSheet = false }
+        )
+    }
 }
 
 @Composable
@@ -526,13 +533,6 @@ private fun KmPaceSplitsSection(splits: List<Int>) {
                 }
             }
         }
-    }
-    if (showTerritoryTakeoversSheet) {
-        TerritoryTakeoversSheet(
-            takeovers = detail.territoryTakeovers,
-            onOpenProfile = onOpenProfile,
-            onDismiss = { showTerritoryTakeoversSheet = false }
-        )
     }
 }
 

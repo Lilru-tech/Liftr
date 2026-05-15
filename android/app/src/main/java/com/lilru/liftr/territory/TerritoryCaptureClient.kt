@@ -472,32 +472,20 @@ object TerritoryCaptureClient {
             logTerritoryShare("refresh batch=${batchesRun + 1} total=${refreshed.size} pending=${pending.size}")
             if (pending.isEmpty()) break
             val resolveLimit = maxOf(1, minOf(maxResolveItems, pending.size))
-            pending.take(resolveLimit).forEachIndexed { index, city ->
-                val coordinates = pendingResolveCoordinates(city) ?: run {
-                    logTerritoryShare("resolve skipped missing coordinates key=${city.cityKey}")
-                    return@forEachIndexed
-                }
-                val bucket = pendingBucketCoordinates(city)
+            repeat(resolveLimit) { index ->
                 logTerritoryShare(
-                    "resolve batch=${batchesRun + 1} item=${index + 1}/$resolveLimit lat=${coordinates.first} lon=${coordinates.second} key=${city.cityKey}"
+                    "resolve batch=${batchesRun + 1} queue item=${index + 1}/$resolveLimit"
                 )
-                resolveMunicipalityAt(
+                invokeTerritoryMunicipalityResolve(
                     supabase = supabase,
-                    latitude = coordinates.first,
-                    longitude = coordinates.second,
-                    bucketLatitude = bucket?.first,
-                    bucketLongitude = bucket?.second
+                    limit = 1,
+                    processQueue = true,
+                    runAssignmentBackfill = false
                 )
                 if (index + 1 < resolveLimit) {
                     delay(800)
                 }
             }
-            invokeTerritoryMunicipalityResolve(
-                supabase = supabase,
-                limit = 1,
-                processQueue = true,
-                runAssignmentBackfill = false
-            )
             refreshed = fetchTerritoryCityRegions(supabase)
             onUpdate?.invoke(refreshed)
             batchesRun += 1
@@ -627,25 +615,6 @@ object TerritoryCaptureClient {
                 runAssignmentBackfill = false
             )
         }
-    }
-
-    private suspend fun resolveMunicipalityAt(
-        supabase: SupabaseClient,
-        latitude: Double,
-        longitude: Double,
-        bucketLatitude: Double? = null,
-        bucketLongitude: Double? = null
-    ) {
-        invokeTerritoryMunicipalityResolve(
-            supabase = supabase,
-            limit = 1,
-            processQueue = false,
-            runAssignmentBackfill = false,
-            latitude = latitude,
-            longitude = longitude,
-            bucketLatitude = bucketLatitude,
-            bucketLongitude = bucketLongitude
-        )
     }
 
     private suspend fun invokeTerritoryMunicipalityResolve(

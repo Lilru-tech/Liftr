@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.push.FcmTokenUploader
 import io.github.jan.supabase.auth.auth
-import io.github.jan.supabase.auth.resetPasswordForEmail
 import io.github.jan.supabase.auth.SignOutScope
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus

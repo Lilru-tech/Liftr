@@ -287,15 +287,37 @@ Deno.serve(async (req) => {
     const processed: unknown[] = [];
     const errors: Array<{ bucket_lat?: number; bucket_lon?: number; lat?: number; lon?: number; error: string }> = [];
     let assignmentBackfill: { updated?: number; has_more?: boolean } | null = null;
-    const processQueue = body.process_queue !== false;
-    const runAssignmentBackfillFlag = body.run_assignment_backfill === true;
     const isBulkOperator = maintenanceAuthorized || serviceAuthorized;
     const requestedItems = Number(body.max_items ?? body.limit ?? 2);
     const maxItems = isBulkOperator
       ? Math.max(1, Math.min(requestedItems, 10))
       : Math.max(1, Math.min(requestedItems, 1));
 
-    if (typeof body.lat === "number" && typeof body.lon === "number") {
+    if (!isBulkOperator) {
+      if (typeof body.lat === "number" || typeof body.lon === "number") {
+        return new Response(JSON.stringify({ ok: false, error: "forbidden_point_ingest" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (body.run_assignment_backfill === true) {
+        return new Response(JSON.stringify({ ok: false, error: "forbidden_assignment_backfill" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (body.process_queue === false) {
+        return new Response(JSON.stringify({ ok: false, error: "process_queue_required" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    const processQueue = body.process_queue !== false;
+    const runAssignmentBackfillFlag = isBulkOperator && body.run_assignment_backfill === true;
+
+    if (isBulkOperator && typeof body.lat === "number" && typeof body.lon === "number") {
       try {
         const result = await ingestMunicipality(admin, {
           lat: body.lat,

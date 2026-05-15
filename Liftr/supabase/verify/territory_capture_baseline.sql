@@ -226,7 +226,18 @@ group by p.username;
 
 select
   has_function_privilege('authenticated', 'public.get_territory_share_leaderboard_v1(text, integer)', 'execute') as authenticated_can_call_legacy_share_rpc,
-  has_function_privilege('authenticated', 'public.backfill_territory_municipality_assignments_v1(integer)', 'execute') as authenticated_can_call_assignment_backfill;
+  has_function_privilege('authenticated', 'public.backfill_territory_municipality_assignments_v1(integer)', 'execute') as authenticated_can_call_assignment_backfill,
+  has_function_privilege(
+    'authenticated',
+    'public.ingest_territory_municipality_v1(text,text,text,integer,text,double precision,double precision,double precision,double precision,double precision,double precision,text,text,numeric,numeric)',
+    'execute'
+  ) as authenticated_can_call_ingest_municipality,
+  has_function_privilege(
+    'authenticated',
+    'public.assign_territory_cells_for_geocode_bucket_v1(numeric,numeric,text)',
+    'execute'
+  ) as authenticated_can_call_bucket_assign,
+  has_function_privilege('service_role', 'public.backfill_territory_municipality_assignments_v1(integer)', 'execute') as service_role_can_call_assignment_backfill;
 
 select
   count(*)::integer as cardio_with_route_missing_capture_event
