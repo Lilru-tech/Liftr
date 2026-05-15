@@ -246,6 +246,13 @@ fun AddWorkoutTabScreen(
     var showParticipantsSheet by remember { mutableStateOf(false) }
     var participantsSearchQuery by remember { mutableStateOf("") }
     var showWorkoutHelp by rememberSaveable { mutableStateOf(false) }
+    var showPlanTooltip by remember { mutableStateOf(!LiftrPreferences.addWorkoutPlanTooltipSeen(app)) }
+    val dismissPlanTooltip: () -> Unit = {
+        if (showPlanTooltip) {
+            LiftrPreferences.setAddWorkoutPlanTooltipSeen(app, true)
+            showPlanTooltip = false
+        }
+    }
     var showClearStrengthDialog by remember { mutableStateOf(false) }
     var showClearHyroxDialog by remember { mutableStateOf(false) }
     var exerciseSearch by remember { mutableStateOf("") }
@@ -255,6 +262,7 @@ fun AddWorkoutTabScreen(
     val participantsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val exerciseSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val templateEditSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val hyroxTemplateEditSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val workoutHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showShareRoutineSheet by remember { mutableStateOf(false) }
     var routineShareSnapshot by remember { mutableStateOf<RoutineShareSnapshot?>(null) }
@@ -528,7 +536,11 @@ fun AddWorkoutTabScreen(
                 selectedKind = selectedKind,
                 onKindChange = { k -> selectedKind = k; vm.clearStatus() },
                 selectedState = selectedState,
-                onStateChange = { s -> selectedState = s; vm.clearStatus() },
+                onStateChange = { s ->
+                    selectedState = s
+                    if (s == AddWorkoutState.PLANNED) dismissPlanTooltip()
+                    vm.clearStatus()
+                },
                 title = title,
                 onTitleChange = { title = it; vm.clearStatus() },
                 startedAtIsoText = startedAtIsoText,
@@ -541,7 +553,9 @@ fun AddWorkoutTabScreen(
                 notes = notes,
                 onNotesChange = { notes = it; vm.clearStatus() },
                 selectedIntensity = selectedIntensity,
-                onIntensityChange = { i -> selectedIntensity = i; vm.clearStatus() }
+                onIntensityChange = { i -> selectedIntensity = i; vm.clearStatus() },
+                showPlanTooltip = showPlanTooltip,
+                onDismissPlanTooltip = dismissPlanTooltip
             )
         }
         item {
@@ -1754,7 +1768,23 @@ fun AddWorkoutTabScreen(
                                 routineShareError = e.message
                             }
                     }
-                }
+                },
+                onEditRoutine = { id -> vm.loadHyroxRoutineForEdit(id) }
+            )
+        }
+    }
+
+    ui.hyroxRoutineTemplateEdit?.let { edit ->
+        ModalBottomSheet(
+            onDismissRequest = {
+                if (!edit.saving) vm.dismissHyroxRoutineTemplateEdit()
+            },
+            sheetState = hyroxTemplateEditSheetState
+        ) {
+            EditHyroxRoutineTemplateSheetContent(
+                edit = edit,
+                vm = vm,
+                onDismiss = { vm.dismissHyroxRoutineTemplateEdit() }
             )
         }
     }

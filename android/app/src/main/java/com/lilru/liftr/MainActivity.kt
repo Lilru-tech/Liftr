@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.lifecycle.lifecycleScope
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -22,11 +23,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.lilru.liftr.ads.UmpHelper
+import com.lilru.liftr.bodyweight.HealthConnectBodyWeightSync
+import com.lilru.liftr.auth.handleAuthDeepLinkIfPresent
 import com.lilru.liftr.data.LiftrSupabase
+import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.navigation.OpenWorkoutIntentStore
 import com.lilru.liftr.push.PushIntentStore
 import com.lilru.liftr.ui.LiftrAppContent
 import com.lilru.liftr.ui.theme.LiftrTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -38,6 +43,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         UmpHelper.requestConsentThenInitAds(this)
         enableEdgeToEdge()
+        handleAuthDeepLinkIfPresent(intent, LiftrSupabase.client)
         PushIntentStore.setFromIntent(intent)
         OpenWorkoutIntentStore.setFromIntent(intent)
         askNotificationPermissionIfNeeded()
@@ -75,9 +81,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        val supabase = LiftrSupabase.client ?: return
+        if (!LiftrPreferences.bodyWeightHealthSyncEnabled(this)) return
+        lifecycleScope.launch {
+            runCatching {
+                HealthConnectBodyWeightSync(this@MainActivity, supabase).syncRecentSamples()
+            }
+        }
+    }
+
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleAuthDeepLinkIfPresent(intent, LiftrSupabase.client)
         PushIntentStore.setFromIntent(intent)
         OpenWorkoutIntentStore.setFromIntent(intent)
     }

@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.territory.TerritoryCaptureClient
+import com.lilru.liftr.territory.TerritoryWorkoutTakeoverRowWire
 import com.lilru.liftr.ui.compare.CompareCandidateLoader
 import com.lilru.liftr.ui.compare.CompareWorkoutCandidate
 import io.github.jan.supabase.SupabaseClient
@@ -76,7 +78,11 @@ data class CardioSessionDetail(
     val elevationGainM: Int? = null,
     val notes: String? = null,
     val routeGeojson: String? = null,
-    val extras: CardioSessionExtras? = null
+    val extras: CardioSessionExtras? = null,
+    val territoryCellsGained: Int? = null,
+    val territoryCellsTaken: Int? = null,
+    val territoryPreviewRings: List<List<Pair<Double, Double>>> = emptyList(),
+    val territoryTakeovers: List<TerritoryWorkoutTakeoverRowWire> = emptyList()
 )
 
 @Serializable
@@ -883,6 +889,14 @@ class WorkoutDetailViewModel(
                 }
             decodeFlexibleList<CardioSessionStatsRow>(sRes.data).firstOrNull()?.stats
         }.getOrNull()
+        val capture = TerritoryCaptureClient.fetchCaptureEvent(supabase, workoutId)
+        val territoryTakeovers = TerritoryCaptureClient.fetchWorkoutTakeovers(supabase, workoutId)
+        val territoryPreviewRings =
+            if ((capture?.cellsGained ?: 0) > 0 && !w.routeGeojson.isNullOrBlank()) {
+                TerritoryCaptureClient.fetchTerritoryPreviewRings(supabase, w.routeGeojson)
+            } else {
+                emptyList()
+            }
         return CardioSessionDetail(
             id = w.id,
             activityCode = w.activityCode,
@@ -895,7 +909,11 @@ class WorkoutDetailViewModel(
             elevationGainM = w.elevationGainM,
             notes = w.notes,
             routeGeojson = w.routeGeojson,
-            extras = extras
+            extras = extras,
+            territoryCellsGained = capture?.cellsGained,
+            territoryCellsTaken = capture?.cellsTaken,
+            territoryPreviewRings = territoryPreviewRings,
+            territoryTakeovers = territoryTakeovers
         )
     }
 

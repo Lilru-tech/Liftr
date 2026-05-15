@@ -42,6 +42,47 @@ class AuthViewModel(
         _uiError.value = null
     }
 
+    fun resetPasswordForEmail(email: String, onEmailSent: () -> Unit = {}) {
+        viewModelScope.launch {
+            _busy.value = true
+            _uiError.value = null
+            try {
+                supabase.auth.resetPasswordForEmail(
+                    email = email.trim(),
+                    redirectUrl = AuthRedirect.WEB_CALLBACK_URL
+                )
+                onEmailSent()
+            } catch (e: Exception) {
+                _uiError.value = e.message?.take(300) ?: e::class.java.simpleName
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun updatePassword(newPassword: String, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            _busy.value = true
+            _uiError.value = null
+            if (newPassword.length < PasswordResetValidation.MINIMUM_LENGTH) {
+                _uiError.value = "Password must be at least 8 characters."
+                _busy.value = false
+                return@launch
+            }
+            try {
+                supabase.auth.updateUser {
+                    password = newPassword
+                }
+                PasswordRecoveryGate.clear()
+                onSuccess()
+            } catch (e: Exception) {
+                _uiError.value = e.message?.take(300) ?: e::class.java.simpleName
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
     /**
      * @param onSignInSuccess Llamada solo si el inicio de sesión no lanza; para persistir email / banner.
      */
@@ -250,6 +291,7 @@ class AuthViewModel(
     fun signOut() {
         viewModelScope.launch {
             _uiError.value = null
+            PasswordRecoveryGate.clear()
             runCatching { FcmTokenUploader.clearFcmToken(supabase) }
             runCatching {
                 supabase.auth.signOut(SignOutScope.GLOBAL)

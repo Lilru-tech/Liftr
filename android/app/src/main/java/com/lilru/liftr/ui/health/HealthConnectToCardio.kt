@@ -2,6 +2,7 @@ package com.lilru.liftr.ui.health
 
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.territory.TerritoryCaptureClient
 import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddWorkoutIntensity
 import com.lilru.liftr.ui.add.AddWorkoutState
@@ -24,6 +25,12 @@ fun exerciseTypeToActivityWire(exerciseType: Int): String = when (exerciseType) 
     ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL -> AddCardioActivity.SWIM_POOL.wire
     ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_OPEN_WATER -> AddCardioActivity.SWIM_OPEN_WATER.wire
     else -> AddCardioActivity.RUN.wire
+}
+
+private fun isOutdoorTerritoryEligible(exerciseType: Int): Boolean = when (exerciseType) {
+    ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY,
+    ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL -> false
+    else -> true
 }
 
 suspend fun importHealthConnectSessionToCardio(
@@ -52,6 +59,9 @@ suspend fun importHealthConnectSessionToCardio(
     val wrapper = buildJsonObject { put("p", p) }
     val res = supabase.postgrest.rpc(BackendContracts.Rpc.CREATE_CARDIO_WORKOUT_V2, wrapper) { }
     val id = parseWorkoutIdFromCreateCardioResponse(res.data) ?: error("No se pudo leer el id del entreno.")
+    if (isOutdoorTerritoryEligible(rec.exerciseType)) {
+        TerritoryCaptureClient.applyCapture(supabase, id.toInt())
+    }
     id.toInt()
 }
 

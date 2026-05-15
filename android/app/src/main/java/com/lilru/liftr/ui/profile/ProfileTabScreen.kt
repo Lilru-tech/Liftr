@@ -32,6 +32,8 @@ import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
@@ -100,11 +102,14 @@ import android.widget.Toast
 import com.lilru.liftr.LiftrApplication
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.SupabaseResponseDecoding
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.components.LiftrBackTopBar
+import com.lilru.liftr.ui.territory.TerritoryMapScreen
+import com.lilru.liftr.ui.territory.TerritoryProfileHubCard
 import com.lilru.liftr.util.AvatarImageUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -121,10 +126,15 @@ import com.lilru.liftr.ui.ranking.RankingInitial
 import com.lilru.liftr.ui.ranking.RankingMetric
 import com.lilru.liftr.ui.ranking.RankingScope
 import com.lilru.liftr.ui.ranking.RankingTabScreen
+import com.lilru.liftr.ui.bodyweight.BodyWeightHistoryScreen
+import com.lilru.liftr.ui.bodyweight.HealthConnectBodyWeightImportScreen
 import com.lilru.liftr.ui.health.HealthConnectImportScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.auth.auth
 import java.text.DateFormat
 import java.time.Instant
@@ -134,6 +144,8 @@ import java.time.temporal.ChronoUnit
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.json.JSONArray
@@ -143,6 +155,14 @@ private data class ProfileMySegmentRow(
     val id: String,
     val name: String,
     val bufferM: Double,
+    val status: String
+)
+
+@Serializable
+private data class ProfilePublishedSegmentWire(
+    val id: String,
+    val name: String,
+    @SerialName("buffer_m") val bufferM: Double,
     val status: String
 )
 
@@ -625,11 +645,14 @@ fun ProfileTabScreen(
     var showFeatureRequests by rememberSaveable { mutableStateOf(false) }
     var showFaqs by rememberSaveable { mutableStateOf(false) }
     var showHealthConnect by rememberSaveable { mutableStateOf(false) }
+    var showBodyWeightHistory by rememberSaveable { mutableStateOf(false) }
+    var showHealthConnectWeight by rememberSaveable { mutableStateOf(false) }
     var showGoals by rememberSaveable { mutableStateOf(false) }
     var showAchievements by rememberSaveable { mutableStateOf(false) }
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
     var showCompetitions by rememberSaveable { mutableStateOf(false) }
     var showRanking by rememberSaveable { mutableStateOf(false) }
+    var showTerritoryMap by rememberSaveable { mutableStateOf(false) }
     var showCreateCompetition by rememberSaveable { mutableStateOf(false) }
     var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
@@ -706,6 +729,20 @@ fun ProfileTabScreen(
         return
     }
 
+    if (showTerritoryMap) {
+        Column(modifier = modifier.fillMaxSize()) {
+            LiftrBackTopBar(
+                title = "Territory map",
+                onBack = { showTerritoryMap = false }
+            )
+            TerritoryMapScreen(
+                supabase = supabase,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        return
+    }
+
     if (showNotifications) {
         NotificationsScreen(
             supabase = supabase,
@@ -748,6 +785,24 @@ fun ProfileTabScreen(
     if (showFaqs) {
         FaqsScreen(
             onBack = { showFaqs = false },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showHealthConnectWeight) {
+        HealthConnectBodyWeightImportScreen(
+            supabase = supabase,
+            onBack = { showHealthConnectWeight = false },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showBodyWeightHistory) {
+        BodyWeightHistoryScreen(
+            supabase = supabase,
+            onBack = { showBodyWeightHistory = false },
             modifier = modifier
         )
         return
@@ -864,12 +919,12 @@ fun ProfileTabScreen(
         return
     }
 
-    val tabEntries = remember(ui.isOwnProfile) {
+    val tabEntries = remember(ui.isOwnProfile, profileUserId) {
         buildList {
             add(ProfileMainTab.Calendar)
             add(ProfileMainTab.Prs)
             add(ProfileMainTab.Progress)
-            if (ui.isOwnProfile) add(ProfileMainTab.Segments)
+            if (profileUserId != null) add(ProfileMainTab.Segments)
             if (ui.isOwnProfile) add(ProfileMainTab.Settings)
         }
     }
@@ -959,7 +1014,7 @@ fun ProfileTabScreen(
                                         ProfileMainTab.Calendar -> R.string.profile_tab_calendar
                                         ProfileMainTab.Prs -> R.string.profile_tab_prs
                                         ProfileMainTab.Progress -> R.string.profile_tab_progress
-                                        ProfileMainTab.Segments -> R.string.profile_tab_segments
+                                        ProfileMainTab.Segments -> R.string.profile_tab_explore
                                         ProfileMainTab.Settings -> R.string.profile_tab_settings
                                     }
                                 ),
@@ -1030,32 +1085,55 @@ fun ProfileTabScreen(
                         }
                     }
                     ProfileMainTab.Segments -> {
-                        if (profileUserId != null && ui.isOwnProfile) {
-                            var rows by remember(profileUserId) { mutableStateOf<List<ProfileMySegmentRow>>(emptyList()) }
+                        if (profileUserId != null) {
+                            var rows by remember(profileUserId, ui.isOwnProfile) { mutableStateOf<List<ProfileMySegmentRow>>(emptyList()) }
                             var busy by remember { mutableStateOf(true) }
                             var loadErr by remember { mutableStateOf<String?>(null) }
-                            LaunchedEffect(profileUserId) {
+                            LaunchedEffect(profileUserId, ui.isOwnProfile) {
                                 busy = true
                                 loadErr = null
                                 runCatching {
-                                    val res = supabase.postgrest.rpc(
-                                        BackendContracts.Rpc.LIST_MY_SEGMENTS_V1,
-                                        buildJsonObject { put("p_limit", 100) }
-                                    ) { }
-                                    val arr = JSONArray(res.data)
-                                    val out = ArrayList<ProfileMySegmentRow>(arr.length())
-                                    for (i in 0 until arr.length()) {
-                                        val o = arr.optJSONObject(i) ?: continue
-                                        out.add(
-                                            ProfileMySegmentRow(
-                                                id = o.optString("id"),
-                                                name = o.optString("name"),
-                                                bufferM = o.optDouble("buffer_m"),
-                                                status = o.optString("status")
+                                    rows = if (ui.isOwnProfile) {
+                                        val res = supabase.postgrest.rpc(
+                                            BackendContracts.Rpc.LIST_MY_SEGMENTS_V1,
+                                            buildJsonObject { put("p_limit", 100) }
+                                        ) { }
+                                        val arr = JSONArray(res.data)
+                                        val out = ArrayList<ProfileMySegmentRow>(arr.length())
+                                        for (i in 0 until arr.length()) {
+                                            val o = arr.optJSONObject(i) ?: continue
+                                            out.add(
+                                                ProfileMySegmentRow(
+                                                    id = o.optString("id"),
+                                                    name = o.optString("name"),
+                                                    bufferM = o.optDouble("buffer_m"),
+                                                    status = o.optString("status")
+                                                )
                                             )
-                                        )
+                                        }
+                                        out
+                                    } else {
+                                        supabase.from(BackendContracts.Tables.SEGMENTS)
+                                            .select(columns = Columns.raw("id, name, buffer_m, status")) {
+                                                filter {
+                                                    eq("created_by", profileUserId)
+                                                    eq("status", "published")
+                                                }
+                                                order("created_at", Order.DESCENDING)
+                                                limit(100)
+                                            }
+                                            .let { res ->
+                                                SupabaseResponseDecoding.decodeListOrObject<ProfilePublishedSegmentWire>(res.data)
+                                            }
+                                            .map {
+                                                ProfileMySegmentRow(
+                                                    id = it.id,
+                                                    name = it.name,
+                                                    bufferM = it.bufferM,
+                                                    status = it.status
+                                                )
+                                            }
                                     }
-                                    rows = out
                                 }.onFailure { loadErr = it.message }
                                 busy = false
                             }
@@ -1066,6 +1144,24 @@ fun ProfileTabScreen(
                                     .padding(vertical = 8.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                TerritoryProfileHubCard(
+                                    supabase = supabase,
+                                    profileUserId = profileUserId,
+                                    isOwnProfile = ui.isOwnProfile,
+                                    onOpenMap = { showTerritoryMap = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                                Text(
+                                    text = stringResource(
+                                        if (ui.isOwnProfile) {
+                                            R.string.profile_your_segments
+                                        } else {
+                                            R.string.profile_tab_segments
+                                        }
+                                    ),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                                 if (busy && rows.isEmpty()) {
                                     LinearProgressIndicator(Modifier.fillMaxWidth())
                                 }
@@ -1078,7 +1174,13 @@ fun ProfileTabScreen(
                                 }
                                 if (!busy && rows.isEmpty() && loadErr == null) {
                                     Text(
-                                        text = stringResource(R.string.profile_my_segments_empty),
+                                        text = stringResource(
+                                            if (ui.isOwnProfile) {
+                                                R.string.profile_my_segments_empty
+                                            } else {
+                                                R.string.profile_other_segments_empty
+                                            }
+                                        ),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
@@ -1261,6 +1363,8 @@ fun ProfileTabScreen(
                             ProfilePersonalInformationCard(
                                 ui = ui,
                                 vm = vm,
+                                onOpenBodyWeightHistory = { showBodyWeightHistory = true },
+                                onOpenHealthConnectWeight = { showHealthConnectWeight = true },
                                 onSaved = {
                                     Toast.makeText(
                                         context,
@@ -1454,9 +1558,12 @@ fun ProfileTabScreen(
 private fun ProfilePersonalInformationCard(
     ui: ProfileUiState,
     vm: ProfileViewModel,
+    onOpenBodyWeightHistory: () -> Unit,
+    onOpenHealthConnectWeight: () -> Unit,
     onSaved: () -> Unit
 ) {
     var showDobPicker by remember { mutableStateOf(false) }
+    var editingPersonalInfo by remember { mutableStateOf(false) }
     val defaultDobMillis = remember {
         val cal = java.util.Calendar.getInstance()
         cal.add(java.util.Calendar.YEAR, -20)
@@ -1470,94 +1577,154 @@ private fun ProfilePersonalInformationCard(
         val now = LocalDate.now(ZoneId.systemDefault())
         ChronoUnit.YEARS.between(birth, now).toInt()
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 stringResource(R.string.profile_personal_info_section),
-                style = MaterialTheme.typography.titleMedium
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f)
             )
-            OutlinedTextField(
-                value = ui.heightCmDraft,
-                onValueChange = vm::setHeightCmDraft,
-                label = { Text(stringResource(R.string.profile_height_cm)) },
-                singleLine = true,
-                enabled = !ui.saveProfileMetricsBusy,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.fillMaxWidth()
-            )
-            OutlinedTextField(
-                value = ui.weightKgDraft,
-                onValueChange = vm::setWeightKgDraft,
-                label = { Text(stringResource(R.string.profile_weight_kg)) },
-                singleLine = true,
-                enabled = !ui.saveProfileMetricsBusy,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                modifier = Modifier.fillMaxWidth()
-            )
-            HorizontalDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            IconButton(
+                onClick = { editingPersonalInfo = !editingPersonalInfo },
+                enabled = !ui.saveProfileMetricsBusy
             ) {
-                Text(
-                    stringResource(R.string.profile_show_birth_date),
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.weight(1f)
-                )
-                Switch(
-                    checked = ui.hasBirthDate,
-                    onCheckedChange = vm::setHasBirthDate,
-                    enabled = !ui.saveProfileMetricsBusy
-                )
-            }
-            if (ui.hasBirthDate) {
-                OutlinedButton(
-                    onClick = { showDobPicker = true },
-                    enabled = !ui.saveProfileMetricsBusy,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        if (dobLabel != null) {
-                            dobLabel
-                        } else {
-                            stringResource(R.string.profile_pick_birth_date)
-                        }
-                    )
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(stringResource(R.string.profile_age))
-                Text(
-                    text = ageYears?.toString()
-                        ?: stringResource(R.string.profile_age_emdash),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-            FilledTonalButton(
-                onClick = { vm.saveProfileMetrics(onSaved) },
-                enabled = !ui.saveProfileMetricsBusy &&
-                    !ui.uploadAvatarBusy && !ui.saveBioBusy,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    if (ui.saveProfileMetricsBusy) {
-                        stringResource(R.string.profile_saving)
-                    } else {
-                        stringResource(R.string.profile_save_personal)
-                    }
+                Icon(
+                    imageVector = if (editingPersonalInfo) Icons.Filled.Check else Icons.Filled.Edit,
+                    contentDescription = stringResource(R.string.workout_detail_menu_edit)
                 )
             }
         }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                if (editingPersonalInfo) {
+                    OutlinedTextField(
+                        value = ui.heightCmDraft,
+                        onValueChange = vm::setHeightCmDraft,
+                        label = { Text(stringResource(R.string.profile_height_cm)) },
+                        singleLine = true,
+                        enabled = !ui.saveProfileMetricsBusy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_height_cm),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = ui.heightCmDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        stringResource(R.string.profile_weight_kg),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = ui.weightKgDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                OutlinedButton(
+                    onClick = onOpenBodyWeightHistory,
+                    enabled = !ui.saveProfileMetricsBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.profile_body_weight_history))
+                }
+                OutlinedButton(
+                    onClick = onOpenHealthConnectWeight,
+                    enabled = !ui.saveProfileMetricsBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.profile_health_connect_weight))
+                }
+                if (editingPersonalInfo) {
+                    HorizontalDivider()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_show_birth_date),
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = ui.hasBirthDate,
+                            onCheckedChange = vm::setHasBirthDate,
+                            enabled = !ui.saveProfileMetricsBusy
+                        )
+                    }
+                    if (ui.hasBirthDate) {
+                        OutlinedButton(
+                            onClick = { showDobPicker = true },
+                            enabled = !ui.saveProfileMetricsBusy,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                if (dobLabel != null) {
+                                    dobLabel
+                                } else {
+                                    stringResource(R.string.profile_pick_birth_date)
+                                }
+                            )
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(stringResource(R.string.profile_age))
+                    Text(
+                        text = ageYears?.toString()
+                            ?: stringResource(R.string.profile_age_emdash),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                if (editingPersonalInfo) {
+                    FilledTonalButton(
+                        onClick = { vm.saveProfileMetrics(onSaved) },
+                        enabled = !ui.saveProfileMetricsBusy &&
+                            !ui.uploadAvatarBusy && !ui.saveBioBusy,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            if (ui.saveProfileMetricsBusy) {
+                                stringResource(R.string.profile_saving)
+                            } else {
+                                stringResource(R.string.profile_save_personal)
+                            }
+                        )
+                    }
+                }
+            }
+        }
     }
-    if (showDobPicker && ui.hasBirthDate) {
+    if (showDobPicker && editingPersonalInfo && ui.hasBirthDate) {
         val state = rememberDatePickerState(
             initialSelectedDateMillis = ui.birthDateMillis ?: defaultDobMillis
         )

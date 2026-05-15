@@ -31,6 +31,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Flag
@@ -42,6 +43,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -67,6 +71,10 @@ import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
+import com.lilru.liftr.territory.TerritoryCaptureClient
+import com.lilru.liftr.ui.territory.TerritoryCityPickerButton
+import com.lilru.liftr.ui.territory.TerritoryCitySearchSheet
+import com.lilru.liftr.ui.territory.TerritoryMapScreen
 import io.github.jan.supabase.SupabaseClient
 import java.util.UUID
 
@@ -102,6 +110,8 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.CARDIO_ELEVATION -> stringResource(R.string.ranking_metric_cardio_elevation)
     RankingMetric.CARDIO_DURATION -> stringResource(R.string.ranking_metric_cardio_duration)
     RankingMetric.CARDIO_BEST_PACE -> stringResource(R.string.ranking_metric_cardio_best_pace)
+    RankingMetric.TERRITORY_SHARE -> stringResource(R.string.ranking_metric_territory_share)
+    RankingMetric.TERRITORY_CELLS -> stringResource(R.string.ranking_metric_territory_cells)
     RankingMetric.SPORT_MATCH_WINS -> stringResource(R.string.ranking_metric_sport_wins)
     RankingMetric.SPORT_WIN_RATE -> stringResource(R.string.ranking_metric_sport_win_rate)
     RankingMetric.SPORT_DURATION -> stringResource(R.string.ranking_metric_sport_duration)
@@ -151,6 +161,9 @@ fun RankingTabScreen(
     var selectedChallengeInstanceId by rememberSaveable { mutableStateOf<String?>(null) }
     var challengesHubOpen by rememberSaveable { mutableStateOf(false) }
     var metricSheetOpen by remember { mutableStateOf(false) }
+    var territoryCityPickerOpen by remember { mutableStateOf(false) }
+    var showTerritoryMap by remember { mutableStateOf(false) }
+    var territoryMapCenter by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     val openChallengeId = remember(selectedChallengeInstanceId) {
@@ -201,6 +214,22 @@ fun RankingTabScreen(
             },
             modifier = modifier
         )
+        return
+    }
+
+    if (showTerritoryMap) {
+        val center = territoryMapCenter
+        Column(modifier = modifier.fillMaxSize()) {
+            TextButton(onClick = { showTerritoryMap = false }) {
+                Text("Back to ranking")
+            }
+            TerritoryMapScreen(
+                supabase = supabase,
+                initialLatitude = center?.first,
+                initialLongitude = center?.second,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
         return
     }
     if (selectedProfile != null) {
@@ -265,7 +294,9 @@ fun RankingTabScreen(
                     val showPeriod = when (ui.metric) {
                         RankingMetric.LEVEL,
                         RankingMetric.GOALS_COMPLETED,
-                        RankingMetric.DUELS_WON -> false
+                        RankingMetric.DUELS_WON,
+                        RankingMetric.TERRITORY_SHARE,
+                        RankingMetric.TERRITORY_CELLS -> false
                         else -> true
                     }
                     val showKind = when (ui.metric) {
@@ -273,7 +304,9 @@ fun RankingTabScreen(
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON,
                         RankingMetric.CHALLENGE_PODIUMS,
-                        RankingMetric.SEGMENT_POPULARITY -> false
+                        RankingMetric.SEGMENT_POPULARITY,
+                        RankingMetric.TERRITORY_SHARE,
+                        RankingMetric.TERRITORY_CELLS -> false
                         else -> true
                     }
                     if (showScope) {
@@ -330,6 +363,39 @@ fun RankingTabScreen(
                                 imageVector = Icons.Filled.UnfoldMore,
                                 contentDescription = stringResource(R.string.ranking_metric_picker_hint)
                             )
+                        }
+                    }
+                    if (ui.metric == RankingMetric.TERRITORY_SHARE) {
+                        val selectedCity = TerritoryCaptureClient.selectedTerritoryCity(
+                            cities = ui.territoryCities,
+                            preferredKey = ui.territoryCityKey,
+                            referenceLatitude = null,
+                            referenceLongitude = null
+                        )
+                        if (ui.territoryCities.size > 1) {
+                            TerritoryCityPickerButton(
+                                selectedCity = selectedCity,
+                                onClick = { territoryCityPickerOpen = true }
+                            )
+                        } else {
+                            selectedCity?.let { city ->
+                                Text(
+                                    text = TerritoryCaptureClient.citySummaryLabel(city),
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+                        }
+                        val mapLat = selectedCity?.centerLat
+                        val mapLon = selectedCity?.centerLon
+                        if (mapLat != null && mapLon != null &&
+                            !TerritoryCaptureClient.isPendingTerritoryCityKey(selectedCity.cityKey)
+                        ) {
+                            TextButton(onClick = {
+                                territoryMapCenter = mapLat to mapLon
+                                showTerritoryMap = true
+                            }) {
+                                Text("View on map")
+                            }
                         }
                     }
                     if (showPeriod) {
@@ -571,5 +637,19 @@ fun RankingTabScreen(
                 }
             }
         }
+    }
+
+    if (territoryCityPickerOpen) {
+        TerritoryCitySearchSheet(
+            supabase = supabase,
+            selectedCityKey = ui.territoryCityKey,
+            referenceLatitude = null,
+            referenceLongitude = null,
+            onDismiss = { territoryCityPickerOpen = false },
+            onSelect = { city ->
+                city.cityKey?.let(vm::setTerritoryCityKey)
+                territoryCityPickerOpen = false
+            }
+        )
     }
 }

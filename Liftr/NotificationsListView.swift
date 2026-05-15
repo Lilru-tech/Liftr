@@ -194,7 +194,8 @@ struct NotificationsListView: View {
                 Text("User not found")
             }
 
-        case "workout_like",
+        case "apple_health_cardio_imported",
+             "workout_like",
              "workout_comment",
              "comment_reply",
              "comment_like",
@@ -495,6 +496,7 @@ struct NotificationsListView: View {
         case "competition_result_win":            return "Result"
         case "competition_result_lose":           return "Result"
         case "workout_kind_inactive":             return "Reminder"
+        case "apple_health_cardio_imported":      return "Apple Health"
         case "segment_you_are_first":             return "Segment"
         case "segment_lost_first":                return "Segment"
         case "challenge_won", "challenge_won_weekly": return "Challenge"

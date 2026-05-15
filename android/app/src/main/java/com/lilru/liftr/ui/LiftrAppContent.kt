@@ -31,6 +31,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.R
 import com.lilru.liftr.auth.AuthViewModel
 import com.lilru.liftr.auth.AuthViewModelFactory
+import com.lilru.liftr.auth.PasswordRecoveryGate
+import com.lilru.liftr.ui.auth.ResetPasswordScreen
 import com.lilru.liftr.ui.main.MainShellScreen
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.SupabaseClient
@@ -41,6 +43,12 @@ fun LiftrAppContent(
 ) {
     val viewModel: AuthViewModel = viewModel(factory = AuthViewModelFactory(supabase))
     val status by viewModel.sessionStatus.collectAsStateWithLifecycle()
+    val recoveryPending by PasswordRecoveryGate.pending.collectAsStateWithLifecycle()
+
+    if (recoveryPending) {
+        ResetPasswordScreen(viewModel = viewModel)
+        return
+    }
 
     when (val s = status) {
         is SessionStatus.Initializing -> {

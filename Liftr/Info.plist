@@ -5,7 +5,7 @@
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Liftr uses your location during outdoor cardio to measure distance while the workout timer is running.</string>
     <key>NSHealthShareUsageDescription</key>
-    <string>Liftr uses HealthKit to read workouts, routes, and related data from Apple Health so you can import runs, rides, and other cardio into your Liftr history.</string>
+    <string>Liftr uses HealthKit to read workouts, routes, body weight, and related data from Apple Health so you can import cardio and track weight history in Liftr.</string>
     <key>NSHealthUpdateUsageDescription</key>
     <string>Liftr does not use HealthKit to write workout data to Apple Health. Access is only used to read workouts you choose to import into Liftr.</string>
     <key>UIBackgroundModes</key>
@@ -18,5 +18,18 @@
 	<true/>
 	<key>UIRequiresFullScreen</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.davidgomez.Liftr.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.davidgomez.Liftr</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

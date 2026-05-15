@@ -25,7 +25,18 @@ fun ProfileAuthNavHost(
                     navController.navigate("auth_register") {
                         launchSingleTop = true
                     }
+                },
+                onNavigateToForgotPassword = {
+                    navController.navigate("auth_forgot_password") {
+                        launchSingleTop = true
+                    }
                 }
+            )
+        }
+        composable("auth_forgot_password") {
+            ForgotPasswordScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
             )
         }
         composable("auth_register") {

@@ -2,6 +2,7 @@ package com.lilru.liftr.data
 
 import android.content.Context
 import com.lilru.liftr.BuildConfig
+import com.lilru.liftr.auth.AuthRedirect
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
@@ -37,7 +38,10 @@ object LiftrSupabase {
             ) {
                 install(Postgrest)
                 install(Storage) { }
-                install(Auth) { }
+                install(Auth) {
+                    scheme = AuthRedirect.SCHEME
+                    host = AuthRedirect.HOST
+                }
                 install(Functions) { }
                 install(Realtime) { }
             }

@@ -331,6 +331,7 @@ fun ActiveCardioWorkoutScreen(
                         ) {
                             CardioRouteMapBox(
                                 routePoints = ui.routePoints,
+                                territoryPreviewRings = ui.territoryPreviewRings,
                                 modifier = Modifier.fillMaxWidth()
                             )
                             TextButton(

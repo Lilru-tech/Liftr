@@ -181,6 +181,8 @@ struct ProfileView: View {
     @State private var weightKg: String = ""
     @State private var birthDate: Date = Date()
     @State private var hasBirthDate: Bool = false
+    @State private var showBodyWeightHistory = false
+    @State private var showAppleHealthBodyWeightImport = false
     @State private var showAvatarPreview = false
     @State private var showDeleteConfirm = false
     @State private var deletingAccount = false
@@ -286,7 +288,7 @@ struct ProfileView: View {
                 Text("Calendar").tag(Tab.calendar)
                 Text("PRs").tag(Tab.prs)
                 Text("Progress").tag(Tab.progress)
-                Text("Segments").tag(Tab.segments)
+                Text("Explore").tag(Tab.segments)
                 if isOwnProfile {
                     Text("Settings").tag(Tab.settings)
                 }
@@ -341,48 +343,64 @@ struct ProfileView: View {
     }
 
     private var mySegmentsTabContent: some View {
-        Group {
-            if mySegmentsLoading && mySegments.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let err = mySegmentsError {
-                Text(err)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else if mySegments.isEmpty {
-                Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else {
-                List(mySegments) { row in
-                    NavigationLink {
-                        SegmentDetailView(segmentId: row.id, onClose: nil)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(row.name)
-                                .font(.body.weight(.semibold))
-                            HStack(spacing: 6) {
-                                Text(row.status.capitalized)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("·")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                                Text("Buffer \(Int(row.buffer_m)) m")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let profileUserId = viewingUserId {
+                    TerritoryProfileHubView(profileUserId: profileUserId, isOwnProfile: isOwnProfile)
+                }
+
+                Text(isOwnProfile ? "Your segments" : "Segments")
+                    .font(.headline)
+                    .padding(.horizontal)
+
+                if mySegmentsLoading && mySegments.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 24)
+                } else if let err = mySegmentsError {
+                    Text(err)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                } else if mySegments.isEmpty {
+                    Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(mySegments) { row in
+                            NavigationLink {
+                                SegmentDetailView(segmentId: row.id, onClose: nil)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(row.name)
+                                        .font(.body.weight(.semibold))
+                                    HStack(spacing: 6) {
+                                        Text(row.status.capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("·")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                        Text("Buffer \(Int(row.buffer_m)) m")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .listRowBackground(Color.clear)
+                    .padding(.horizontal)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
+            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: "\(tab.rawValue)-\(viewingUserId?.uuidString ?? "none")") {
@@ -2033,7 +2051,7 @@ struct ProfileView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
             }
-            Section("Personal information") {
+            Section {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.ultraThinMaterial)
@@ -2041,23 +2059,8 @@ struct ProfileView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(.white.opacity(0.18))
                         )
-                    
+
                     VStack(spacing: 10) {
-                        HStack {
-                            Spacer()
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { editingProfile.toggle() }
-                            } label: {
-                                Image(systemName: editingProfile ? "checkmark.circle.fill" : "pencil")
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(6)
-                                    .background(.thinMaterial, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(editingProfile ? "Done" : "Edit")
-                        }
-                        
-                        Divider().opacity(0.15)
                         HStack {
                             Text("Height (cm)")
                                 .font(.subheadline.weight(.semibold))
@@ -2073,37 +2076,79 @@ struct ProfileView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        
+
                         Divider().opacity(0.15)
                         HStack {
                             Text("Weight (kg)")
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
-                            if editingProfile {
-                                TextField("—", text: $weightKg)
-                                    .keyboardType(.decimalPad)
-                                    .multilineTextAlignment(.trailing)
-                                    .frame(maxWidth: 120)
-                            } else {
-                                Text(weightKg.isEmpty ? "–" : "\(weightKg)")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                            Text(weightKg.isEmpty ? "–" : weightKg)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Divider().opacity(0.15)
+                        Button {
+                            showBodyWeightHistory = true
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "chart.line.uptrend.xyaxis")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Weight history")
+                                        .font(.body.weight(.semibold))
+                                    Text("Track changes over time and log manual entries.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
                             }
                         }
-                        
-                        Divider().opacity(0.15)
-                        Toggle("Show birth date", isOn: $hasBirthDate)
-                            .font(.subheadline.weight(.semibold))
-                        Divider().opacity(0.15)
-                        if editingProfile && hasBirthDate {
-                            HStack {
-                                Text("Birth date")
-                                Spacer()
-                                DatePicker("", selection: $birthDate, displayedComponents: .date)
-                                    .labelsHidden()
+                        .buttonStyle(.plain)
+
+                        if HealthKitBodyWeightSyncService.shared.isHealthDataAvailable {
+                            Divider().opacity(0.15)
+                            Button {
+                                showAppleHealthBodyWeightImport = true
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: "heart.fill")
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Apple Health weight")
+                                            .font(.body.weight(.semibold))
+                                        Text("Sync body-weight samples from Apple Health.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if editingProfile {
+                            Divider().opacity(0.15)
+                            Toggle("Show birth date", isOn: $hasBirthDate)
+                                .font(.subheadline.weight(.semibold))
+                            if hasBirthDate {
+                                Divider().opacity(0.15)
+                                HStack {
+                                    Text("Birth date")
+                                    Spacer()
+                                    DatePicker("", selection: $birthDate, displayedComponents: .date)
+                                        .labelsHidden()
+                                }
                             }
                         }
-                        
+
+                        Divider().opacity(0.15)
                         HStack {
                             Text("Age")
                             Spacer()
@@ -2129,6 +2174,22 @@ struct ProfileView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
+            } header: {
+                HStack(alignment: .center) {
+                    Text("Personal information")
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { editingProfile.toggle() }
+                    } label: {
+                        Image(systemName: editingProfile ? "checkmark.circle.fill" : "pencil")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(6)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(editingProfile ? "Done" : "Edit")
+                }
+                .textCase(nil)
             }
             
             Section {
@@ -2182,6 +2243,14 @@ struct ProfileView: View {
         .listRowSeparator(.hidden)
         .listSectionSeparator(.hidden)
         .background(Color.clear)
+        .navigationDestination(isPresented: $showBodyWeightHistory) {
+            BodyWeightHistoryView()
+                .gradientBG()
+        }
+        .navigationDestination(isPresented: $showAppleHealthBodyWeightImport) {
+            AppleHealthBodyWeightImportView()
+                .gradientBG()
+        }
         .alert("Delete account?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 showDeleteConfirm = false
@@ -2206,11 +2275,6 @@ struct ProfileView: View {
             let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
             let height = Int(hText).flatMap { $0 > 0 ? $0 : nil }
 
-            let wText = weightKg
-                .replacingOccurrences(of: ",", with: ".")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let weight = Double(wText).flatMap { $0 > 0 ? $0 : nil }
-            
             let df = DateFormatter()
             df.timeZone = TimeZone(secondsFromGMT: 0)
             df.dateFormat = "yyyy-MM-dd"
@@ -2221,12 +2285,6 @@ struct ProfileView: View {
                 payload["height_cm"] = AnyEncodable(nilValue: ())
             } else if let height, height > 0 {
                 payload["height_cm"] = AnyEncodable(height)
-            }
-
-            if wText.isEmpty {
-                payload["weight_kg"] = AnyEncodable(nilValue: ())
-            } else if let weight, weight > 0 {
-                payload["weight_kg"] = AnyEncodable(weight)
             }
 
             if hasBirthDate {

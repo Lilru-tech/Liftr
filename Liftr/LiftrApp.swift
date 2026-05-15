@@ -9,6 +9,10 @@ struct LiftrApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
+                .onOpenURL { url in
+                    AuthCallbackLogger.log("SwiftUI onOpenURL", url: url, source: "LiftrApp")
+                    Task { await appState.handleAuthCallbackURL(url) }
+                }
         }
     }
 }

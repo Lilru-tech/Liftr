@@ -87,7 +87,7 @@ struct FAQsView: View {
             ),
             FAQ(
                 question: "Is Apple Health import automatic?",
-                answer: "No. Import is manual: choose a date range in Settings and tap Import workouts.",
+                answer: "Automatic import is on by default in Settings → Import cardio workouts. New compatible sessions sync from Apple Health in the background. You can still choose a date range and tap Import workouts for a manual backfill.",
                 category: "Apple Health Import (Cardio)"
             ),
             FAQ(
@@ -123,6 +123,11 @@ struct FAQsView: View {
             FAQ(
                 question: "Can I delete my account?",
                 answer: "Yes. Account deletion is available in Profile settings and removes your account data according to app policy.",
+                category: "Privacy, Account & Support"
+            ),
+            FAQ(
+                question: "I forgot my password. How do I sign in again?",
+                answer: "On the Profile tab, tap Forgot password?, enter your email, and open the reset link from your inbox on the same device. Then choose a new password and sign in.",
                 category: "Privacy, Account & Support"
             ),
             FAQ(

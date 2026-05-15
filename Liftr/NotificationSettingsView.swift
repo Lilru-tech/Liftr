@@ -26,9 +26,13 @@ struct NotificationSettingsRow: Codable {
     var pushCompetitionWorkoutRejected: Bool
     var pushSegmentYouAreFirst: Bool
     var pushSegmentLostFirst: Bool
+    var pushTerritoryCaptureFromUser: Bool
+    var pushTerritoryLostToUser: Bool
     var pushChallengeWon: Bool
     var pushChallengeWonWeekly: Bool
     var pushWorkoutKindInactive: Bool
+    var pushAppleHealthCardioImported: Bool
+    var appleHealthCardioPushKnownOnServer: Bool
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
@@ -55,9 +59,47 @@ struct NotificationSettingsRow: Codable {
         case pushCompetitionWorkoutRejected = "push_competition_workout_rejected"
         case pushSegmentYouAreFirst = "push_segment_you_are_first"
         case pushSegmentLostFirst = "push_segment_lost_first"
+        case pushTerritoryCaptureFromUser = "push_territory_capture_from_user"
+        case pushTerritoryLostToUser = "push_territory_lost_to_user"
         case pushChallengeWon = "push_challenge_won"
         case pushChallengeWonWeekly = "push_challenge_won_weekly"
         case pushWorkoutKindInactive = "push_workout_kind_inactive"
+        case pushAppleHealthCardioImported = "push_apple_health_cardio_imported"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        userId = try c.decode(UUID.self, forKey: .userId)
+        pushEnabled = try c.decode(Bool.self, forKey: .pushEnabled)
+        pushNewMessage = try c.decode(Bool.self, forKey: .pushNewMessage)
+        pushNewFollower = try c.decode(Bool.self, forKey: .pushNewFollower)
+        pushWorkoutLike = try c.decode(Bool.self, forKey: .pushWorkoutLike)
+        pushWorkoutComment = try c.decode(Bool.self, forKey: .pushWorkoutComment)
+        pushCommentLike = try c.decode(Bool.self, forKey: .pushCommentLike)
+        pushCommentReply = try c.decode(Bool.self, forKey: .pushCommentReply)
+        pushAddedAsParticipant = try c.decode(Bool.self, forKey: .pushAddedAsParticipant)
+        pushAchievementUnlocked = try c.decode(Bool.self, forKey: .pushAchievementUnlocked)
+        pushGoalCompleted = try c.decode(Bool.self, forKey: .pushGoalCompleted)
+        pushGoalAlmostDone = try c.decode(Bool.self, forKey: .pushGoalAlmostDone)
+        pushCompetitionInvite = try c.decode(Bool.self, forKey: .pushCompetitionInvite)
+        pushCompetitionAccepted = try c.decode(Bool.self, forKey: .pushCompetitionAccepted)
+        pushCompetitionDeclined = try c.decode(Bool.self, forKey: .pushCompetitionDeclined)
+        pushCompetitionCancelled = try c.decode(Bool.self, forKey: .pushCompetitionCancelled)
+        pushCompetitionExpired = try c.decode(Bool.self, forKey: .pushCompetitionExpired)
+        pushCompetitionResultWin = try c.decode(Bool.self, forKey: .pushCompetitionResultWin)
+        pushCompetitionResultLose = try c.decode(Bool.self, forKey: .pushCompetitionResultLose)
+        pushCompetitionWorkoutPendingReview = try c.decode(Bool.self, forKey: .pushCompetitionWorkoutPendingReview)
+        pushCompetitionWorkoutAccepted = try c.decode(Bool.self, forKey: .pushCompetitionWorkoutAccepted)
+        pushCompetitionWorkoutRejected = try c.decode(Bool.self, forKey: .pushCompetitionWorkoutRejected)
+        pushSegmentYouAreFirst = try c.decode(Bool.self, forKey: .pushSegmentYouAreFirst)
+        pushSegmentLostFirst = try c.decode(Bool.self, forKey: .pushSegmentLostFirst)
+        pushTerritoryCaptureFromUser = try c.decode(Bool.self, forKey: .pushTerritoryCaptureFromUser)
+        pushTerritoryLostToUser = try c.decode(Bool.self, forKey: .pushTerritoryLostToUser)
+        pushChallengeWon = try c.decode(Bool.self, forKey: .pushChallengeWon)
+        pushChallengeWonWeekly = try c.decode(Bool.self, forKey: .pushChallengeWonWeekly)
+        pushWorkoutKindInactive = try c.decode(Bool.self, forKey: .pushWorkoutKindInactive)
+        appleHealthCardioPushKnownOnServer = c.contains(.pushAppleHealthCardioImported)
+        pushAppleHealthCardioImported = try c.decodeIfPresent(Bool.self, forKey: .pushAppleHealthCardioImported) ?? true
     }
 }
 
@@ -146,12 +188,22 @@ struct NotificationSettingsView: View {
                 Section("Segments & Challenges") {
                     toggleCard(title: "Segment: you are first", isOn: binding(\.pushSegmentYouAreFirst), enabled: pushMaster && !saving)
                     toggleCard(title: "Segment: lost first", isOn: binding(\.pushSegmentLostFirst), enabled: pushMaster && !saving)
+                    toggleCard(title: "Territory captured from others", isOn: binding(\.pushTerritoryCaptureFromUser), enabled: pushMaster && !saving)
+                    toggleCard(title: "Territory lost to others", isOn: binding(\.pushTerritoryLostToUser), enabled: pushMaster && !saving)
                     toggleCard(title: "Challenge won", isOn: binding(\.pushChallengeWon), enabled: pushMaster && !saving)
                     toggleCard(title: "Challenge won (weekly)", isOn: binding(\.pushChallengeWonWeekly), enabled: pushMaster && !saving)
                 }
 
                 Section("Reminders") {
                     toggleCard(title: "Workout reminders", isOn: binding(\.pushWorkoutKindInactive), enabled: pushMaster && !saving)
+                }
+
+                Section("Apple Health") {
+                    toggleCard(
+                        title: "Cardio workout imported",
+                        isOn: binding(\.pushAppleHealthCardioImported),
+                        enabled: pushMaster && !saving
+                    )
                 }
             }
         }
@@ -279,9 +331,77 @@ struct NotificationSettingsView: View {
             let push_competition_workout_rejected: Bool
             let push_segment_you_are_first: Bool
             let push_segment_lost_first: Bool
+            let push_territory_capture_from_user: Bool
+            let push_territory_lost_to_user: Bool
             let push_challenge_won: Bool
             let push_challenge_won_weekly: Bool
             let push_workout_kind_inactive: Bool
+            let push_apple_health_cardio_imported: Bool?
+
+            enum CodingKeys: String, CodingKey {
+                case push_enabled
+                case push_new_message
+                case push_new_follower
+                case push_workout_like
+                case push_workout_comment
+                case push_comment_like
+                case push_comment_reply
+                case push_added_as_participant
+                case push_achievement_unlocked
+                case push_goal_completed
+                case push_goal_almost_done
+                case push_competition_invite
+                case push_competition_accepted
+                case push_competition_declined
+                case push_competition_cancelled
+                case push_competition_expired
+                case push_competition_result_win
+                case push_competition_result_lose
+                case push_competition_workout_pending_review
+                case push_competition_workout_accepted
+                case push_competition_workout_rejected
+                case push_segment_you_are_first
+                case push_segment_lost_first
+                case push_territory_capture_from_user
+                case push_territory_lost_to_user
+                case push_challenge_won
+                case push_challenge_won_weekly
+                case push_workout_kind_inactive
+                case push_apple_health_cardio_imported
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(push_enabled, forKey: .push_enabled)
+                try c.encode(push_new_message, forKey: .push_new_message)
+                try c.encode(push_new_follower, forKey: .push_new_follower)
+                try c.encode(push_workout_like, forKey: .push_workout_like)
+                try c.encode(push_workout_comment, forKey: .push_workout_comment)
+                try c.encode(push_comment_like, forKey: .push_comment_like)
+                try c.encode(push_comment_reply, forKey: .push_comment_reply)
+                try c.encode(push_added_as_participant, forKey: .push_added_as_participant)
+                try c.encode(push_achievement_unlocked, forKey: .push_achievement_unlocked)
+                try c.encode(push_goal_completed, forKey: .push_goal_completed)
+                try c.encode(push_goal_almost_done, forKey: .push_goal_almost_done)
+                try c.encode(push_competition_invite, forKey: .push_competition_invite)
+                try c.encode(push_competition_accepted, forKey: .push_competition_accepted)
+                try c.encode(push_competition_declined, forKey: .push_competition_declined)
+                try c.encode(push_competition_cancelled, forKey: .push_competition_cancelled)
+                try c.encode(push_competition_expired, forKey: .push_competition_expired)
+                try c.encode(push_competition_result_win, forKey: .push_competition_result_win)
+                try c.encode(push_competition_result_lose, forKey: .push_competition_result_lose)
+                try c.encode(push_competition_workout_pending_review, forKey: .push_competition_workout_pending_review)
+                try c.encode(push_competition_workout_accepted, forKey: .push_competition_workout_accepted)
+                try c.encode(push_competition_workout_rejected, forKey: .push_competition_workout_rejected)
+                try c.encode(push_segment_you_are_first, forKey: .push_segment_you_are_first)
+                try c.encode(push_segment_lost_first, forKey: .push_segment_lost_first)
+                try c.encode(push_territory_capture_from_user, forKey: .push_territory_capture_from_user)
+                try c.encode(push_territory_lost_to_user, forKey: .push_territory_lost_to_user)
+                try c.encode(push_challenge_won, forKey: .push_challenge_won)
+                try c.encode(push_challenge_won_weekly, forKey: .push_challenge_won_weekly)
+                try c.encode(push_workout_kind_inactive, forKey: .push_workout_kind_inactive)
+                try c.encodeIfPresent(push_apple_health_cardio_imported, forKey: .push_apple_health_cardio_imported)
+            }
         }
 
         let payload = UpdatePayload(
@@ -308,9 +428,14 @@ struct NotificationSettingsView: View {
             push_competition_workout_rejected: row.pushCompetitionWorkoutRejected,
             push_segment_you_are_first: row.pushSegmentYouAreFirst,
             push_segment_lost_first: row.pushSegmentLostFirst,
+            push_territory_capture_from_user: row.pushTerritoryCaptureFromUser,
+            push_territory_lost_to_user: row.pushTerritoryLostToUser,
             push_challenge_won: row.pushChallengeWon,
             push_challenge_won_weekly: row.pushChallengeWonWeekly,
-            push_workout_kind_inactive: row.pushWorkoutKindInactive
+            push_workout_kind_inactive: row.pushWorkoutKindInactive,
+            push_apple_health_cardio_imported: row.appleHealthCardioPushKnownOnServer
+                ? row.pushAppleHealthCardioImported
+                : nil
         )
 
         do {

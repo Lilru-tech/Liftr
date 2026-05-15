@@ -176,6 +176,7 @@ private fun RoutineListRow(
     onApply: () -> Unit,
     onShareRoutine: () -> Unit,
     neighbors: Pair<List<StrengthRoutineUi>, Int>?,
+    onEditRoutine: () -> Unit,
     onRenameRoutine: () -> Unit,
     onDuplicate: () -> Unit,
     onMoveUp: () -> Unit,
@@ -237,6 +238,10 @@ private fun RoutineListRow(
                     expanded = menu,
                     onDismissRequest = { menu = false }
                 ) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.add_routine_sheet_menu_edit)) },
+                        onClick = { menu = false; onEditRoutine() }
+                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.add_routine_sheet_menu_rename)) },
                         onClick = { menu = false; onRenameRoutine() }
@@ -310,7 +315,8 @@ fun AddHyroxRoutinesSheetContent(
     onDeleteRoutine: (Long) -> Unit,
     onPreviewRoutine: (Long) -> Unit,
     onApplyRoutine: (Long) -> Unit,
-    onShareRoutine: (Long) -> Unit
+    onShareRoutine: (Long) -> Unit,
+    onEditRoutine: (Long) -> Unit
 ) {
     val ctx = LocalContext.current.applicationContext
     val persistScope = rememberCoroutineScope()
@@ -350,6 +356,10 @@ fun AddHyroxRoutinesSheetContent(
     var folderToDelete by remember { mutableStateOf<Long?>(null) }
 
     var expandMenuOpen by remember { mutableStateOf(false) }
+
+    val hyroxBusy = ui.managingRoutines || ui.applyingRoutine ||
+        ui.hyroxRoutineTemplateEdit?.loading == true ||
+        ui.hyroxRoutineTemplateEdit?.saving == true
 
     val sortedFolderRows = remember(ui.hyroxRoutineFolders) {
         ui.hyroxRoutineFolders.sortedBy { it.sortOrder }
@@ -735,12 +745,13 @@ fun AddHyroxRoutinesSheetContent(
                         val copyOf = stringResource(R.string.add_routine_copy_of_format, row.name)
                         RoutineListRow(
                             row = row,
-                            busy = ui.managingRoutines || ui.applyingRoutine,
+                            busy = hyroxBusy,
                             updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                             onPreview = { onPreviewRoutine(row.id) },
                             onApply = { onApplyRoutine(row.id) },
                             onShareRoutine = { onShareRoutine(row.id) },
                             neighbors = groupNeighbors(row),
+                            onEditRoutine = { onEditRoutine(row.id) },
                             onRenameRoutine = {
                                 routineToRename = row
                                 routineRenameDraft = row.name
@@ -799,12 +810,13 @@ fun AddHyroxRoutinesSheetContent(
                             val copyOf = stringResource(R.string.add_routine_copy_of_format, row.name)
                             RoutineListRow(
                                 row = row,
-                                busy = ui.managingRoutines || ui.applyingRoutine,
+                                busy = hyroxBusy,
                                 updatedLabel = formatRoutineUpdatedAt(row.updatedAtIso),
                                 onPreview = { onPreviewRoutine(row.id) },
                                 onApply = { onApplyRoutine(row.id) },
                                 onShareRoutine = { onShareRoutine(row.id) },
                                 neighbors = groupNeighbors(row),
+                                onEditRoutine = { onEditRoutine(row.id) },
                                 onRenameRoutine = {
                                     routineToRename = row
                                     routineRenameDraft = row.name

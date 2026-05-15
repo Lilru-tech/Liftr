@@ -20,4 +20,5 @@ sealed class MainOverlay {
     data class AddWorkoutDraftKind(val kind: String) : MainOverlay()
     data class ChallengeWeeklyDetail(val instanceId: UUID) : MainOverlay()
     data class ChatThread(val conversationId: Long, val otherUserId: String?) : MainOverlay()
+    data object TerritoryMap : MainOverlay()
 }

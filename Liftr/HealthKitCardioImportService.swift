@@ -10,6 +10,19 @@ struct HealthKitImportSummary: Sendable {
     var errorMessages: [String] = []
 }
 
+enum HealthKitCardioImportMode: Sendable {
+    case manual
+    case automatic
+}
+
+enum HealthKitCardioImportNotificationPolicy {
+    static let recentImportWindow: TimeInterval = 48 * 3600
+
+    static func shouldNotifyAutoImport(workoutEndedAt: Date, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(workoutEndedAt) <= recentImportWindow
+    }
+}
+
 enum HealthKitCardioImportError: LocalizedError {
     case healthDataNotAvailable
 
@@ -51,7 +64,12 @@ final class HealthKitCardioImportService {
         }
     }
 
-    func importCardioWorkouts(from fromDate: Date, to toDate: Date, userId: UUID) async -> HealthKitImportSummary {
+    func importCardioWorkouts(
+        from fromDate: Date,
+        to toDate: Date,
+        userId: UUID,
+        mode: HealthKitCardioImportMode = .manual
+    ) async -> HealthKitImportSummary {
         var summary = HealthKitImportSummary()
         guard isHealthDataAvailable else {
             summary.errorMessages.append(HealthKitCardioImportError.healthDataNotAvailable.localizedDescription)
@@ -162,8 +180,21 @@ final class HealthKitCardioImportService {
                     wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID)
                 }
                 if let wid {
+                    if !isTreadmill, routeGeoJSON != nil {
+                        if let summary = await TerritoryCaptureClient.applyCapture(workoutId: wid),
+                           let message = TerritoryCapturePresentation.message(for: summary) {
+                            TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: summary)
+                            await MainActor.run {
+                                AppState.shared.territoryCaptureToast = message
+                            }
+                        }
+                    }
                     await MainActor.run {
                         NotificationCenter.default.post(name: .workoutDidChange, object: wid)
+                    }
+                    if mode == .automatic,
+                       HealthKitCardioImportNotificationPolicy.shouldNotifyAutoImport(workoutEndedAt: w.endDate) {
+                        await notifyAutoImportedWorkout(workoutId: wid, title: title)
                     }
                 }
                 summary.imported += 1
@@ -427,6 +458,24 @@ final class HealthKitCardioImportService {
                 }
             }
             store.execute(q)
+        }
+    }
+
+    private func notifyAutoImportedWorkout(workoutId: Int, title: String) async {
+        struct Params: Encodable {
+            let p_workout_id: Int
+            let p_title: String?
+        }
+        do {
+            _ = try await SupabaseManager.shared.client
+                .rpc(
+                    "notify_apple_health_cardio_imported",
+                    params: Params(p_workout_id: workoutId, p_title: title)
+                )
+                .execute()
+            await AppState.shared.refreshUnreadNotificationsCount()
+        } catch {
+            print("[HealthKitCardioImport] notify auto-import error:", error.localizedDescription)
         }
     }
 

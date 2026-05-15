@@ -143,6 +143,7 @@ dependencies {
     implementation("com.google.android.play:app-update:2.1.0")
     implementation("com.android.billingclient:billing-ktx:7.1.1")
     implementation("androidx.health.connect:connect-client:1.1.0-alpha10")
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
     implementation("androidx.glance:glance-appwidget:1.1.0")
     implementation("androidx.glance:glance:1.1.0")
     implementation("androidx.glance:glance-material3:1.1.0")
