@@ -26,7 +26,7 @@ struct TerritoryMapView: View {
 
     @State private var mapCameraPosition: MapCameraPosition = .region(defaultRegion)
     @State private var visibleRegion = defaultRegion
-    @State private var cells: [TerritoryMapCellRow] = []
+    @State private var cellCache: [String: TerritoryMapCellRow] = [:]
     @State private var summary: TerritorySummaryResponse?
     @State private var loading = false
     @State private var lastFetchKey = ""
@@ -35,12 +35,33 @@ struct TerritoryMapView: View {
     @State private var showLeaderboard = false
     @State private var showMineOnly = false
     @State private var loadError: String?
+    @State private var othersMayBeTruncated = false
+    @State private var mineFetchLikelyCapped = false
+
+    private static let mapCellFetchLimit = 500
+    private static let othersSlotsReservedOnServer = min(200, max(mapCellFetchLimit / 2, 1))
+
+    private static var maxMineCellsPerMapRequest: Int {
+        mapCellFetchLimit - othersSlotsReservedOnServer
+    }
+    private static let drawRegionInflationFactor = 1.12
+    private static let pruneCacheMaxEntries = 10_000
+    private static let pruneRegionSpanMultiplier = 2.5
+
+    private var cellsIntersectingDrawRegion: [TerritoryMapCellRow] {
+        let drawRegion = Self.inflatedRegion(visibleRegion, latitudeFactor: Self.drawRegionInflationFactor, longitudeFactor: Self.drawRegionInflationFactor)
+        return cellCache.values.filter { cell in
+            guard let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: cell.ring) else { return false }
+            return TerritoryMapGeometry.intersects(region: drawRegion, bbox: bbox)
+        }.sorted { $0.cell_id < $1.cell_id }
+    }
 
     private var visibleCells: [TerritoryMapCellRow] {
+        let intersecting = cellsIntersectingDrawRegion
         if showMineOnly {
-            return cells.filter { $0.is_mine == true }
+            return intersecting.filter { $0.is_mine == true }
         }
-        return cells
+        return intersecting
     }
 
     private var ownedCellsInView: Int {
@@ -70,7 +91,7 @@ struct TerritoryMapView: View {
                 .contentShape(Rectangle())
                 .onTapGesture { point in
                     guard let coordinate = proxy.convert(point, from: .local) else { return }
-                    selectedCell = TerritoryMapGeometry.selectedCell(at: coordinate, in: cells)
+                    selectedCell = TerritoryMapGeometry.selectedCell(at: coordinate, in: Array(cellCache.values))
                 }
                 .ignoresSafeArea(edges: .bottom)
                 .onMapCameraChange(frequency: .onEnd) { context in
@@ -109,6 +130,18 @@ struct TerritoryMapView: View {
                         Text("\(visibleCells.count) cells in view belong to other players")
                             .font(.caption)
                     }
+                    if mineFetchLikelyCapped {
+                        Text(
+                            "Showing up to \(Self.maxMineCellsPerMapRequest) of your newest cells in this area — pan or zoom to load more."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+                    if othersMayBeTruncated && !showMineOnly {
+                        Text("Some other players' cells are hidden in this area.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -136,6 +169,10 @@ struct TerritoryMapView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
+            await MainActor.run {
+                cellCache = [:]
+                lastFetchKey = ""
+            }
             let center = Self.coordinate(
                 latitude: initialLatitude,
                 longitude: initialLongitude,
@@ -155,8 +192,6 @@ struct TerritoryMapView: View {
                 await TerritoryCaptureClient.backfillHistoricalCaptures()
                 await loadSummary()
             }
-            lastFetchKey = ""
-            await refreshVisibleCells(for: visibleRegion)
         }
         .sheet(item: $selectedCell) { cell in
             TerritoryCellDetailSheet(
@@ -213,6 +248,38 @@ struct TerritoryMapView: View {
         region(around: coordinate, span: 0.12)
     }
 
+    private static func inflatedRegion(
+        _ region: MKCoordinateRegion,
+        latitudeFactor: Double,
+        longitudeFactor: Double
+    ) -> MKCoordinateRegion {
+        MKCoordinateRegion(
+            center: region.center,
+            span: MKCoordinateSpan(
+                latitudeDelta: region.span.latitudeDelta * latitudeFactor,
+                longitudeDelta: region.span.longitudeDelta * longitudeFactor
+            )
+        )
+    }
+
+    private func pruneCellCacheIfNeeded() {
+        guard cellCache.count > Self.pruneCacheMaxEntries else { return }
+        let keepRegion = Self.inflatedRegion(
+            visibleRegion,
+            latitudeFactor: Self.pruneRegionSpanMultiplier,
+            longitudeFactor: Self.pruneRegionSpanMultiplier
+        )
+        let keysToRemove = cellCache.keys.filter { key in
+            guard let cell = cellCache[key],
+                  let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: cell.ring)
+            else { return true }
+            return !TerritoryMapGeometry.intersects(region: keepRegion, bbox: bbox)
+        }
+        for key in keysToRemove {
+            cellCache.removeValue(forKey: key)
+        }
+    }
+
     private func loadSummary() async {
         let loaded = await TerritoryCaptureClient.fetchMySummary()
         await MainActor.run {
@@ -238,10 +305,22 @@ struct TerritoryMapView: View {
             minLat: minLat,
             minLon: minLon,
             maxLat: maxLat,
-            maxLon: maxLon
+            maxLon: maxLon,
+            limit: Self.mapCellFetchLimit
         )
         await MainActor.run {
-            cells = rows
+            for row in rows {
+                cellCache[row.cell_id] = row
+            }
+            pruneCellCacheIfNeeded()
+            let mineCount = rows.filter { $0.is_mine == true }.count
+            let othersCount = rows.count - mineCount
+            let othersBudget = max(0, Self.mapCellFetchLimit - mineCount)
+            mineFetchLikelyCapped = mineCount >= Self.maxMineCellsPerMapRequest
+            othersMayBeTruncated = !showMineOnly
+                && othersCount > 0
+                && othersBudget > 0
+                && othersCount >= othersBudget
             loading = false
         }
     }

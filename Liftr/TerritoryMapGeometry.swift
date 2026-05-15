@@ -1,6 +1,44 @@
 import CoreLocation
+import MapKit
 
 enum TerritoryMapGeometry {
+    struct GeographicBoundingBox {
+        let minLatitude: Double
+        let maxLatitude: Double
+        let minLongitude: Double
+        let maxLongitude: Double
+    }
+
+    static func geographicBoundingBox(ring: [CLLocationCoordinate2D]) -> GeographicBoundingBox? {
+        guard let first = ring.first else { return nil }
+        var minLat = first.latitude
+        var maxLat = first.latitude
+        var minLon = first.longitude
+        var maxLon = first.longitude
+        for coordinate in ring.dropFirst() {
+            minLat = min(minLat, coordinate.latitude)
+            maxLat = max(maxLat, coordinate.latitude)
+            minLon = min(minLon, coordinate.longitude)
+            maxLon = max(maxLon, coordinate.longitude)
+        }
+        return GeographicBoundingBox(
+            minLatitude: minLat,
+            maxLatitude: maxLat,
+            minLongitude: minLon,
+            maxLongitude: maxLon
+        )
+    }
+
+    static func intersects(region: MKCoordinateRegion, bbox: GeographicBoundingBox) -> Bool {
+        let regionMinLat = region.center.latitude - region.span.latitudeDelta / 2
+        let regionMaxLat = region.center.latitude + region.span.latitudeDelta / 2
+        let regionMinLon = region.center.longitude - region.span.longitudeDelta / 2
+        let regionMaxLon = region.center.longitude + region.span.longitudeDelta / 2
+        if bbox.maxLatitude < regionMinLat || bbox.minLatitude > regionMaxLat { return false }
+        if bbox.maxLongitude < regionMinLon || bbox.minLongitude > regionMaxLon { return false }
+        return true
+    }
+
     static func polygonContains(point: CLLocationCoordinate2D, ring: [CLLocationCoordinate2D]) -> Bool {
         guard ring.count >= 3 else { return false }
         let x = point.longitude
