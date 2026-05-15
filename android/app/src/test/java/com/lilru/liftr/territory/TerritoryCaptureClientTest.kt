@@ -36,6 +36,32 @@ class TerritoryCaptureClientTest {
     }
 
     @Test
+    fun takeoverRowSubtitleFormatsCellsAndShare() {
+        assertEquals(
+            "120 cells · 12.5%",
+            TerritoryCaptureClient.takeoverRowSubtitle(120, 12.5)
+        )
+        assertEquals(
+            "8 cells · 4%",
+            TerritoryCaptureClient.takeoverRowSubtitle(8, 4.0)
+        )
+    }
+
+    @Test
+    fun workoutTakeoverRowDecodes() {
+        val decoded = Json { ignoreUnknownKeys = true }.decodeFromString<List<TerritoryWorkoutTakeoverRowWire>>(
+            """
+            [{"victim_user_id":"22222222-2222-2222-2222-222222222222","victim_username":"runner","victim_avatar_url":"https://example.com/a.jpg","cells_taken":120,"share_taken_pct":12.5}]
+            """.trimIndent()
+        )
+        assertEquals(1, decoded.size)
+        assertEquals("22222222-2222-2222-2222-222222222222", decoded[0].victimUserId)
+        assertEquals("runner", decoded[0].victimUsername)
+        assertEquals(120, decoded[0].cellsTaken)
+        assertEquals(12.5, decoded[0].shareTakenPct)
+    }
+
+    @Test
     fun historicalBackfillDoneOnlyWhenQueueEmpty() {
         assertEquals(true, TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(false))
         assertEquals(false, TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(true))
@@ -59,6 +85,119 @@ class TerritoryCaptureClientTest {
         assertEquals(1, decoded.size)
         assertEquals("runner", decoded[0].username)
         assertEquals(4.25, decoded[0].territorySharePct ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun profileTerritorySummaryLineOwnProfileWithActivity() {
+        assertEquals(
+            "You own 218 cells · 208 new cells (in 2 workouts) in the last 7 days",
+            TerritoryCaptureClient.profileTerritorySummaryLine(
+                totalCells = 218,
+                cellsGained7d = 208,
+                workouts7d = 2,
+                isOwnProfile = true
+            )
+        )
+    }
+
+    @Test
+    fun profileTerritorySummaryLineOtherProfileWithActivity() {
+        assertEquals(
+            "Owns 218 cells · 208 new cells (in 2 workouts) in the last 7 days",
+            TerritoryCaptureClient.profileTerritorySummaryLine(
+                totalCells = 218,
+                cellsGained7d = 208,
+                workouts7d = 2,
+                isOwnProfile = false
+            )
+        )
+    }
+
+    @Test
+    fun profileTerritorySummaryLineSingularWorkout() {
+        assertEquals(
+            "You own 50 cells · 12 new cells (in 1 workout) in the last 7 days",
+            TerritoryCaptureClient.profileTerritorySummaryLine(
+                totalCells = 50,
+                cellsGained7d = 12,
+                workouts7d = 1,
+                isOwnProfile = true
+            )
+        )
+    }
+
+    @Test
+    fun profileTerritorySummaryLineOmits7dWhenZero() {
+        assertEquals(
+            "You own 218 cells",
+            TerritoryCaptureClient.profileTerritorySummaryLine(
+                totalCells = 218,
+                cellsGained7d = 0,
+                workouts7d = 0,
+                isOwnProfile = true
+            )
+        )
+    }
+
+    @Test
+    fun mapTerritory7dLineFormatsCellsAndWorkouts() {
+        assertEquals(
+            "7d: 208 new cells (2 workouts)",
+            TerritoryCaptureClient.mapTerritory7dLine(cellsGained7d = 208, workouts7d = 2)
+        )
+    }
+
+    @Test
+    fun mapTerritory7dLineSingular() {
+        assertEquals(
+            "7d: 1 new cell (1 workout)",
+            TerritoryCaptureClient.mapTerritory7dLine(cellsGained7d = 1, workouts7d = 1)
+        )
+    }
+
+    @Test
+    fun mapTerritory7dLineNullWhenZero() {
+        assertEquals(null, TerritoryCaptureClient.mapTerritory7dLine(cellsGained7d = 0, workouts7d = 0))
+    }
+
+    @Test
+    fun territorySummaryWireDecodes7dBreakdown() {
+        val decoded = Json { ignoreUnknownKeys = true }.decodeFromString<TerritorySummaryWire>(
+            """{"total_cells":218,"cells_gained_last_7d":208,"capture_workouts_last_7d":2,"cells_last_7d":2}"""
+        )
+        assertEquals(218, decoded.totalCells)
+        assertEquals(208, decoded.cellsGainedLast7d)
+        assertEquals(2, decoded.captureWorkoutsLast7d)
+    }
+
+    @Test
+    fun profileCitySummaryLabelShowsOwnedCellsWithValidTotal() {
+        val city = TerritoryCityRegionRowWire(
+            cityKey = "osm:relation:12345",
+            displayName = "Tarragona",
+            capturedCells = 2754,
+            totalCaptureCells = 65309,
+            myOwnedCells = 45
+        )
+        assertEquals(
+            "Tarragona · you own 45 of 65309 cells",
+            TerritoryCaptureClient.profileCitySummaryLabel(city)
+        )
+    }
+
+    @Test
+    fun profileCitySummaryLabelOmitsBadTotal() {
+        val city = TerritoryCityRegionRowWire(
+            cityKey = "osm:relation:12345",
+            displayName = "Tarragona",
+            capturedCells = 2754,
+            totalCaptureCells = 2,
+            myOwnedCells = 45
+        )
+        assertEquals(
+            "Tarragona · you own 45 cells",
+            TerritoryCaptureClient.profileCitySummaryLabel(city)
+        )
     }
 
     @Test

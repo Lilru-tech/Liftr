@@ -76,6 +76,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         configurePushNotifications(application: application)
         MobileAds.shared.start(completionHandler: nil)
 
+        if let launchURL = launchOptions?[.url] as? URL {
+            AuthCallbackLogger.log("cold start launchOptions URL", url: launchURL, source: "AppDelegate")
+            Task { @MainActor in
+                await AppState.shared.handleAuthCallbackURL(launchURL)
+            }
+        }
+
         if let remoteNotification = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
             print("🚀 [AppDelegate] launched from push, userInfo:", remoteNotification)
             let (notificationId, type, data) = Self.notificationPayload(from: remoteNotification)
@@ -94,6 +101,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         Task {
             await HealthKitBodyWeightSyncService.shared.handleAppForegroundIfNeeded()
+            await HealthKitCardioSyncService.shared.handleAppForegroundIfNeeded()
         }
 
         return true
@@ -119,6 +127,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         Messaging.messaging().delegate = self
+    }
+
+    func application(
+        _ app: UIApplication,
+        open url: URL,
+        options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+    ) -> Bool {
+        let source = options[.sourceApplication] as? String ?? "unknown"
+        AuthCallbackLogger.log("application(open:) sourceApplication=\(source)", url: url, source: "AppDelegate")
+        guard AuthRedirect.isAuthCallback(url) else { return false }
+        Task { @MainActor in
+            await AppState.shared.handleAuthCallbackURL(url)
+        }
+        return true
     }
 
     func application(_ application: UIApplication,

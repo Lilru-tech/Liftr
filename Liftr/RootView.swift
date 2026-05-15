@@ -87,6 +87,7 @@ struct RootView: View {
             }
             Task {
                 await HealthKitBodyWeightSyncService.shared.handleAppForegroundIfNeeded()
+                await HealthKitCardioSyncService.shared.handleAppForegroundIfNeeded()
             }
         }
         .onReceive(app.$pendingNotification) { pending in
@@ -247,6 +248,17 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: updatePrompt != nil)
+        .fullScreenCover(isPresented: $app.passwordRecoveryPending) {
+            NavigationStack {
+                ResetPasswordView()
+            }
+            .interactiveDismissDisabled(true)
+        }
+        .onChange(of: app.passwordRecoveryPending) { _, pending in
+            if pending {
+                AuthCallbackLogger.log("RootView presenting password recovery fullScreenCover", source: "RootView")
+            }
+        }
     }
 
     @ViewBuilder

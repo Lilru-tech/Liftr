@@ -94,14 +94,13 @@ fun TerritoryProfileHubCard(
                 loading -> CircularProgressIndicator()
                 summary != null -> {
                     val s = summary!!
-                    val total = s.totalCells ?: 0
-                    val week = s.cellsLast7d ?: 0
                     Text(
-                        text = if (isOwnProfile) {
-                            "You own $total cells · $week captured in the last 7 days"
-                        } else {
-                            "Owns $total cells · $week captured in the last 7 days"
-                        },
+                        text = TerritoryCaptureClient.profileTerritorySummaryLine(
+                            totalCells = s.totalCells ?: 0,
+                            cellsGained7d = s.cellsGainedLast7d ?: 0,
+                            workouts7d = s.captureWorkoutsLast7d ?: 0,
+                            isOwnProfile = isOwnProfile
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -118,7 +117,7 @@ fun TerritoryProfileHubCard(
                     } else {
                         topCities.forEach { city ->
                             Text(
-                                text = TerritoryCaptureClient.citySummaryLabel(city),
+                                text = TerritoryCaptureClient.profileCitySummaryLabel(city),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

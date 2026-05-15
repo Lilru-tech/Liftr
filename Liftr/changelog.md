@@ -12,8 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Territories** — During **cardio** workouts, users **capture territories** and can **take over** other users’ territories.
 - **Hyrox routines** — Saved **Hyrox** routines can now be **edited**.
 - **Active strength** — Users can see **all sets** for an exercise in **Active Strength Workout**.
+- **Active strength** — **Quick rest** chips are **personalized** from your recent strength history (last 8 weeks); new users keep the standard presets.
 - **Plan** — **Tooltip** for new users explaining how to use **Active Workouts**.
 - **Profile / body weight** — **Import weight data** and view **weight history**.
+- **Apple Health — cardio** — **Auto-import** cardio workouts from Apple Health; a **notification** is sent when a new workout is imported.
+- **Auth** — **Forgot password** flow to recover account access via email.
 
 ### Changed
 - **Workouts — saving** — Faster saves when **editing a workout** and when **finishing** an active workout.

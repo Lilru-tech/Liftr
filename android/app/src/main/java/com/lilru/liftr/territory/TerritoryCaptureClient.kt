@@ -89,6 +89,8 @@ data class TerritoryMapCellWire(
 @Serializable
 data class TerritorySummaryWire(
     @SerialName("total_cells") val totalCells: Int? = null,
+    @SerialName("cells_gained_last_7d") val cellsGainedLast7d: Int? = null,
+    @SerialName("capture_workouts_last_7d") val captureWorkoutsLast7d: Int? = null,
     @SerialName("cells_last_7d") val cellsLast7d: Int? = null,
     @SerialName("approx_area_m2") val approxAreaM2: Double? = null
 )
@@ -140,6 +142,15 @@ data class TerritoryCaptureEventRowWire(
     @SerialName("cells_taken") val cellsTaken: Int? = null
 )
 
+@Serializable
+data class TerritoryWorkoutTakeoverRowWire(
+    @SerialName("victim_user_id") val victimUserId: String? = null,
+    @SerialName("victim_username") val victimUsername: String? = null,
+    @SerialName("victim_avatar_url") val victimAvatarUrl: String? = null,
+    @SerialName("cells_taken") val cellsTaken: Int? = null,
+    @SerialName("share_taken_pct") val shareTakenPct: Double? = null
+)
+
 object TerritoryCaptureClient {
     private const val LOG_TAG = "TerritoryShare"
     private val json = Json { ignoreUnknownKeys = true }
@@ -172,6 +183,19 @@ object TerritoryCaptureClient {
             val row = json.decodeFromString<List<TerritoryCaptureEventRowWire>>(res.data).firstOrNull()
             if (row == null || (row.cellsGained ?: 0) <= 0) null else row
         }.getOrNull()
+    }
+
+    suspend fun fetchWorkoutTakeovers(
+        supabase: SupabaseClient,
+        workoutId: Int
+    ): List<TerritoryWorkoutTakeoverRowWire> {
+        return runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.LIST_WORKOUT_TERRITORY_TAKEOVERS_V1,
+                buildJsonObject { put("p_workout_id", workoutId) }
+            )
+            json.decodeFromString<List<TerritoryWorkoutTakeoverRowWire>>(res.data)
+        }.getOrDefault(emptyList())
     }
 
     suspend fun fetchTerritoryPreviewRings(
@@ -664,6 +688,18 @@ object TerritoryCaptureClient {
         }
     }
 
+    fun profileCitySummaryLabel(city: TerritoryCityRegionRowWire): String {
+        val name = city.displayName ?: city.cityKey ?: "City"
+        val owned = city.myOwnedCells ?: city.ownedCells ?: 0
+        val communityCaptured = city.capturedCells ?: 0
+        val total = city.totalCaptureCells
+        return if (total != null && total > owned && total >= communityCaptured) {
+            "$name · you own $owned of $total cells"
+        } else {
+            "$name · you own $owned cells"
+        }
+    }
+
     fun captureMessage(summary: TerritoryCaptureSummaryWire): String? {
         if (!summary.ok) return captureFailureMessage(summary.reason)
         val gained = summary.cellsGained ?: 0
@@ -680,6 +716,35 @@ object TerritoryCaptureClient {
             parts += "near ${"%.3f".format(lat)}, ${"%.3f".format(lon)}"
         }
         return parts.joinToString(", ") + "."
+    }
+
+    fun takeoverRowSubtitle(cells: Int, sharePct: Double): String {
+        val shareText = if (sharePct % 1.0 == 0.0) {
+            "%.0f".format(sharePct)
+        } else {
+            "%.1f".format(sharePct)
+        }
+        return "$cells cells · $shareText%"
+    }
+
+    fun profileTerritorySummaryLine(
+        totalCells: Int,
+        cellsGained7d: Int,
+        workouts7d: Int,
+        isOwnProfile: Boolean
+    ): String {
+        val prefix = if (isOwnProfile) "You own $totalCells cells" else "Owns $totalCells cells"
+        if (cellsGained7d <= 0 && workouts7d <= 0) return prefix
+        val workoutWord = if (workouts7d == 1) "workout" else "workouts"
+        val newWord = if (cellsGained7d == 1) "new cell" else "new cells"
+        return "$prefix · $cellsGained7d $newWord (in $workouts7d $workoutWord) in the last 7 days"
+    }
+
+    fun mapTerritory7dLine(cellsGained7d: Int, workouts7d: Int): String? {
+        if (cellsGained7d <= 0 && workouts7d <= 0) return null
+        val newCellsWord = if (cellsGained7d == 1) "new cell" else "new cells"
+        val workoutWord = if (workouts7d == 1) "workout" else "workouts"
+        return "7d: $cellsGained7d $newCellsWord ($workouts7d $workoutWord)"
     }
 
     fun workoutDetailLabel(gained: Int, taken: Int): String {

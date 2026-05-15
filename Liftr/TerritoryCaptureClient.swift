@@ -75,6 +75,8 @@ struct TerritoryMapCellRow: Decodable, Identifiable, Hashable {
 
 struct TerritorySummaryResponse: Decodable {
     let total_cells: Int?
+    let cells_gained_last_7d: Int?
+    let capture_workouts_last_7d: Int?
     let cells_last_7d: Int?
     let approx_area_m2: Double?
 }
@@ -122,6 +124,15 @@ struct TerritoryRecentTakeoverRow: Decodable, Identifiable, Hashable {
 struct TerritoryCaptureEventRow: Decodable, Hashable {
     let cells_gained: Int?
     let cells_taken: Int?
+}
+
+struct TerritoryWorkoutTakeoverRow: Decodable, Identifiable, Hashable {
+    let victim_user_id: UUID?
+    let victim_username: String?
+    let victim_avatar_url: String?
+    let cells_taken: Int?
+    let share_taken_pct: Double?
+    var id: String { victim_user_id?.uuidString ?? victim_username ?? "victim" }
 }
 
 enum TerritoryCaptureClient {
@@ -193,6 +204,18 @@ enum TerritoryCaptureClient {
             return row
         } catch {
             return nil
+        }
+    }
+
+    static func fetchWorkoutTakeovers(workoutId: Int) async -> [TerritoryWorkoutTakeoverRow] {
+        let params = WorkoutIdParams(p_workout_id: Int64(workoutId))
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("list_workout_territory_takeovers_v1", params: params)
+                .execute()
+            return try JSONDecoder.supabase().decode([TerritoryWorkoutTakeoverRow].self, from: res.data)
+        } catch {
+            return []
         }
     }
 
@@ -750,14 +773,51 @@ enum TerritoryCaptureClient {
         }
         return "\(name) · \(captured) cells"
     }
+
+    static func profileCitySummaryLabel(for city: TerritoryCityRegionRow) -> String {
+        let name = city.display_name ?? city.city_key ?? "City"
+        let owned = city.my_owned_cells ?? city.owned_cells ?? 0
+        let communityCaptured = city.captured_cells ?? 0
+        if let total = city.total_capture_cells, total > owned, total >= communityCaptured {
+            return "\(name) · you own \(owned) of \(total) cells"
+        }
+        return "\(name) · you own \(owned) cells"
+    }
 }
 
 enum TerritoryCapturePresentation {
+    static func profileTerritorySummaryLine(
+        totalCells: Int,
+        cellsGained7d: Int,
+        workouts7d: Int,
+        isOwnProfile: Bool
+    ) -> String {
+        let prefix = isOwnProfile ? "You own \(totalCells) cells" : "Owns \(totalCells) cells"
+        guard cellsGained7d > 0 || workouts7d > 0 else { return prefix }
+        let workoutWord = workouts7d == 1 ? "workout" : "workouts"
+        let newWord = cellsGained7d == 1 ? "new cell" : "new cells"
+        return "\(prefix) · \(cellsGained7d) \(newWord) (in \(workouts7d) \(workoutWord)) in the last 7 days"
+    }
+
+    static func mapTerritory7dLine(cellsGained7d: Int, workouts7d: Int) -> String? {
+        guard cellsGained7d > 0 || workouts7d > 0 else { return nil }
+        let newCellsWord = cellsGained7d == 1 ? "new cell" : "new cells"
+        let workoutWord = workouts7d == 1 ? "workout" : "workouts"
+        return "7d: \(cellsGained7d) \(newCellsWord) (\(workouts7d) \(workoutWord))"
+    }
+
     static func workoutDetailLabel(gained: Int, taken: Int) -> String {
         if taken > 0 {
             return "\(gained) cells (\(taken) from others)"
         }
         return "\(gained) cells"
+    }
+
+    static func takeoverRowSubtitle(cells: Int, sharePct: Double) -> String {
+        let shareText = sharePct.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", sharePct)
+            : String(format: "%.1f", sharePct)
+        return "\(cells) cells · \(shareText)%"
     }
 
     static func message(for summary: TerritoryCaptureSummary) -> String? {

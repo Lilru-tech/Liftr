@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 import Supabase
 import UIKit
 import CoreLocation
@@ -37,6 +38,8 @@ final class AppState: ObservableObject {
     
     @Published var isAuthenticated: Bool = false
     @Published var userId: UUID?
+    @Published var passwordRecoveryPending: Bool = false
+    @Published var authCallbackError: String?
     
     @Published private(set) var tabBarProfileAvatar: UIImage?
     private var tabBarAvatarURLString: String?
@@ -46,7 +49,10 @@ final class AppState: ObservableObject {
     @Published var territoryReferenceCoordinate: CLLocationCoordinate2D?
     
     private var authTask: Task<Void, Never>?
-    
+    private var lastHandledAuthCallbackKey: String?
+    private var lastHandledAuthCallbackAt: Date?
+    private var isHandlingAuthCallback = false
+
     private init() {
         listenAuth()
     }
@@ -55,6 +61,84 @@ final class AppState: ObservableObject {
         authTask?.cancel()
     }
     
+    @MainActor
+    func preparePasswordRecoveryFromAuthCallback() {
+        passwordRecoveryPending = true
+        isAuthenticated = false
+        withAnimation {
+            selectedTab = .profile
+        }
+        authCallbackError = nil
+        AuthCallbackLogger.log(
+            "preparePasswordRecovery pending=\(passwordRecoveryPending) tab=\(selectedTab) authenticated=\(isAuthenticated)",
+            source: "AppState"
+        )
+    }
+
+    @MainActor
+    func clearAuthCallbackError() {
+        authCallbackError = nil
+    }
+
+    @MainActor
+    func handleAuthCallbackURL(_ url: URL) async {
+        AuthCallbackLogger.log("handleAuthCallbackURL entered \(AuthCallbackLogger.describeMatch(url))", url: url, source: "AppState")
+        guard AuthRedirect.isAuthCallback(url) else {
+            AuthCallbackLogger.log("ignored: URL did not match auth callback", url: url, source: "AppState")
+            return
+        }
+        if isHandlingAuthCallback {
+            AuthCallbackLogger.log("skipped: already handling auth callback", url: url, source: "AppState")
+            return
+        }
+        let dedupeKey = url.absoluteString
+        if lastHandledAuthCallbackKey == dedupeKey,
+           let lastHandledAuthCallbackAt,
+           Date().timeIntervalSince(lastHandledAuthCallbackAt) < 3 {
+            AuthCallbackLogger.log("skipped duplicate within 3s", url: url, source: "AppState")
+            return
+        }
+        isHandlingAuthCallback = true
+        lastHandledAuthCallbackKey = dedupeKey
+        lastHandledAuthCallbackAt = Date()
+        defer { isHandlingAuthCallback = false }
+        preparePasswordRecoveryFromAuthCallback()
+        do {
+            AuthCallbackLogger.log("exchanging PKCE code via session(from:)", source: "AppState")
+            let session = try await SupabaseManager.shared.client.auth.session(from: url)
+            userId = session.user.id
+            passwordRecoveryPending = true
+            isAuthenticated = false
+            AuthCallbackLogger.log(
+                "exchange succeeded userId=\(session.user.id.uuidString) pending=\(passwordRecoveryPending) tab=\(selectedTab)",
+                source: "AppState"
+            )
+        } catch {
+            authCallbackError = error.localizedDescription
+            passwordRecoveryPending = false
+            isAuthenticated = false
+            userId = nil
+            AuthCallbackLogger.log("exchange failed: \(error.localizedDescription)", source: "AppState")
+        }
+    }
+
+    @MainActor
+    func completePasswordRecovery() {
+        passwordRecoveryPending = false
+        authCallbackError = nil
+        withAnimation {
+            selectedTab = .home
+        }
+        Task { @MainActor in
+            if let session = try? await SupabaseManager.shared.client.auth.session {
+                userId = session.user.id
+                isAuthenticated = true
+            }
+            await refreshTabBarProfileAvatarFromServer()
+            await refreshUnreadNotificationsCount()
+        }
+    }
+
     @MainActor
     func refreshSession() async {
         do {
@@ -271,7 +355,8 @@ final class AppState: ObservableObject {
                 notificationDestination = .none
             }
             
-        case "workout_like",
+        case "apple_health_cardio_imported",
+             "workout_like",
              "workout_comment",
              "comment_reply",
              "comment_like":
@@ -446,11 +531,18 @@ final class AppState: ObservableObject {
             
             if let session = try? await SupabaseManager.shared.client.auth.session {
                 await MainActor.run {
-                    self.isAuthenticated = true
                     self.userId = session.user.id
+                    if !self.passwordRecoveryPending {
+                        self.isAuthenticated = true
+                    } else {
+                        self.isAuthenticated = false
+                    }
                 }
-                await self.refreshTabBarProfileAvatarFromServer()
-                await self.refreshUnreadNotificationsCount()
+                let recoveryPending = await MainActor.run { self.passwordRecoveryPending }
+                if !recoveryPending {
+                    await self.refreshTabBarProfileAvatarFromServer()
+                    await self.refreshUnreadNotificationsCount()
+                }
             } else {
                 await MainActor.run {
                     self.isAuthenticated = false
@@ -467,32 +559,43 @@ final class AppState: ObservableObject {
                 await MainActor.run {
                     switch event {
                     case .initialSession, .signedIn, .userUpdated, .tokenRefreshed:
-                        self.isAuthenticated = (session != nil)
+                        if !self.passwordRecoveryPending {
+                            self.isAuthenticated = (session != nil)
+                            self.userId = session?.user.id
+                        }
+
+                    case .passwordRecovery:
+                        self.passwordRecoveryPending = true
                         self.userId = session?.user.id
-                        
-                    case .signedOut, .passwordRecovery, .userDeleted:
+                        self.isAuthenticated = false
+
+                    case .signedOut, .userDeleted:
                         self.isAuthenticated = false
                         self.userId = nil
+                        self.passwordRecoveryPending = false
+                        self.authCallbackError = nil
                         self.clearTabBarProfileAvatar()
                         self.unreadNotificationsCount = 0
-                        
+
                     default:
                         break
                     }
                 }
-                
+
                 switch event {
                 case .initialSession, .signedIn, .userUpdated, .tokenRefreshed:
-                    if session != nil {
+                    if session != nil, !self.passwordRecoveryPending {
                         await self.refreshTabBarProfileAvatarFromServer()
                         await self.refreshUnreadNotificationsCount()
-                    } else {
+                    } else if session == nil {
                         await MainActor.run {
                             self.clearTabBarProfileAvatar()
                             self.unreadNotificationsCount = 0
                         }
                     }
-                case .signedOut, .passwordRecovery, .userDeleted:
+                case .signedOut, .userDeleted:
+                    break
+                case .passwordRecovery:
                     break
                 default:
                     break

@@ -85,13 +85,20 @@ struct TerritoryMapView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 12) {
                         Text("You own \(summary.total_cells ?? 0) cells")
-                        Text("7d captures: \(summary.cells_last_7d ?? 0)")
                         Spacer()
                         Button("Leaderboard") {
                             showLeaderboard = true
                         }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.blue)
+                    }
+                    if let weekLine = TerritoryCapturePresentation.mapTerritory7dLine(
+                        cellsGained7d: summary.cells_gained_last_7d ?? 0,
+                        workouts7d: summary.capture_workouts_last_7d ?? 0
+                    ) {
+                        Text(weekLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     Text("Public map · colored cells are owned territory · brighter cells are yours")
                         .font(.caption)

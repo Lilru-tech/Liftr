@@ -38,6 +38,24 @@ struct TerritoryCaptureRegressionTests {
         #expect(TerritoryCapturePresentation.workoutDetailLabel(gained: 8, taken: 0) == "8 cells")
     }
 
+    @Test func takeoverRowSubtitleFormatsCellsAndShare() {
+        #expect(TerritoryCapturePresentation.takeoverRowSubtitle(cells: 120, sharePct: 12.5) == "120 cells · 12.5%")
+        #expect(TerritoryCapturePresentation.takeoverRowSubtitle(cells: 8, sharePct: 4) == "8 cells · 4%")
+    }
+
+    @Test func workoutTakeoverRowDecodes() throws {
+        let victimId = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let data = Data("""
+        [{"victim_user_id":"22222222-2222-2222-2222-222222222222","victim_username":"runner","victim_avatar_url":"https://example.com/a.jpg","cells_taken":120,"share_taken_pct":12.5}]
+        """.utf8)
+        let decoded = try JSONDecoder().decode([TerritoryWorkoutTakeoverRow].self, from: data)
+        #expect(decoded.count == 1)
+        #expect(decoded[0].victim_user_id == victimId)
+        #expect(decoded[0].victim_username == "runner")
+        #expect(decoded[0].cells_taken == 120)
+        #expect(decoded[0].share_taken_pct == 12.5)
+    }
+
     @Test func historicalBackfillDoneOnlyWhenQueueEmpty() {
         #expect(TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(hasMore: false))
         #expect(!TerritoryCaptureClient.shouldMarkHistoricalBackfillDone(hasMore: true))
@@ -153,6 +171,112 @@ struct TerritoryCaptureRegressionTests {
             TerritoryCapturePresentation.failureMessage(reason: "missing_route")
             == "Territory capture needs a GPS route on this workout."
         )
+    }
+
+    @Test func profileTerritorySummaryLineOwnProfileWithActivity() {
+        #expect(
+            TerritoryCapturePresentation.profileTerritorySummaryLine(
+                totalCells: 218,
+                cellsGained7d: 208,
+                workouts7d: 2,
+                isOwnProfile: true
+            ) == "You own 218 cells · 208 new cells (in 2 workouts) in the last 7 days"
+        )
+    }
+
+    @Test func profileTerritorySummaryLineOtherProfileWithActivity() {
+        #expect(
+            TerritoryCapturePresentation.profileTerritorySummaryLine(
+                totalCells: 218,
+                cellsGained7d: 208,
+                workouts7d: 2,
+                isOwnProfile: false
+            ) == "Owns 218 cells · 208 new cells (in 2 workouts) in the last 7 days"
+        )
+    }
+
+    @Test func profileTerritorySummaryLineSingularWorkout() {
+        #expect(
+            TerritoryCapturePresentation.profileTerritorySummaryLine(
+                totalCells: 50,
+                cellsGained7d: 12,
+                workouts7d: 1,
+                isOwnProfile: true
+            ) == "You own 50 cells · 12 new cells (in 1 workout) in the last 7 days"
+        )
+    }
+
+    @Test func profileTerritorySummaryLineOmits7dWhenZero() {
+        #expect(
+            TerritoryCapturePresentation.profileTerritorySummaryLine(
+                totalCells: 218,
+                cellsGained7d: 0,
+                workouts7d: 0,
+                isOwnProfile: true
+            ) == "You own 218 cells"
+        )
+    }
+
+    @Test func mapTerritory7dLineFormatsCellsAndWorkouts() {
+        #expect(
+            TerritoryCapturePresentation.mapTerritory7dLine(cellsGained7d: 208, workouts7d: 2)
+            == "7d: 208 new cells (2 workouts)"
+        )
+    }
+
+    @Test func mapTerritory7dLineSingular() {
+        #expect(
+            TerritoryCapturePresentation.mapTerritory7dLine(cellsGained7d: 1, workouts7d: 1)
+            == "7d: 1 new cell (1 workout)"
+        )
+    }
+
+    @Test func profileCitySummaryLabelShowsOwnedCellsWithValidTotal() {
+        let city = TerritoryCityRegionRow(
+            city_key: "osm:relation:12345",
+            display_name: "Tarragona",
+            center_lat: 41.12,
+            center_lon: 1.24,
+            captured_cells: 2754,
+            total_capture_cells: 65309,
+            my_owned_cells: 45,
+            owned_cells: nil
+        )
+        #expect(
+            TerritoryCaptureClient.profileCitySummaryLabel(for: city)
+            == "Tarragona · you own 45 of 65309 cells"
+        )
+    }
+
+    @Test func profileCitySummaryLabelOmitsBadTotal() {
+        let city = TerritoryCityRegionRow(
+            city_key: "osm:relation:12345",
+            display_name: "Tarragona",
+            center_lat: 41.12,
+            center_lon: 1.24,
+            captured_cells: 2754,
+            total_capture_cells: 2,
+            my_owned_cells: 45,
+            owned_cells: nil
+        )
+        #expect(
+            TerritoryCaptureClient.profileCitySummaryLabel(for: city)
+            == "Tarragona · you own 45 cells"
+        )
+    }
+
+    @Test func mapTerritory7dLineNilWhenZero() {
+        #expect(TerritoryCapturePresentation.mapTerritory7dLine(cellsGained7d: 0, workouts7d: 0) == nil)
+    }
+
+    @Test func territorySummaryResponseDecodes7dBreakdown() throws {
+        let data = Data("""
+        {"total_cells":218,"cells_gained_last_7d":208,"capture_workouts_last_7d":2,"cells_last_7d":2,"approx_area_m2":353989.6}
+        """.utf8)
+        let decoded = try JSONDecoder().decode(TerritorySummaryResponse.self, from: data)
+        #expect(decoded.total_cells == 218)
+        #expect(decoded.cells_gained_last_7d == 208)
+        #expect(decoded.capture_workouts_last_7d == 2)
     }
 
     @Test func territoryCityRegionsDecode() throws {

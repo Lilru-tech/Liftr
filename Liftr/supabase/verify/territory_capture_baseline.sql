@@ -24,6 +24,7 @@ where
     'backfill_my_territory_captures_v1',
     'backfill_territory_municipality_assignments_v1',
     'list_my_territory_recent_takeovers_v1',
+    'list_workout_territory_takeovers_v1',
     'ingest_territory_municipality_v1',
     'list_territory_geocode_queue_v1',
     '_liftr_apply_territory_capture_for_workout',
@@ -70,6 +71,96 @@ select
   public.preview_territory_capture_v1(
     '{"type":"LineString","coordinates":[[-3.7038,40.4168],[-3.7010,40.4180],[-3.6980,40.4190]]}'::text
   ) as open_route_preview;
+
+select
+  public.preview_territory_capture_v1(
+    '{"type":"LineString","coordinates":[[-3.7050,40.4150],[-3.7038,40.4168],[-3.7030,40.4172],[-3.7022,40.4168],[-3.7030,40.4164],[-3.7038,40.4168],[-3.7050,40.4150]]}'::text
+  ) as loop_with_tail_preview;
+
+select
+  public._liftr_territory_route_kind(
+    public._liftr_territory_route_geog_from_geojson(
+      '{"type":"LineString","coordinates":[[-3.7050,40.4150],[-3.7038,40.4168],[-3.7030,40.4172],[-3.7022,40.4168],[-3.7030,40.4164],[-3.7038,40.4168],[-3.7050,40.4150]]}'
+    )
+  ) = 'closed' as loop_with_tail_is_closed;
+
+select
+  public._liftr_territory_polygonize_loop_faces(
+    public._liftr_territory_route_geog_from_geojson(
+      '{"type":"LineString","coordinates":[[-3.7050,40.4150],[-3.7038,40.4168],[-3.7030,40.4172],[-3.7022,40.4168],[-3.7030,40.4164],[-3.7038,40.4168],[-3.7050,40.4150]]}'
+    )
+  ) is not null as loop_with_tail_has_polygon_face;
+
+select
+  (
+    select count(*)::integer
+    from public._liftr_territory_hex_cells_from_geog(
+      public._liftr_territory_capture_geom(
+        public._liftr_territory_route_geog_from_geojson(
+          '{"type":"LineString","coordinates":[[-3.710,40.410],[-3.700,40.420],[-3.690,40.420],[-3.690,40.410],[-3.700,40.410],[-3.710,40.410]]}'
+        )
+      )
+    )
+  ) > (
+    select count(*)::integer
+    from public._liftr_territory_hex_cells_from_geog(
+      public._liftr_territory_capture_geom(
+        public._liftr_territory_route_geog_from_geojson(
+          '{"type":"LineString","coordinates":[[-3.710,40.410],[-3.650,40.410]]}'
+        )
+      )
+    )
+  ) as closed_loop_more_cells_than_open_line;
+
+select
+  round(public._liftr_territory_min_loop_area_m2()::numeric, 1) as min_loop_area_m2_one_hex;
+
+select
+  public._liftr_territory_route_kind(
+    public._liftr_territory_route_geog_from_geojson(
+      '{"type":"LineString","coordinates":[[-3.710,40.410],[-3.650,40.410],[-3.64964,40.410],[-3.64964,40.41036],[-3.6500,40.41036],[-3.6500,40.410]]}'
+    )
+  ) = 'closed' as small_loop_with_tail_is_closed;
+
+select
+  (
+    select count(*)::integer
+    from public._liftr_territory_hex_cells_from_geog(
+      public._liftr_territory_capture_geom(
+        public._liftr_territory_route_geog_from_geojson(
+          '{"type":"LineString","coordinates":[[-3.710,40.410],[-3.650,40.410],[-3.64964,40.410],[-3.64964,40.41036],[-3.6500,40.41036],[-3.6500,40.410]]}'
+        )
+      )
+    )
+  ) > (
+    select count(*)::integer
+    from public._liftr_territory_hex_cells_from_geog(
+      public._liftr_territory_capture_geom(
+        public._liftr_territory_route_geog_from_geojson(
+          '{"type":"LineString","coordinates":[[-3.710,40.410],[-3.650,40.410]]}'
+        )
+      )
+    )
+  ) as small_loop_with_tail_more_cells_than_line_only;
+
+select
+  public._liftr_territory_polygonize_loop_faces(
+    public._liftr_territory_route_geog_from_geojson(
+      '{"type":"LineString","coordinates":[[-3.7040,40.4160],[-3.7036,40.4160],[-3.7036,40.41636],[-3.7040,40.41636],[-3.7040,40.4160]]}'
+    )
+  ) is null as tiny_noise_loop_ignored;
+
+select
+  e.workout_id,
+  e.route_kind,
+  e.cells_gained,
+  round(st_area(public._liftr_territory_capture_geom(
+    public._liftr_territory_route_geog_from_geojson(
+      public._liftr_workout_route_geojson_text(e.workout_id)
+    )
+  ))::numeric, 0) as capture_area_m2
+from public.territory_capture_events e
+where e.workout_id in (627, 773);
 
 select
   m.city_key,

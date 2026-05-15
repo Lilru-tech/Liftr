@@ -2404,6 +2404,10 @@ private struct CardioDetailBlock: View {
     @State private var kmPaceSplitsExpanded = false
     @State private var captureEvent: TerritoryCaptureEventRow?
     @State private var territoryPreviewCells: [TerritoryPreviewCell] = []
+    @State private var workoutTakeovers: [TerritoryWorkoutTakeoverRow] = []
+    @State private var showTerritoryTakeoversSheet = false
+
+    private let maxInlineTerritoryTakeovers = 5
 
     private var routeCoordinates: [CLLocationCoordinate2D] {
         CardioRouteGeoJSONParser.coordinates(from: row?.route_geojson)
@@ -2415,6 +2419,15 @@ private struct CardioDetailBlock: View {
             gained: gained,
             taken: captureEvent?.cells_taken ?? 0
         )
+    }
+
+    private var inlineTerritoryTakeovers: [TerritoryWorkoutTakeoverRow] {
+        guard (captureEvent?.cells_taken ?? 0) > 0, !workoutTakeovers.isEmpty else { return [] }
+        return Array(workoutTakeovers.prefix(maxInlineTerritoryTakeovers))
+    }
+
+    private var hiddenTerritoryTakeoverCount: Int {
+        max(workoutTakeovers.count - maxInlineTerritoryTakeovers, 0)
     }
     
     var body: some View {
@@ -2433,7 +2446,7 @@ private struct CardioDetailBlock: View {
                 if let mh = r.max_hr { info("Max HR", "\(mh) bpm") }
                 if let elev = r.elevation_gain_m { info("Elevation gain", "\(elev) m") }
                 if routeCoordinates.count < 2, let territoryDetailValue {
-                    info("Territory", territoryDetailValue)
+                    territorySection(summary: territoryDetailValue)
                 }
                 if routeCoordinates.count >= 2 {
                     Text("Route")
@@ -2444,7 +2457,7 @@ private struct CardioDetailBlock: View {
                         territoryCells: territoryPreviewCells
                     )
                     if let territoryDetailValue {
-                        info("Territory", territoryDetailValue)
+                        territorySection(summary: territoryDetailValue)
                     }
                     if canEdit && workoutState == "published" {
                         Button {
@@ -2488,7 +2501,27 @@ private struct CardioDetailBlock: View {
             kmPaceSplitsExpanded = false
             captureEvent = nil
             territoryPreviewCells = []
+            workoutTakeovers = []
             Task { await load() }
+        }
+        .sheet(isPresented: $showTerritoryTakeoversSheet) {
+            NavigationStack {
+                List(workoutTakeovers) { takeover in
+                    territoryTakeoverRow(takeover)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .navigationTitle("Territory taken from")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Done") { showTerritoryTakeoversSheet = false }
+                    }
+                }
+            }
+            .presentationBackground(.clear)
         }
         .sheet(isPresented: $showCreateSegment) {
             CreateSegmentFromWorkoutSheet(
@@ -2541,9 +2574,12 @@ private struct CardioDetailBlock: View {
             } catch {
                 await MainActor.run { self.extras = nil }
             }
-            let capture = await TerritoryCaptureClient.fetchCaptureEvent(workoutId: workoutId)
+            async let capture = TerritoryCaptureClient.fetchCaptureEvent(workoutId: workoutId)
+            async let takeovers = TerritoryCaptureClient.fetchWorkoutTakeovers(workoutId: workoutId)
+            let captureEvent = await capture
+            let takeoverRows = await takeovers
             let previewCells: [TerritoryPreviewCell]
-            if (capture?.cells_gained ?? 0) > 0,
+            if (captureEvent?.cells_gained ?? 0) > 0,
                let routeGeoJSON = r.route_geojson,
                !routeGeoJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 previewCells = await TerritoryCaptureClient.fetchTerritoryPreviewCells(routeGeoJSON: routeGeoJSON)
@@ -2551,17 +2587,84 @@ private struct CardioDetailBlock: View {
                 previewCells = []
             }
             await MainActor.run {
-                self.captureEvent = capture
+                self.captureEvent = captureEvent
+                self.workoutTakeovers = takeoverRows
                 self.territoryPreviewCells = previewCells
             }
         } catch {
             await MainActor.run {
                 self.row = nil
                 self.captureEvent = nil
+                self.workoutTakeovers = []
                 self.territoryPreviewCells = []
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    @ViewBuilder
+    private func territorySection(summary: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            info("Territory", summary)
+            ForEach(inlineTerritoryTakeovers) { takeover in
+                territoryTakeoverRow(takeover)
+            }
+            if hiddenTerritoryTakeoverCount > 0 {
+                Button {
+                    showTerritoryTakeoversSheet = true
+                } label: {
+                    HStack {
+                        Text("+\(hiddenTerritoryTakeoverCount) more")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(10)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func territoryTakeoverRow(_ takeover: TerritoryWorkoutTakeoverRow) -> some View {
+        HStack(spacing: 10) {
+            AvatarView(urlString: takeover.victim_avatar_url)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            if let userId = takeover.victim_user_id {
+                NavigationLink {
+                    ProfileView(userId: userId).id(userId).gradientBG()
+                } label: {
+                    Text("@\(takeover.victim_username ?? "user")")
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("@\(takeover.victim_username ?? "user")")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let cells = takeover.cells_taken {
+                Text(
+                    TerritoryCapturePresentation.takeoverRowSubtitle(
+                        cells: cells,
+                        sharePct: takeover.share_taken_pct ?? 0
+                    )
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
     
     @ViewBuilder private func info(_ label: String, _ value: String) -> some View {

@@ -45,7 +45,7 @@ struct TerritoryProfileHubView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(topCities) { city in
-                        Text(TerritoryCaptureClient.citySummaryLabel(for: city))
+                        Text(TerritoryCaptureClient.profileCitySummaryLabel(for: city))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -107,12 +107,12 @@ struct TerritoryProfileHubView: View {
     }
 
     private func summaryLine(_ summary: TerritorySummaryResponse) -> String {
-        let total = summary.total_cells ?? 0
-        let week = summary.cells_last_7d ?? 0
-        if isOwnProfile {
-            return "You own \(total) cells · \(week) captured in the last 7 days"
-        }
-        return "Owns \(total) cells · \(week) captured in the last 7 days"
+        TerritoryCapturePresentation.profileTerritorySummaryLine(
+            totalCells: summary.total_cells ?? 0,
+            cellsGained7d: summary.cells_gained_last_7d ?? 0,
+            workouts7d: summary.capture_workouts_last_7d ?? 0,
+            isOwnProfile: isOwnProfile
+        )
     }
 
     private func ownedCells(for city: TerritoryCityRegionRow) -> Int {

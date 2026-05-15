@@ -18,5 +18,18 @@
 	<true/>
 	<key>UIRequiresFullScreen</key>
 	<true/>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.davidgomez.Liftr.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.davidgomez.Liftr</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

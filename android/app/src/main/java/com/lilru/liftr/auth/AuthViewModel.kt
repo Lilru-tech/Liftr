@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.push.FcmTokenUploader
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.resetPasswordForEmail
 import io.github.jan.supabase.auth.SignOutScope
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.status.SessionStatus
@@ -40,6 +41,47 @@ class AuthViewModel(
 
     fun clearUiError() {
         _uiError.value = null
+    }
+
+    fun resetPasswordForEmail(email: String, onEmailSent: () -> Unit = {}) {
+        viewModelScope.launch {
+            _busy.value = true
+            _uiError.value = null
+            try {
+                supabase.auth.resetPasswordForEmail(
+                    email = email.trim(),
+                    redirectUrl = AuthRedirect.WEB_CALLBACK_URL
+                )
+                onEmailSent()
+            } catch (e: Exception) {
+                _uiError.value = e.message?.take(300) ?: e::class.java.simpleName
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
+    fun updatePassword(newPassword: String, onSuccess: () -> Unit = {}) {
+        viewModelScope.launch {
+            _busy.value = true
+            _uiError.value = null
+            if (newPassword.length < PasswordResetValidation.MINIMUM_LENGTH) {
+                _uiError.value = "Password must be at least 8 characters."
+                _busy.value = false
+                return@launch
+            }
+            try {
+                supabase.auth.updateUser {
+                    password = newPassword
+                }
+                PasswordRecoveryGate.clear()
+                onSuccess()
+            } catch (e: Exception) {
+                _uiError.value = e.message?.take(300) ?: e::class.java.simpleName
+            } finally {
+                _busy.value = false
+            }
+        }
     }
 
     /**
@@ -250,6 +292,7 @@ class AuthViewModel(
     fun signOut() {
         viewModelScope.launch {
             _uiError.value = null
+            PasswordRecoveryGate.clear()
             runCatching { FcmTokenUploader.clearFcmToken(supabase) }
             runCatching {
                 supabase.auth.signOut(SignOutScope.GLOBAL)

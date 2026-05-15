@@ -549,7 +549,8 @@ fun WorkoutDetailScreen(
                             isOwner = isOwner,
                             supabase = supabase,
                             onSegmentCreated = { id -> segmentOverlayUuid = id.toString() },
-                            onDuplicateSegment = { id -> segmentOverlayUuid = id.toString() }
+                            onDuplicateSegment = { id -> segmentOverlayUuid = id.toString() },
+                            onOpenProfile = { selectedProfileUserId = it }
                         )
                     }
                 } else {

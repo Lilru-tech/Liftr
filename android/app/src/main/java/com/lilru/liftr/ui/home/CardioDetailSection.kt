@@ -12,14 +12,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -29,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.cardio.CardioRouteGeoJson
 import com.lilru.liftr.territory.TerritoryCaptureClient
+import com.lilru.liftr.territory.TerritoryWorkoutTakeoverRowWire
+import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.map.CardioRouteMapFromGeoJson
 import com.lilru.liftr.ui.map.CardioRouteSegmentTapMap
 import com.lilru.liftr.ui.segment.SegmentDuplicateException
@@ -47,6 +56,7 @@ import kotlin.math.min
 import java.util.Locale
 import java.util.UUID
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CardioDetailSection(
     detail: CardioSessionDetail,
@@ -57,8 +67,10 @@ fun CardioDetailSection(
     onSegmentCreated: ((UUID) -> Unit)? = null,
     /** Si el servidor detecta un segmento ya muy similar, abrir ese detalle (p. ej. overlay en el detalle del workout). */
     onDuplicateSegment: ((UUID) -> Unit)? = null,
+    onOpenProfile: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
+    val maxInlineTerritoryTakeovers = 5
     val act = remember(detail) { effectiveCardioActivityCode(detail) }
     val ex = detail.extras
     val scope = rememberCoroutineScope()
@@ -80,6 +92,21 @@ fun CardioDetailSection(
             TerritoryCaptureClient.workoutDetailLabel(gained, detail.territoryCellsTaken ?: 0)
         }
     }
+    val inlineTerritoryTakeovers = remember(
+        detail.territoryCellsTaken,
+        detail.territoryTakeovers
+    ) {
+        val taken = detail.territoryCellsTaken ?: 0
+        if (taken > 0 && detail.territoryTakeovers.isNotEmpty()) {
+            detail.territoryTakeovers.take(maxInlineTerritoryTakeovers)
+        } else {
+            emptyList()
+        }
+    }
+    val hiddenTerritoryTakeoverCount = remember(detail.territoryTakeovers) {
+        max(detail.territoryTakeovers.size - maxInlineTerritoryTakeovers, 0)
+    }
+    var showTerritoryTakeoversSheet by remember { mutableStateOf(false) }
     val canOfferSegment =
         isOwner &&
             workoutState?.equals("published", ignoreCase = true) == true &&
@@ -150,9 +177,12 @@ fun CardioDetailSection(
             )
         }
         if (routePts.size < 2 && territoryDetailValue != null) {
-            CardioInfoRow(
-                stringResource(R.string.home_detail_cardio_label_territory),
-                territoryDetailValue
+            TerritoryDetailSection(
+                summary = territoryDetailValue,
+                inlineTakeovers = inlineTerritoryTakeovers,
+                hiddenTakeoverCount = hiddenTerritoryTakeoverCount,
+                onOpenProfile = onOpenProfile,
+                onShowAllTakeovers = { showTerritoryTakeoversSheet = true }
             )
         }
         if (!detail.routeGeojson.isNullOrBlank()) {
@@ -170,9 +200,12 @@ fun CardioDetailSection(
                 territoryPreviewRings = detail.territoryPreviewRings
             )
             if (territoryDetailValue != null) {
-                CardioInfoRow(
-                    stringResource(R.string.home_detail_cardio_label_territory),
-                    territoryDetailValue
+                TerritoryDetailSection(
+                    summary = territoryDetailValue,
+                    inlineTakeovers = inlineTerritoryTakeovers,
+                    hiddenTakeoverCount = hiddenTerritoryTakeoverCount,
+                    onOpenProfile = onOpenProfile,
+                    onShowAllTakeovers = { showTerritoryTakeoversSheet = true }
                 )
             }
             if (canOfferSegment) {
@@ -491,6 +524,145 @@ private fun KmPaceSplitsSection(splits: List<Int>) {
                         }
                     }
                 }
+            }
+        }
+    }
+    if (showTerritoryTakeoversSheet) {
+        TerritoryTakeoversSheet(
+            takeovers = detail.territoryTakeovers,
+            onOpenProfile = onOpenProfile,
+            onDismiss = { showTerritoryTakeoversSheet = false }
+        )
+    }
+}
+
+@Composable
+private fun TerritoryDetailSection(
+    summary: String,
+    inlineTakeovers: List<TerritoryWorkoutTakeoverRowWire>,
+    hiddenTakeoverCount: Int,
+    onOpenProfile: ((String) -> Unit)?,
+    onShowAllTakeovers: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        CardioInfoRow(
+            stringResource(R.string.home_detail_cardio_label_territory),
+            summary
+        )
+        inlineTakeovers.forEach { takeover ->
+            TerritoryTakeoverRow(
+                takeover = takeover,
+                onOpenProfile = onOpenProfile
+            )
+        }
+        if (hiddenTakeoverCount > 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onShowAllTakeovers)
+                    .background(
+                        color = workoutDetailInsetFieldColor(),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(
+                        R.string.home_detail_cardio_territory_takeovers_more,
+                        hiddenTakeoverCount
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(Modifier.weight(1f))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TerritoryTakeoverRow(
+    takeover: TerritoryWorkoutTakeoverRowWire,
+    onOpenProfile: ((String) -> Unit)?
+) {
+    val username = takeover.victimUsername?.takeIf { it.isNotBlank() } ?: "user"
+    val userId = takeover.victimUserId
+    val cells = takeover.cellsTaken ?: 0
+    val share = takeover.shareTakenPct ?: 0.0
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (userId != null && onOpenProfile != null) {
+                    Modifier.clickable { onOpenProfile(userId) }
+                } else {
+                    Modifier
+                }
+            )
+            .background(
+                color = workoutDetailInsetFieldColor(),
+                shape = RoundedCornerShape(10.dp)
+            )
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        LiftrAvatar(
+            imageUrl = takeover.victimAvatarUrl,
+            displayName = username,
+            size = 28.dp,
+            modifier = Modifier.clip(RoundedCornerShape(6.dp))
+        )
+        Text(
+            "@$username",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            TerritoryCaptureClient.takeoverRowSubtitle(cells, share),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TerritoryTakeoversSheet(
+    takeovers: List<TerritoryWorkoutTakeoverRowWire>,
+    onOpenProfile: ((String) -> Unit)?,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                stringResource(R.string.home_detail_cardio_territory_takeovers_sheet_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            takeovers.forEach { takeover ->
+                TerritoryTakeoverRow(
+                    takeover = takeover,
+                    onOpenProfile = onOpenProfile
+                )
             }
         }
     }

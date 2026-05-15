@@ -262,6 +262,7 @@ struct ActiveStrengthWorkoutView: View {
     @State private var strengthNavStripWaveTask: Task<Void, Never>?
     @State private var navStripScrollEdgeFades = NavStripScrollEdgeFades(showLeading: false, showTrailing: false)
     @State private var showElborblaCelebration = false
+    @State private var quickRestPresets: [Int] = StrengthRestPresetService.defaultPresets
     @State private var strengthFinishDeferral: StrengthFinishDeferral?
     private let swipeThreshold: CGFloat = 110
 
@@ -666,7 +667,7 @@ struct ActiveStrengthWorkoutView: View {
                             .foregroundStyle(.secondary)
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 8) {
-                                ForEach([30, 60, 90, 120, 180], id: \.self) { sec in
+                                ForEach(quickRestPresets, id: \.self) { sec in
                                     Button {
                                         editRestText = "\(sec)"
                                     } label: {
@@ -819,6 +820,10 @@ struct ActiveStrengthWorkoutView: View {
             #endif
         }
         .task { await load() }
+        .task(id: app.userId) {
+            guard let userId = app.userId else { return }
+            quickRestPresets = await StrengthRestPresetService.fetchQuickRestPresets(userId: userId)
+        }
         .onDisappear {
             Task { await sanitizeEndDateIfNeededOnClose() }
         }

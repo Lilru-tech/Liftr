@@ -157,6 +157,7 @@ object BackendContracts {
         const val GET_TERRITORY_SUMMARY_V1 = "get_territory_summary_v1"
         const val LIST_USER_TERRITORY_TOP_CITIES_V1 = "list_user_territory_top_cities_v1"
         const val LIST_TERRITORY_RECENT_TAKEOVERS_V1 = "list_territory_recent_takeovers_v1"
+        const val LIST_WORKOUT_TERRITORY_TAKEOVERS_V1 = "list_workout_territory_takeovers_v1"
         const val BACKFILL_TERRITORY_MUNICIPALITY_ASSIGNMENTS_V1 = "backfill_territory_municipality_assignments_v1"
         const val LIST_ACTIVE_CHALLENGES_V1 = "list_active_challenges_v1"
         const val GET_CHALLENGE_INSTANCE_DETAIL_V1 = "get_challenge_instance_detail_v1"

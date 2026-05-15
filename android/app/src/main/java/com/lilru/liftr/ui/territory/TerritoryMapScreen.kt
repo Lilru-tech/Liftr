@@ -243,15 +243,19 @@ fun TerritoryMapScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            text = "7d captures: ${s.cellsLast7d ?: 0}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 16.dp)
-                        )
                         TextButton(onClick = { showLeaderboard = true }) {
                             Text("Leaderboard")
                         }
+                    }
+                    TerritoryCaptureClient.mapTerritory7dLine(
+                        cellsGained7d = s.cellsGainedLast7d ?: 0,
+                        workouts7d = s.captureWorkoutsLast7d ?: 0
+                    )?.let { weekLine ->
+                        Text(
+                            text = weekLine,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     Text(
                         text = "Public map · colored cells are owned territory · brighter cells are yours",
