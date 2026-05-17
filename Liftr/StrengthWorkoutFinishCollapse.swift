@@ -38,6 +38,7 @@ enum StrengthWorkoutFinishCollapse {
             let sets = rowsOut.map { row in
                 StrengthWorkoutSetSaveInput(
                     set_number: row.count,
+                    order_index: nil,
                     reps: row.reps,
                     weight_kg: row.weightKg.map { NSDecimalNumber(decimal: $0).doubleValue },
                     rpe: row.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
@@ -48,6 +49,7 @@ enum StrengthWorkoutFinishCollapse {
             return StrengthWorkoutExerciseSaveInput(
                 workout_exercise_id: exerciseId,
                 exercise_id: nil,
+                order_index: nil,
                 notes: nil,
                 custom_name: nil,
                 sets: sets

@@ -272,11 +272,19 @@ struct AppleHealthImportView: View {
         defer { syncPreferenceBusy = false }
         do {
             if enabled {
-                try await HealthKitCardioSyncService.shared.enableBackgroundSync()
-                banner = "Automatic import enabled"
+                let result = try await HealthKitCardioSyncService.shared.enableBackgroundSync()
+                summary = result
+                if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0 {
+                    banner = "Automatic import enabled. No compatible cardio workouts found in the last 90 days."
+                } else if result.failed > 0, let firstError = result.errorMessages.first {
+                    banner = "Automatic import enabled, but the initial import reported: \(firstError)"
+                } else {
+                    banner = "Automatic import enabled"
+                }
             } else {
                 HealthKitCardioSyncService.shared.disableBackgroundSync()
                 banner = "Automatic import disabled"
+                summary = nil
             }
         } catch {
             suppressSyncToggleChange = true

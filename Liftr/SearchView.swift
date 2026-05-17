@@ -136,7 +136,7 @@ struct SearchView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-            if !isPremium {
+            if !isPremium && tab != .map {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)

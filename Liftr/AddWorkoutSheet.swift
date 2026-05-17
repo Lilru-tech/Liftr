@@ -2701,9 +2701,10 @@ struct AddWorkoutSheet: View {
                 blocks.append((1, s))
             }
         }
-        return blocks.map { b in
+        return blocks.enumerated().map { idx, b in
             EditableSet(
                 setNumber: b.count,
+                orderIndex: idx + 1,
                 reps: b.template.reps,
                 weightKg: stringFromRecommendationKg(b.template.weightKg),
                 rpe: b.template.rpe.map { stringFromRecommendationRpe($0) } ?? "",
@@ -3030,11 +3031,16 @@ struct EditableExercise: Identifiable {
         guard let exerciseId else { return nil }
         let cleaned = cleanSets()
         guard !cleaned.isEmpty else { return nil }
+        let strengthSets = cleaned.enumerated().compactMap { idx, set -> RPCStrengthParams.StrengthItem.StrengthSet? in
+            var orderedSet = set
+            orderedSet.orderIndex = idx + 1
+            return orderedSet.toStrengthSet()
+        }
         return .init(
             exercise_id: exerciseId,
             order_index: orderIndex,
             notes: notes.isEmpty ? nil : notes,
-            sets: cleaned.compactMap { $0.toStrengthSet() },
+            sets: strengthSets,
             custom_name: exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : exerciseName
         )
     }
@@ -3050,6 +3056,7 @@ extension EditableExercise {
         copy.sets = sets.map {
             EditableSet(
                 setNumber: $0.setNumber,
+                orderIndex: $0.orderIndex,
                 reps: $0.reps,
                 weightKg: $0.weightKg,
                 rpe: $0.rpe,
@@ -3065,6 +3072,7 @@ extension EditableExercise {
 struct EditableSet: Identifiable {
     let id = UUID()
     var setNumber: Int
+    var orderIndex: Int = 1
     var reps: Int? = nil
     var weightKg: String = ""
     var rpe: String = ""
@@ -3086,6 +3094,7 @@ struct EditableSet: Identifiable {
             let first = segs[0]
             return .init(
                 set_number: max(1, min(99, setNumber)),
+                order_index: orderIndex,
                 reps: first.reps,
                 weight_kg: first.weight_kg,
                 rpe: rpeD,
@@ -3101,6 +3110,7 @@ struct EditableSet: Identifiable {
         }
         return .init(
             set_number: max(1, min(99, setNumber)),
+            order_index: orderIndex,
             reps: repsV.flatMap { $0 > 0 ? $0 : nil },
             weight_kg: weight,
             rpe: rpeD,
@@ -3282,6 +3292,7 @@ struct RPCStrengthParams: Encodable {
         
         struct StrengthSet: Encodable {
             let set_number: Int
+            let order_index: Int?
             let reps: Int?
             let weight_kg: Double?
             let rpe: Double?

@@ -45,10 +45,13 @@ final class AppState: ObservableObject {
     private var tabBarAvatarURLString: String?
     private static let tabBarAvatarPointDiameter: CGFloat = 26
     @Published private(set) var unreadNotificationsCount: Int = 0
+    @Published private(set) var unreadChatMessagesCount: Int = 0
     @Published var territoryCaptureToast: String?
     @Published var territoryReferenceCoordinate: CLLocationCoordinate2D?
     
     private var authTask: Task<Void, Never>?
+    private let chatInboxRealtime = ChatInboxRealtime()
+    private var chatInboxRealtimeUserId: UUID?
     private var lastHandledAuthCallbackKey: String?
     private var lastHandledAuthCallbackAt: Date?
     private var isHandlingAuthCallback = false
@@ -65,6 +68,9 @@ final class AppState: ObservableObject {
     func preparePasswordRecoveryFromAuthCallback() {
         passwordRecoveryPending = true
         isAuthenticated = false
+        Task { @MainActor in
+            await stopChatUnreadRealtime()
+        }
         withAnimation {
             selectedTab = .profile
         }
@@ -136,6 +142,9 @@ final class AppState: ObservableObject {
             }
             await refreshTabBarProfileAvatarFromServer()
             await refreshUnreadNotificationsCount()
+            if let userId {
+                await startChatUnreadRealtimeIfNeeded(for: userId)
+            }
         }
     }
 
@@ -147,11 +156,13 @@ final class AppState: ObservableObject {
             self.isAuthenticated = true
             await refreshTabBarProfileAvatarFromServer()
             await refreshUnreadNotificationsCount()
+            await startChatUnreadRealtimeIfNeeded(for: session.user.id)
         } catch {
             self.userId = nil
             self.isAuthenticated = false
             clearTabBarProfileAvatar()
             unreadNotificationsCount = 0
+            await stopChatUnreadRealtime()
         }
     }
     
@@ -171,6 +182,20 @@ final class AppState: ObservableObject {
             unreadNotificationsCount = res.count ?? 0
         } catch {
             unreadNotificationsCount = 0
+        }
+    }
+
+    @MainActor
+    func refreshUnreadChatMessagesCount() async {
+        guard userId != nil else {
+            unreadChatMessagesCount = 0
+            return
+        }
+        do {
+            let list = try await ChatService.fetchConversations(limit: 100)
+            unreadChatMessagesCount = list.reduce(0) { $0 + $1.unread_count }
+        } catch {
+            unreadChatMessagesCount = 0
         }
     }
     
@@ -523,6 +548,31 @@ final class AppState: ObservableObject {
             return nil
         }
     }
+
+    @MainActor
+    private func startChatUnreadRealtimeIfNeeded(for userId: UUID) async {
+        guard chatInboxRealtimeUserId != userId else {
+            await refreshUnreadChatMessagesCount()
+            return
+        }
+        if chatInboxRealtimeUserId != nil {
+            await chatInboxRealtime.stop()
+        }
+        chatInboxRealtimeUserId = userId
+        await chatInboxRealtime.start(myUserId: userId) { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.refreshUnreadChatMessagesCount()
+            }
+        }
+        await refreshUnreadChatMessagesCount()
+    }
+
+    @MainActor
+    private func stopChatUnreadRealtime() async {
+        await chatInboxRealtime.stop()
+        chatInboxRealtimeUserId = nil
+        unreadChatMessagesCount = 0
+    }
     
     private func listenAuth() {
         authTask?.cancel()
@@ -542,6 +592,9 @@ final class AppState: ObservableObject {
                 if !recoveryPending {
                     await self.refreshTabBarProfileAvatarFromServer()
                     await self.refreshUnreadNotificationsCount()
+                    await self.startChatUnreadRealtimeIfNeeded(for: session.user.id)
+                } else {
+                    await self.stopChatUnreadRealtime()
                 }
             } else {
                 await MainActor.run {
@@ -550,6 +603,7 @@ final class AppState: ObservableObject {
                     self.clearTabBarProfileAvatar()
                     self.unreadNotificationsCount = 0
                 }
+                await self.stopChatUnreadRealtime()
             }
             
             for await state in SupabaseManager.shared.client.auth.authStateChanges {
@@ -576,6 +630,7 @@ final class AppState: ObservableObject {
                         self.authCallbackError = nil
                         self.clearTabBarProfileAvatar()
                         self.unreadNotificationsCount = 0
+                        self.unreadChatMessagesCount = 0
 
                     default:
                         break
@@ -587,16 +642,22 @@ final class AppState: ObservableObject {
                     if session != nil, !self.passwordRecoveryPending {
                         await self.refreshTabBarProfileAvatarFromServer()
                         await self.refreshUnreadNotificationsCount()
+                        if let userId = session?.user.id {
+                            await self.startChatUnreadRealtimeIfNeeded(for: userId)
+                        }
                     } else if session == nil {
                         await MainActor.run {
                             self.clearTabBarProfileAvatar()
                             self.unreadNotificationsCount = 0
                         }
+                        await self.stopChatUnreadRealtime()
+                    } else {
+                        await self.stopChatUnreadRealtime()
                     }
                 case .signedOut, .userDeleted:
-                    break
+                    await self.stopChatUnreadRealtime()
                 case .passwordRecovery:
-                    break
+                    await self.stopChatUnreadRealtime()
                 default:
                     break
                 }

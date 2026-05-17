@@ -44,10 +44,11 @@ func editableExercisesFromStrengthTemplateDetail(
     let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
     return exs.map { ex in
         let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
-        let mappedSets: [EditableSet] = setsSorted.map { s in
+        let mappedSets: [EditableSet] = setsSorted.enumerated().map { idx, s in
             let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
             return EditableSet(
                 setNumber: s.set_number,
+                orderIndex: idx + 1,
                 reps: s.reps,
                 weightKg: s.weight_kg.map { String($0) } ?? "",
                 rpe: s.rpe.map { String($0) } ?? "",
@@ -218,6 +219,11 @@ struct StrengthRoutineExercisesEditorBlock: View {
                     restSec: restBinding(i, s),
                     segments: segmentsBinding(i, s),
                     showDelete: exercises[i].sets.count > 1,
+                    showReorder: exercises[i].sets.count > 1,
+                    canMoveUp: s > 0,
+                    canMoveDown: s < exercises[i].sets.count - 1,
+                    onMoveUp: { moveSet(exerciseIndex: i, setIndex: s, direction: -1) },
+                    onMoveDown: { moveSet(exerciseIndex: i, setIndex: s, direction: 1) },
                     onDelete: { removeSet(exerciseIndex: i, setIndex: s) }
                 )
             }
@@ -405,7 +411,7 @@ struct StrengthRoutineExercisesEditorBlock: View {
 
     private func appendSet(exerciseIndex i: Int) {
         replaceExercise(i) { ex in
-            ex.sets.append(EditableSet(setNumber: 1))
+            ex.sets.append(EditableSet(setNumber: 1, orderIndex: ex.sets.count + 1))
         }
     }
 
@@ -413,6 +419,22 @@ struct StrengthRoutineExercisesEditorBlock: View {
         replaceExercise(i) { ex in
             guard ex.sets.indices.contains(s) else { return }
             ex.sets.remove(at: s)
+            renumberSetOrder(&ex)
+        }
+    }
+
+    private func moveSet(exerciseIndex i: Int, setIndex s: Int, direction: Int) {
+        replaceExercise(i) { ex in
+            let newIndex = s + direction
+            guard ex.sets.indices.contains(s), ex.sets.indices.contains(newIndex) else { return }
+            ex.sets.swapAt(s, newIndex)
+            renumberSetOrder(&ex)
+        }
+    }
+
+    private func renumberSetOrder(_ ex: inout EditableExercise) {
+        for idx in ex.sets.indices {
+            ex.sets[idx].orderIndex = idx + 1
         }
     }
 }

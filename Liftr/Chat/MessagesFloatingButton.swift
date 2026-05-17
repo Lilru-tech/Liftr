@@ -23,7 +23,6 @@ struct MessagesFloatingButton: View {
     @State private var dragOffset: CGSize = .zero
     @State private var dragging: Bool = false
     @State private var presentInbox: Bool = false
-    @State private var unreadTotal: Int = 0
     @State private var deepLinkConversation: DeepLinkPayload?
 
     private struct DeepLinkPayload: Identifiable, Hashable {
@@ -82,10 +81,9 @@ struct MessagesFloatingButton: View {
             }
             .gradientBG()
         }
-        .task { await refreshUnread() }
         .onChange(of: presentInbox) { _, isShown in
             if isShown { chatFabDragHintSeen = true }
-            if !isShown { Task { await refreshUnread() } }
+            if !isShown { Task { await app.refreshUnreadChatMessagesCount() } }
         }
     }
 
@@ -169,8 +167,8 @@ struct MessagesFloatingButton: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Open messages")
 
-            if unreadTotal > 0 {
-                Text(unreadTotal > 99 ? "99+" : "\(unreadTotal)")
+            if app.unreadChatMessagesCount > 0 {
+                Text(app.unreadChatMessagesCount > 99 ? "99+" : "\(app.unreadChatMessagesCount)")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
@@ -199,13 +197,4 @@ struct MessagesFloatingButton: View {
         }
     }
 
-    @MainActor
-    private func refreshUnread() async {
-        do {
-            let list = try await ChatService.fetchConversations(limit: 100)
-            self.unreadTotal = list.reduce(0) { $0 + $1.unread_count }
-        } catch {
-            self.unreadTotal = 0
-        }
-    }
 }

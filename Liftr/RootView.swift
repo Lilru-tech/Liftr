@@ -8,6 +8,7 @@ struct RootView: View {
     @State private var showAuthAlert = false
     @State private var updatePrompt: AppUpdatePrompt?
     @State private var didRunUpdateCheck = false
+    @State private var territoryBackfillStartedForUserId: UUID?
     
     var body: some View {
         TabView(selection: $app.selectedTab) {
@@ -46,6 +47,12 @@ struct RootView: View {
                     }
                 }
                 .badge(app.unreadNotificationsCount)
+        }
+        .task(id: app.userId) {
+            guard let userId = app.userId else { return }
+            guard territoryBackfillStartedForUserId != userId else { return }
+            territoryBackfillStartedForUserId = userId
+            await TerritoryCaptureClient.backfillHistoricalCaptures()
         }
         .overlay(alignment: .top) {
             if let message = app.territoryCaptureToast {

@@ -3,6 +3,36 @@ import Testing
 @testable import Liftr
 
 struct StrengthWorkoutSaveRegressionTests {
+    @Test func strengthExerciseSaveInputEncodesOrderIndex() throws {
+        let input = StrengthWorkoutExerciseSaveInput(
+            workout_exercise_id: 10,
+            exercise_id: 20,
+            order_index: 2,
+            notes: nil,
+            custom_name: nil,
+            sets: []
+        )
+        let data = try JSONEncoder().encode(input)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["order_index"] as? Int == 2)
+    }
+
+    @Test func strengthSetSaveInputEncodesOrderIndexSeparatelyFromSetNumber() throws {
+        let input = StrengthWorkoutSetSaveInput(
+            set_number: 3,
+            order_index: 1,
+            reps: 8,
+            weight_kg: 80,
+            rpe: nil,
+            rest_sec: nil,
+            weight_segments: nil
+        )
+        let data = try JSONEncoder().encode(input)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["set_number"] as? Int == 3)
+        #expect(json["order_index"] as? Int == 1)
+    }
+
     @Test func collapseLegacyIdenticalSets() {
         let lines = [
             StrengthWorkoutFinishCollapse.Line(

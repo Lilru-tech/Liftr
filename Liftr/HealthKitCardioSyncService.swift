@@ -28,12 +28,7 @@ final class HealthKitCardioSyncService {
     }
 
     var isSyncEnabled: Bool {
-        get {
-            if UserDefaults.standard.object(forKey: syncEnabledKey) == nil {
-                return true
-            }
-            return UserDefaults.standard.bool(forKey: syncEnabledKey)
-        }
+        get { UserDefaults.standard.bool(forKey: syncEnabledKey) }
         set { UserDefaults.standard.set(newValue, forKey: syncEnabledKey) }
     }
 
@@ -41,14 +36,15 @@ final class HealthKitCardioSyncService {
         UserDefaults.standard.object(forKey: lastSyncAtKey) as? Date
     }
 
-    func enableBackgroundSync() async throws {
+    @discardableResult
+    func enableBackgroundSync() async throws -> HealthKitImportSummary {
         guard isHealthDataAvailable else { throw HealthKitCardioSyncError.healthDataNotAvailable }
         try await HealthKitCardioImportService.shared.requestReadAuthorization()
         #if targetEnvironment(simulator)
-        await activateCardioSyncFromHealthKit()
+        return await activateCardioSyncFromHealthKit()
         #else
         try await enableBackgroundDelivery()
-        await activateCardioSyncFromHealthKit()
+        return await activateCardioSyncFromHealthKit()
         #endif
     }
 
@@ -70,7 +66,6 @@ final class HealthKitCardioSyncService {
     @discardableResult
     func syncWorkouts(from fromDate: Date, to toDate: Date) async -> HealthKitImportSummary {
         guard isSyncEnabled else { return HealthKitImportSummary() }
-        guard isWorkoutReadAuthorized else { return HealthKitImportSummary() }
         guard let userId = SupabaseManager.shared.client.auth.currentUser?.id else {
             return HealthKitImportSummary()
         }
@@ -87,20 +82,15 @@ final class HealthKitCardioSyncService {
 
     func handleAppForegroundIfNeeded() async {
         guard isSyncEnabled else { return }
-        guard isWorkoutReadAuthorized else { return }
         startObserverIfNeeded()
         _ = await syncRecentWorkouts()
     }
 
-    private var isWorkoutReadAuthorized: Bool {
-        store.authorizationStatus(for: HKObjectType.workoutType()) == .sharingAuthorized
-    }
-
-    private func activateCardioSyncFromHealthKit() async {
+    private func activateCardioSyncFromHealthKit() async -> HealthKitImportSummary {
         isSyncEnabled = true
         startObserverIfNeeded()
         let from = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date()
-        _ = await syncWorkouts(from: from, to: Date())
+        return await syncWorkouts(from: from, to: Date())
     }
 
     #if !targetEnvironment(simulator)

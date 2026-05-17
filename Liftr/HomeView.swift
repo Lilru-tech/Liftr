@@ -151,6 +151,7 @@ struct HomeView: View {
     private let pageSize = 30
     @State private var canLoadMore = true
     @State private var isLoadingPage = false
+    @State private var feedLoadGeneration = UUID()
     @State private var selectedItem: FeedItem?
     @State private var _selToken = UUID()
     @State private var initialLoading = false
@@ -185,6 +186,12 @@ struct HomeView: View {
     
     private let highlightsInsertIndex = 5
     private let scrollToTopThreshold: CGFloat = 120
+
+    private struct FeedPageRequest {
+        let page: Int
+        let generation: UUID
+        let filter: KindFilter
+    }
     
     private func metricChip(_ text: String) -> some View {
         Text(text)
@@ -391,8 +398,7 @@ struct HomeView: View {
                             .listRowBackground(Color.clear)
                     }
                     
-                    ForEach(feed.indices, id: \.self) { i in
-                        let item = feed[i]
+                    ForEach(Array(feed.enumerated()), id: \.element.id) { i, item in
                         let firstOfDay = i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at)
                         
                         WorkoutFeedCard(
@@ -623,68 +629,20 @@ struct HomeView: View {
         }
     }
     
-    private func reloadAll() async {
-        print("[Home.reloadAll] start filter=\(filter.rawValue)")
-        if let session = try? await SupabaseManager.shared.client.auth.session {
-            if app.userId != session.user.id {
-                await MainActor.run { app.userId = session.user.id }
-            }
-        }
-        
-        guard let me = app.userId else {
-            await reloadGuestHome()
-            return
-        }
-        
-        await MainActor.run {
-            initialLoading = true
-            error = nil
-            page = 0
-            canLoadMore = true
-            isLoadingPage = false
-            feed.removeAll()
-        }
-        
-        do {
-            let fRes = try await SupabaseManager.shared.client
-                .from("follows")
-                .select("followee_id")
-                .eq("follower_id", value: me.uuidString)
-                .limit(500)
-                .execute()
-            let fRows = try JSONDecoder.supabase().decode([FollowRow].self, from: fRes.data)
-            let ids = fRows.map { $0.followee_id }
-            await MainActor.run { self.followees = ids }
-            await loadPage(reset: true)
-            try await ensureProfilesAvailable(for: ([me] + ids))
-            async let t: Void = loadTodaySummary()
-            async let w: Void = loadWeekSummaryAndLeaderboard()
-            async let s: Void = loadStreak()
-            async let r: Void = loadRecentPRs()
-            async let m: Void = loadMonthlySummary()
-            async let i: Void = loadInsights()
-            _ = await (t, w, s, r, m, i)
-            
-        } catch {
-            await MainActor.run {
-                self.error = error.localizedDescription
-                self.feed = []
-            }
-        }
-        
-        await MainActor.run { initialLoading = false }
-    }
-    
-    private func reloadGuestHome() async {
-        await MainActor.run {
+    @MainActor
+    private func beginFeedReload(clearGuestHome: Bool) -> UUID {
+        let generation = UUID()
+        feedLoadGeneration = generation
+        initialLoading = true
+        error = nil
+        page = 0
+        canLoadMore = true
+        isLoadingPage = false
+        feed.removeAll()
+
+        if clearGuestHome {
             followees = []
-            initialLoading = true
-            error = nil
             showGuestSignInAlert = false
-            page = 0
-            canLoadMore = true
-            isLoadingPage = false
-            feed.removeAll()
             todayCount = 0
             todayMinutes = 0
             todayPoints = 0
@@ -701,46 +659,191 @@ struct HomeView: View {
             bestSportScore = 0
             bestSportLabel = ""
         }
-        await loadGuestFeedPage(reset: true)
-        await MainActor.run { initialLoading = false }
+
+        return generation
     }
-    
-    private func loadGuestFeedPage(reset: Bool) async {
+
+    @MainActor
+    private func beginFeedPageLoad(reset: Bool, generation requestedGeneration: UUID?) -> FeedPageRequest? {
         if reset {
-            await MainActor.run {
-                page = 0
-                canLoadMore = true
-                feed.removeAll()
+            feedLoadGeneration = requestedGeneration ?? UUID()
+            page = 0
+            canLoadMore = true
+            isLoadingPage = false
+            feed.removeAll()
+        } else if let requestedGeneration, !HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: requestedGeneration
+        ) {
+            return nil
+        }
+
+        guard canLoadMore, !isLoadingPage else { return nil }
+
+        let request = FeedPageRequest(
+            page: page,
+            generation: requestedGeneration ?? feedLoadGeneration,
+            filter: filter
+        )
+        isLoadingPage = true
+        return request
+    }
+
+    @MainActor
+    private func finishFeedPageLoad(_ request: FeedPageRequest) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: request.generation
+        ) else { return }
+
+        isLoadingPage = false
+    }
+
+    @MainActor
+    private func applyFeedPage(items: [FeedItem], fetchedCount: Int, request: FeedPageRequest) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: request.generation
+        ) else {
+            return
+        }
+
+        feed = HomeFeedMerge.merge(
+            existing: feed,
+            incoming: items,
+            id: { $0.id },
+            startedAt: { $0.workout.started_at }
+        )
+        canLoadMore = fetchedCount == pageSize
+        if canLoadMore {
+            page = request.page + 1
+        }
+    }
+
+    @MainActor
+    private func failFeedPageLoad(_ error: Error, request: FeedPageRequest, clearFeed: Bool) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: request.generation
+        ) else { return }
+
+        if clearFeed {
+            self.error = error.localizedDescription
+            feed = []
+        }
+        canLoadMore = false
+    }
+
+    @MainActor
+    private func completeFeedReload(_ generation: UUID) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: generation
+        ) else { return }
+
+        initialLoading = false
+    }
+
+    @MainActor
+    private func failFeedReload(_ error: Error, generation: UUID) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: generation
+        ) else { return }
+
+        self.error = error.localizedDescription
+        feed = []
+        initialLoading = false
+    }
+
+    private func reloadAll() async {
+        print("[Home.reloadAll] start filter=\(filter.rawValue)")
+        if let session = try? await SupabaseManager.shared.client.auth.session {
+            if app.userId != session.user.id {
+                await MainActor.run { app.userId = session.user.id }
             }
         }
         
-        guard canLoadMore, !isLoadingPage else { return }
-        
-        await MainActor.run {
-            isLoadingPage = true
-            print("[Home.loadGuestFeedPage] isLoadingPage=true reset=\(reset) page=\(page)")
+        guard let me = app.userId else {
+            await reloadGuestHome()
+            return
         }
+        
+        let generation = await MainActor.run {
+            beginFeedReload(clearGuestHome: false)
+        }
+        
+        do {
+            let fRes = try await SupabaseManager.shared.client
+                .from("follows")
+                .select("followee_id")
+                .eq("follower_id", value: me.uuidString)
+                .limit(500)
+                .execute()
+            let fRows = try JSONDecoder.supabase().decode([FollowRow].self, from: fRes.data)
+            let ids = fRows.map { $0.followee_id }
+            await MainActor.run {
+                if HomeFeedMerge.shouldApplyResult(
+                    currentGeneration: feedLoadGeneration,
+                    resultGeneration: generation
+                ) {
+                    self.followees = ids
+                }
+            }
+            await loadPage(reset: false, generation: generation)
+            try await ensureProfilesAvailable(for: ([me] + ids))
+            async let t: Void = loadTodaySummary()
+            async let w: Void = loadWeekSummaryAndLeaderboard()
+            async let s: Void = loadStreak()
+            async let r: Void = loadRecentPRs()
+            async let m: Void = loadMonthlySummary()
+            async let i: Void = loadInsights()
+            _ = await (t, w, s, r, m, i)
+            
+        } catch {
+            await MainActor.run { failFeedReload(error, generation: generation) }
+        }
+        
+        await MainActor.run { completeFeedReload(generation) }
+    }
+    
+    private func reloadGuestHome() async {
+        let generation = await MainActor.run {
+            beginFeedReload(clearGuestHome: true)
+        }
+        await loadGuestFeedPage(reset: false, generation: generation)
+        await MainActor.run { completeFeedReload(generation) }
+    }
+    
+    private func loadGuestFeedPage(reset: Bool, generation: UUID? = nil) async {
+        let request = await MainActor.run {
+            beginFeedPageLoad(reset: reset, generation: generation)
+        }
+        guard let request else {
+            return
+        }
+        print("[Home.loadGuestFeedPage] isLoadingPage=true reset=\(reset) page=\(request.page)")
         
         defer {
             Task { await MainActor.run {
-                isLoadingPage = false
+                finishFeedPageLoad(request)
                 print("[Home.loadGuestFeedPage] isLoadingPage=false")
             }}
         }
         
         do {
-            print("[Home.loadGuestFeedPage] fetching page=\(page) pageSize=\(pageSize)")
+            print("[Home.loadGuestFeedPage] fetching page=\(request.page) pageSize=\(pageSize)")
             
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
                 .from("workouts")
                 .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
                 .eq("state", value: "published")
             
-            if filter != .all {
-                q = q.eq("kind", value: filter.rawValue.lowercased())
+            if request.filter != KindFilter.all {
+                q = q.eq("kind", value: request.filter.rawValue.lowercased())
             }
             
-            let from = page * pageSize
+            let from = request.page * pageSize
             let to = from + pageSize - 1
             
             let wRes = try await q
@@ -819,50 +922,38 @@ struct HomeView: View {
             }
             
             await MainActor.run {
-                self.feed.append(contentsOf: items)
-                self.feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
-                self.canLoadMore = workouts.count == pageSize
-                if self.canLoadMore { self.page += 1 }
+                applyFeedPage(items: items, fetchedCount: workouts.count, request: request)
                 print("[Home.loadGuestFeedPage] appended items=\(items.count) newFeedCount=\(self.feed.count) canLoadMore=\(self.canLoadMore) nextPage=\(self.page)")
             }
         } catch {
             await MainActor.run {
-                self.error = error.localizedDescription
-                self.feed = []
-                self.canLoadMore = false
+                failFeedPageLoad(error, request: request, clearFeed: true)
                 print("[Home.loadGuestFeedPage] error=\(error)")
             }
         }
     }
     
-    private func loadPage(reset: Bool) async {
+    private func loadPage(reset: Bool, generation: UUID? = nil) async {
         guard let me = app.userId else { return }
         
-        if reset {
-            await MainActor.run {
-                page = 0
-                canLoadMore = true
-                feed.removeAll()
-            }
+        let request = await MainActor.run {
+            beginFeedPageLoad(reset: reset, generation: generation)
         }
-        
-        guard canLoadMore, !isLoadingPage else { return }
-        
-        await MainActor.run {
-            isLoadingPage = true
-            print("[Home.loadPage] isLoadingPage=true reset=\(reset) page=\(page) canLoadMore=\(canLoadMore)")
+        guard let request else {
+            return
         }
+        print("[Home.loadPage] isLoadingPage=true reset=\(reset) page=\(request.page) canLoadMore=\(canLoadMore)")
         
         defer {
             Task { await MainActor.run {
-                isLoadingPage = false
+                finishFeedPageLoad(request)
                 print("[Home.loadPage] isLoadingPage=false")
             }}
         }
         
         do {
             let allIds = [me] + followees
-            print("[Home.loadPage] fetching page=\(page) pageSize=\(pageSize) userIds=\(allIds.count)")
+            print("[Home.loadPage] fetching page=\(request.page) pageSize=\(pageSize) userIds=\(allIds.count)")
             
             let idsCSV = allIds.map { $0.uuidString }.joined(separator: ",")
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
@@ -870,12 +961,12 @@ struct HomeView: View {
                 .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
                 .or("user_id.eq.\(me.uuidString),and(user_id.in.(\(idsCSV)),state.neq.planned)")
             
-            if filter != .all {
-                q = q.eq("kind", value: filter.rawValue.lowercased())
-                print("[Home.loadPage] filter=\(filter.rawValue.lowercased())")
+            if request.filter != KindFilter.all {
+                q = q.eq("kind", value: request.filter.rawValue.lowercased())
+                print("[Home.loadPage] filter=\(request.filter.rawValue.lowercased())")
             }
             
-            let from = page * pageSize
+            let from = request.page * pageSize
             let to   = from + pageSize - 1
             
             let wRes = try await q
@@ -959,15 +1050,12 @@ struct HomeView: View {
             }
             
             await MainActor.run {
-                self.feed.append(contentsOf: items)
-                self.feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
-                self.canLoadMore = workouts.count == pageSize
-                if canLoadMore { page += 1 }
+                applyFeedPage(items: items, fetchedCount: workouts.count, request: request)
                 print("[Home.loadPage] appended items=\(items.count) newFeedCount=\(feed.count) canLoadMore=\(canLoadMore) nextPage=\(page)")
             }
         } catch {
             await MainActor.run {
-                self.canLoadMore = false
+                failFeedPageLoad(error, request: request, clearFeed: false)
                 print("[Home.loadPage] error=\(error) → canLoadMore=false")
             }
         }

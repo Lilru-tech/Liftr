@@ -219,6 +219,7 @@ struct EditWorkoutMetaSheet: View {
         let id = UUID()
         var setId: Int?
         var setNumber: Int
+        var orderIndex: Int = 1
         var reps: Int?
         var weightKg: String = ""
         var rpe: String = ""
@@ -230,6 +231,7 @@ struct EditWorkoutMetaSheet: View {
         let id = UUID()
         let workoutExerciseId: Int
         var exerciseId: Int
+        var orderIndex: Int
         var name: String
         var alias: String
         var notes: String
@@ -665,6 +667,13 @@ struct EditWorkoutMetaSheet: View {
                 if s_items.isEmpty && !loading {
                     Text("No exercises found").foregroundStyle(.secondary)
                 } else {
+                    if s_items.count > 1 {
+                        Text("Use the arrows on each exercise to change order.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     ForEach(s_items.indices, id: \.self) { i in
                         if i != s_items.startIndex { Divider().padding(.vertical, 6) }
                         FieldRowPlain(nil) {
@@ -712,7 +721,16 @@ struct EditWorkoutMetaSheet: View {
                                 restSec: $s_items[i].sets[s].restSec,
                                 segments: $s_items[i].sets[s].segments,
                                 showDelete: s_items[i].sets.count > 1,
-                                onDelete: { s_items[i].sets.remove(at: s) }
+                                showReorder: s_items[i].sets.count > 1,
+                                canMoveUp: s > 0,
+                                canMoveDown: s < s_items[i].sets.count - 1,
+                                onMoveUp: { moveSetInEditor(exerciseIndex: i, setIndex: s, direction: -1) },
+                                onMoveDown: { moveSetInEditor(exerciseIndex: i, setIndex: s, direction: 1) },
+                                onDelete: {
+                                    guard s_items.indices.contains(i), s_items[i].sets.indices.contains(s) else { return }
+                                    s_items[i].sets.remove(at: s)
+                                    renumberSetOrderInEditor(exerciseIndex: i)
+                                }
                             )
                         }
                         
@@ -721,7 +739,7 @@ struct EditWorkoutMetaSheet: View {
                             HStack {
                                 Button {
                                     s_items[i].sets.append(
-                                        SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])
+                                        SEditableSet(setId: nil, setNumber: 1, orderIndex: s_items[i].sets.count + 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])
                                     )
                                 } label: { Label("Add set", systemImage: "plus.circle") }
                                     .buttonStyle(.borderless)
@@ -729,10 +747,42 @@ struct EditWorkoutMetaSheet: View {
                                 Spacer()
                                 
                                 if s_items.count > 1 {
+                                    HStack(spacing: 2) {
+                                        Button {
+                                            moveStrengthExerciseInEditor(from: i, direction: -1)
+                                        } label: {
+                                            Image(systemName: "chevron.up")
+                                                .font(.subheadline.weight(.semibold))
+                                                .frame(width: 36, height: 32)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(i == 0)
+                                        .opacity(i == 0 ? 0.35 : 1)
+
+                                        Button {
+                                            moveStrengthExerciseInEditor(from: i, direction: 1)
+                                        } label: {
+                                            Image(systemName: "chevron.down")
+                                                .font(.subheadline.weight(.semibold))
+                                                .frame(width: 36, height: 32)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(i == s_items.count - 1)
+                                        .opacity(i == s_items.count - 1 ? 0.35 : 1)
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityLabel("Reorder exercise")
+
                                     Button(role: .destructive) {
                                         Task {
                                             await deleteExercise(s_items[i].workoutExerciseId)
-                                            s_items.remove(at: i)
+                                            if s_items.indices.contains(i) {
+                                                s_items.remove(at: i)
+                                                renumberStrengthExerciseOrder()
+                                            }
                                         }
                                     } label: {
                                         HStack(spacing: 6) {
@@ -1325,30 +1375,45 @@ struct EditWorkoutMetaSheet: View {
                 let exIds = exWire.map { $0.id }
                 var setsByEx: [Int: [SEditableSet]] = [:]
                 if !exIds.isEmpty {
-                    let sRes = try await SupabaseManager.shared.client
-                        .from("exercise_sets")
-                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
-                        .in("workout_exercise_id", values: exIds)
-                        .order("set_number", ascending: true)
-                        .order("id", ascending: true)
-                        .execute()
-                    
                     struct SetWire: Decodable {
                         let id: Int
                         let workout_exercise_id: Int
                         let set_number: Int
+                        let order_index: Int?
                         let reps: Int?
                         let weight_kg: Decimal?
                         let rpe: Decimal?
                         let rest_sec: Int?
                         let weight_segments: [StrengthWeightSegWire]?
                     }
-                    let sWire = try decoder.decode([SetWire].self, from: sRes.data)
+                    let sData: Data
+                    do {
+                        sData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("order_index", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    } catch {
+                        sData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("set_number", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    }
+                    let sWire = try decoder.decode([SetWire].self, from: sData)
                     for s in sWire {
+                        let nextOrder = setsByEx[s.workout_exercise_id, default: []].count + 1
                         let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                         let editable = SEditableSet(
                             setId: s.id,
                             setNumber: s.set_number,
+                            orderIndex: s.order_index ?? nextOrder,
                             reps: s.reps,
                             weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                             rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
@@ -1363,10 +1428,11 @@ struct EditWorkoutMetaSheet: View {
                     SEditableExercise(
                         workoutExerciseId: ex.id,
                         exerciseId: ex.exercise_id,
+                        orderIndex: ex.order_index,
                         name: ex.exercises?.name ?? "Exercise",
                         alias: ex.custom_name ?? "",
                         notes: ex.notes ?? "",
-                        sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]]
+                        sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, orderIndex: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]]
                     )
                 }
                 await MainActor.run { s_items = mapped }
@@ -1396,7 +1462,8 @@ struct EditWorkoutMetaSheet: View {
                         !s.rpe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                         s.restSec != nil
                 }
-                .compactMap { s -> StrengthWorkoutSetSaveInput? in
+                .enumerated()
+                .compactMap { idx, s -> StrengthWorkoutSetSaveInput? in
                     let ws: [StrengthWeightSegWire]? = {
                         guard s.segments.count >= 2 else { return nil }
                         var out: [StrengthWeightSegWire] = []
@@ -1415,6 +1482,7 @@ struct EditWorkoutMetaSheet: View {
                     }()
                     return StrengthWorkoutSetSaveInput(
                         set_number: max(1, s.setNumber),
+                        order_index: idx + 1,
                         reps: firstRep,
                         weight_kg: firstKg,
                         rpe: s.rpe.asDouble,
@@ -1425,6 +1493,7 @@ struct EditWorkoutMetaSheet: View {
             return StrengthWorkoutExerciseSaveInput(
                 workout_exercise_id: ex.workoutExerciseId,
                 exercise_id: ex.exerciseId,
+                order_index: ex.orderIndex,
                 notes: ex.notes.trimmedOrNil,
                 custom_name: ex.alias.trimmedOrNil,
                 sets: sets
@@ -1692,10 +1761,11 @@ struct EditWorkoutMetaSheet: View {
                     SEditableExercise(
                         workoutExerciseId: inserted.id,
                         exerciseId: Int(ex.id),
+                        orderIndex: nextOrder,
                         name: ex.name,
                         alias: "",
                         notes: "",
-                        sets: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]
+                        sets: [SEditableSet(setId: nil, setNumber: 1, orderIndex: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]
                     )
                 )
             }
@@ -1719,6 +1789,40 @@ struct EditWorkoutMetaSheet: View {
                 .execute()
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+
+    private func moveStrengthExerciseInEditor(from index: Int, direction: Int) {
+        var list = s_items
+        let newIndex = index + direction
+        guard list.indices.contains(index), list.indices.contains(newIndex) else { return }
+        list.swapAt(index, newIndex)
+        for idx in list.indices {
+            list[idx].orderIndex = idx + 1
+        }
+        s_items = list
+    }
+
+    private func renumberStrengthExerciseOrder() {
+        for idx in s_items.indices {
+            s_items[idx].orderIndex = idx + 1
+        }
+    }
+
+    private func moveSetInEditor(exerciseIndex: Int, setIndex: Int, direction: Int) {
+        let newIndex = setIndex + direction
+        guard s_items.indices.contains(exerciseIndex),
+              s_items[exerciseIndex].sets.indices.contains(setIndex),
+              s_items[exerciseIndex].sets.indices.contains(newIndex)
+        else { return }
+        s_items[exerciseIndex].sets.swapAt(setIndex, newIndex)
+        renumberSetOrderInEditor(exerciseIndex: exerciseIndex)
+    }
+
+    private func renumberSetOrderInEditor(exerciseIndex: Int) {
+        guard s_items.indices.contains(exerciseIndex) else { return }
+        for idx in s_items[exerciseIndex].sets.indices {
+            s_items[exerciseIndex].sets[idx].orderIndex = idx + 1
         }
     }
     

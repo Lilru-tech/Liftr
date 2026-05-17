@@ -386,6 +386,7 @@ final class ChatThreadModel: ObservableObject {
         guard last.id > 0 else { return }
         do {
             try await ChatService.markRead(conversationId: conversationId, lastMessageId: last.id)
+            await AppState.shared.refreshUnreadChatMessagesCount()
         } catch {
             #if DEBUG
             print("[Chat] markRead error:", error)

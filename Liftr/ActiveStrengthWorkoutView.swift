@@ -82,6 +82,7 @@ struct ActiveStrengthWorkoutView: View {
         let id: Int
         let workout_exercise_id: Int
         let set_number: Int
+        let order_index: Int?
         let reps: Int?
         let weight_kg: Decimal?
         let rpe: Decimal?
@@ -91,7 +92,7 @@ struct ActiveStrengthWorkoutView: View {
         let segmentsInRow: Int
 
         enum CodingKeys: String, CodingKey {
-            case id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments
+            case id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments
         }
 
         init(from decoder: Decoder) throws {
@@ -99,6 +100,7 @@ struct ActiveStrengthWorkoutView: View {
             id = try c.decode(Int.self, forKey: .id)
             workout_exercise_id = try c.decode(Int.self, forKey: .workout_exercise_id)
             set_number = try c.decode(Int.self, forKey: .set_number)
+            order_index = try c.decodeIfPresent(Int.self, forKey: .order_index)
             reps = try c.decodeIfPresent(Int.self, forKey: .reps)
             weight_kg = try c.decodeIfPresent(Decimal.self, forKey: .weight_kg)
             rpe = try c.decodeIfPresent(Decimal.self, forKey: .rpe)
@@ -113,6 +115,7 @@ struct ActiveStrengthWorkoutView: View {
             id: Int,
             workout_exercise_id: Int,
             set_number: Int,
+            order_index: Int? = nil,
             reps: Int?,
             weight_kg: Decimal?,
             rpe: Decimal?,
@@ -124,6 +127,7 @@ struct ActiveStrengthWorkoutView: View {
             self.id = id
             self.workout_exercise_id = workout_exercise_id
             self.set_number = set_number
+            self.order_index = order_index
             self.reps = reps
             self.weight_kg = weight_kg
             self.rpe = rpe
@@ -3406,7 +3410,7 @@ struct ActiveStrengthWorkoutView: View {
     ) -> [StrengthProgramItem]? {
         var items: [StrengthProgramItem] = []
         for ex in exList.sorted(by: { $0.order_index < $1.order_index }) {
-            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            let templateSets = orderedSetRows(setsMap[ex.id] ?? [])
             let sets: [StrengthProgramSet]
             if !templateSets.isEmpty {
                 sets = templateSets.map { s in
@@ -3456,23 +3460,33 @@ struct ActiveStrengthWorkoutView: View {
         return items.isEmpty ? nil : items
     }
 
+    private func orderedSetRows(_ rows: [SetRow]) -> [SetRow] {
+        rows.sorted { a, b in
+            let ao = a.order_index ?? Int.max
+            let bo = b.order_index ?? Int.max
+            if ao != bo { return ao < bo }
+            return a.id < b.id
+        }
+    }
+
     private func editableExercisesForRoutineUpdateFromHost(
         exList: [ExerciseRow],
         setsMap: [Int: [SetRow]],
         performedMap: [Int: [PerformedSet]]
     ) -> [EditableExercise] {
         exList.sorted(by: { $0.order_index < $1.order_index }).map { ex in
-            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            let templateSets = orderedSetRows(setsMap[ex.id] ?? [])
             var ee = EditableExercise()
             ee.exerciseId = ex.exercise_id
             ee.exerciseName = ex.custom_name ?? ""
             ee.orderIndex = ex.order_index
             ee.notes = ex.notes ?? ""
             if !templateSets.isEmpty {
-                ee.sets = templateSets.map { s in
+                ee.sets = templateSets.enumerated().map { idx, s in
                     let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                     return EditableSet(
                         setNumber: s.set_number,
+                        orderIndex: s.order_index ?? idx + 1,
                         reps: s.reps,
                         weightKg: activeDecimalToWeightField(s.weight_kg),
                         rpe: activeDecimalToRpeField(s.rpe),
@@ -3487,6 +3501,7 @@ struct ActiveStrengthWorkoutView: View {
                     let segDraft = (p.weight_segments ?? []).asEditorSegmentsIfDropSet()
                     return EditableSet(
                         setNumber: i + 1,
+                        orderIndex: i + 1,
                         reps: p.reps,
                         weightKg: activeDecimalToWeightField(p.weight_kg),
                         rpe: activeDecimalToRpeField(p.rpe),
@@ -4150,14 +4165,27 @@ struct ActiveStrengthWorkoutView: View {
         var byEx: [Int: [SetRow]] = [:]
 
         if !ids.isEmpty {
-            let sRes = try await SupabaseManager.shared.client
-                .from("exercise_sets")
-                .select("*")
-                .in("workout_exercise_id", values: ids)
-                .order("set_number", ascending: true)
-                .order("id", ascending: true)
-                .execute()
-            let sets = try JSONDecoder.supabase().decode([SetRow].self, from: sRes.data)
+            let setData: Data
+            do {
+                setData = try await SupabaseManager.shared.client
+                    .from("exercise_sets")
+                    .select("*")
+                    .in("workout_exercise_id", values: ids)
+                    .order("order_index", ascending: true)
+                    .order("id", ascending: true)
+                    .execute()
+                    .data
+            } catch {
+                setData = try await SupabaseManager.shared.client
+                    .from("exercise_sets")
+                    .select("*")
+                    .in("workout_exercise_id", values: ids)
+                    .order("set_number", ascending: true)
+                    .order("id", ascending: true)
+                    .execute()
+                    .data
+            }
+            let sets = try JSONDecoder.supabase().decode([SetRow].self, from: setData)
             for s in sets {
                 byEx[s.workout_exercise_id, default: []].append(s)
             }

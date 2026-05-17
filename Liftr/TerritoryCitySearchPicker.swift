@@ -64,7 +64,7 @@ struct TerritoryCitySearchSheet: View {
                     if loading && cities.isEmpty {
                         ProgressView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if displayedCities.isEmpty {
+                    } else if recentCities.isEmpty && ownedCities.isEmpty && allCities.isEmpty {
                         ContentUnavailableView.search(text: searchText)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -79,8 +79,10 @@ struct TerritoryCitySearchSheet: View {
                                     cityRows(ownedCities)
                                 }
                             }
-                            Section(recentCities.isEmpty && ownedCities.isEmpty ? "Cities" : "All cities") {
-                                cityRows(displayedCities)
+                            if !allCities.isEmpty {
+                                Section(recentCities.isEmpty && ownedCities.isEmpty ? "Cities" : "All cities") {
+                                    cityRows(allCities)
+                                }
                             }
                         }
                         .listStyle(.plain)
@@ -129,12 +131,27 @@ struct TerritoryCitySearchSheet: View {
     }
 
     private var recentCities: [TerritoryCityRegionRow] {
+        guard searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
         let keys = TerritoryCaptureClient.recentTerritoryCityKeys()
         return keys.compactMap { key in cities.first { $0.city_key == key } }
     }
 
     private var ownedCities: [TerritoryCityRegionRow] {
-        cities.filter { ($0.my_owned_cells ?? 0) > 0 }
+        guard searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let recentKeys = Set(recentCities.compactMap(\.city_key))
+        return cities.filter { city in
+            (city.my_owned_cells ?? 0) > 0 && !recentKeys.contains(city.city_key ?? "")
+        }
+    }
+
+    private var allCities: [TerritoryCityRegionRow] {
+        guard searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return displayedCities
+        }
+        let promotedKeys = Set((recentCities + ownedCities).compactMap(\.city_key))
+        return displayedCities.filter { city in
+            !promotedKeys.contains(city.city_key ?? "")
+        }
     }
 
     @ViewBuilder
@@ -173,10 +190,10 @@ struct TerritoryCitySearchSheet: View {
         )
         await MainActor.run {
             cities = fetched
-            if selectedCityKey == nil {
+            if selectedCityKey == nil || !fetched.contains(where: { $0.city_key == selectedCityKey }) {
                 selectedCityKey = TerritoryCaptureClient.selectedTerritoryCity(
                     from: fetched,
-                    preferredKey: nil,
+                    preferredKey: selectedCityKey,
                     referenceLatitude: referenceLatitude,
                     referenceLongitude: referenceLongitude
                 )?.city_key

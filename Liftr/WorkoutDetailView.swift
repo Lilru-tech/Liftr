@@ -1373,30 +1373,45 @@ struct WorkoutDetailView: View {
                 let exIds = exs.map { $0.id }
                 var setsByEx: [Int: [EditableSet]] = [:]
                 if !exIds.isEmpty {
-                    let setRes = try await SupabaseManager.shared.client
-                        .from("exercise_sets")
-                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
-                        .in("workout_exercise_id", values: exIds)
-                        .order("set_number", ascending: true)
-                        .order("id", ascending: true)
-                        .execute()
-                    
                     struct SetWire: Decodable {
                         let id: Int
                         let workout_exercise_id: Int
                         let set_number: Int
+                        let order_index: Int?
                         let reps: Int?
                         let weight_kg: Decimal?
                         let rpe: Decimal?
                         let rest_sec: Int?
                         let weight_segments: [StrengthWeightSegWire]?
                     }
-                    let sets = try decoder.decode([SetWire].self, from: setRes.data)
+                    let setData: Data
+                    do {
+                        setData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("order_index", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    } catch {
+                        setData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("set_number", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    }
+                    let sets = try decoder.decode([SetWire].self, from: setData)
                     for s in sets {
+                        let nextOrder = setsByEx[s.workout_exercise_id, default: []].count + 1
                         let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                         setsByEx[s.workout_exercise_id, default: []].append(
                             EditableSet(
                                 setNumber: s.set_number,
+                                orderIndex: s.order_index ?? nextOrder,
                                 reps: s.reps,
                                 weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                                 rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
@@ -2087,6 +2102,7 @@ private struct StrengthDetailBlock: View {
         let id: Int
         let workout_exercise_id: Int
         let set_number: Int
+        let order_index: Int?
         let reps: Int?
         let weight_kg: Decimal?
         let rpe: Decimal?
@@ -2123,7 +2139,9 @@ private struct StrengthDetailBlock: View {
                     } else {
                         VStack(spacing: 6) {
                             ForEach(rows.sorted(by: { a, b in
-                                if a.set_number != b.set_number { return a.set_number < b.set_number }
+                                let ao = a.order_index ?? Int.max
+                                let bo = b.order_index ?? Int.max
+                                if ao != bo { return ao < bo }
                                 return a.id < b.id
                             })) { s in
                                 let dropSummary: String? = {
@@ -2131,7 +2149,7 @@ private struct StrengthDetailBlock: View {
                                     return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
                                 }()
                                 HStack(spacing: 12) {
-                                    Text("#\(s.set_number)").font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
+                                    Text("#\(s.order_index ?? s.set_number)").font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
                                     if let ds = dropSummary {
                                         Text(ds).font(.footnote)
                                     } else {
@@ -2205,14 +2223,27 @@ private struct StrengthDetailBlock: View {
             let ids = exRows.map { $0.id }
             var byEx: [Int: [SetRow]] = [:]
             if !ids.isEmpty {
-                let sRes = try await SupabaseManager.shared.client
-                    .from("exercise_sets")
-                    .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
-                    .in("workout_exercise_id", values: ids)
-                    .order("set_number", ascending: true)
-                    .order("id", ascending: true)
-                    .execute()
-                let sets = try JSONDecoder.supabase().decode([SetRow].self, from: sRes.data)
+                let setData: Data
+                do {
+                    setData = try await SupabaseManager.shared.client
+                        .from("exercise_sets")
+                        .select("id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments")
+                        .in("workout_exercise_id", values: ids)
+                        .order("order_index", ascending: true)
+                        .order("id", ascending: true)
+                        .execute()
+                        .data
+                } catch {
+                    setData = try await SupabaseManager.shared.client
+                        .from("exercise_sets")
+                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
+                        .in("workout_exercise_id", values: ids)
+                        .order("set_number", ascending: true)
+                        .order("id", ascending: true)
+                        .execute()
+                        .data
+                }
+                let sets = try JSONDecoder.supabase().decode([SetRow].self, from: setData)
                 for s in sets { byEx[s.workout_exercise_id, default: []].append(s) }
             }
             

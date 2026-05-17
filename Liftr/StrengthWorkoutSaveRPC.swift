@@ -20,6 +20,7 @@ struct StrengthWorkoutFinishLinkedInput: Encodable {
 struct StrengthWorkoutExerciseSaveInput: Encodable {
     let workout_exercise_id: Int
     let exercise_id: Int?
+    let order_index: Int?
     let notes: String?
     let custom_name: String?
     let sets: [StrengthWorkoutSetSaveInput]
@@ -27,6 +28,7 @@ struct StrengthWorkoutExerciseSaveInput: Encodable {
 
 struct StrengthWorkoutSetSaveInput: Encodable {
     let set_number: Int
+    let order_index: Int?
     let reps: Int?
     let weight_kg: Double?
     let rpe: Double?
