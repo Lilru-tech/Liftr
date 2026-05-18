@@ -12,19 +12,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Territories** — During **cardio** workouts, users **capture territories** and can **take over** other users’ territories.
 - **Hyrox routines** — Saved **Hyrox** routines can now be **edited**.
 - **Active strength** — Users can see **all sets** for an exercise in **Active Strength Workout**.
-- **Active strength** — **Quick rest** chips are **personalized** from your recent strength history (last 8 weeks); new users keep the standard presets.
+- **Active strength** — Users can **add** and **delete exercises** from an active strength workout.
+- **Active strength** — Users can move **sets** up and down when adding or editing a workout.
+- **Active strength** — **Recommended resting time** is now personalized for each user from recent strength history; new users keep the standard presets.
 - **Plan** — **Tooltip** for new users explaining how to use **Active Workouts**.
 - **Profile / body weight** — **Import weight data** and view **weight history**.
 - **Apple Health — cardio** — **Auto-import** cardio workouts from Apple Health; a **notification** is sent when a new workout is imported.
 - **Auth** — **Forgot password** flow to recover account access via email.
+- **Notifications** — Users can now **mark all notifications as read**.
+- **Workout actions** — Added a **quick action button** so users can start a workout immediately.
+- **Hyrox** — Users can now add **zones** to Hyrox workouts.
 
 ### Changed
 - **Workouts — saving** — Faster saves when **editing a workout** and when **finishing** an active workout.
 - **Chat — compose** — Polished **message input** UI.
+- **Workout editing** — Exercises can now be moved **up** and **down** with arrows while editing a workout.
+- **Exercise search** — Users can search by **muscle group**; empty results now explain that users can ask Liftr to add the missing exercise to the catalog.
+- **Hyrox active workout** — Improved the active Hyrox workout experience.
+- **Calories** — Adjusted calories calculation.
+- **Comments** — Improved the comment section.
+- **Profile calendar** — Improved the calendar view in the profile.
+- **Workout detail** — Improved Workout Detail View.
 
 ### Fixed
+- **Active strength — Superseries** — Fixed superseries so they work correctly again.
 - **Chat — tooltips** — Tooltip **messages** display correctly again.
+- **Chat — unread count** — Fixed unread chat count so it appears before the user opens the conversations list.
+- **Chat — shared items** — Fixed the last message preview when the last conversation message is a shared item.
 - **Active cardio** — **Distance** is no longer editable in a way that **stops** the live **distance tracker** or allows arbitrary values.
+- **Active strength — Set editor** — Fixed the edit set background color to match the rest of the app and removed the extra **Done** button shown at the bottom.
+- **Home** — Fixed an issue where workouts could appear **twice** in HomeView.
 
 ## [1.12.0] - 2026-05-11
 
