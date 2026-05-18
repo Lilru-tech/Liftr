@@ -1109,11 +1109,6 @@ private fun homeQuickTooltipOffset(
         (raw.y - tooltipHeight / 2f).coerceIn(12f, heightPx - tooltipHeight - 12f).roundToInt()
     )
 }
-        } else {
-            Text("⚡", style = MaterialTheme.typography.titleLarge)
-        }
-    }
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
