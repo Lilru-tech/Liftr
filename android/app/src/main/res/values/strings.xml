@@ -554,6 +554,16 @@
     <string name="home_guest_detail_message">Sign in or create an account to view other people\'s workouts.</string>
     <string name="home_guest_detail_go_profile">Go to Profile</string>
     <string name="home_guest_detail_cancel">Cancel</string>
+    <string name="home_quick_actions_title">Quick actions</string>
+    <string name="home_quick_actions_subtitle">Create a plan and jump into Active Workout.</string>
+    <string name="home_quick_actions_sign_in_message">Sign in or create an account to start a workout.</string>
+    <string name="home_quick_actions_error_title">Could not start workout</string>
+    <string name="home_quick_actions_choose_cardio">Choose cardio</string>
+    <string name="home_quick_actions_choose_sport">Choose sport</string>
+    <string name="home_quick_actions_tooltip">Start a workout from here</string>
+    <string name="home_quick_actions_tooltip_dismiss">Got it</string>
+    <string name="home_quick_actions_loading_title">Starting workout...</string>
+    <string name="home_quick_actions_loading_message">Creating your workout and opening Active Workout.</string>
     <string name="home_feed_you">You</string>
     <string name="home_feed_today">Today</string>
     <string name="home_feed_yesterday">Yesterday</string>

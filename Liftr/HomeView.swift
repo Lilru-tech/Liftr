@@ -12,6 +12,154 @@ private struct ShareItem: Identifiable {
     let image: UIImage
 }
 
+private enum QuickWorkoutStarter {
+    private struct CreatedWorkoutRow: Decodable {
+        let id: Int64
+    }
+
+    static func create(
+        kind: WorkoutKind,
+        userId: UUID,
+        cardioActivity: CardioActivityType? = nil,
+        sportType: SportType? = nil
+    ) async throws -> Int {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let startedAt = iso.string(from: Date())
+
+        switch kind {
+        case .strength:
+            return try await createStrength(userId: userId, startedAt: startedAt)
+        case .cardio:
+            return try await createCardio(
+                userId: userId,
+                startedAt: startedAt,
+                activity: cardioActivity ?? .run
+            )
+        case .sport:
+            return try await createSport(
+                userId: userId,
+                startedAt: startedAt,
+                sport: sportType ?? .padel
+            )
+        }
+    }
+
+    private static func createStrength(userId: UUID, startedAt: String) async throws -> Int {
+        let client = SupabaseManager.shared.client
+        let params = RPCStrengthParams(
+            p_user_id: userId,
+            p_items: [],
+            p_title: nil,
+            p_started_at: startedAt,
+            p_ended_at: nil,
+            p_notes: nil,
+            p_perceived_intensity: WorkoutIntensity.moderate.rawValue,
+            p_state: PublishMode.plan.stateParam
+        )
+        _ = try await client.rpc("create_strength_workout", params: params).execute()
+        return try await fetchLastWorkoutId(userId: userId, kind: .strength)
+    }
+
+    private static func createCardio(
+        userId: UUID,
+        startedAt: String,
+        activity: CardioActivityType
+    ) async throws -> Int {
+        let client = SupabaseManager.shared.client
+        let params = RPCCardioV2Params(
+            p_user_id: userId,
+            p_activity_code: activity.rawValue,
+            p_title: nil,
+            p_started_at: startedAt,
+            p_ended_at: nil,
+            p_notes: nil,
+            p_distance_km: nil,
+            p_duration_sec: nil,
+            p_avg_hr: nil,
+            p_max_hr: nil,
+            p_avg_pace_sec_per_km: nil,
+            p_elevation_gain_m: nil,
+            p_perceived_intensity: WorkoutIntensity.moderate.rawValue,
+            p_state: PublishMode.plan.stateParam,
+            p_stats: try AnyJSON([String: AnyJSON]()),
+            p_healthkit_uuid: nil,
+            p_route_geojson: nil
+        )
+        let res = try await client
+            .rpc("create_cardio_workout_v2", params: RPCCardioV2Wrapper(p: params))
+            .execute()
+        if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
+            return created
+        }
+        return try await fetchLastWorkoutId(userId: userId, kind: .cardio)
+    }
+
+    private static func createSport(
+        userId: UUID,
+        startedAt: String,
+        sport: SportType
+    ) async throws -> Int {
+        let client = SupabaseManager.shared.client
+        let payload: [String: AnyJSON] = [
+            "p_user_id": try AnyJSON(userId.uuidString),
+            "p_sport": try AnyJSON(sport.rawValue),
+            "p_started_at": try AnyJSON(startedAt),
+            "p_match_result": try AnyJSON(MatchResult.unfinished.rawValue),
+            "p_perceived_intensity": try AnyJSON(WorkoutIntensity.moderate.rawValue),
+            "p_state": try AnyJSON(PublishMode.plan.stateParam)
+        ]
+        let res = try await client
+            .rpc(
+                "create_sport_workout_v2",
+                params: RPCSportV2Wrapper(
+                    p: try AnyJSON(payload),
+                    p_stats: try AnyJSON([String: AnyJSON]())
+                )
+            )
+            .execute()
+        if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
+            return created
+        }
+        return try await fetchLastWorkoutId(userId: userId, kind: .sport)
+    }
+
+    private static func fetchLastWorkoutId(userId: UUID, kind: WorkoutKind) async throws -> Int {
+        let res = try await SupabaseManager.shared.client
+            .from("workouts")
+            .select("id")
+            .eq("user_id", value: userId.uuidString)
+            .eq("kind", value: kind.rawValue)
+            .order("id", ascending: false)
+            .limit(1)
+            .execute()
+        let rows = try JSONDecoder.supabase().decode([CreatedWorkoutRow].self, from: res.data)
+        guard let id = rows.first?.id else {
+            throw NSError(
+                domain: "QuickWorkoutStarter",
+                code: 0,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find the created workout."]
+            )
+        }
+        return Int(id)
+    }
+}
+
+private struct QuickActiveWorkout: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case strength
+        case cardio
+        case sport
+    }
+
+    let id: Int
+    let kind: Kind
+}
+
+private enum QuickActionDockEdge: String {
+    case left, right, top, bottom
+}
+
 struct HomeView: View {
     @EnvironmentObject var app: AppState
     @AppStorage("isPremium") private var isPremium = false
@@ -180,9 +328,21 @@ struct HomeView: View {
     @AppStorage("homeCollapseStreak") private var collapseStreak = false
     @AppStorage("homeCollapseInsights") private var collapseInsights = false
     @AppStorage("homeCollapseMonthly") private var collapseMonthly = false
+    @AppStorage("homeQuickActionsHintDismissed") private var quickActionsHintDismissed = false
+    @AppStorage("homeQuickActionsEdge") private var quickActionsEdgeRaw = QuickActionDockEdge.right.rawValue
+    @AppStorage("homeQuickActionsPosition") private var quickActionsPosition = 0.64
     
     @State private var showScrollToTopButton = false
     @State private var showGuestSignInAlert = false
+    @State private var showQuickStartSignInAlert = false
+    @State private var showQuickActions = false
+    @State private var showQuickCardioPicker = false
+    @State private var showQuickSportPicker = false
+    @State private var quickStartBusyKind: WorkoutKind?
+    @State private var quickStartError: String?
+    @State private var quickActiveWorkout: QuickActiveWorkout?
+    @State private var lastQuickActiveWorkoutId: Int?
+    @State private var quickActionsDragLocation: CGPoint?
     
     private let highlightsInsertIndex = 5
     private let scrollToTopThreshold: CGFloat = 120
@@ -504,6 +664,18 @@ struct HomeView: View {
                     .zIndex(99)
             }
         }
+        .overlay {
+            GeometryReader { proxy in
+                quickActionsFloatingOverlay(in: proxy.size)
+            }
+        }
+        .overlay {
+            if quickStartBusyKind != nil {
+                quickStartLoadingOverlay
+                    .transition(.opacity)
+                    .zIndex(200)
+            }
+        }
         .task { await reloadAll() }
         .onChange(of: app.isAuthenticated) { _, _ in
             Task { await reloadAll() }
@@ -514,11 +686,58 @@ struct HomeView: View {
         } message: {
             Text("Sign in or create an account to view other people's workouts.")
         }
+        .alert("Sign in required", isPresented: $showQuickStartSignInAlert) {
+            Button("Go to Profile") { app.selectedTab = .profile }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sign in or create an account to start a workout.")
+        }
+        .alert("Could not start workout", isPresented: Binding(
+            get: { quickStartError != nil },
+            set: { if !$0 { quickStartError = nil } }
+        )) {
+            Button("OK", role: .cancel) { quickStartError = nil }
+        } message: {
+            Text(quickStartError ?? "Unknown error")
+        }
         .navigationDestination(item: $selectedItem) { it in
             WorkoutDetailView(workoutId: it.id, ownerId: it.workout.user_id)
                 .onAppear {
                     print("[Home.navDest.onAppear] showing WorkoutDetailView id=\(it.id) main=\(Thread.isMainThread)")
                 }
+        }
+        .sheet(isPresented: $showQuickCardioPicker) {
+            quickCardioPicker
+        }
+        .sheet(isPresented: $showQuickSportPicker) {
+            quickSportPicker
+        }
+        .fullScreenCover(item: $quickActiveWorkout, onDismiss: {
+            if let lastQuickActiveWorkoutId {
+                Task { await refreshOne(id: lastQuickActiveWorkoutId) }
+            }
+        }) { active in
+            switch active.kind {
+            case .strength:
+                ActiveStrengthWorkoutView(
+                    workoutId: active.id,
+                    dualGuestWorkoutId: nil,
+                    dualGuestAvatarURL: nil,
+                    dualGuest2WorkoutId: nil,
+                    dualGuest2AvatarURL: nil,
+                    dualHostAvatarURL: nil
+                )
+                .environmentObject(app)
+                .gradientBG()
+            case .cardio:
+                ActiveCardioWorkoutView(workoutId: active.id)
+                    .environmentObject(app)
+                    .gradientBG()
+            case .sport:
+                ActiveSportWorkoutView(workoutId: active.id)
+                    .environmentObject(app)
+                    .gradientBG()
+            }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .workoutUpdated).receive(on: RunLoop.main)
@@ -626,6 +845,383 @@ struct HomeView: View {
         .navigationDestination(isPresented: $showCompetitions) {
             CompetitionsHubView()
                 .gradientBG()
+        }
+    }
+
+    private func quickActionsFloatingOverlay(in size: CGSize) -> some View {
+        let tabSize = CGSize(width: 56, height: 52)
+        let point = quickActionsDragLocation ?? quickActionsPoint(in: size, tabSize: tabSize)
+
+        return ZStack(alignment: .topLeading) {
+            if showQuickActions {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                            showQuickActions = false
+                        }
+                    }
+
+                quickActionsMenu(edge: quickActionEdge)
+                    .position(quickActionsMenuPoint(anchor: point, edge: quickActionEdge, in: size))
+                    .transition(.scale(scale: 0.92).combined(with: .opacity))
+                    .zIndex(2)
+            }
+
+            if !quickActionsHintDismissed && !showQuickActions && quickStartBusyKind == nil {
+                quickActionsTooltip(edge: quickActionEdge)
+                    .position(quickActionsTooltipPoint(anchor: point, edge: quickActionEdge, in: size))
+                    .transition(.opacity.combined(with: .move(edge: .trailing)))
+                    .zIndex(1)
+            }
+
+            quickActionsSideTab(in: size, tabSize: tabSize)
+                .position(point)
+                .zIndex(3)
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: showQuickActions)
+        .coordinateSpace(name: "quickActionsOverlay")
+    }
+
+    private var quickStartLoadingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.34)
+                .ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.primary)
+                Text("Starting workout...")
+                    .font(.headline)
+                Text("Creating your workout and opening Active Workout.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, 24)
+            .padding(.horizontal, 22)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(.white.opacity(0.22), lineWidth: 0.8)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 8)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private func quickActionsSideTab(in size: CGSize, tabSize: CGSize) -> some View {
+        Button {
+            if app.userId == nil {
+                showQuickStartSignInAlert = true
+            } else {
+                quickActionsHintDismissed = true
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    showQuickActions.toggle()
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.fill")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.yellow)
+                if quickStartBusyKind != nil {
+                    ProgressView()
+                        .tint(.primary)
+                        .scaleEffect(0.8)
+                }
+            }
+            .padding(.leading, 12)
+            .padding(.trailing, 10)
+            .frame(width: 56, height: 52)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(.white.opacity(0.22), lineWidth: 0.8)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(quickStartBusyKind != nil)
+        .accessibilityLabel("Quick actions")
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10, coordinateSpace: .named("quickActionsOverlay"))
+                .onChanged { value in
+                    showQuickActions = false
+                    quickActionsDragLocation = value.location
+                }
+                .onEnded { value in
+                    let dock = quickActionsDock(for: value.location, in: size, tabSize: tabSize)
+                    quickActionsEdgeRaw = dock.edge.rawValue
+                    quickActionsPosition = dock.position
+                    quickActionsDragLocation = nil
+                    quickActionsHintDismissed = true
+                }
+        )
+    }
+
+    private func quickActionsMenu(edge: QuickActionDockEdge) -> some View {
+        VStack(spacing: 8) {
+            Text("Quick actions")
+                .font(.subheadline.weight(.semibold))
+                .padding(.bottom, 2)
+            quickActionsMenuButton("Strength") {
+                showQuickActions = false
+                startQuickWorkout(.strength)
+            }
+            quickActionsMenuButton("Cardio") {
+                showQuickActions = false
+                showQuickCardioPicker = true
+            }
+            quickActionsMenuButton("Sport") {
+                showQuickActions = false
+                showQuickSportPicker = true
+            }
+        }
+        .padding(12)
+        .frame(width: 158)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(.white.opacity(0.22), lineWidth: 0.8)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 16, x: 0, y: 8)
+    }
+
+    private func quickActionsMenuButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 11)
+                .background(.thinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(quickStartBusyKind != nil)
+    }
+
+    private func quickActionsTooltip(edge: QuickActionDockEdge) -> some View {
+        HStack(spacing: 8) {
+            Text("Start a workout from here")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+            Button("Got it") {
+                quickActionsHintDismissed = true
+            }
+            .font(.caption.weight(.bold))
+        }
+        .padding(.vertical, 9)
+        .padding(.horizontal, 12)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.8))
+        .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
+    }
+
+    private var quickActionEdge: QuickActionDockEdge {
+        QuickActionDockEdge(rawValue: quickActionsEdgeRaw) ?? .right
+    }
+
+    private func quickActionsPoint(in size: CGSize, tabSize: CGSize) -> CGPoint {
+        let edge = quickActionEdge
+        let safeBottom = isPremium ? 18.0 : 70.0
+        let minX = tabSize.width / 2
+        let maxX = max(minX, size.width - tabSize.width / 2)
+        let minY = tabSize.height / 2 + 10
+        let maxY = max(minY, size.height - tabSize.height / 2 - safeBottom)
+        let fraction = min(max(quickActionsPosition, 0.0), 1.0)
+
+        switch edge {
+        case .left:
+            return CGPoint(x: minX, y: minY + (maxY - minY) * fraction)
+        case .right:
+            return CGPoint(x: maxX, y: minY + (maxY - minY) * fraction)
+        case .top:
+            return CGPoint(x: minX + (maxX - minX) * fraction, y: minY)
+        case .bottom:
+            return CGPoint(x: minX + (maxX - minX) * fraction, y: maxY)
+        }
+    }
+
+    private func quickActionsDock(
+        for point: CGPoint,
+        in size: CGSize,
+        tabSize: CGSize
+    ) -> (edge: QuickActionDockEdge, position: Double) {
+        let safeBottom = isPremium ? 18.0 : 70.0
+        let minX = tabSize.width / 2
+        let maxX = max(minX, size.width - tabSize.width / 2)
+        let minY = tabSize.height / 2 + 10
+        let maxY = max(minY, size.height - tabSize.height / 2 - safeBottom)
+        let distances: [(QuickActionDockEdge, CGFloat)] = [
+            (.left, abs(point.x - minX)),
+            (.right, abs(point.x - maxX)),
+            (.top, abs(point.y - minY)),
+            (.bottom, abs(point.y - maxY))
+        ]
+        let edge = distances.min { $0.1 < $1.1 }?.0 ?? .right
+
+        switch edge {
+        case .left, .right:
+            let ratio = (point.y - minY) / max(maxY - minY, 1)
+            return (edge, Double(min(max(ratio, 0), 1)))
+        case .top, .bottom:
+            let ratio = (point.x - minX) / max(maxX - minX, 1)
+            return (edge, Double(min(max(ratio, 0), 1)))
+        }
+    }
+
+    private func quickActionsMenuPoint(
+        anchor: CGPoint,
+        edge: QuickActionDockEdge,
+        in size: CGSize
+    ) -> CGPoint {
+        let menuSize = CGSize(width: 158, height: 188)
+        let spacing = 92.0
+        let raw: CGPoint
+
+        switch edge {
+        case .left:
+            raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
+        case .right:
+            raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
+        case .top:
+            raw = CGPoint(x: anchor.x, y: anchor.y + spacing + 8)
+        case .bottom:
+            raw = CGPoint(x: anchor.x, y: anchor.y - spacing - 8)
+        }
+
+        return CGPoint(
+            x: min(max(raw.x, menuSize.width / 2 + 12), size.width - menuSize.width / 2 - 12),
+            y: min(max(raw.y, menuSize.height / 2 + 12), size.height - menuSize.height / 2 - 12)
+        )
+    }
+
+    private func quickActionsTooltipPoint(
+        anchor: CGPoint,
+        edge: QuickActionDockEdge,
+        in size: CGSize
+    ) -> CGPoint {
+        let tooltipSize = CGSize(width: 210, height: 44)
+        let spacing = 134.0
+        let raw: CGPoint
+
+        switch edge {
+        case .left:
+            raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
+        case .right:
+            raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
+        case .top:
+            raw = CGPoint(x: anchor.x, y: anchor.y + 58)
+        case .bottom:
+            raw = CGPoint(x: anchor.x, y: anchor.y - 58)
+        }
+
+        return CGPoint(
+            x: min(max(raw.x, tooltipSize.width / 2 + 12), size.width - tooltipSize.width / 2 - 12),
+            y: min(max(raw.y, tooltipSize.height / 2 + 12), size.height - tooltipSize.height / 2 - 12)
+        )
+    }
+
+    private var quickCardioPicker: some View {
+        NavigationStack {
+            ZStack {
+                GradientBackground().ignoresSafeArea()
+                List(CardioActivityType.allCases) { activity in
+                    Button {
+                        showQuickCardioPicker = false
+                        startQuickWorkout(.cardio, cardioActivity: activity)
+                    } label: {
+                        Text(activity.label)
+                            .foregroundStyle(.primary)
+                    }
+                    .listRowBackground(Color.white.opacity(0.16))
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Choose cardio")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showQuickCardioPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationBackground(.clear)
+    }
+
+    private var quickSportPicker: some View {
+        NavigationStack {
+            ZStack {
+                GradientBackground().ignoresSafeArea()
+                List(SportType.allCases) { sport in
+                    Button {
+                        showQuickSportPicker = false
+                        startQuickWorkout(.sport, sportType: sport)
+                    } label: {
+                        Text(sport.label)
+                            .foregroundStyle(.primary)
+                    }
+                    .listRowBackground(Color.white.opacity(0.16))
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Choose sport")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showQuickSportPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationBackground(.clear)
+    }
+
+    private func startQuickWorkout(
+        _ kind: WorkoutKind,
+        cardioActivity: CardioActivityType? = nil,
+        sportType: SportType? = nil
+    ) {
+        guard let userId = app.userId else {
+            showQuickStartSignInAlert = true
+            return
+        }
+        guard quickStartBusyKind == nil else { return }
+        quickStartBusyKind = kind
+        quickStartError = nil
+        Task {
+            do {
+                let workoutId = try await QuickWorkoutStarter.create(
+                    kind: kind,
+                    userId: userId,
+                    cardioActivity: cardioActivity,
+                    sportType: sportType
+                )
+                await MainActor.run {
+                    lastQuickActiveWorkoutId = workoutId
+                    quickActiveWorkout = QuickActiveWorkout(
+                        id: workoutId,
+                        kind: quickActiveKind(for: kind)
+                    )
+                    quickStartBusyKind = nil
+                }
+            } catch {
+                await MainActor.run {
+                    quickStartBusyKind = nil
+                    quickStartError = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func quickActiveKind(for kind: WorkoutKind) -> QuickActiveWorkout.Kind {
+        switch kind {
+        case .strength: return .strength
+        case .cardio: return .cardio
+        case .sport: return .sport
         }
     }
     
