@@ -24,7 +24,6 @@ struct TerritoryMapView: View {
         self.initialSpan = initialSpan
     }
 
-    @State private var mapCameraPosition: MapCameraPosition = .region(defaultRegion)
     @State private var visibleRegion = defaultRegion
     @State private var cellCache: [String: TerritoryMapCellRow] = [:]
     @State private var summary: TerritorySummaryResponse?
@@ -37,31 +36,53 @@ struct TerritoryMapView: View {
     @State private var loadError: String?
     @State private var othersMayBeTruncated = false
     @State private var mineFetchLikelyCapped = false
+    @State private var drawableCellsInView: [TerritoryMapCellRow] = []
+    @State private var cellsToRender: [TerritoryMapCellRow] = []
+    @State private var cellBoundingBoxes: [String: TerritoryMapGeometry.GeographicBoundingBox] = [:]
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var loadedSnapshotRegion: MKCoordinateRegion?
 
-    private static let mapCellFetchLimit = 500
-    private static let othersSlotsReservedOnServer = min(200, max(mapCellFetchLimit / 2, 1))
+    private static let mapCellFetchLimit = 20_000
+    private static let maxRenderedHexCells = 20_000
+    private static let otherRenderedHexCellsTarget = maxRenderedHexCells
 
-    private static var maxMineCellsPerMapRequest: Int {
-        mapCellFetchLimit - othersSlotsReservedOnServer
-    }
     private static let drawRegionInflationFactor = 1.12
-    private static let pruneCacheMaxEntries = 10_000
-    private static let pruneRegionSpanMultiplier = 2.5
+    private static let pruneCacheMaxEntries = 24_000
+    private static let pruneRegionSpanMultiplier = 1.75
+    private static let snapshotFetchRegionMultiplier = 1.15
 
-    private var cellsIntersectingDrawRegion: [TerritoryMapCellRow] {
-        let drawRegion = Self.inflatedRegion(visibleRegion, latitudeFactor: Self.drawRegionInflationFactor, longitudeFactor: Self.drawRegionInflationFactor)
-        return cellCache.values.filter { cell in
-            guard let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: cell.ring) else { return false }
+    private static func log(_ message: String) {
+        print("[TerritoryMap][View] \(message)")
+    }
+
+    private func recomputeDrawableCells() {
+        let drawRegion = Self.inflatedRegion(
+            visibleRegion,
+            latitudeFactor: Self.drawRegionInflationFactor,
+            longitudeFactor: Self.drawRegionInflationFactor
+        )
+        drawableCellsInView = cellCache.values.filter { cell in
+            guard let bbox = boundingBox(for: cell) else { return false }
             return TerritoryMapGeometry.intersects(region: drawRegion, bbox: bbox)
         }.sorted { $0.cell_id < $1.cell_id }
+        updateCellsToRender()
+        Self.log("recompute cache=\(cellCache.count) visible=\(drawableCellsInView.count) render=\(cellsToRender.count) region=\(Self.regionLog(visibleRegion))")
+    }
+
+    private func updateCellsToRender() {
+        let base = showMineOnly ? drawableCellsInView.filter { $0.is_mine == true } : drawableCellsInView
+        cellsToRender = TerritoryMapGeometry.ownerBalancedCells(
+            base,
+            maxCount: Self.maxRenderedHexCells,
+            otherTarget: showMineOnly ? 0 : Self.otherRenderedHexCellsTarget
+        )
     }
 
     private var visibleCells: [TerritoryMapCellRow] {
-        let intersecting = cellsIntersectingDrawRegion
         if showMineOnly {
-            return intersecting.filter { $0.is_mine == true }
+            return drawableCellsInView.filter { $0.is_mine == true }
         }
-        return intersecting
+        return drawableCellsInView
     }
 
     private var ownedCellsInView: Int {
@@ -70,36 +91,13 @@ struct TerritoryMapView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            MapReader { proxy in
-                Map(position: $mapCameraPosition) {
-                    ForEach(visibleCells) { cell in
-                        let ring = cell.ring
-                        if ring.count >= 3, let ownerId = cell.owner_user_id {
-                            MapPolygon(coordinates: ring)
-                                .foregroundStyle(TerritoryOwnerColors.fill(for: ownerId, isMine: cell.is_mine == true))
-                                .stroke(
-                                    TerritoryOwnerColors.stroke(for: ownerId, isMine: cell.is_mine == true),
-                                    lineWidth: TerritoryOwnerColors.strokeWidth(isMine: cell.is_mine == true)
-                                )
-                        }
-                    }
-                }
-                .mapControls {
-                    MapUserLocationButton()
-                    MapCompass()
-                }
-                .contentShape(Rectangle())
-                .onTapGesture { point in
-                    guard let coordinate = proxy.convert(point, from: .local) else { return }
-                    selectedCell = TerritoryMapGeometry.selectedCell(at: coordinate, in: Array(cellCache.values))
-                }
-                .ignoresSafeArea(edges: .bottom)
-                .onMapCameraChange(frequency: .onEnd) { context in
-                    visibleRegion = context.region
-                    AppState.shared.territoryReferenceCoordinate = context.region.center
-                    Task { await refreshVisibleCells(for: context.region) }
-                }
-            }
+            TerritoryMapRepresentable(
+                region: visibleRegion,
+                cells: cellsToRender,
+                onRegionChange: handleMapRegionChange,
+                onSelectCell: { selectedCell = $0 }
+            )
+            .ignoresSafeArea(edges: .bottom)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if let summary {
@@ -130,9 +128,14 @@ struct TerritoryMapView: View {
                         Text("\(visibleCells.count) cells in view belong to other players")
                             .font(.caption)
                     }
+                    if visibleCells.count > Self.maxRenderedHexCells {
+                        Text("Showing up to \(Self.maxRenderedHexCells) cells in view for performance.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if mineFetchLikelyCapped {
                         Text(
-                            "Showing up to \(Self.maxMineCellsPerMapRequest) of your newest cells in this area — pan or zoom to load more."
+                            "Showing a simplified view of your cells in this area — pan or zoom to load more."
                         )
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -172,6 +175,10 @@ struct TerritoryMapView: View {
             await MainActor.run {
                 cellCache = [:]
                 lastFetchKey = ""
+                drawableCellsInView = []
+                cellsToRender = []
+                cellBoundingBoxes = [:]
+                loadedSnapshotRegion = nil
             }
             let center = Self.coordinate(
                 latitude: initialLatitude,
@@ -179,19 +186,22 @@ struct TerritoryMapView: View {
                 fallback: app.territoryReferenceCoordinate
             )
             let initialRegion = Self.region(around: center, span: initialSpan)
-            mapCameraPosition = .region(initialRegion)
             visibleRegion = initialRegion
+            recomputeDrawableCells()
             if let center {
                 app.territoryReferenceCoordinate = center
             }
             async let summaryLoad: Void = loadSummary()
-            async let cellsLoad: Void = refreshVisibleCells(for: initialRegion)
+            async let cellsLoad: Void = performSnapshotFetch(for: initialRegion)
             _ = await summaryLoad
             _ = await cellsLoad
-            Task(priority: .utility) {
-                await TerritoryCaptureClient.backfillHistoricalCaptures()
-                await loadSummary()
-            }
+        }
+        .onDisappear {
+            refreshTask?.cancel()
+            refreshTask = nil
+        }
+        .onChange(of: showMineOnly) { _, _ in
+            updateCellsToRender()
         }
         .sheet(item: $selectedCell) { cell in
             TerritoryCellDetailSheet(
@@ -262,6 +272,50 @@ struct TerritoryMapView: View {
         )
     }
 
+    private static func regionLog(_ region: MKCoordinateRegion) -> String {
+        String(
+            format: "center=(%.5f,%.5f) span=(%.5f,%.5f)",
+            region.center.latitude,
+            region.center.longitude,
+            region.span.latitudeDelta,
+            region.span.longitudeDelta
+        )
+    }
+
+    private static func paddedFetchRegion(for region: MKCoordinateRegion) -> MKCoordinateRegion {
+        inflatedRegion(
+            region,
+            latitudeFactor: snapshotFetchRegionMultiplier,
+            longitudeFactor: snapshotFetchRegionMultiplier
+        )
+    }
+
+    private static func regionContains(_ outer: MKCoordinateRegion, visible inner: MKCoordinateRegion) -> Bool {
+        let outerMinLat = outer.center.latitude - outer.span.latitudeDelta / 2
+        let outerMaxLat = outer.center.latitude + outer.span.latitudeDelta / 2
+        let outerMinLon = outer.center.longitude - outer.span.longitudeDelta / 2
+        let outerMaxLon = outer.center.longitude + outer.span.longitudeDelta / 2
+        let innerMinLat = inner.center.latitude - inner.span.latitudeDelta / 2
+        let innerMaxLat = inner.center.latitude + inner.span.latitudeDelta / 2
+        let innerMinLon = inner.center.longitude - inner.span.longitudeDelta / 2
+        let innerMaxLon = inner.center.longitude + inner.span.longitudeDelta / 2
+        return innerMinLat >= outerMinLat
+            && innerMaxLat <= outerMaxLat
+            && innerMinLon >= outerMinLon
+            && innerMaxLon <= outerMaxLon
+    }
+
+    private func boundingBox(for cell: TerritoryMapCellRow) -> TerritoryMapGeometry.GeographicBoundingBox? {
+        if let cached = cellBoundingBoxes[cell.cell_id] {
+            return cached
+        }
+        guard let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: cell.ring) else {
+            return nil
+        }
+        cellBoundingBoxes[cell.cell_id] = bbox
+        return bbox
+    }
+
     private func pruneCellCacheIfNeeded() {
         guard cellCache.count > Self.pruneCacheMaxEntries else { return }
         let keepRegion = Self.inflatedRegion(
@@ -271,12 +325,13 @@ struct TerritoryMapView: View {
         )
         let keysToRemove = cellCache.keys.filter { key in
             guard let cell = cellCache[key],
-                  let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: cell.ring)
+                  let bbox = boundingBox(for: cell)
             else { return true }
             return !TerritoryMapGeometry.intersects(region: keepRegion, bbox: bbox)
         }
         for key in keysToRemove {
             cellCache.removeValue(forKey: key)
+            cellBoundingBoxes.removeValue(forKey: key)
         }
     }
 
@@ -292,15 +347,67 @@ struct TerritoryMapView: View {
         }
     }
 
-    private func refreshVisibleCells(for region: MKCoordinateRegion) async {
-        let minLat = region.center.latitude - region.span.latitudeDelta / 2.0
-        let maxLat = region.center.latitude + region.span.latitudeDelta / 2.0
-        let minLon = region.center.longitude - region.span.longitudeDelta / 2.0
-        let maxLon = region.center.longitude + region.span.longitudeDelta / 2.0
-        let key = String(format: "%.4f|%.4f|%.4f|%.4f", minLat, minLon, maxLat, maxLon)
-        guard key != lastFetchKey else { return }
-        lastFetchKey = key
-        await MainActor.run { loading = true }
+    private func handleMapRegionChange(_ region: MKCoordinateRegion) {
+        visibleRegion = region
+        AppState.shared.territoryReferenceCoordinate = region.center
+        recomputeDrawableCells()
+        Self.log("regionChanged \(Self.regionLog(region))")
+        enqueueSnapshotFetchIfNeeded(for: region)
+    }
+
+    private func enqueueSnapshotFetchIfNeeded(for region: MKCoordinateRegion) {
+        if let loadedSnapshotRegion,
+           Self.regionContains(loadedSnapshotRegion, visible: region) {
+            Self.log("skip viewport fetch loaded region contains visible \(Self.regionLog(region))")
+            return
+        }
+        refreshTask?.cancel()
+        Self.log("enqueue viewport fetch \(Self.regionLog(region))")
+        refreshTask = Task {
+            await performSnapshotFetch(for: region)
+        }
+    }
+
+    private func performSnapshotFetch(for visibleRegion: MKCoordinateRegion) async {
+        let fetchRegion = Self.paddedFetchRegion(for: visibleRegion)
+        await fetchCells(
+            minLat: fetchRegion.center.latitude - fetchRegion.span.latitudeDelta / 2.0,
+            minLon: fetchRegion.center.longitude - fetchRegion.span.longitudeDelta / 2.0,
+            maxLat: fetchRegion.center.latitude + fetchRegion.span.latitudeDelta / 2.0,
+            maxLon: fetchRegion.center.longitude + fetchRegion.span.longitudeDelta / 2.0,
+            fetchKey: String(
+                format: "%.4f|%.4f|%.4f|%.4f",
+                fetchRegion.center.latitude - fetchRegion.span.latitudeDelta / 2.0,
+                fetchRegion.center.longitude - fetchRegion.span.longitudeDelta / 2.0,
+                fetchRegion.center.latitude + fetchRegion.span.latitudeDelta / 2.0,
+                fetchRegion.center.longitude + fetchRegion.span.longitudeDelta / 2.0
+            ),
+            loadedRegion: fetchRegion
+        )
+    }
+
+    private func fetchCells(
+        minLat: Double,
+        minLon: Double,
+        maxLat: Double,
+        maxLon: Double,
+        fetchKey key: String,
+        loadedRegion: MKCoordinateRegion?
+    ) async {
+        let skipFetch = await MainActor.run {
+            key == lastFetchKey && loadedSnapshotRegion != nil
+        }
+        guard !skipFetch else {
+            Self.log("skip fetch key=\(key)")
+            return
+        }
+
+        await MainActor.run {
+            lastFetchKey = key
+            loading = true
+        }
+        Self.log("fetch start key=\(key) bounds=(\(minLat),\(minLon),\(maxLat),\(maxLon))")
+
         let rows = await TerritoryCaptureClient.fetchMapCells(
             minLat: minLat,
             minLon: minLon,
@@ -308,20 +415,39 @@ struct TerritoryMapView: View {
             maxLon: maxLon,
             limit: Self.mapCellFetchLimit
         )
+
+        guard !Task.isCancelled else {
+            await MainActor.run {
+                loading = false
+            }
+            Self.log("fetch cancelled key=\(key)")
+            return
+        }
+
         await MainActor.run {
+            let previousCount = cellCache.count
             for row in rows {
                 cellCache[row.cell_id] = row
+                if let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: row.ring) {
+                    cellBoundingBoxes[row.cell_id] = bbox
+                } else {
+                    cellBoundingBoxes.removeValue(forKey: row.cell_id)
+                }
             }
+            loadedSnapshotRegion = loadedRegion
             pruneCellCacheIfNeeded()
+            recomputeDrawableCells()
             let mineCount = rows.filter { $0.is_mine == true }.count
             let othersCount = rows.count - mineCount
-            let othersBudget = max(0, Self.mapCellFetchLimit - mineCount)
-            mineFetchLikelyCapped = mineCount >= Self.maxMineCellsPerMapRequest
+            mineFetchLikelyCapped = rows.count >= Self.mapCellFetchLimit && mineCount > 0
             othersMayBeTruncated = !showMineOnly
                 && othersCount > 0
-                && othersBudget > 0
-                && othersCount >= othersBudget
+                && rows.count >= Self.mapCellFetchLimit
+            if summary != nil {
+                loadError = nil
+            }
             loading = false
+            Self.log("fetch finish key=\(key) rows=\(rows.count) cacheBefore=\(previousCount) cacheAfter=\(cellCache.count) mine=\(mineCount) others=\(othersCount)")
         }
     }
 }

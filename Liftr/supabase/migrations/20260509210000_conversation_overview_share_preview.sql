@@ -41,13 +41,13 @@ as $$
           when m.kind = 'image' then 'Sent an image'
           when m.kind = 'file' then 'Sent a file'
           when m.kind = 'workout_share' then
-            coalesce(nullif(trim(both from m.metadata->>'title'), ''), 'Sent a workout')
+            coalesce(nullif(trim(both from m.metadata->>'title'), ''), 'Shared workout')
           when m.kind = 'routine_share' then
-            coalesce(nullif(trim(both from m.metadata->>'name'), ''), 'Sent a routine')
+            coalesce(nullif(trim(both from m.metadata->>'name'), ''), 'Shared routine')
           when m.kind = 'achievement_share' then
-            coalesce(nullif(trim(both from m.metadata->>'title'), ''), 'Sent an achievement')
+            coalesce(nullif(trim(both from m.metadata->>'title'), ''), 'Shared achievement')
           when m.kind = 'segment_share' then
-            coalesce(nullif(trim(both from m.metadata->>'name'), ''), 'Sent a segment')
+            coalesce(nullif(trim(both from m.metadata->>'name'), ''), 'Shared segment')
           when m.kind = 'system' then 'System message'
           else coalesce(nullif(trim(both from m.body), ''), 'Message')
         end,

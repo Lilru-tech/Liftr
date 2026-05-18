@@ -60,6 +60,7 @@ private struct EditHyroxExercise: Identifiable {
     var exerciseCode: String = HyroxExerciseCode.run.rawValue
     var customDisplayName: String = ""
     var exerciseOrder: Int = 1
+    var zoneOrder: Int? = nil
     var distanceM: String = ""
     var reps: String = ""
     var weightKg: String = ""
@@ -219,6 +220,7 @@ struct EditWorkoutMetaSheet: View {
         let id = UUID()
         var setId: Int?
         var setNumber: Int
+        var orderIndex: Int = 1
         var reps: Int?
         var weightKg: String = ""
         var rpe: String = ""
@@ -230,6 +232,7 @@ struct EditWorkoutMetaSheet: View {
         let id = UUID()
         let workoutExerciseId: Int
         var exerciseId: Int
+        var orderIndex: Int
         var name: String
         var alias: String
         var notes: String
@@ -665,6 +668,13 @@ struct EditWorkoutMetaSheet: View {
                 if s_items.isEmpty && !loading {
                     Text("No exercises found").foregroundStyle(.secondary)
                 } else {
+                    if s_items.count > 1 {
+                        Text("Use the arrows on each exercise to change order.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
                     ForEach(s_items.indices, id: \.self) { i in
                         if i != s_items.startIndex { Divider().padding(.vertical, 6) }
                         FieldRowPlain(nil) {
@@ -712,7 +722,16 @@ struct EditWorkoutMetaSheet: View {
                                 restSec: $s_items[i].sets[s].restSec,
                                 segments: $s_items[i].sets[s].segments,
                                 showDelete: s_items[i].sets.count > 1,
-                                onDelete: { s_items[i].sets.remove(at: s) }
+                                showReorder: s_items[i].sets.count > 1,
+                                canMoveUp: s > 0,
+                                canMoveDown: s < s_items[i].sets.count - 1,
+                                onMoveUp: { moveSetInEditor(exerciseIndex: i, setIndex: s, direction: -1) },
+                                onMoveDown: { moveSetInEditor(exerciseIndex: i, setIndex: s, direction: 1) },
+                                onDelete: {
+                                    guard s_items.indices.contains(i), s_items[i].sets.indices.contains(s) else { return }
+                                    s_items[i].sets.remove(at: s)
+                                    renumberSetOrderInEditor(exerciseIndex: i)
+                                }
                             )
                         }
                         
@@ -721,7 +740,7 @@ struct EditWorkoutMetaSheet: View {
                             HStack {
                                 Button {
                                     s_items[i].sets.append(
-                                        SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])
+                                        SEditableSet(setId: nil, setNumber: 1, orderIndex: s_items[i].sets.count + 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])
                                     )
                                 } label: { Label("Add set", systemImage: "plus.circle") }
                                     .buttonStyle(.borderless)
@@ -729,10 +748,42 @@ struct EditWorkoutMetaSheet: View {
                                 Spacer()
                                 
                                 if s_items.count > 1 {
+                                    HStack(spacing: 2) {
+                                        Button {
+                                            moveStrengthExerciseInEditor(from: i, direction: -1)
+                                        } label: {
+                                            Image(systemName: "chevron.up")
+                                                .font(.subheadline.weight(.semibold))
+                                                .frame(width: 36, height: 32)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(i == 0)
+                                        .opacity(i == 0 ? 0.35 : 1)
+
+                                        Button {
+                                            moveStrengthExerciseInEditor(from: i, direction: 1)
+                                        } label: {
+                                            Image(systemName: "chevron.down")
+                                                .font(.subheadline.weight(.semibold))
+                                                .frame(width: 36, height: 32)
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(i == s_items.count - 1)
+                                        .opacity(i == s_items.count - 1 ? 0.35 : 1)
+                                    }
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityLabel("Reorder exercise")
+
                                     Button(role: .destructive) {
                                         Task {
                                             await deleteExercise(s_items[i].workoutExerciseId)
-                                            s_items.remove(at: i)
+                                            if s_items.indices.contains(i) {
+                                                s_items.remove(at: i)
+                                                renumberStrengthExerciseOrder()
+                                            }
                                         }
                                     } label: {
                                         HStack(spacing: 6) {
@@ -1093,6 +1144,7 @@ struct EditWorkoutMetaSheet: View {
                             let id: Int64
                             let exercise_code: String
                             let exercise_order: Int
+                            let zone_order: Int?
                             let distance_m: Int?
                             let reps: Int?
                             let weight_kg: Decimal?
@@ -1122,6 +1174,7 @@ struct EditWorkoutMetaSheet: View {
                                 exerciseCode: fields.code,
                                 customDisplayName: fields.customDisplayName,
                                 exerciseOrder: row.exercise_order,
+                                zoneOrder: row.zone_order.map { max(1, $0) },
                                 distanceM: row.distance_m.map(String.init) ?? "",
                                 reps: row.reps.map(String.init) ?? "",
                                 weightKg: row.weight_kg.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? "",
@@ -1325,30 +1378,45 @@ struct EditWorkoutMetaSheet: View {
                 let exIds = exWire.map { $0.id }
                 var setsByEx: [Int: [SEditableSet]] = [:]
                 if !exIds.isEmpty {
-                    let sRes = try await SupabaseManager.shared.client
-                        .from("exercise_sets")
-                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
-                        .in("workout_exercise_id", values: exIds)
-                        .order("set_number", ascending: true)
-                        .order("id", ascending: true)
-                        .execute()
-                    
                     struct SetWire: Decodable {
                         let id: Int
                         let workout_exercise_id: Int
                         let set_number: Int
+                        let order_index: Int?
                         let reps: Int?
                         let weight_kg: Decimal?
                         let rpe: Decimal?
                         let rest_sec: Int?
                         let weight_segments: [StrengthWeightSegWire]?
                     }
-                    let sWire = try decoder.decode([SetWire].self, from: sRes.data)
+                    let sData: Data
+                    do {
+                        sData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("order_index", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    } catch {
+                        sData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("set_number", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    }
+                    let sWire = try decoder.decode([SetWire].self, from: sData)
                     for s in sWire {
+                        let nextOrder = setsByEx[s.workout_exercise_id, default: []].count + 1
                         let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                         let editable = SEditableSet(
                             setId: s.id,
                             setNumber: s.set_number,
+                            orderIndex: s.order_index ?? nextOrder,
                             reps: s.reps,
                             weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                             rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
@@ -1363,10 +1431,11 @@ struct EditWorkoutMetaSheet: View {
                     SEditableExercise(
                         workoutExerciseId: ex.id,
                         exerciseId: ex.exercise_id,
+                        orderIndex: ex.order_index,
                         name: ex.exercises?.name ?? "Exercise",
                         alias: ex.custom_name ?? "",
                         notes: ex.notes ?? "",
-                        sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]]
+                        sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, orderIndex: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]]
                     )
                 }
                 await MainActor.run { s_items = mapped }
@@ -1396,7 +1465,8 @@ struct EditWorkoutMetaSheet: View {
                         !s.rpe.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                         s.restSec != nil
                 }
-                .compactMap { s -> StrengthWorkoutSetSaveInput? in
+                .enumerated()
+                .compactMap { idx, s -> StrengthWorkoutSetSaveInput? in
                     let ws: [StrengthWeightSegWire]? = {
                         guard s.segments.count >= 2 else { return nil }
                         var out: [StrengthWeightSegWire] = []
@@ -1415,6 +1485,7 @@ struct EditWorkoutMetaSheet: View {
                     }()
                     return StrengthWorkoutSetSaveInput(
                         set_number: max(1, s.setNumber),
+                        order_index: idx + 1,
                         reps: firstRep,
                         weight_kg: firstKg,
                         rpe: s.rpe.asDouble,
@@ -1425,6 +1496,7 @@ struct EditWorkoutMetaSheet: View {
             return StrengthWorkoutExerciseSaveInput(
                 workout_exercise_id: ex.workoutExerciseId,
                 exercise_id: ex.exerciseId,
+                order_index: ex.orderIndex,
                 notes: ex.notes.trimmedOrNil,
                 custom_name: ex.alias.trimmedOrNil,
                 sets: sets
@@ -1692,10 +1764,11 @@ struct EditWorkoutMetaSheet: View {
                     SEditableExercise(
                         workoutExerciseId: inserted.id,
                         exerciseId: Int(ex.id),
+                        orderIndex: nextOrder,
                         name: ex.name,
                         alias: "",
                         notes: "",
-                        sets: [SEditableSet(setId: nil, setNumber: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]
+                        sets: [SEditableSet(setId: nil, setNumber: 1, orderIndex: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]
                     )
                 )
             }
@@ -1719,6 +1792,40 @@ struct EditWorkoutMetaSheet: View {
                 .execute()
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+
+    private func moveStrengthExerciseInEditor(from index: Int, direction: Int) {
+        var list = s_items
+        let newIndex = index + direction
+        guard list.indices.contains(index), list.indices.contains(newIndex) else { return }
+        list.swapAt(index, newIndex)
+        for idx in list.indices {
+            list[idx].orderIndex = idx + 1
+        }
+        s_items = list
+    }
+
+    private func renumberStrengthExerciseOrder() {
+        for idx in s_items.indices {
+            s_items[idx].orderIndex = idx + 1
+        }
+    }
+
+    private func moveSetInEditor(exerciseIndex: Int, setIndex: Int, direction: Int) {
+        let newIndex = setIndex + direction
+        guard s_items.indices.contains(exerciseIndex),
+              s_items[exerciseIndex].sets.indices.contains(setIndex),
+              s_items[exerciseIndex].sets.indices.contains(newIndex)
+        else { return }
+        s_items[exerciseIndex].sets.swapAt(setIndex, newIndex)
+        renumberSetOrderInEditor(exerciseIndex: exerciseIndex)
+    }
+
+    private func renumberSetOrderInEditor(exerciseIndex: Int) {
+        guard s_items.indices.contains(exerciseIndex) else { return }
+        for idx in s_items[exerciseIndex].sets.indices {
+            s_items[exerciseIndex].sets[idx].orderIndex = idx + 1
         }
     }
     
@@ -1898,15 +2005,108 @@ struct EditWorkoutMetaSheet: View {
         }
     }
 
-    private func moveHyroxExerciseInEditor(from index: Int, direction: Int) {
-        var list = hyExercises
-        let j = index + direction
-        guard list.indices.contains(index), list.indices.contains(j) else { return }
-        list.swapAt(index, j)
-        for idx in list.indices {
-            list[idx].exerciseOrder = idx + 1
+    private var orderedHyroxEditExerciseIndices: [Int] {
+        hyExercises.indices.sorted {
+            let lhs = hyExercises[$0]
+            let rhs = hyExercises[$1]
+            return lhs.exerciseOrder < rhs.exerciseOrder
         }
-        hyExercises = list
+    }
+
+    private func isFirstHyroxEditExerciseInZone(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition) else { return false }
+        let current = hyExercises[ordered[displayPosition]].zoneOrder
+        guard current != nil else { return false }
+        guard displayPosition > 0 else { return true }
+        let previous = hyExercises[ordered[displayPosition - 1]].zoneOrder
+        return current != previous
+    }
+
+    private func moveHyroxExerciseInEditor(from index: Int, direction: Int) {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard let position = ordered.firstIndex(of: index) else { return }
+        let nextPosition = position + direction
+        guard ordered.indices.contains(nextPosition) else { return }
+        let other = ordered[nextPosition]
+        let currentOrder = hyExercises[index].exerciseOrder
+        hyExercises[index].exerciseOrder = hyExercises[other].exerciseOrder
+        hyExercises[other].exerciseOrder = currentOrder
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func normalizeHyroxEditExerciseOrdering() {
+        let ordered = orderedHyroxEditExerciseIndices
+        for (idx, originalIndex) in ordered.enumerated() {
+            hyExercises[originalIndex].exerciseOrder = idx + 1
+            hyExercises[originalIndex].zoneOrder = hyExercises[originalIndex].zoneOrder.map { max(1, $0) }
+        }
+        collapseSingleHyroxEditZones()
+    }
+
+    private func collapseSingleHyroxEditZones() {
+        let counts = Dictionary(grouping: hyExercises.compactMap(\.zoneOrder), by: { $0 }).mapValues(\.count)
+        for idx in hyExercises.indices {
+            guard let zoneOrder = hyExercises[idx].zoneOrder else { continue }
+            if (counts[zoneOrder] ?? 0) <= 1 {
+                hyExercises[idx].zoneOrder = nil
+            }
+        }
+    }
+
+    private func removeHyroxEditZone(_ zoneOrder: Int?) {
+        guard let zoneOrder else { return }
+        for idx in hyExercises.indices where hyExercises[idx].zoneOrder == zoneOrder {
+            hyExercises[idx].zoneOrder = nil
+        }
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func canZoneHyroxEditWithNext(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return false }
+        let current = hyExercises[ordered[displayPosition]]
+        let next = hyExercises[ordered[displayPosition + 1]]
+        return current.zoneOrder == nil && next.zoneOrder == nil
+    }
+
+    private func canAddNextToHyroxEditZone(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return false }
+        let current = hyExercises[ordered[displayPosition]]
+        let next = hyExercises[ordered[displayPosition + 1]]
+        return current.zoneOrder != nil && next.zoneOrder == nil
+    }
+
+    private func zoneHyroxEditExerciseWithNext(displayPosition: Int) {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return }
+        let nextZone = (hyExercises.compactMap(\.zoneOrder).max() ?? 0) + 1
+        hyExercises[ordered[displayPosition]].zoneOrder = nextZone
+        hyExercises[ordered[displayPosition + 1]].zoneOrder = nextZone
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func addNextHyroxEditExerciseToZone(displayPosition: Int) {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1),
+              let zoneOrder = hyExercises[ordered[displayPosition]].zoneOrder
+        else { return }
+        hyExercises[ordered[displayPosition + 1]].zoneOrder = zoneOrder
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func removeHyroxEditExerciseFromZone(index: Int) {
+        guard hyExercises.indices.contains(index) else { return }
+        hyExercises[index].zoneOrder = nil
+        normalizeHyroxEditExerciseOrdering()
     }
 
     private func editHyroxExercisePickerBinding(index: Int) -> Binding<String> {
@@ -2131,14 +2331,29 @@ struct EditWorkoutMetaSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if !hyExercises.isEmpty {
-                Text("Use the arrows on each exercise to change order.")
+                Text("Select exercises to create a zone, then use arrows to change order.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            ForEach(hyExercises.indices, id: \.self) { i in
+            ForEach(Array(orderedHyroxEditExerciseIndices.enumerated()), id: \.element) { position, i in
                 Divider().padding(.vertical, 6)
+
+                if isFirstHyroxEditExerciseInZone(displayPosition: position) {
+                    HStack {
+                        Text("Zone \(hyExercises[i].zoneOrder ?? 1)")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Button("Remove zone") {
+                            removeHyroxEditZone(hyExercises[i].zoneOrder)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.borderless)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -2193,6 +2408,30 @@ struct EditWorkoutMetaSheet: View {
                         Spacer(minLength: 0)
 
                         if hyExercises.count > 1 {
+                            HStack(spacing: 8) {
+                                if hyExercises[i].zoneOrder != nil {
+                                    Button("Remove") {
+                                        removeHyroxEditExerciseFromZone(index: i)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                } else if canZoneHyroxEditWithNext(displayPosition: position) {
+                                    Button("Zone with next") {
+                                        zoneHyroxEditExerciseWithNext(displayPosition: position)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                }
+
+                                if canAddNextToHyroxEditZone(displayPosition: position) {
+                                    Button("Add next") {
+                                        addNextHyroxEditExerciseToZone(displayPosition: position)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+
                             HStack(spacing: 2) {
                                 Button {
                                     moveHyroxExerciseInEditor(from: i, direction: -1)
@@ -2203,8 +2442,8 @@ struct EditWorkoutMetaSheet: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(i == 0)
-                                .opacity(i == 0 ? 0.35 : 1)
+                                .disabled(position == 0)
+                                .opacity(position == 0 ? 0.35 : 1)
 
                                 Button {
                                     moveHyroxExerciseInEditor(from: i, direction: 1)
@@ -2215,8 +2454,8 @@ struct EditWorkoutMetaSheet: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(i == hyExercises.count - 1)
-                                .opacity(i == hyExercises.count - 1 ? 0.35 : 1)
+                                .disabled(position == hyExercises.count - 1)
+                                .opacity(position == hyExercises.count - 1 ? 0.35 : 1)
                             }
                             .foregroundStyle(.secondary)
                             .accessibilityElement(children: .combine)
@@ -2226,9 +2465,7 @@ struct EditWorkoutMetaSheet: View {
                         if hyExercises.count > 1 {
                             Button(role: .destructive) {
                                 hyExercises.remove(at: i)
-                                for idx in hyExercises.indices {
-                                    hyExercises[idx].exerciseOrder = idx + 1
-                                }
+                                normalizeHyroxEditExerciseOrdering()
                             } label: {
                                 Image(systemName: "trash")
                                     .font(.body)
@@ -2251,6 +2488,7 @@ struct EditWorkoutMetaSheet: View {
                         exerciseOrder: hyExercises.count + 1
                     )
                 )
+                normalizeHyroxEditExerciseOrdering()
             } label: {
                 Label("Add exercise", systemImage: "plus")
             }
@@ -2571,6 +2809,9 @@ struct EditWorkoutMetaSheet: View {
                     "exercise_code": .s(persisted.code),
                     "exercise_order": .i(ex.exerciseOrder)
                 ]
+                if let zoneOrder = ex.zoneOrder {
+                    values["zone_order"] = .i(max(1, zoneOrder))
+                }
                 if let d = persisted.displayName {
                     values["exercise_display_name"] = .s(d)
                 }
@@ -2794,8 +3035,11 @@ fileprivate func patchHyroxDisplayNamesForEditedWorkout(
             notes: $0.notes
         )
     }
-    let updates = HyroxExerciseFormatting.hyroxDisplayNameColumnUpdates(rows: rows)
-    guard !updates.isEmpty else { return }
+    let displayNamesByOrder = Dictionary(
+        uniqueKeysWithValues: HyroxExerciseFormatting
+            .hyroxDisplayNameColumnUpdates(rows: rows)
+            .map { ($0.exerciseOrder, $0.displayName) }
+    )
 
     let sessionRes = try await client
         .from("sport_sessions")
@@ -2806,13 +3050,19 @@ fileprivate func patchHyroxDisplayNamesForEditedWorkout(
     struct SessionRow: Decodable { let id: Int }
     let sessionId = try JSONDecoder().decode(SessionRow.self, from: sessionRes.data).id
 
-    struct Patch: Encodable { let exercise_display_name: String }
-    for u in updates {
+    struct Patch: Encodable {
+        let exercise_display_name: String?
+            let zone_order: Int?
+    }
+    for ex in hyExercises {
         _ = try await client
             .from("hyrox_session_exercises")
-            .update(Patch(exercise_display_name: u.displayName))
+            .update(Patch(
+                exercise_display_name: displayNamesByOrder[ex.exerciseOrder],
+                    zone_order: ex.zoneOrder.map { max(1, $0) }
+            ))
             .eq("session_id", value: sessionId)
-            .eq("exercise_order", value: u.exerciseOrder)
+            .eq("exercise_order", value: ex.exerciseOrder)
             .execute()
     }
 }

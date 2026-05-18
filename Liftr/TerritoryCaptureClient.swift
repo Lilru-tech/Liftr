@@ -66,6 +66,7 @@ struct TerritoryMapCellRow: Decodable, Identifiable, Hashable {
     let owner_user_id: UUID?
     let owner_username: String?
     let owner_avatar_url: String?
+    let last_workout_id: Int64?
     let captured_at: Date?
     let is_mine: Bool?
     var id: String { cell_id }
@@ -136,6 +137,14 @@ struct TerritoryWorkoutTakeoverRow: Decodable, Identifiable, Hashable {
 }
 
 enum TerritoryCaptureClient {
+    private static func shouldIgnoreCancelledError(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        if let urlError = error as? URLError, urlError.code == .cancelled { return true }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return true }
+        return error.localizedDescription.lowercased() == "cancelled"
+    }
+
     private struct WorkoutIdParams: Encodable {
         let p_workout_id: Int64
     }
@@ -184,6 +193,7 @@ enum TerritoryCaptureClient {
                 .execute()
             return try JSONDecoder.supabase().decode(TerritoryCaptureSummary.self, from: res.data)
         } catch {
+            guard !shouldIgnoreCancelledError(error) else { return nil }
             await MainActor.run {
                 AppState.shared.territoryCaptureToast = TerritoryCapturePresentation.failureMessage(for: error)
             }
@@ -247,6 +257,7 @@ enum TerritoryCaptureClient {
             }
             return decoded
         } catch {
+            guard !shouldIgnoreCancelledError(error) else { return nil }
             await MainActor.run {
                 AppState.shared.territoryCaptureToast = TerritoryCapturePresentation.failureMessage(for: error)
             }
@@ -280,7 +291,7 @@ enum TerritoryCaptureClient {
                 .execute()
             return try JSONDecoder.supabase().decode(TerritorySummaryResponse.self, from: res.data)
         } catch {
-            if userId == nil {
+            if userId == nil && !shouldIgnoreCancelledError(error) {
                 await MainActor.run {
                     AppState.shared.territoryCaptureToast = TerritoryCapturePresentation.failureMessage(for: error)
                 }
@@ -341,6 +352,8 @@ enum TerritoryCaptureClient {
         maxLon: Double,
         limit: Int = 500
     ) async -> [TerritoryMapCellRow] {
+        print("[TerritoryMap][RPC] start minLat=\(minLat) minLon=\(minLon) maxLat=\(maxLat) maxLon=\(maxLon) limit=\(limit)")
+        let pageSize = min(1_000, max(limit, 1))
         let params = MapParams(
             p_min_lat: minLat,
             p_min_lon: minLon,
@@ -349,14 +362,30 @@ enum TerritoryCaptureClient {
             p_limit: limit
         )
         do {
-            let res = try await SupabaseManager.shared.client
-                .rpc("get_territory_map_v1", params: params)
-                .execute()
-            return try JSONDecoder.supabase().decode([TerritoryMapCellRow].self, from: res.data)
-        } catch {
-            await MainActor.run {
-                AppState.shared.territoryCaptureToast = TerritoryCapturePresentation.failureMessage(for: error)
+            var allRows: [TerritoryMapCellRow] = []
+            var offset = 0
+            var totalBytes = 0
+            while offset < limit {
+                let pageLimit = min(pageSize, limit - offset)
+                let res = try await SupabaseManager.shared.client
+                    .rpc("get_territory_map_v1", params: params)
+                    .range(from: offset, to: offset + pageLimit - 1)
+                    .execute()
+                totalBytes += res.data.count
+                let pageRows = try JSONDecoder.supabase().decode([TerritoryMapCellRow].self, from: res.data)
+                print("[TerritoryMap][RPC] page offset=\(offset) rows=\(pageRows.count) bytes=\(res.data.count)")
+                allRows.append(contentsOf: pageRows)
+                guard pageRows.count == pageLimit else {
+                    break
+                }
+                offset += pageLimit
             }
+            let owners = Set(allRows.compactMap(\.owner_user_id)).count
+            let mine = allRows.filter { $0.is_mine == true }.count
+            print("[TerritoryMap][RPC] success rows=\(allRows.count) owners=\(owners) mine=\(mine) bytes=\(totalBytes)")
+            return allRows
+        } catch {
+            print("[TerritoryMap][RPC] failed error=\(error.localizedDescription)")
             return []
         }
     }
@@ -382,11 +411,29 @@ enum TerritoryCaptureClient {
                     )
                 )
                 .execute()
-            return try JSONDecoder.supabase().decode([TerritoryCityRegionRow].self, from: res.data)
+            let rows = try JSONDecoder.supabase().decode([TerritoryCityRegionRow].self, from: res.data)
+            return deduplicatedTerritoryCities(rows)
         } catch {
             logTerritoryShare("city regions fetch failed error=\(error.localizedDescription)")
             return []
         }
+    }
+
+    static func deduplicatedTerritoryCities(_ cities: [TerritoryCityRegionRow]) -> [TerritoryCityRegionRow] {
+        var selectedByIdentity: [String: TerritoryCityRegionRow] = [:]
+        var orderedIdentities: [String] = []
+        for city in cities {
+            let identity = territoryCityIdentity(for: city)
+            if let existing = selectedByIdentity[identity] {
+                if shouldPreferTerritoryCity(city, over: existing) {
+                    selectedByIdentity[identity] = city
+                }
+            } else {
+                selectedByIdentity[identity] = city
+                orderedIdentities.append(identity)
+            }
+        }
+        return orderedIdentities.compactMap { selectedByIdentity[$0] }
     }
 
     static func filterTerritoryCities(_ cities: [TerritoryCityRegionRow], query: String) -> [TerritoryCityRegionRow] {
@@ -397,6 +444,36 @@ enum TerritoryCaptureClient {
             let key = city.city_key?.lowercased() ?? ""
             return name.contains(needle) || key.contains(needle)
         }
+    }
+
+    private static func territoryCityIdentity(for city: TerritoryCityRegionRow) -> String {
+        let name = city.display_name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let name, !name.isEmpty {
+            return "name:\(name)"
+        }
+        return "key:\(city.city_key ?? city.id)"
+    }
+
+    private static func shouldPreferTerritoryCity(
+        _ candidate: TerritoryCityRegionRow,
+        over current: TerritoryCityRegionRow
+    ) -> Bool {
+        let candidateOwned = candidate.my_owned_cells ?? candidate.owned_cells ?? 0
+        let currentOwned = current.my_owned_cells ?? current.owned_cells ?? 0
+        if candidateOwned != currentOwned {
+            return candidateOwned > currentOwned
+        }
+        let candidateCaptured = candidate.captured_cells ?? 0
+        let currentCaptured = current.captured_cells ?? 0
+        if candidateCaptured != currentCaptured {
+            return candidateCaptured > currentCaptured
+        }
+        let candidateTotal = candidate.total_capture_cells ?? 0
+        let currentTotal = current.total_capture_cells ?? 0
+        if candidateTotal != currentTotal {
+            return candidateTotal > currentTotal
+        }
+        return (candidate.city_key ?? "") < (current.city_key ?? "")
     }
 
     static func selectedTerritoryCity(

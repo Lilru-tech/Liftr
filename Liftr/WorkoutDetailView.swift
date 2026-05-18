@@ -56,6 +56,7 @@ struct WorkoutDetailView: View {
         let started_at: Date?
         let ended_at: Date?
         let duration_min: Int?
+        let paused_sec: Int?
         let perceived_intensity: String?
         let state: String
         let calories_kcal: Decimal?
@@ -132,16 +133,13 @@ struct WorkoutDetailView: View {
     }
         
     var body: some View {
-        ZStack {
-            ScrollView {
-                content
-                    .padding(.bottom, showStartButton ? 140 : 0)
-            }
+        ScrollView {
+            content
         }
-        .overlay(alignment: .bottom) {
+        .safeAreaInset(edge: .bottom) {
             if showStartButton {
                 startButtonBar
-                    .padding(.bottom, 32)
+                    .padding(.bottom, 12)
             }
         }
         .task {
@@ -329,20 +327,41 @@ struct WorkoutDetailView: View {
     @ViewBuilder
     private var content: some View {
         VStack(spacing: 14) {
-            if let w = workout {
+            if loading && workout == nil {
+                DetailSectionCard(title: "Workout") {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                }
+            } else if let error, workout == nil {
+                DetailSectionCard(title: "Workout") {
+                    DetailEmptyState(
+                        title: "Could not load workout",
+                        message: error,
+                        systemImage: "exclamationmark.triangle"
+                    )
+                }
+            } else if let w = workout {
                 workoutHeader(w)
-            }
-            if !participants.isEmpty {
-                participantsBlock
-            }
-            if let notes = workout?.notes,
-               !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                notesBlock(notes)
-            }
-            
-            if let kind = workout?.kind {
-                workoutDetail(kind)
+
+                if !participants.isEmpty {
+                    participantsBlock
+                }
+                if let notes = workout?.notes,
+                   !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    notesBlock(notes)
+                }
+
+                workoutDetail(w.kind)
                 feedbackBlock
+            } else {
+                DetailSectionCard(title: "Workout") {
+                    DetailEmptyState(
+                        title: "Workout unavailable",
+                        message: "This workout could not be found.",
+                        systemImage: "figure.run"
+                    )
+                }
             }
         }
         .padding(16)
@@ -382,10 +401,14 @@ struct WorkoutDetailView: View {
                     }
                 }
                 
-                HStack(spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(dateRange(w)).font(.footnote).foregroundStyle(.secondary)
                     if let dur = w.duration_min {
                         Text("• \(dur) min")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    if let paused = w.paused_sec, paused > 0 {
+                        Text("• Paused \(durationString(Double(paused)))")
                             .font(.footnote).foregroundStyle(.secondary)
                     }
                     if let pi = w.perceived_intensity, !pi.isEmpty {
@@ -407,6 +430,7 @@ struct WorkoutDetailView: View {
                         draftBadge
                     }
                 }
+                .fixedSize(horizontal: false, vertical: true)
             }
             .padding(16)
         }
@@ -669,6 +693,7 @@ struct WorkoutDetailView: View {
                 started_at: w.started_at,
                 ended_at: w.ended_at,
                 duration_min: w.duration_min,
+                paused_sec: w.paused_sec,
                 perceived_intensity: w.perceived_intensity,
                 state: w.state,
                 calories_kcal: w.calories_kcal
@@ -965,7 +990,7 @@ struct WorkoutDetailView: View {
         do {
             let wRes = try await SupabaseManager.shared.client
                 .from("workouts")
-                .select("id, user_id, kind, title, notes, started_at, ended_at, duration_min, perceived_intensity, state, calories_kcal")
+                .select("id, user_id, kind, title, notes, started_at, ended_at, duration_min, paused_sec, perceived_intensity, state, calories_kcal")
                 .eq("id", value: workoutId)
                 .single()
                 .execute()
@@ -992,6 +1017,7 @@ struct WorkoutDetailView: View {
                 self.profile = p
                 self.totalScore = sRows.isEmpty ? nil : total
                 self.totalCalories = w.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue }
+                self.error = nil
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
@@ -1268,6 +1294,7 @@ struct WorkoutDetailView: View {
                     started_at: now,
                     ended_at: nil,
                     duration_min: w.duration_min,
+                    paused_sec: w.paused_sec,
                     perceived_intensity: w.perceived_intensity,
                     state: w.state,
                     calories_kcal: w.calories_kcal
@@ -1354,7 +1381,7 @@ struct WorkoutDetailView: View {
             do {
                 let exRes = try await SupabaseManager.shared.client
                     .from("workout_exercises")
-                    .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
+                    .select("id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name, exercises(name)")
                     .eq("workout_id", value: workoutId)
                     .order("order_index", ascending: true)
                     .execute()
@@ -1363,6 +1390,8 @@ struct WorkoutDetailView: View {
                     let id: Int
                     let exercise_id: Int64
                     let order_index: Int
+                    let superset_group_id: UUID?
+                    let superset_position: Int?
                     let notes: String?
                     let exercises: ExName?
                     let custom_name: String?
@@ -1373,30 +1402,45 @@ struct WorkoutDetailView: View {
                 let exIds = exs.map { $0.id }
                 var setsByEx: [Int: [EditableSet]] = [:]
                 if !exIds.isEmpty {
-                    let setRes = try await SupabaseManager.shared.client
-                        .from("exercise_sets")
-                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
-                        .in("workout_exercise_id", values: exIds)
-                        .order("set_number", ascending: true)
-                        .order("id", ascending: true)
-                        .execute()
-                    
                     struct SetWire: Decodable {
                         let id: Int
                         let workout_exercise_id: Int
                         let set_number: Int
+                        let order_index: Int?
                         let reps: Int?
                         let weight_kg: Decimal?
                         let rpe: Decimal?
                         let rest_sec: Int?
                         let weight_segments: [StrengthWeightSegWire]?
                     }
-                    let sets = try decoder.decode([SetWire].self, from: setRes.data)
+                    let setData: Data
+                    do {
+                        setData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("order_index", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    } catch {
+                        setData = try await SupabaseManager.shared.client
+                            .from("exercise_sets")
+                            .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
+                            .in("workout_exercise_id", values: exIds)
+                            .order("set_number", ascending: true)
+                            .order("id", ascending: true)
+                            .execute()
+                            .data
+                    }
+                    let sets = try decoder.decode([SetWire].self, from: setData)
                     for s in sets {
+                        let nextOrder = setsByEx[s.workout_exercise_id, default: []].count + 1
                         let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                         setsByEx[s.workout_exercise_id, default: []].append(
                             EditableSet(
                                 setNumber: s.set_number,
+                                orderIndex: s.order_index ?? nextOrder,
                                 reps: s.reps,
                                 weightKg: s.weight_kg.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
                                 rpe: s.rpe.map { String(NSDecimalNumber(decimal: $0).doubleValue) } ?? "",
@@ -1413,6 +1457,8 @@ struct WorkoutDetailView: View {
                         exerciseId: ex.exercise_id,
                         exerciseName: (ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercises?.name ?? "")),
                         orderIndex: ex.order_index,
+                        supersetGroupId: ex.superset_group_id,
+                        supersetPosition: ex.superset_position,
                         notes: ex.notes ?? "",
                         sets: setsByEx[ex.id] ?? [EditableSet(setNumber: 1)]
                     )
@@ -1788,6 +1834,7 @@ struct WorkoutDetailView: View {
                         struct HyExRow: Decodable {
                             let exercise_code: String
                             let exercise_order: Int
+                            let zone_order: Int?
                             let distance_m: Int?
                             let reps: Int?
                             let weight_kg: Decimal?
@@ -1809,6 +1856,7 @@ struct WorkoutDetailView: View {
                                 exerciseCode: fields.code,
                                 customDisplayName: fields.customDisplayName,
                                 exerciseOrder: row.exercise_order,
+                                zoneOrder: row.zone_order.map { max(1, $0) },
                                 distanceM: row.distance_m.map(String.init) ?? "",
                                 reps: row.reps.map(String.init) ?? "",
                                 weightKg: row.weight_kg.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? "",
@@ -2070,6 +2118,169 @@ struct WorkoutDetailView: View {
 
 }
 
+private struct DetailMetric: Identifiable {
+    let id = UUID()
+    let label: String
+    let value: String
+    let systemImage: String?
+
+    init(_ label: String, _ value: String, systemImage: String? = nil) {
+        self.label = label
+        self.value = value
+        self.systemImage = systemImage
+    }
+}
+
+private struct DetailSectionCard<Content: View>: View {
+    let title: String
+    let subtitle: String?
+    let content: Content
+
+    init(title: String, subtitle: String? = nil, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            content
+        }
+        .padding(14)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
+    }
+}
+
+private struct DetailStatRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(label)
+                .font(.subheadline.weight(.semibold))
+            Spacer(minLength: 12)
+            Text(value)
+                .font(.subheadline)
+                .multilineTextAlignment(.trailing)
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct DetailMetricGrid: View {
+    let metrics: [DetailMetric]
+
+    private var columns: [GridItem] {
+        [GridItem(.flexible()), GridItem(.flexible())]
+    }
+
+    var body: some View {
+        if !metrics.isEmpty {
+            LazyVGrid(columns: columns, spacing: 10) {
+                ForEach(metrics) { metric in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            if let systemImage = metric.systemImage {
+                                Image(systemName: systemImage)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(metric.label)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
+                        Text(metric.value)
+                            .font(.subheadline.weight(.semibold))
+                            .monospacedDigit()
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                }
+            }
+        }
+    }
+}
+
+private struct DetailEmptyState: View {
+    let title: String
+    let message: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+        .padding(.horizontal, 12)
+    }
+}
+
+private func detailTrimmed(_ value: String?) -> String? {
+    guard let value else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
+private func detailPositiveInt(_ value: Int?) -> Int? {
+    guard let value, value > 0 else { return nil }
+    return value
+}
+
+private func detailNonZeroInt(_ value: Int?) -> Int? {
+    guard let value, value != 0 else { return nil }
+    return value
+}
+
+private func detailPositiveDecimalDouble(_ value: Decimal?) -> Double? {
+    guard let value else { return nil }
+    let doubleValue = NSDecimalNumber(decimal: value).doubleValue
+    return doubleValue > 0 ? doubleValue : nil
+}
+
+private func detailRatio(_ made: Int?, _ total: Int?) -> String? {
+    let madeValue = made ?? 0
+    let totalValue = total ?? 0
+    guard madeValue != 0 || totalValue != 0 else { return nil }
+    return "\(madeValue)/\(totalValue)"
+}
+
+private func detailPair(_ left: Int?, _ right: Int?, separator: String = "–") -> String? {
+    let leftValue = left ?? 0
+    let rightValue = right ?? 0
+    guard leftValue != 0 || rightValue != 0 else { return nil }
+    return "\(leftValue)\(separator)\(rightValue)"
+}
+
+private func detailLabel(_ value: String) -> String {
+    value.replacingOccurrences(of: "_", with: " ").capitalized
+}
+
 private struct StrengthDetailBlock: View {
     let workoutId: Int
     let reloadKey: UUID
@@ -2078,6 +2289,8 @@ private struct StrengthDetailBlock: View {
         let id: Int
         let exercise_id: Int64
         let order_index: Int
+        let superset_group_id: UUID?
+        let superset_position: Int?
         let notes: String?
         let custom_name: String?
         let exercise_name: String?
@@ -2087,11 +2300,23 @@ private struct StrengthDetailBlock: View {
         let id: Int
         let workout_exercise_id: Int
         let set_number: Int
+        let order_index: Int?
         let reps: Int?
         let weight_kg: Decimal?
         let rpe: Decimal?
         let rest_sec: Int?
+        let notes: String?
         let weight_segments: [StrengthWeightSegWire]?
+    }
+
+    private struct ExerciseDisplayBlock: Identifiable {
+        let id: String
+        let title: String?
+        let exercises: [ExerciseRow]
+
+        var isSuperset: Bool {
+            exercises.count > 1
+        }
     }
     
     @State private var exercises: [ExerciseRow] = []
@@ -2101,73 +2326,255 @@ private struct StrengthDetailBlock: View {
     @State private var error: String?
     
     var body: some View {
+        DetailSectionCard(title: "Strength", subtitle: strengthSubtitle) {
+            if loading && exercises.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else if let error, exercises.isEmpty {
+                DetailEmptyState(
+                    title: "Could not load strength details",
+                    message: error,
+                    systemImage: "exclamationmark.triangle"
+                )
+            } else if exercises.isEmpty {
+                DetailEmptyState(
+                    title: "No exercises yet",
+                    message: "This workout does not have any exercises attached.",
+                    systemImage: "dumbbell"
+                )
+            } else {
+                DetailMetricGrid(metrics: strengthMetrics)
+
+                ForEach(exerciseDisplayBlocks) { block in
+                    if block.isSuperset {
+                        supersetExerciseCard(block)
+                    } else if let ex = block.exercises.first {
+                        exerciseCard(ex)
+                    }
+                }
+            }
+        }
+        .task { await load() }
+        .onChange(of: reloadKey) { _, _ in
+            Task { await load() }
+        }
+    }
+
+    private var allSets: [SetRow] {
+        setsByExercise.values.flatMap { $0 }
+    }
+
+    private var strengthSubtitle: String? {
+        guard !exercises.isEmpty else { return nil }
+        let setCount = allSets.count
+        if setCount > 0 {
+            return "\(exercises.count) exercises · \(setCount) sets"
+        }
+        return "\(exercises.count) exercises"
+    }
+
+    private var strengthMetrics: [DetailMetric] {
+        var metrics: [DetailMetric] = []
+        if !exercises.isEmpty {
+            metrics.append(DetailMetric("Exercises", "\(exercises.count)", systemImage: "list.bullet"))
+        }
+        if !allSets.isEmpty {
+            metrics.append(DetailMetric("Sets", "\(allSets.count)", systemImage: "number"))
+        }
+        let totalReps = allSets.compactMap { detailPositiveInt($0.reps) }.reduce(0, +)
+        if totalReps > 0 {
+            metrics.append(DetailMetric("Reps", "\(totalReps)", systemImage: "repeat"))
+        }
+        if let totalVolumeKg, totalVolumeKg > 0 {
+            metrics.append(DetailMetric("Volume", String(format: "%.1f kg", totalVolumeKg), systemImage: "scalemass"))
+        }
+        let maxWeight = allSets.compactMap { detailPositiveDecimalDouble($0.weight_kg) }.max()
+        if let maxWeight {
+            metrics.append(DetailMetric("Top weight", String(format: "%.1f kg", maxWeight), systemImage: "arrow.up"))
+        }
+        let rpes = allSets.compactMap { detailPositiveDecimalDouble($0.rpe) }
+        if !rpes.isEmpty {
+            let avg = rpes.reduce(0, +) / Double(rpes.count)
+            metrics.append(DetailMetric("Avg RPE", String(format: "%.1f", avg), systemImage: "gauge.medium"))
+        }
+        return metrics
+    }
+
+    private var exerciseDisplayBlocks: [ExerciseDisplayBlock] {
+        var blocks: [ExerciseDisplayBlock] = []
+        let ordered = exercises.sorted { lhs, rhs in
+            if lhs.order_index != rhs.order_index { return lhs.order_index < rhs.order_index }
+            return lhs.id < rhs.id
+        }
+        var idx = 0
+        while idx < ordered.count {
+            let current = ordered[idx]
+            guard let groupId = current.superset_group_id else {
+                blocks.append(ExerciseDisplayBlock(id: "exercise-\(current.id)", title: nil, exercises: [current]))
+                idx += 1
+                continue
+            }
+
+            var group: [ExerciseRow] = [current]
+            var nextIdx = idx + 1
+            while nextIdx < ordered.count, ordered[nextIdx].superset_group_id == groupId {
+                group.append(ordered[nextIdx])
+                nextIdx += 1
+            }
+
+            if group.count > 1 {
+                let sortedGroup = group.sorted {
+                    let lp = $0.superset_position ?? Int.max
+                    let rp = $1.superset_position ?? Int.max
+                    if lp != rp { return lp < rp }
+                    if $0.order_index != $1.order_index { return $0.order_index < $1.order_index }
+                    return $0.id < $1.id
+                }
+                blocks.append(
+                    ExerciseDisplayBlock(
+                        id: "superset-\(groupId.uuidString)",
+                        title: "Superserie",
+                        exercises: sortedGroup
+                    )
+                )
+            } else {
+                blocks.append(ExerciseDisplayBlock(id: "exercise-\(current.id)", title: nil, exercises: [current]))
+            }
+
+            idx = nextIdx
+        }
+        return blocks
+    }
+
+    private func supersetExerciseCard(_ block: ExerciseDisplayBlock) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Exercises").font(.headline)
-            
-            if loading { ProgressView().padding(.vertical, 8) }
-            
-            ForEach(exercises.sorted(by: { $0.order_index < $1.order_index })) { ex in
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.caption.weight(.semibold))
+                Text(block.title ?? "Superserie")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .foregroundStyle(.blue)
+
+            ForEach(Array(block.exercises.enumerated()), id: \.element.id) { offset, ex in
                 VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text((ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise #\(ex.exercise_id)")))
+                    HStack(spacing: 8) {
+                        Text(supersetPositionLabel(offset))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.blue)
+                        Text(exerciseDisplayName(ex))
                             .font(.subheadline.weight(.semibold))
                         Spacer()
                     }
                     if let exNotes = ex.notes, !exNotes.isEmpty {
                         Text(exNotes).font(.caption).foregroundStyle(.secondary)
                     }
-                    
-                    let rows = setsByExercise[ex.id] ?? []
-                    if rows.isEmpty {
-                        Text("No sets").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        VStack(spacing: 6) {
-                            ForEach(rows.sorted(by: { a, b in
-                                if a.set_number != b.set_number { return a.set_number < b.set_number }
-                                return a.id < b.id
-                            })) { s in
-                                let dropSummary: String? = {
-                                    guard let ws = s.weight_segments, ws.count >= 2 else { return nil }
-                                    return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
-                                }()
-                                HStack(spacing: 12) {
-                                    Text("#\(s.set_number)").font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
-                                    if let ds = dropSummary {
-                                        Text(ds).font(.footnote)
+                    exerciseSetsSummary(ex)
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.blue.opacity(0.25), lineWidth: 1))
+    }
+
+    private func exerciseCard(_ ex: ExerciseRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(exerciseDisplayName(ex))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            if let exNotes = ex.notes, !exNotes.isEmpty {
+                Text(exNotes).font(.caption).foregroundStyle(.secondary)
+            }
+            exerciseSetsSummary(ex)
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12)))
+    }
+
+    private func exerciseDisplayName(_ ex: ExerciseRow) -> String {
+        ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise #\(ex.exercise_id)")
+    }
+
+    private func supersetPositionLabel(_ offset: Int) -> String {
+        let letter = Character(UnicodeScalar(65 + min(max(offset, 0), 25))!)
+        return "\(letter)1"
+    }
+
+    private func exerciseSetsSummary(_ ex: ExerciseRow) -> some View {
+        let rows = setsByExercise[ex.id] ?? []
+        return Group {
+            if rows.isEmpty {
+                Text("No sets").font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(rows.sorted(by: { a, b in
+                        let ao = a.order_index ?? Int.max
+                        let bo = b.order_index ?? Int.max
+                        if ao != bo { return ao < bo }
+                        return a.id < b.id
+                    })) { s in
+                        let dropSummary: String? = {
+                            guard let ws = s.weight_segments, ws.count >= 2 else { return nil }
+                            return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
+                        }()
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 12) {
+                                Text("#\(s.order_index ?? s.set_number)")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 26, alignment: .leading)
+                                if let ds = dropSummary {
+                                    Text(ds).font(.footnote)
+                                } else {
+                                    let parts = setSummaryParts(s)
+                                    if parts.isEmpty {
+                                        Text("No set data")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
                                     } else {
-                                        Text("\(s.reps ?? 0) reps").font(.footnote)
-                                        Text("• \(weightStr(s.weight_kg))").font(.footnote)
+                                        Text(parts.joined(separator: " • "))
+                                            .font(.footnote)
                                     }
-                                    if let rpe = s.rpe {
-                                        Text("• RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))").font(.footnote)
-                                    }
-                                    if let rest = s.rest_sec {
-                                        Text("• Rest \(rest)s").font(.footnote)
-                                    }
-                                    Spacer()
                                 }
+                                Spacer()
+                            }
+                            if let notes = detailTrimmed(s.notes) {
+                                Text(notes)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
+                        .padding(8)
+                        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
                     }
                 }
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12)))
-            }
-            
-            if let vol = totalVolumeKg {
-                Text(String(format: "Total volume: %.1f kg", vol))
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .padding(.top, 4)
             }
         }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-        .task { await load() }
-        .onChange(of: reloadKey) { _, _ in
-            Task { await load() }
+    }
+
+    private func setSummaryParts(_ s: SetRow) -> [String] {
+        var parts: [String] = []
+        if let reps = detailPositiveInt(s.reps) {
+            parts.append("\(reps) reps")
         }
+        if let weight = detailPositiveDecimalDouble(s.weight_kg) {
+            parts.append(String(format: "%.1f kg", weight))
+        }
+        if let rpe = detailPositiveDecimalDouble(s.rpe) {
+            parts.append(String(format: "RPE %.1f", rpe))
+        }
+        if let rest = detailPositiveInt(s.rest_sec) {
+            parts.append("Rest \(rest)s")
+        }
+        return parts
     }
     
     private func load() async {
@@ -2175,7 +2582,7 @@ private struct StrengthDetailBlock: View {
         do {
             let exQ = try await SupabaseManager.shared.client
                 .from("workout_exercises")
-                .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
+                .select("id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name, exercises(name)")
                 .eq("workout_id", value: workoutId)
                 .order("order_index", ascending: true)
                 .execute()
@@ -2184,6 +2591,8 @@ private struct StrengthDetailBlock: View {
                 let id: Int
                 let exercise_id: Int64
                 let order_index: Int
+                let superset_group_id: UUID?
+                let superset_position: Int?
                 let notes: String?
                 let custom_name: String?
                 let exercises: ExName?
@@ -2195,6 +2604,8 @@ private struct StrengthDetailBlock: View {
                     id: $0.id,
                     exercise_id: $0.exercise_id,
                     order_index: $0.order_index,
+                    superset_group_id: $0.superset_group_id,
+                    superset_position: $0.superset_position,
                     notes: $0.notes,
                     custom_name: $0.custom_name,
                     exercise_name: $0.exercises?.name
@@ -2205,14 +2616,27 @@ private struct StrengthDetailBlock: View {
             let ids = exRows.map { $0.id }
             var byEx: [Int: [SetRow]] = [:]
             if !ids.isEmpty {
-                let sRes = try await SupabaseManager.shared.client
-                    .from("exercise_sets")
-                    .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments")
-                    .in("workout_exercise_id", values: ids)
-                    .order("set_number", ascending: true)
-                    .order("id", ascending: true)
-                    .execute()
-                let sets = try JSONDecoder.supabase().decode([SetRow].self, from: sRes.data)
+                let setData: Data
+                do {
+                    setData = try await SupabaseManager.shared.client
+                        .from("exercise_sets")
+                        .select("id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, notes, weight_segments")
+                        .in("workout_exercise_id", values: ids)
+                        .order("order_index", ascending: true)
+                        .order("id", ascending: true)
+                        .execute()
+                        .data
+                } catch {
+                    setData = try await SupabaseManager.shared.client
+                        .from("exercise_sets")
+                        .select("id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, notes, weight_segments")
+                        .in("workout_exercise_id", values: ids)
+                        .order("set_number", ascending: true)
+                        .order("id", ascending: true)
+                        .execute()
+                        .data
+                }
+                let sets = try JSONDecoder.supabase().decode([SetRow].self, from: setData)
                 for s in sets { byEx[s.workout_exercise_id, default: []].append(s) }
             }
             
@@ -2234,16 +2658,13 @@ private struct StrengthDetailBlock: View {
             await MainActor.run {
                 setsByExercise = byEx
                 totalVolumeKg = vol
+                error = nil
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
         }
     }
     
-    private func weightStr(_ w: Decimal?) -> String {
-        guard let w else { return "0.0 kg" }
-        return String(format: "%.1f kg", NSDecimalNumber(decimal: w).doubleValue)
-    }
 }
 
 private enum CardioRouteGeoJSONParser {
@@ -2389,6 +2810,7 @@ private struct CardioDetailBlock: View {
     }
     
     @State private var row: CardioRow?
+    @State private var loading = false
     @State private var error: String?
     private struct CardioExtras: Decodable {
         let cadence_rpm: Int?
@@ -2431,31 +2853,40 @@ private struct CardioDetailBlock: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Cardio").font(.headline)
-            
-            if let r = row {
-                info("Activity", activityLabel(r))
-                if let d = r.distance_km { info("Distance", String(format: "%.2f km", NSDecimalNumber(decimal: d).doubleValue)) }
-                if let s = r.duration_sec { info("Duration", durationString(Double(s))) }
-                if let p = r.avg_pace_sec_per_km { info("Avg pace", paceString(Double(p))) }
-                if let splits = extras?.km_split_pace_sec, !splits.isEmpty {
+        DetailSectionCard(title: row.map(activityLabel) ?? "Cardio", subtitle: cardioSubtitle) {
+            if loading && row == nil {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else if let error, row == nil {
+                DetailEmptyState(
+                    title: "Could not load cardio details",
+                    message: error,
+                    systemImage: "exclamationmark.triangle"
+                )
+            } else if let r = row {
+                DetailMetricGrid(metrics: cardioMetrics(r))
+
+                if let splits = extras?.km_split_pace_sec?.filter({ $0 > 0 }), !splits.isEmpty {
                     perKmPaceSection(splits: splits)
                 }
-                if let ah = r.avg_hr { info("Avg HR", "\(ah) bpm") }
-                if let mh = r.max_hr { info("Max HR", "\(mh) bpm") }
-                if let elev = r.elevation_gain_m { info("Elevation gain", "\(elev) m") }
+                if let elev = detailPositiveInt(r.elevation_gain_m) {
+                    info("Elevation gain", "\(elev) m")
+                }
+                cardioSpecificRows(r)
+
                 if routeCoordinates.count < 2, let territoryDetailValue {
                     territorySection(summary: territoryDetailValue)
                 }
                 if routeCoordinates.count >= 2 {
-                    Text("Route")
-                        .font(.subheadline.weight(.semibold))
-                        .padding(.top, 2)
-                    CardioRouteMapMini(
-                        coordinates: routeCoordinates,
-                        territoryCells: territoryPreviewCells
-                    )
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Route")
+                            .font(.subheadline.weight(.semibold))
+                        CardioRouteMapMini(
+                            coordinates: routeCoordinates,
+                            territoryCells: territoryPreviewCells
+                        )
+                    }
                     if let territoryDetailValue {
                         territorySection(summary: territoryDetailValue)
                     }
@@ -2468,34 +2899,20 @@ private struct CardioDetailBlock: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
-                        .padding(.top, 8)
+                        .padding(.top, 4)
                     }
                 }
-                if let n = r.notes, !n.isEmpty { info("Notes", n) }
-                if showsCadence(for: r.activity_code), let cad = extras?.cadence_rpm {
-                    info("Cadence", "\(cad) \((r.activity_code ?? "") == "rowerg" ? "spm" : "rpm")")
-                }
-                if showsWatts(for: r.activity_code), let w = extras?.watts_avg {
-                    info("Avg watts", "\(w) W")
-                }
-                if showsIncline(for: r.activity_code), let inc = extras?.incline_pct {
-                    info("Incline", String(format: "%.1f %%", inc))
-                }
-                if showsSplit500m(for: r.activity_code), let split = extras?.split_sec_per_500m {
-                    info("Split", "\(liftrMMSS(split)) /500m")
-                }
-                if showsSwimFields(for: r.activity_code) {
-                    if let laps = extras?.swim_laps { info("Laps", "\(laps)") }
-                    if let len  = extras?.pool_length_m { info("Pool length", "\(len) m") }
-                    if let st   = extras?.swim_style, !st.isEmpty { info("Swim style", st.capitalized) }
+                if let n = detailTrimmed(r.notes) {
+                    info("Notes", n)
                 }
             } else {
-                Text("No cardio session linked").foregroundStyle(.secondary).font(.caption)
+                DetailEmptyState(
+                    title: "No cardio session linked",
+                    message: "This workout does not have cardio details attached.",
+                    systemImage: "heart.text.square"
+                )
             }
         }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
         .task { await load() }
         .onChange(of: reloadKey) { _, _ in
             kmPaceSplitsExpanded = false
@@ -2546,8 +2963,65 @@ private struct CardioDetailBlock: View {
             .presentationBackground(.clear)
         }
     }
+
+    private var cardioSubtitle: String? {
+        guard let row else { return nil }
+        if routeCoordinates.count >= 2 {
+            return "Route recorded"
+        }
+        if detailPositiveDecimalDouble(row.distance_km) != nil {
+            return "Distance workout"
+        }
+        return nil
+    }
+
+    private func cardioMetrics(_ r: CardioRow) -> [DetailMetric] {
+        var metrics: [DetailMetric] = []
+        if let d = detailPositiveDecimalDouble(r.distance_km) {
+            metrics.append(DetailMetric("Distance", String(format: "%.2f km", d), systemImage: "point.topleft.down.curvedto.point.bottomright.up"))
+        }
+        if let s = detailPositiveInt(r.duration_sec) {
+            metrics.append(DetailMetric("Duration", durationString(Double(s)), systemImage: "clock"))
+        }
+        if let p = detailPositiveInt(r.avg_pace_sec_per_km) {
+            metrics.append(DetailMetric("Avg pace", paceString(Double(p)), systemImage: "speedometer"))
+        }
+        if let ah = detailPositiveInt(r.avg_hr) {
+            metrics.append(DetailMetric("Avg HR", "\(ah) bpm", systemImage: "heart"))
+        }
+        if let mh = detailPositiveInt(r.max_hr) {
+            metrics.append(DetailMetric("Max HR", "\(mh) bpm", systemImage: "heart.fill"))
+        }
+        return metrics
+    }
+
+    @ViewBuilder
+    private func cardioSpecificRows(_ r: CardioRow) -> some View {
+        if showsCadence(for: r.activity_code), let cad = detailPositiveInt(extras?.cadence_rpm) {
+            info("Cadence", "\(cad) \((r.activity_code ?? "") == "rowerg" ? "spm" : "rpm")")
+        }
+        if showsWatts(for: r.activity_code), let w = detailPositiveInt(extras?.watts_avg) {
+            info("Avg watts", "\(w) W")
+        }
+        if showsIncline(for: r.activity_code), let inc = extras?.incline_pct, inc != 0 {
+            info("Incline", String(format: "%.1f %%", inc))
+        }
+        if showsSplit500m(for: r.activity_code), let split = detailPositiveInt(extras?.split_sec_per_500m) {
+            info("Split", "\(liftrMMSS(split)) /500m")
+        }
+        if showsSwimFields(for: r.activity_code) {
+            if let laps = detailPositiveInt(extras?.swim_laps) { info("Laps", "\(laps)") }
+            if let len = detailPositiveInt(extras?.pool_length_m) { info("Pool length", "\(len) m") }
+            if let st = detailTrimmed(extras?.swim_style) { info("Swim style", st.capitalized) }
+        }
+    }
     
     private func load() async {
+        await MainActor.run {
+            loading = true
+            error = nil
+        }
+        defer { Task { await MainActor.run { loading = false } } }
         do {
             let res = try await SupabaseManager.shared.client
                 .from("cardio_sessions")
@@ -2558,6 +3032,7 @@ private struct CardioDetailBlock: View {
             let r = try JSONDecoder.supabase().decode(CardioRow.self, from: res.data)
             await MainActor.run {
                 row = r
+                error = nil
                 kmPaceSplitsExpanded = false
             }
             do {
@@ -2668,13 +3143,7 @@ private struct CardioDetailBlock: View {
     }
     
     @ViewBuilder private func info(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(.subheadline.weight(.semibold))
-            Spacer()
-            Text(value).font(.subheadline)
-        }
-        .padding(10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        DetailStatRow(label: label, value: value)
     }
 
     @ViewBuilder
@@ -2883,6 +3352,7 @@ private struct SportDetailBlock: View {
         let session_id: Int
         let exercise_code: String
         let exercise_order: Int
+        let zone_order: Int?
         let distance_m: Int?
         let reps: Int?
         let weight_kg: Decimal?
@@ -2908,6 +3378,7 @@ private struct SportDetailBlock: View {
     }
     
     @State private var row: SportRow?
+    @State private var loading = false
     @State private var error: String?
     
     @State private var fb: FootballStats? = nil
@@ -2922,275 +3393,418 @@ private struct SportDetailBlock: View {
     @State private var sk: SkiStats? = nil
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Sport").font(.headline)
-            
-            if let r = row {
-                info("Sport", r.sport.capitalized)
-                
-                if let s = r.duration_sec {
-                    info("Duration", durationString(Double(s)))
-                }
-                if r.sport != "ski", let res = r.match_result, !res.isEmpty {
-                    info("Result", res.capitalized)
-                }
-                if sportUsesNumericScore(r.sport),
-                   let sf = r.score_for,
-                   let sa = r.score_against {
-                    info("Score", "\(sf) – \(sa)")
-                }
-                if sportUsesSetText(r.sport),
-                   let mst = r.match_score_text,
-                   !mst.isEmpty {
-                    info("Sets", mst)
-                }
-                if let loc = r.location, !loc.isEmpty {
-                    info("Location", loc)
-                }
-                if let n = r.notes, !n.isEmpty {
-                    info("Session notes", n)
-                }
-                
-                if r.sport == "football", let s = fb {
-                    Divider().padding(.vertical, 4)
-                    Text("Football stats").font(.headline)
-                    if let v = s.position, !v.isEmpty {
-                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
-                    }
-                    if let v = s.minutes_played { info("Minutes played", "\(v)") }
-                    if let v = s.goals          { info("Goals", "\(v)") }
-                    if let v = s.assists        { info("Assists", "\(v)") }
-                    if let v = s.shots_on_target { info("Shots on target", "\(v)") }
-                    if let v = s.passes_completed, let tot = s.passes_attempted {
-                        info("Passes", "\(v)/\(tot)")
-                    } else if let v = s.passes_completed {
-                        info("Passes completed", "\(v)")
-                    }
-                    if let v = s.tackles        { info("Tackles", "\(v)") }
-                    if let v = s.interceptions  { info("Interceptions", "\(v)") }
-                    if let v = s.saves          { info("Saves", "\(v)") }
-                    if let v = s.yellow_cards   { info("Yellow cards", "\(v)") }
-                    if let v = s.red_cards      { info("Red cards", "\(v)") }
-                }
-                
-                if r.sport == "handball", let s = hb {
-                    Divider().padding(.vertical, 4)
-                    Text("Handball stats").font(.headline)
-                    if let v = s.position, !v.isEmpty {
-                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
-                    }
-                    if let v = s.minutes_played   { info("Minutes played", "\(v)") }
-                    if let v = s.goals            { info("Goals", "\(v)") }
-                    if let v = s.shots            { info("Shots", "\(v)") }
-                    if let v = s.shots_on_target  { info("Shots on target", "\(v)") }
-                    if let v = s.assists          { info("Assists", "\(v)") }
-                    if let v = s.steals           { info("Steals", "\(v)") }
-                    if let v = s.blocks           { info("Blocks", "\(v)") }
-                    if let v = s.turnovers_lost   { info("Turnovers lost", "\(v)") }
-                    if let g = s.seven_m_goals, let a = s.seven_m_attempts {
-                        info("7m goals", "\(g)/\(a)")
-                    } else if let g = s.seven_m_goals {
-                        info("7m goals", "\(g)")
-                    }
-                    if let v = s.saves            { info("Saves", "\(v)") }
-                    if let v = s.yellow_cards     { info("Yellow cards", "\(v)") }
-                    if let v = s.two_min_suspensions { info("2-min suspensions", "\(v)") }
-                    if let v = s.red_cards        { info("Red cards", "\(v)") }
-                }
-                
-                if r.sport == "hockey", let s = hk {
-                    Divider().padding(.vertical, 4)
-                    Text("Hockey stats").font(.headline)
-                    if let v = s.position, !v.isEmpty {
-                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
-                    }
-                    if let v = s.minutes_played   { info("Minutes played", "\(v)") }
-                    if let v = s.goals            { info("Goals", "\(v)") }
-                    if let v = s.assists          { info("Assists", "\(v)") }
-                    if let v = s.shots_on_goal    { info("Shots on goal", "\(v)") }
-                    if let v = s.plus_minus       { info("+ / -", "\(v)") }
-                    if let v = s.hits             { info("Hits", "\(v)") }
-                    if let v = s.blocks           { info("Blocks", "\(v)") }
-                    if let w = s.faceoffs_won, let t = s.faceoffs_total {
-                        info("Faceoffs", "\(w)/\(t)")
-                    }
-                    if let v = s.saves            { info("Saves", "\(v)") }
-                    if let v = s.penalty_minutes  { info("Penalty minutes", "\(v)") }
-                }
-                
-                if r.sport == "rugby", let s = rg {
-                    Divider().padding(.vertical, 4)
-                    Text("Rugby stats").font(.headline)
-                    if let v = s.position, !v.isEmpty {
-                        info("Position", v.replacingOccurrences(of: "_", with: " ").capitalized)
-                    }
-                    if let v = s.minutes_played        { info("Minutes played", "\(v)") }
-                    if let v = s.tries                 { info("Tries", "\(v)") }
-                    if let m = s.conversions_made, let a = s.conversions_attempted {
-                        info("Conversions", "\(m)/\(a)")
-                    } else if let m = s.conversions_made {
-                        info("Conversions made", "\(m)")
-                    }
-                    if let m = s.penalty_goals_made, let a = s.penalty_goals_attempted {
-                        info("Penalty goals", "\(m)/\(a)")
-                    } else if let m = s.penalty_goals_made {
-                        info("Penalty goals made", "\(m)")
-                    }
-                    if let v = s.runs                  { info("Runs", "\(v)") }
-                    if let v = s.meters_gained         { info("Meters gained", "\(v)") }
-                    if let v = s.offloads              { info("Offloads", "\(v)") }
-                    if let v = s.tackles_made          { info("Tackles made", "\(v)") }
-                    if let v = s.tackles_missed        { info("Tackles missed", "\(v)") }
-                    if let v = s.turnovers_won         { info("Turnovers won", "\(v)") }
-                    if let v = s.yellow_cards          { info("Yellow cards", "\(v)") }
-                    if let v = s.red_cards             { info("Red cards", "\(v)") }
-                }
-                
-                if r.sport == "basketball", let s = bb {
-                    Divider().padding(.vertical, 4)
-                    Text("Basketball stats").font(.headline)
-                    if let v = s.points    { info("Points", "\(v)") }
-                    if let v = s.rebounds  { info("Rebounds", "\(v)") }
-                    if let v = s.assists   { info("Assists", "\(v)") }
-                    if let v = s.steals    { info("Steals", "\(v)") }
-                    if let v = s.blocks    { info("Blocks", "\(v)") }
-                    if let m = s.fg_made, let a = s.fg_attempted {
-                        info("FG", "\(m)/\(a)")
-                    }
-                    if let m = s.three_made, let a = s.three_attempted {
-                        info("3PT", "\(m)/\(a)")
-                    }
-                    if let m = s.ft_made, let a = s.ft_attempted {
-                        info("FT", "\(m)/\(a)")
-                    }
-                    if let v = s.turnovers { info("Turnovers", "\(v)") }
-                    if let v = s.fouls     { info("Fouls", "\(v)") }
-                }
-                
-                if ["padel","tennis","badminton","squash","table_tennis"].contains(r.sport),
-                   let s = rk {
-                    Divider().padding(.vertical, 4)
-                    Text("Racket stats").font(.headline)
-                    if let v = s.mode   { info("Mode", v.replacingOccurrences(of: "_", with: " ").capitalized) }
-                    if let v = s.format { info("Format", v.replacingOccurrences(of: "_", with: " ").capitalized) }
-                    if let w = s.sets_won, let l = s.sets_lost { info("Sets (W–L)", "\(w)–\(l)") }
-                    if let w = s.games_won, let l = s.games_lost { info("Games (W–L)", "\(w)–\(l)") }
-                    if let v = s.aces { info("Aces", "\(v)") }
-                    if let v = s.double_faults { info("Double faults", "\(v)") }
-                    if let v = s.winners { info("Winners", "\(v)") }
-                    if let v = s.unforced_errors { info("Unforced errors", "\(v)") }
-                    if let w = s.break_points_won, let t = s.break_points_total {
-                        info("Break points", "\(w)/\(t)")
-                    }
-                    if let w = s.net_points_won, let t = s.net_points_total {
-                        info("Net points", "\(w)/\(t)")
-                    }
-                }
-                
-                if r.sport == "volleyball", let s = vb {
-                    Divider().padding(.vertical, 4)
-                    Text("Volleyball stats").font(.headline)
-                    if let v = s.points { info("Points", "\(v)") }
-                    if let v = s.aces   { info("Aces", "\(v)") }
-                    if let v = s.blocks { info("Blocks", "\(v)") }
-                    if let v = s.digs   { info("Digs", "\(v)") }
-                }
-                
-                if r.sport == "hyrox", let s = hy {
-                    Divider().padding(.vertical, 4)
-                    Text("Hyrox stats").font(.headline)
-                    if let v = s.division, !v.isEmpty   { info("Division", v) }
-                    if let v = s.category, !v.isEmpty   { info("Category", v) }
-                    if let v = s.age_group, !v.isEmpty  { info("Age group", v) }
-                    if let t = s.official_time_sec      { info("Official time", durationString(Double(t))) }
-                    if let v = s.rank_overall           { info("Overall rank", "#\(v)") }
-                    if let v = s.rank_category          { info("Category rank", "#\(v)") }
-                    if let v = s.no_reps                { info("No reps", "\(v)") }
-                    if let t = s.penalty_time_sec       { info("Penalty time", durationString(Double(t))) }
-                    if let v = s.avg_hr                 { info("Avg HR", "\(v) bpm") }
-                    if let v = s.max_hr                 { info("Max HR", "\(v) bpm") }
-
-                    if !hyExercises.isEmpty {
-                        Divider().padding(.vertical, 4)
-                        Text("Hyrox exercises").font(.headline)
-
-                        ForEach(hyExercises) { ex in
-                            VStack(alignment: .leading, spacing: 8) {
-                                let exerciseTitle = HyroxExerciseFormatting.label(
-                                    code: ex.exercise_code,
-                                    displayName: ex.exercise_display_name,
-                                    notes: ex.notes
-                                )
-                                Text("\(ex.exercise_order). \(exerciseTitle)")
-                                    .font(.subheadline.weight(.semibold))
-
-                                if let v = ex.distance_m {
-                                    info("Distance", "\(v) m")
-                                }
-                                if let v = ex.reps {
-                                    info("Reps", "\(v)")
-                                }
-                                if let v = ex.weight_kg {
-                                    info("Weight", String(format: "%.1f kg", NSDecimalNumber(decimal: v).doubleValue))
-                                }
-                                if let v = ex.duration_sec {
-                                    info("Duration", durationString(Double(v)))
-                                }
-                                if let v = ex.height_cm {
-                                    info("Height", "\(v) cm")
-                                }
-                                if let v = ex.implement_count {
-                                    info("Implements", "\(v)")
-                                }
-                                if let v = ex.notes, !v.isEmpty {
-                                    let trimmedNote = v.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    if trimmedNote != exerciseTitle.trimmingCharacters(in: .whitespacesAndNewlines) {
-                                        info("Notes", v)
-                                    }
-                                }
-                            }
-                            .padding(10)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        }
-                    }
-                }
-                if r.sport == "ski", let s = sk {
-                    Divider().padding(.vertical, 4)
-                    Text("Ski stats").font(.headline)
-                    if let d = s.total_distance_km {
-                        info("Total distance", String(format: "%.2f km", NSDecimalNumber(decimal: d).doubleValue))
-                    }
-                    if let v = s.runs_count { info("Runs", "\(v)") }
-                    if let v = s.max_speed_kmh {
-                        info("Max speed", String(format: "%.1f km/h", NSDecimalNumber(decimal: v).doubleValue))
-                    }
-                    if let v = s.avg_speed_kmh {
-                        info("Avg speed", String(format: "%.1f km/h", NSDecimalNumber(decimal: v).doubleValue))
-                    }
-                    if let v = s.vertical_drop_m { info("Vertical drop", "\(v) m") }
-                    if let t = s.moving_time_sec { info("Moving time", durationString(Double(t))) }
-                    if let t = s.paused_time_sec { info("Paused time", durationString(Double(t))) }
-                    if let v = s.resort_name, !v.isEmpty { info("Resort", v) }
-                    if let v = s.snow_condition, !v.isEmpty { info("Snow", v) }
-                    if let v = s.weather, !v.isEmpty { info("Weather", v) }
-                }
-                
+        DetailSectionCard(title: sportTitle, subtitle: sportSubtitle) {
+            if loading && row == nil {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+            } else if let error, row == nil {
+                DetailEmptyState(
+                    title: "Could not load sport details",
+                    message: error,
+                    systemImage: "exclamationmark.triangle"
+                )
+            } else if let r = row {
+                DetailMetricGrid(metrics: sportSummaryMetrics(r))
+                sportOverviewRows(r)
+                sportSpecificSection(r)
             } else {
-                Text("No sport session linked")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
+                DetailEmptyState(
+                    title: "No sport session linked",
+                    message: "This workout does not have sport details attached.",
+                    systemImage: "trophy"
+                )
             }
         }
-        .padding(14)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
         .task { await load() }
         .onChange(of: reloadKey) { _, _ in
             Task { await load() }
         }
     }
+
+    private var sportTitle: String {
+        row.map { detailLabel($0.sport) } ?? "Sport"
+    }
+
+    private var sportSubtitle: String? {
+        guard let row else { return nil }
+        if row.sport == "hyrox", !hyExercises.isEmpty {
+            return "\(hyExercises.count) Hyrox exercises"
+        }
+        if let result = detailTrimmed(row.match_result), row.sport != "ski" {
+            return result.capitalized
+        }
+        return nil
+    }
+
+    private func sportSummaryMetrics(_ r: SportRow) -> [DetailMetric] {
+        var metrics: [DetailMetric] = [DetailMetric("Sport", detailLabel(r.sport), systemImage: "figure.run")]
+        if let s = detailPositiveInt(r.duration_sec) {
+            metrics.append(DetailMetric("Duration", durationString(Double(s)), systemImage: "clock"))
+        }
+        if r.sport != "ski", let res = detailTrimmed(r.match_result) {
+            metrics.append(DetailMetric("Result", res.capitalized, systemImage: "flag.checkered"))
+        }
+        if sportUsesNumericScore(r.sport), let score = detailPair(r.score_for, r.score_against) {
+            metrics.append(DetailMetric("Score", score, systemImage: "number"))
+        }
+        if sportUsesSetText(r.sport), let sets = detailTrimmed(r.match_score_text) {
+            metrics.append(DetailMetric("Sets", sets, systemImage: "list.number"))
+        }
+        if r.sport == "hyrox", !hyExercises.isEmpty {
+            metrics.append(DetailMetric("Exercises", "\(hyExercises.count)", systemImage: "square.grid.2x2"))
+        }
+        return metrics
+    }
+
+    @ViewBuilder
+    private func sportOverviewRows(_ r: SportRow) -> some View {
+        if let loc = detailTrimmed(r.location) {
+            info("Location", loc)
+        }
+        if let n = detailTrimmed(r.notes) {
+            info("Session notes", n)
+        }
+    }
+
+    @ViewBuilder
+    private func sportSpecificSection(_ r: SportRow) -> some View {
+        switch r.sport {
+        case "football":
+            if let s = fb, hasFootballStats(s) {
+                sportSubsection("Football stats") {
+                    if let v = detailTrimmed(s.position) { info("Position", detailLabel(v)) }
+                    if let v = detailPositiveInt(s.minutes_played) { info("Minutes played", "\(v)") }
+                    if let v = detailPositiveInt(s.goals) { info("Goals", "\(v)") }
+                    if let v = detailPositiveInt(s.assists) { info("Assists", "\(v)") }
+                    if let v = detailPositiveInt(s.shots_on_target) { info("Shots on target", "\(v)") }
+                    if let v = detailRatio(s.passes_completed, s.passes_attempted) { info("Passes", v) }
+                    if let v = detailPositiveInt(s.tackles) { info("Tackles", "\(v)") }
+                    if let v = detailPositiveInt(s.interceptions) { info("Interceptions", "\(v)") }
+                    if let v = detailPositiveInt(s.saves) { info("Saves", "\(v)") }
+                    if let v = detailPositiveInt(s.yellow_cards) { info("Yellow cards", "\(v)") }
+                    if let v = detailPositiveInt(s.red_cards) { info("Red cards", "\(v)") }
+                }
+            }
+        case "handball":
+            if let s = hb, hasHandballStats(s) {
+                sportSubsection("Handball stats") {
+                    if let v = detailTrimmed(s.position) { info("Position", detailLabel(v)) }
+                    if let v = detailPositiveInt(s.minutes_played) { info("Minutes played", "\(v)") }
+                    if let v = detailPositiveInt(s.goals) { info("Goals", "\(v)") }
+                    if let v = detailPositiveInt(s.shots) { info("Shots", "\(v)") }
+                    if let v = detailPositiveInt(s.shots_on_target) { info("Shots on target", "\(v)") }
+                    if let v = detailPositiveInt(s.assists) { info("Assists", "\(v)") }
+                    if let v = detailPositiveInt(s.steals) { info("Steals", "\(v)") }
+                    if let v = detailPositiveInt(s.blocks) { info("Blocks", "\(v)") }
+                    if let v = detailPositiveInt(s.turnovers_lost) { info("Turnovers lost", "\(v)") }
+                    if let v = detailRatio(s.seven_m_goals, s.seven_m_attempts) { info("7m goals", v) }
+                    if let v = detailPositiveInt(s.saves) { info("Saves", "\(v)") }
+                    if let v = detailPositiveInt(s.yellow_cards) { info("Yellow cards", "\(v)") }
+                    if let v = detailPositiveInt(s.two_min_suspensions) { info("2-min suspensions", "\(v)") }
+                    if let v = detailPositiveInt(s.red_cards) { info("Red cards", "\(v)") }
+                }
+            }
+        case "hockey":
+            if let s = hk, hasHockeyStats(s) {
+                sportSubsection("Hockey stats") {
+                    if let v = detailTrimmed(s.position) { info("Position", detailLabel(v)) }
+                    if let v = detailPositiveInt(s.minutes_played) { info("Minutes played", "\(v)") }
+                    if let v = detailPositiveInt(s.goals) { info("Goals", "\(v)") }
+                    if let v = detailPositiveInt(s.assists) { info("Assists", "\(v)") }
+                    if let v = detailPositiveInt(s.shots_on_goal) { info("Shots on goal", "\(v)") }
+                    if let v = detailNonZeroInt(s.plus_minus) { info("+ / -", "\(v)") }
+                    if let v = detailPositiveInt(s.hits) { info("Hits", "\(v)") }
+                    if let v = detailPositiveInt(s.blocks) { info("Blocks", "\(v)") }
+                    if let v = detailRatio(s.faceoffs_won, s.faceoffs_total) { info("Faceoffs", v) }
+                    if let v = detailPositiveInt(s.saves) { info("Saves", "\(v)") }
+                    if let v = detailPositiveInt(s.penalty_minutes) { info("Penalty minutes", "\(v)") }
+                }
+            }
+        case "rugby":
+            if let s = rg, hasRugbyStats(s) {
+                sportSubsection("Rugby stats") {
+                    if let v = detailTrimmed(s.position) { info("Position", detailLabel(v)) }
+                    if let v = detailPositiveInt(s.minutes_played) { info("Minutes played", "\(v)") }
+                    if let v = detailPositiveInt(s.tries) { info("Tries", "\(v)") }
+                    if let v = detailRatio(s.conversions_made, s.conversions_attempted) { info("Conversions", v) }
+                    if let v = detailRatio(s.penalty_goals_made, s.penalty_goals_attempted) { info("Penalty goals", v) }
+                    if let v = detailPositiveInt(s.runs) { info("Runs", "\(v)") }
+                    if let v = detailPositiveInt(s.meters_gained) { info("Meters gained", "\(v)") }
+                    if let v = detailPositiveInt(s.offloads) { info("Offloads", "\(v)") }
+                    if let v = detailPositiveInt(s.tackles_made) { info("Tackles made", "\(v)") }
+                    if let v = detailPositiveInt(s.tackles_missed) { info("Tackles missed", "\(v)") }
+                    if let v = detailPositiveInt(s.turnovers_won) { info("Turnovers won", "\(v)") }
+                    if let v = detailPositiveInt(s.yellow_cards) { info("Yellow cards", "\(v)") }
+                    if let v = detailPositiveInt(s.red_cards) { info("Red cards", "\(v)") }
+                }
+            }
+        case "basketball":
+            if let s = bb, hasBasketballStats(s) {
+                sportSubsection("Basketball stats") {
+                    if let v = detailPositiveInt(s.points) { info("Points", "\(v)") }
+                    if let v = detailPositiveInt(s.rebounds) { info("Rebounds", "\(v)") }
+                    if let v = detailPositiveInt(s.assists) { info("Assists", "\(v)") }
+                    if let v = detailPositiveInt(s.steals) { info("Steals", "\(v)") }
+                    if let v = detailPositiveInt(s.blocks) { info("Blocks", "\(v)") }
+                    if let v = detailRatio(s.fg_made, s.fg_attempted) { info("FG", v) }
+                    if let v = detailRatio(s.three_made, s.three_attempted) { info("3PT", v) }
+                    if let v = detailRatio(s.ft_made, s.ft_attempted) { info("FT", v) }
+                    if let v = detailPositiveInt(s.turnovers) { info("Turnovers", "\(v)") }
+                    if let v = detailPositiveInt(s.fouls) { info("Fouls", "\(v)") }
+                }
+            }
+        case "padel", "tennis", "badminton", "squash", "table_tennis":
+            if let s = rk, hasRacketStats(s) {
+                sportSubsection("Racket stats") {
+                    if let v = detailTrimmed(s.mode) { info("Mode", detailLabel(v)) }
+                    if let v = detailTrimmed(s.format) { info("Format", detailLabel(v)) }
+                    if let v = detailPair(s.sets_won, s.sets_lost) { info("Sets (W-L)", v) }
+                    if let v = detailPair(s.games_won, s.games_lost) { info("Games (W-L)", v) }
+                    if let v = detailPositiveInt(s.aces) { info("Aces", "\(v)") }
+                    if let v = detailPositiveInt(s.double_faults) { info("Double faults", "\(v)") }
+                    if let v = detailPositiveInt(s.winners) { info("Winners", "\(v)") }
+                    if let v = detailPositiveInt(s.unforced_errors) { info("Unforced errors", "\(v)") }
+                    if let v = detailRatio(s.break_points_won, s.break_points_total) { info("Break points", v) }
+                    if let v = detailRatio(s.net_points_won, s.net_points_total) { info("Net points", v) }
+                }
+            }
+        case "volleyball":
+            if let s = vb, hasVolleyballStats(s) {
+                sportSubsection("Volleyball stats") {
+                    if let v = detailPositiveInt(s.points) { info("Points", "\(v)") }
+                    if let v = detailPositiveInt(s.aces) { info("Aces", "\(v)") }
+                    if let v = detailPositiveInt(s.blocks) { info("Blocks", "\(v)") }
+                    if let v = detailPositiveInt(s.digs) { info("Digs", "\(v)") }
+                }
+            }
+        case "hyrox":
+            hyroxSection()
+        case "ski":
+            if let s = sk, hasSkiStats(s) {
+                sportSubsection("Ski stats") {
+                    if let d = detailPositiveDecimalDouble(s.total_distance_km) {
+                        info("Total distance", String(format: "%.2f km", d))
+                    }
+                    if let v = detailPositiveInt(s.runs_count) { info("Runs", "\(v)") }
+                    if let v = detailPositiveDecimalDouble(s.max_speed_kmh) {
+                        info("Max speed", String(format: "%.1f km/h", v))
+                    }
+                    if let v = detailPositiveDecimalDouble(s.avg_speed_kmh) {
+                        info("Avg speed", String(format: "%.1f km/h", v))
+                    }
+                    if let v = detailPositiveInt(s.vertical_drop_m) { info("Vertical drop", "\(v) m") }
+                    if let t = detailPositiveInt(s.moving_time_sec) { info("Moving time", durationString(Double(t))) }
+                    if let t = detailPositiveInt(s.paused_time_sec) { info("Paused time", durationString(Double(t))) }
+                    if let v = detailTrimmed(s.resort_name) { info("Resort", v) }
+                    if let v = detailTrimmed(s.snow_condition) { info("Snow", v) }
+                    if let v = detailTrimmed(s.weather) { info("Weather", v) }
+                }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func sportSubsection<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider().padding(.vertical, 2)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            content()
+        }
+    }
+
+    @ViewBuilder
+    private func hyroxSection() -> some View {
+        if let s = hy, hasHyroxStats(s) {
+            sportSubsection("Hyrox stats") {
+                if let v = detailTrimmed(s.division) { info("Division", v) }
+                if let v = detailTrimmed(s.category) { info("Category", v) }
+                if let v = detailTrimmed(s.age_group) { info("Age group", v) }
+                if let t = detailPositiveInt(s.official_time_sec) { info("Official time", durationString(Double(t))) }
+                if let v = detailPositiveInt(s.rank_overall) { info("Overall rank", "#\(v)") }
+                if let v = detailPositiveInt(s.rank_category) { info("Category rank", "#\(v)") }
+                if let v = detailPositiveInt(s.no_reps) { info("No reps", "\(v)") }
+                if let t = detailPositiveInt(s.penalty_time_sec) { info("Penalty time", durationString(Double(t))) }
+                if let v = detailPositiveInt(s.avg_hr) { info("Avg HR", "\(v) bpm") }
+                if let v = detailPositiveInt(s.max_hr) { info("Max HR", "\(v) bpm") }
+            }
+        }
+
+        if !hyExercises.isEmpty {
+            sportSubsection("Hyrox exercises") {
+                ForEach(orderedHyroxDetailExercisePairs, id: \.element.id) { pair in
+                    if let zoneOrder = pair.element.zone_order {
+                        if isFirstHyroxDetailExerciseInZone(position: pair.offset, zoneOrder: zoneOrder) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Zone \(max(1, zoneOrder))")
+                                    .font(.subheadline.weight(.bold))
+                                ForEach(hyroxDetailZoneExercisePairs(zoneOrder), id: \.element.id) { zonePair in
+                                    hyroxDetailExerciseCard(zonePair.element)
+                                }
+                            }
+                            .padding(10)
+                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
+                        }
+                    } else {
+                        hyroxDetailExerciseCard(pair.element)
+                    }
+                }
+            }
+        }
+    }
+
+    private func hasFootballStats(_ s: FootballStats) -> Bool {
+        detailTrimmed(s.position) != nil ||
+        [
+            s.minutes_played, s.goals, s.assists, s.shots_on_target,
+            s.passes_completed, s.passes_attempted, s.tackles, s.interceptions,
+            s.saves, s.yellow_cards, s.red_cards
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasBasketballStats(_ s: BasketballStats) -> Bool {
+        [
+            s.points, s.rebounds, s.assists, s.steals, s.blocks,
+            s.fg_made, s.fg_attempted, s.three_made, s.three_attempted,
+            s.ft_made, s.ft_attempted, s.turnovers, s.fouls
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasRacketStats(_ s: RacketStats) -> Bool {
+        detailTrimmed(s.mode) != nil ||
+        detailTrimmed(s.format) != nil ||
+        [
+            s.sets_won, s.sets_lost, s.games_won, s.games_lost, s.aces,
+            s.double_faults, s.winners, s.unforced_errors, s.break_points_won,
+            s.break_points_total, s.net_points_won, s.net_points_total
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasVolleyballStats(_ s: VolleyballStats) -> Bool {
+        [s.points, s.aces, s.blocks, s.digs].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasHandballStats(_ s: HandballStats) -> Bool {
+        detailTrimmed(s.position) != nil ||
+        [
+            s.minutes_played, s.goals, s.shots, s.shots_on_target, s.assists,
+            s.steals, s.blocks, s.turnovers_lost, s.seven_m_goals,
+            s.seven_m_attempts, s.saves, s.yellow_cards, s.two_min_suspensions,
+            s.red_cards
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasHockeyStats(_ s: HockeyStats) -> Bool {
+        detailTrimmed(s.position) != nil ||
+        detailNonZeroInt(s.plus_minus) != nil ||
+        [
+            s.minutes_played, s.goals, s.assists, s.shots_on_goal, s.hits,
+            s.blocks, s.faceoffs_won, s.faceoffs_total, s.saves, s.penalty_minutes
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasRugbyStats(_ s: RugbyStats) -> Bool {
+        detailTrimmed(s.position) != nil ||
+        [
+            s.minutes_played, s.tries, s.conversions_made, s.conversions_attempted,
+            s.penalty_goals_made, s.penalty_goals_attempted, s.runs,
+            s.meters_gained, s.offloads, s.tackles_made, s.tackles_missed,
+            s.turnovers_won, s.yellow_cards, s.red_cards
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasHyroxStats(_ s: HyroxStats) -> Bool {
+        detailTrimmed(s.division) != nil ||
+        detailTrimmed(s.category) != nil ||
+        detailTrimmed(s.age_group) != nil ||
+        [
+            s.official_time_sec, s.rank_overall, s.rank_category,
+            s.no_reps, s.penalty_time_sec, s.avg_hr, s.max_hr
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasSkiStats(_ s: SkiStats) -> Bool {
+        detailPositiveDecimalDouble(s.total_distance_km) != nil ||
+        detailPositiveDecimalDouble(s.max_speed_kmh) != nil ||
+        detailPositiveDecimalDouble(s.avg_speed_kmh) != nil ||
+        detailTrimmed(s.resort_name) != nil ||
+        detailTrimmed(s.snow_condition) != nil ||
+        detailTrimmed(s.weather) != nil ||
+        [
+            s.runs_count, s.vertical_drop_m, s.moving_time_sec, s.paused_time_sec
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private var orderedHyroxDetailExercisePairs: [(offset: Int, element: HyroxExerciseStats)] {
+        Array(hyExercises.sorted { $0.exercise_order < $1.exercise_order }.enumerated())
+    }
+
+    private func hyroxDetailZoneExercisePairs(_ zoneOrder: Int) -> [(offset: Int, element: HyroxExerciseStats)] {
+        orderedHyroxDetailExercisePairs.filter { $0.element.zone_order == zoneOrder }
+    }
+
+    private func isFirstHyroxDetailExerciseInZone(position: Int, zoneOrder: Int) -> Bool {
+        guard orderedHyroxDetailExercisePairs.indices.contains(position) else { return false }
+        guard position > 0 else { return true }
+        return orderedHyroxDetailExercisePairs[position - 1].element.zone_order != zoneOrder
+    }
+
+    @ViewBuilder
+    private func hyroxDetailExerciseCard(_ ex: HyroxExerciseStats) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let exerciseTitle = HyroxExerciseFormatting.label(
+                code: ex.exercise_code,
+                displayName: ex.exercise_display_name,
+                notes: ex.notes
+            )
+            Text("\(ex.exercise_order). \(exerciseTitle)")
+                .font(.subheadline.weight(.semibold))
+
+            DetailMetricGrid(metrics: hyroxExerciseMetrics(ex))
+
+            if let v = ex.notes, !v.isEmpty {
+                let trimmedNote = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmedNote != exerciseTitle.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    info("Notes", v)
+                }
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func hyroxExerciseMetrics(_ ex: HyroxExerciseStats) -> [DetailMetric] {
+        var metrics: [DetailMetric] = []
+        if let v = detailPositiveInt(ex.distance_m) {
+            metrics.append(DetailMetric("Distance", "\(v) m"))
+        }
+        if let v = detailPositiveInt(ex.reps) {
+            metrics.append(DetailMetric("Reps", "\(v)"))
+        }
+        if let v = detailPositiveDecimalDouble(ex.weight_kg) {
+            metrics.append(DetailMetric("Weight", String(format: "%.1f kg", v)))
+        }
+        if let v = detailPositiveInt(ex.duration_sec) {
+            metrics.append(DetailMetric("Duration", durationString(Double(v))))
+        }
+        if let v = detailPositiveInt(ex.height_cm) {
+            metrics.append(DetailMetric("Height", "\(v) cm"))
+        }
+        if let v = detailPositiveInt(ex.implement_count) {
+            metrics.append(DetailMetric("Implements", "\(v)"))
+        }
+        return metrics
+    }
     
     private func load() async {
+        await MainActor.run {
+            loading = true
+            error = nil
+        }
+        defer { Task { await MainActor.run { loading = false } } }
         do {
             let res = try await SupabaseManager.shared.client
                 .from("sport_sessions")
@@ -3201,6 +3815,7 @@ private struct SportDetailBlock: View {
             let r = try JSONDecoder.supabase().decode(SportRow.self, from: res.data)
             await MainActor.run {
                 row = r
+                error = nil
                 fb = nil; bb = nil; rk = nil; vb = nil
                 hb = nil; hk = nil; rg = nil; hy = nil
                 hyExercises = []
@@ -3354,13 +3969,7 @@ private struct SportDetailBlock: View {
     
     @ViewBuilder
     private func info(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).font(.subheadline.weight(.semibold))
-            Spacer()
-            Text(value).font(.subheadline)
-        }
-        .padding(10)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        DetailStatRow(label: label, value: value)
     }
     
     private func durationString(_ secondsDouble: Double) -> String {

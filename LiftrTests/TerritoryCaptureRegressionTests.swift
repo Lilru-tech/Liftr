@@ -336,6 +336,82 @@ struct TerritoryCaptureRegressionTests {
         #expect(filtered.first?.city_key == "osm:relation:2")
     }
 
+    @Test func deduplicatedTerritoryCitiesKeepsOneRowPerDisplayName() {
+        let cities = [
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:344202",
+                display_name: "Sabadell",
+                center_lat: 41.5460801,
+                center_lon: 2.1083214,
+                captured_cells: 226,
+                total_capture_cells: 42431,
+                my_owned_cells: 0,
+                owned_cells: 0
+            ),
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:19797036",
+                display_name: "Sabadell",
+                center_lat: 41.5486935,
+                center_lon: 2.11649,
+                captured_cells: 151,
+                total_capture_cells: 985,
+                my_owned_cells: 0,
+                owned_cells: 0
+            ),
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:5536842",
+                display_name: "Sevilla",
+                center_lat: 37.3248719,
+                center_lon: -5.9687548,
+                captured_cells: 346,
+                total_capture_cells: 11387,
+                my_owned_cells: 0,
+                owned_cells: 0
+            ),
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:342563",
+                display_name: "Sevilla",
+                center_lat: 37.3886303,
+                center_lon: -5.9953403,
+                captured_cells: 108,
+                total_capture_cells: 139594,
+                my_owned_cells: 0,
+                owned_cells: 0
+            )
+        ]
+        let deduped = TerritoryCaptureClient.deduplicatedTerritoryCities(cities)
+        #expect(deduped.compactMap(\.display_name) == ["Sabadell", "Sevilla"])
+        #expect(deduped.compactMap(\.city_key) == ["osm:relation:344202", "osm:relation:5536842"])
+    }
+
+    @Test func deduplicatedTerritoryCitiesPrefersOwnedDuplicate() {
+        let cities = [
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:1",
+                display_name: "Example",
+                center_lat: 41,
+                center_lon: 2,
+                captured_cells: 100,
+                total_capture_cells: 1000,
+                my_owned_cells: 0,
+                owned_cells: 0
+            ),
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:2",
+                display_name: "Example",
+                center_lat: 41.1,
+                center_lon: 2.1,
+                captured_cells: 10,
+                total_capture_cells: 100,
+                my_owned_cells: 5,
+                owned_cells: 5
+            )
+        ]
+        let deduped = TerritoryCaptureClient.deduplicatedTerritoryCities(cities)
+        #expect(deduped.count == 1)
+        #expect(deduped.first?.city_key == "osm:relation:2")
+    }
+
     @Test func selectedTerritoryCityPrefersOwnedPool() {
         let cities = [
             TerritoryCityRegionRow(
@@ -403,11 +479,80 @@ struct TerritoryCaptureRegressionTests {
             owner_user_id: ownerId,
             owner_username: "runner",
             owner_avatar_url: nil,
+            last_workout_id: nil,
             captured_at: nil,
             is_mine: false
         )
         let coordinate = CLLocationCoordinate2D(latitude: 40.415, longitude: -3.695)
         let selected = TerritoryMapGeometry.selectedCell(at: coordinate, in: [cell])
         #expect(selected?.cell_id == "1:1")
+    }
+
+    @Test func ownerBalancedCellsPreserveOtherOwnersInDenseView() {
+        let mineOwner = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let firstOther = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let secondOther = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let cells = territoryCells(ownerId: mineOwner, prefix: "mine", count: 10, isMine: true, workoutId: 1)
+            + territoryCells(ownerId: firstOther, prefix: "other-a", count: 2, isMine: false, workoutId: 2)
+            + territoryCells(ownerId: secondOther, prefix: "other-b", count: 2, isMine: false, workoutId: 3)
+
+        let balanced = TerritoryMapGeometry.ownerBalancedCells(cells, maxCount: 8, otherTarget: 4)
+        let renderedOtherOwners = Set(balanced.filter { $0.is_mine != true }.compactMap(\.owner_user_id))
+
+        #expect(balanced.count == 8)
+        #expect(balanced.filter { $0.is_mine == true }.count == 4)
+        #expect(balanced.filter { $0.owner_user_id == firstOther }.count == 2)
+        #expect(balanced.filter { $0.owner_user_id == secondOther }.count == 2)
+        #expect(renderedOtherOwners == Set([firstOther, secondOther]))
+    }
+
+    @Test func ownerBalancedCellsFillCapacityWhenOnlyOthersVisible() {
+        let firstOther = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let secondOther = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+        let cells = territoryCells(ownerId: firstOther, prefix: "other-a", count: 4, isMine: false, workoutId: 4)
+            + territoryCells(ownerId: secondOther, prefix: "other-b", count: 4, isMine: false, workoutId: 5)
+
+        let balanced = TerritoryMapGeometry.ownerBalancedCells(cells, maxCount: 8, otherTarget: 4)
+        let renderedOtherOwners = Set(balanced.compactMap(\.owner_user_id))
+
+        #expect(balanced.count == 8)
+        #expect(renderedOtherOwners == Set([firstOther, secondOther]))
+    }
+
+    @Test func ownerBalancedCellsKeepCompleteOtherWorkoutBeforeMine() {
+        let mineOwner = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let otherOwner = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let cells = territoryCells(ownerId: mineOwner, prefix: "mine", count: 10, isMine: true, workoutId: 1)
+            + territoryCells(ownerId: otherOwner, prefix: "other", count: 5, isMine: false, workoutId: 773)
+
+        let balanced = TerritoryMapGeometry.ownerBalancedCells(cells, maxCount: 8, otherTarget: 8)
+
+        #expect(balanced.filter { $0.owner_user_id == otherOwner }.count == 5)
+        #expect(balanced.filter { $0.owner_user_id == mineOwner }.count == 3)
+        #expect(Set(balanced.compactMap(\.last_workout_id)).contains(773))
+    }
+
+    private func territoryCells(
+        ownerId: UUID,
+        prefix: String,
+        count: Int,
+        isMine: Bool,
+        workoutId: Int64?
+    ) -> [TerritoryMapCellRow] {
+        (0..<count).map { index in
+            TerritoryMapCellRow(
+                cell_id: "\(prefix)-\(index)",
+                cell_geojson: TerritoryGeoJSONPolygon(
+                    type: "Polygon",
+                    coordinates: [[[-3.7, 40.41], [-3.69, 40.41], [-3.69, 40.42], [-3.7, 40.41]]]
+                ),
+                owner_user_id: ownerId,
+                owner_username: prefix,
+                owner_avatar_url: nil,
+                last_workout_id: workoutId,
+                captured_at: Date(timeIntervalSince1970: Double(count - index)),
+                is_mine: isMine
+            )
+        }
     }
 }

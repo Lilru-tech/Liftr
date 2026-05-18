@@ -44,10 +44,11 @@ func editableExercisesFromStrengthTemplateDetail(
     let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
     return exs.map { ex in
         let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
-        let mappedSets: [EditableSet] = setsSorted.map { s in
+        let mappedSets: [EditableSet] = setsSorted.enumerated().map { idx, s in
             let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
             return EditableSet(
                 setNumber: s.set_number,
+                orderIndex: idx + 1,
                 reps: s.reps,
                 weightKg: s.weight_kg.map { String($0) } ?? "",
                 rpe: s.rpe.map { String($0) } ?? "",
@@ -65,6 +66,8 @@ func editableExercisesFromStrengthTemplateDetail(
             exerciseId: ex.exercise_id,
             exerciseName: displayName,
             orderIndex: ex.order_index,
+            supersetGroupId: nil,
+            supersetPosition: nil,
             notes: ex.notes ?? "",
             sets: fallbackSets
         )
@@ -218,6 +221,11 @@ struct StrengthRoutineExercisesEditorBlock: View {
                     restSec: restBinding(i, s),
                     segments: segmentsBinding(i, s),
                     showDelete: exercises[i].sets.count > 1,
+                    showReorder: exercises[i].sets.count > 1,
+                    canMoveUp: s > 0,
+                    canMoveDown: s < exercises[i].sets.count - 1,
+                    onMoveUp: { moveSet(exerciseIndex: i, setIndex: s, direction: -1) },
+                    onMoveDown: { moveSet(exerciseIndex: i, setIndex: s, direction: 1) },
                     onDelete: { removeSet(exerciseIndex: i, setIndex: s) }
                 )
             }
@@ -276,6 +284,9 @@ struct StrengthRoutineExercisesEditorBlock: View {
                         .accessibilityLabel("Remove exercise")
                     }
                 }
+                if exercises.count > 1 {
+                    supersetControls(for: i)
+                }
                 Text("Next prescription row: #\(exercises[i].sets.count + 1)")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -299,6 +310,54 @@ struct StrengthRoutineExercisesEditorBlock: View {
         .animation(.easeInOut(duration: 0.6), value: recentlyAddedExerciseId)
     }
 
+    @ViewBuilder
+    private func supersetControls(for index: Int) -> some View {
+        if let exercise = exercises[safe: index], let groupId = exercise.supersetGroupId {
+            HStack(spacing: 8) {
+                Text("Superserie")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("Group \(supersetGroupDisplayNumber(groupId, in: exercises)) · \(exercise.supersetPosition ?? 1)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 8)
+
+                if canAddNextToSuperset(groupId: groupId) {
+                    Button("Add next") {
+                        addNextExerciseToSuperset(groupId: groupId)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                }
+
+                Button("Remove") {
+                    removeExerciseFromSuperset(index)
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            HStack(spacing: 8) {
+                Text("Superserie")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button {
+                    startSuperset(at: index)
+                } label: {
+                    Label("Superset with next", systemImage: "link.badge.plus")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canStartSuperset(at: index))
+                .opacity(canStartSuperset(at: index) ? 1 : 0.45)
+            }
+        }
+    }
+
     private func moveExercise(from index: Int, direction: Int) {
         let newIndex = index + direction
         guard exercises.indices.contains(index), exercises.indices.contains(newIndex) else { return }
@@ -307,7 +366,53 @@ struct StrengthRoutineExercisesEditorBlock: View {
         for idx in next.indices {
             next[idx].orderIndex = idx + 1
         }
-        exercises = next
+        exercises = compactSupersetMetadata(next)
+    }
+
+    private func startSuperset(at index: Int) {
+        guard canStartSuperset(at: index) else { return }
+        var next = exercises
+        let groupId = next[index].supersetGroupId ?? next[index + 1].supersetGroupId ?? UUID()
+        next[index].supersetGroupId = groupId
+        next[index + 1].supersetGroupId = groupId
+        exercises = compactSupersetMetadata(next)
+    }
+
+    private func addNextExerciseToSuperset(groupId: UUID) {
+        guard let nextIndex = nextExerciseIndexAfterSuperset(groupId: groupId) else { return }
+        var next = exercises
+        next[nextIndex].supersetGroupId = groupId
+        exercises = compactSupersetMetadata(next)
+    }
+
+    private func removeExerciseFromSuperset(_ index: Int) {
+        guard exercises.indices.contains(index) else { return }
+        var next = exercises
+        next[index].supersetGroupId = nil
+        next[index].supersetPosition = nil
+        exercises = compactSupersetMetadata(next)
+    }
+
+    private func canStartSuperset(at index: Int) -> Bool {
+        guard exercises.indices.contains(index),
+              exercises.indices.contains(index + 1)
+        else { return false }
+        return exerciseSelected(exercises[index]) && exerciseSelected(exercises[index + 1])
+    }
+
+    private func canAddNextToSuperset(groupId: UUID) -> Bool {
+        guard let nextIndex = nextExerciseIndexAfterSuperset(groupId: groupId) else { return false }
+        return exerciseSelected(exercises[nextIndex])
+    }
+
+    private func nextExerciseIndexAfterSuperset(groupId: UUID) -> Int? {
+        let groupIndices = exercises.indices.filter { exercises[$0].supersetGroupId == groupId }
+        guard let lastGroupIndex = groupIndices.max() else { return nil }
+        let nextIndex = lastGroupIndex + 1
+        guard exercises.indices.contains(nextIndex),
+              exercises[nextIndex].supersetGroupId != groupId
+        else { return nil }
+        return nextIndex
     }
 
     private func replaceExercise(_ index: Int, _ mutate: (inout EditableExercise) -> Void) {
@@ -405,7 +510,7 @@ struct StrengthRoutineExercisesEditorBlock: View {
 
     private func appendSet(exerciseIndex i: Int) {
         replaceExercise(i) { ex in
-            ex.sets.append(EditableSet(setNumber: 1))
+            ex.sets.append(EditableSet(setNumber: 1, orderIndex: ex.sets.count + 1))
         }
     }
 
@@ -413,6 +518,22 @@ struct StrengthRoutineExercisesEditorBlock: View {
         replaceExercise(i) { ex in
             guard ex.sets.indices.contains(s) else { return }
             ex.sets.remove(at: s)
+            renumberSetOrder(&ex)
+        }
+    }
+
+    private func moveSet(exerciseIndex i: Int, setIndex s: Int, direction: Int) {
+        replaceExercise(i) { ex in
+            let newIndex = s + direction
+            guard ex.sets.indices.contains(s), ex.sets.indices.contains(newIndex) else { return }
+            ex.sets.swapAt(s, newIndex)
+            renumberSetOrder(&ex)
+        }
+    }
+
+    private func renumberSetOrder(_ ex: inout EditableExercise) {
+        for idx in ex.sets.indices {
+            ex.sets[idx].orderIndex = idx + 1
         }
     }
 }
@@ -520,9 +641,7 @@ struct EditSavedStrengthRoutineSheet: View {
             Button("Remove", role: .destructive) {
                 if let req = confirmRemoveStrengthExercise, exercises.indices.contains(req.index) {
                     exercises.remove(at: req.index)
-                    for idx in exercises.indices {
-                        exercises[idx].orderIndex = idx + 1
-                    }
+                    exercises = compactSupersetMetadata(exercises)
                 }
                 confirmRemoveStrengthExercise = nil
             }

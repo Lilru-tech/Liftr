@@ -84,6 +84,11 @@ struct StrengthSetRowEditor: View {
     @Binding var restSec: Int?
     @Binding var segments: [StrengthEditorSegment]
     var showDelete: Bool
+    var showReorder: Bool = false
+    var canMoveUp: Bool = false
+    var canMoveDown: Bool = false
+    var onMoveUp: () -> Void = {}
+    var onMoveDown: () -> Void = {}
     var onDelete: () -> Void
 
     private var isDrop: Bool { segments.count >= 2 }
@@ -120,6 +125,33 @@ struct StrengthSetRowEditor: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityHint("Plus and minus change how many times this row counts, not the row number.")
+
+                if showReorder {
+                    HStack(spacing: 2) {
+                        Button(action: onMoveUp) {
+                            Image(systemName: "chevron.up")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 32, height: 30)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canMoveUp)
+                        .opacity(canMoveUp ? 1 : 0.35)
+
+                        Button(action: onMoveDown) {
+                            Image(systemName: "chevron.down")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(width: 32, height: 30)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canMoveDown)
+                        .opacity(canMoveDown ? 1 : 0.35)
+                    }
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Reorder set")
+                }
 
                 if showDelete {
                     Button(role: .destructive, action: onDelete) {

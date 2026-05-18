@@ -750,8 +750,10 @@ struct AddWorkoutSheet: View {
                        req.lane >= 0, req.lane < strengthLaneItems.count,
                        strengthLaneItems[req.lane].indices.contains(req.index) {
                         strengthLaneItems[req.lane].remove(at: req.index)
+                        strengthLaneItems[req.lane] = compactSupersetMetadata(strengthLaneItems[req.lane])
                     } else if items.indices.contains(req.index) {
                         items.remove(at: req.index)
+                        items = compactSupersetMetadata(items)
                     }
                 }
                 confirmRemoveStrengthExercise = nil
@@ -1752,35 +1754,32 @@ struct AddWorkoutSheet: View {
         workoutId: Int,
         exercises: [HyroxExerciseForm]
     ) async throws {
-        let rows: [HyroxExerciseFormatting.HyroxExerciseRowInput] = exercises.enumerated().map { idx, ex in
-            HyroxExerciseFormatting.HyroxExerciseRowInput(
-                exerciseOrder: idx + 1,
+        let payload: [AnyJSON] = try exercises.enumerated().map { idx, ex in
+            let persisted = HyroxExerciseFormatting.persistedPayload(
                 exerciseCode: ex.exerciseCode,
                 customDisplayName: ex.customDisplayName,
                 notes: ex.notes
             )
+            var item: [String: AnyJSON] = [:]
+            item["exercise_order"] = try .init(idx + 1)
+            if let displayName = persisted.displayName {
+                item["exercise_display_name"] = try .init(displayName)
+            }
+            if let zoneOrder = ex.zoneOrder {
+                item["zone_order"] = try .init(max(1, zoneOrder))
+            }
+            return try AnyJSON(item)
         }
-        let updates = HyroxExerciseFormatting.hyroxDisplayNameColumnUpdates(rows: rows)
-        guard !updates.isEmpty else { return }
 
-        let sessionRes = try await client
-            .from("sport_sessions")
-            .select("id")
-            .eq("workout_id", value: workoutId)
-            .single()
+        _ = try await client
+            .rpc(
+                "patch_hyrox_session_exercise_metadata",
+                params: HyroxSessionExerciseMetadataPatchParams(
+                    p_workout_id: workoutId,
+                    p_exercises: try AnyJSON(payload)
+                )
+            )
             .execute()
-        struct SessionRow: Decodable { let id: Int }
-        let sessionId = try JSONDecoder().decode(SessionRow.self, from: sessionRes.data).id
-
-        struct Patch: Encodable { let exercise_display_name: String }
-        for u in updates {
-            _ = try await client
-                .from("hyrox_session_exercises")
-                .update(Patch(exercise_display_name: u.displayName))
-                .eq("session_id", value: sessionId)
-                .eq("exercise_order", value: u.exerciseOrder)
-                .execute()
-        }
     }
 
     private func recomputeDurationLabel() {
@@ -2131,18 +2130,23 @@ struct AddWorkoutSheet: View {
             case .strength:
                 if usePerPersonStrengthEditor {
                     var rows: [PlanStrengthSquadProgramRow] = []
+                    var supersetPrograms: [[EditableExercise]] = []
                     guard let me = app.userId else { throw NSError(domain: "AddWorkout", code: 1, userInfo: [NSLocalizedDescriptionKey: "Not signed in"]) }
+                    let hostProgram = normalizedSupersetPrograms(strengthLaneItems[0])
                     let hostItems = strengthLaneItems[0].compactMap { $0.toStrengthItem() }
                     guard !hostItems.isEmpty else { throw NSError(domain: "AddWorkout", code: 2, userInfo: [NSLocalizedDescriptionKey: "Host program is empty"]) }
                     rows.append(.init(owner_user_id: me, items: hostItems))
+                    supersetPrograms.append(hostProgram)
                     for (i, p) in participants.enumerated() {
                         let lane = i + 1
                         guard strengthLaneItems.indices.contains(lane) else { continue }
+                        let laneProgram = normalizedSupersetPrograms(strengthLaneItems[lane])
                         let theirs = strengthLaneItems[lane].compactMap { $0.toStrengthItem() }
                         guard !theirs.isEmpty else {
                             throw NSError(domain: "AddWorkout", code: 3, userInfo: [NSLocalizedDescriptionKey: "Each person needs at least one valid exercise."])
                         }
                         rows.append(.init(owner_user_id: p.user_id, items: theirs))
+                        supersetPrograms.append(laneProgram)
                     }
                     let squadParams = PlanStrengthSquadProgramsRPC(
                         p_programs: rows,
@@ -2156,8 +2160,14 @@ struct AddWorkoutSheet: View {
                     let res = try await client.rpc("plan_strength_squad_programs", params: squadParams).execute()
                     let created = try JSONDecoder().decode([Int64].self, from: res.data)
                     newWorkoutId = created.first
+                    try await patchSupersetsForCreatedWorkouts(
+                        client: client,
+                        workoutIds: created,
+                        programs: supersetPrograms
+                    )
                 } else {
-                    let strengthItems = items.compactMap { $0.toStrengthItem() }
+                    let supersetProgram = normalizedSupersetPrograms(items)
+                    let strengthItems = supersetProgram.compactMap { $0.toStrengthItem() }
                     let params = RPCStrengthParams(
                         p_user_id: userId,
                         p_items: strengthItems,
@@ -2171,6 +2181,13 @@ struct AddWorkoutSheet: View {
                     _ = try await client.rpc("create_strength_workout", params: params).execute()
                     if newWorkoutId == nil {
                         newWorkoutId = try await fetchLastWorkoutId(for: userId, kind: .strength)
+                    }
+                    if let wid = newWorkoutId {
+                        try await patchSupersetsForCreatedWorkouts(
+                            client: client,
+                            workoutIds: [wid],
+                            programs: [supersetProgram]
+                        )
                     }
                 }
                 
@@ -2197,7 +2214,9 @@ struct AddWorkoutSheet: View {
                     p_state: publishMode.stateParam,
                     p_stats: statsJSON,
                     p_healthkit_uuid: nil,
-                    p_route_geojson: nil
+                    p_route_geojson: nil,
+                    p_calories_kcal: nil,
+                    p_calories_method: nil
                 )
 
                 let res = try await client
@@ -2396,6 +2415,72 @@ struct AddWorkoutSheet: View {
             .execute()
         let rows = try JSONDecoder().decode([Row].self, from: res.data)
         return rows.first?.id
+    }
+
+    private struct CreatedWorkoutExerciseRow: Decodable {
+        let id: Int
+        let order_index: Int
+    }
+
+    private struct WorkoutExerciseSupersetPatch: Encodable {
+        let superset_group_id: UUID?
+        let superset_position: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case superset_group_id, superset_position
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            if let superset_group_id {
+                try container.encode(superset_group_id, forKey: .superset_group_id)
+            } else {
+                try container.encodeNil(forKey: .superset_group_id)
+            }
+            if let superset_position {
+                try container.encode(superset_position, forKey: .superset_position)
+            } else {
+                try container.encodeNil(forKey: .superset_position)
+            }
+        }
+    }
+
+    private func patchSupersetsForCreatedWorkouts(
+        client: SupabaseClient,
+        workoutIds: [Int64],
+        programs: [[EditableExercise]]
+    ) async throws {
+        for (idx, workoutId) in workoutIds.enumerated() {
+            guard programs.indices.contains(idx) else { continue }
+            let program = normalizedSupersetPrograms(programs[idx])
+            guard program.contains(where: { $0.supersetGroupId != nil }) else { continue }
+
+            let res = try await client
+                .from("workout_exercises")
+                .select("id, order_index")
+                .eq("workout_id", value: Int(workoutId))
+                .order("order_index", ascending: true)
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([CreatedWorkoutExerciseRow].self, from: res.data)
+
+            for row in rows {
+                guard let exercise = program.first(where: { $0.orderIndex == row.order_index }),
+                      let groupId = exercise.supersetGroupId,
+                      let position = exercise.supersetPosition
+                else { continue }
+
+                _ = try await client
+                    .from("workout_exercises")
+                    .update(
+                        WorkoutExerciseSupersetPatch(
+                            superset_group_id: groupId,
+                            superset_position: position
+                        )
+                    )
+                    .eq("id", value: row.id)
+                    .execute()
+            }
+        }
     }
 
     private func strengthExercisesForRoutineTemplate() -> [EditableExercise] {
@@ -2618,6 +2703,9 @@ struct AddWorkoutSheet: View {
                     item["exercise_display_name"] = try .init(d)
                 }
                 item["exercise_order"] = try .init(index + 1)
+                if let zoneOrder = ex.zoneOrder {
+                    item["zone_order"] = try .init(max(1, zoneOrder))
+                }
 
                 if let v = parseInt(ex.distanceM)      { item["distance_m"] = try .init(v) }
                 if let v = parseInt(ex.reps)           { item["reps"] = try .init(v) }
@@ -2701,9 +2789,10 @@ struct AddWorkoutSheet: View {
                 blocks.append((1, s))
             }
         }
-        return blocks.map { b in
+        return blocks.enumerated().map { idx, b in
             EditableSet(
                 setNumber: b.count,
+                orderIndex: idx + 1,
                 reps: b.template.reps,
                 weightKg: stringFromRecommendationKg(b.template.weightKg),
                 rpe: b.template.rpe.map { stringFromRecommendationRpe($0) } ?? "",
@@ -3019,6 +3108,8 @@ struct EditableExercise: Identifiable {
     var exerciseId: Int64? = nil
     var exerciseName: String = ""
     var orderIndex: Int = 1
+    var supersetGroupId: UUID? = nil
+    var supersetPosition: Int? = nil
     var notes: String = ""
     var sets: [EditableSet] = [EditableSet(setNumber: 1)]
     
@@ -3030,11 +3121,16 @@ struct EditableExercise: Identifiable {
         guard let exerciseId else { return nil }
         let cleaned = cleanSets()
         guard !cleaned.isEmpty else { return nil }
+        let strengthSets = cleaned.enumerated().compactMap { idx, set -> RPCStrengthParams.StrengthItem.StrengthSet? in
+            var orderedSet = set
+            orderedSet.orderIndex = idx + 1
+            return orderedSet.toStrengthSet()
+        }
         return .init(
             exercise_id: exerciseId,
             order_index: orderIndex,
             notes: notes.isEmpty ? nil : notes,
-            sets: cleaned.compactMap { $0.toStrengthSet() },
+            sets: strengthSets,
             custom_name: exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : exerciseName
         )
     }
@@ -3046,10 +3142,13 @@ extension EditableExercise {
         copy.exerciseId = exerciseId
         copy.exerciseName = exerciseName
         copy.orderIndex = orderIndex
+        copy.supersetGroupId = supersetGroupId
+        copy.supersetPosition = supersetPosition
         copy.notes = notes
         copy.sets = sets.map {
             EditableSet(
                 setNumber: $0.setNumber,
+                orderIndex: $0.orderIndex,
                 reps: $0.reps,
                 weightKg: $0.weightKg,
                 rpe: $0.rpe,
@@ -3062,9 +3161,49 @@ extension EditableExercise {
     }
 }
 
+func compactSupersetMetadata(_ source: [EditableExercise]) -> [EditableExercise] {
+    var next = source
+    for idx in next.indices {
+        next[idx].orderIndex = idx + 1
+    }
+
+    let groupCounts = Dictionary(grouping: next.compactMap(\.supersetGroupId), by: { $0 }).mapValues(\.count)
+    var groupPositions: [UUID: Int] = [:]
+
+    for idx in next.indices {
+        guard let groupId = next[idx].supersetGroupId, (groupCounts[groupId] ?? 0) > 1 else {
+            next[idx].supersetGroupId = nil
+            next[idx].supersetPosition = nil
+            continue
+        }
+        let position = (groupPositions[groupId] ?? 0) + 1
+        groupPositions[groupId] = position
+        next[idx].supersetPosition = position
+    }
+
+    return next
+}
+
+func normalizedSupersetPrograms(_ source: [EditableExercise]) -> [EditableExercise] {
+    let valid = source
+        .filter { $0.toStrengthItem() != nil }
+        .map { $0.deepCopied() }
+    return compactSupersetMetadata(valid)
+}
+
+func supersetGroupDisplayNumber(_ groupId: UUID, in exercises: [EditableExercise]) -> Int {
+    let groups = exercises.compactMap(\.supersetGroupId).reduce(into: [UUID]()) { result, id in
+        if !result.contains(id) {
+            result.append(id)
+        }
+    }
+    return (groups.firstIndex(of: groupId) ?? 0) + 1
+}
+
 struct EditableSet: Identifiable {
     let id = UUID()
     var setNumber: Int
+    var orderIndex: Int = 1
     var reps: Int? = nil
     var weightKg: String = ""
     var rpe: String = ""
@@ -3086,6 +3225,7 @@ struct EditableSet: Identifiable {
             let first = segs[0]
             return .init(
                 set_number: max(1, min(99, setNumber)),
+                order_index: orderIndex,
                 reps: first.reps,
                 weight_kg: first.weight_kg,
                 rpe: rpeD,
@@ -3101,6 +3241,7 @@ struct EditableSet: Identifiable {
         }
         return .init(
             set_number: max(1, min(99, setNumber)),
+            order_index: orderIndex,
             reps: repsV.flatMap { $0 > 0 ? $0 : nil },
             weight_kg: weight,
             rpe: rpeD,
@@ -3145,6 +3286,7 @@ struct HyroxExerciseForm: Identifiable, Hashable {
     var exerciseCode: String = HyroxExerciseCode.run.rawValue
     var customDisplayName: String = ""
     var exerciseOrder: Int = 1
+    var zoneOrder: Int? = nil
     var distanceM: String = ""
     var reps: String = ""
     var weightKg: String = ""
@@ -3282,6 +3424,7 @@ struct RPCStrengthParams: Encodable {
         
         struct StrengthSet: Encodable {
             let set_number: Int
+            let order_index: Int?
             let reps: Int?
             let weight_kg: Double?
             let rpe: Double?
@@ -3408,6 +3551,8 @@ struct RPCCardioV2Params: Encodable {
     let p_stats: AnyJSON
     let p_healthkit_uuid: String?
     let p_route_geojson: String?
+    let p_calories_kcal: Double?
+    let p_calories_method: String?
 }
 struct RPCCardioV2Wrapper: Encodable {
     let p: RPCCardioV2Params
@@ -3439,6 +3584,11 @@ struct RPCSportWrapper: Encodable {
 struct RPCSportV2Wrapper: Encodable {
     let p: AnyJSON
     let p_stats: AnyJSON?
+}
+
+struct HyroxSessionExerciseMetadataPatchParams: Encodable {
+    let p_workout_id: Int
+    let p_exercises: AnyJSON
 }
 
 private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {

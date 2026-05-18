@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 enum TerritoryOwnerColors {
     private static let palette: [Color] = (0..<48).map { index in
@@ -24,15 +25,34 @@ enum TerritoryOwnerColors {
     }
 
     static func fill(for ownerId: UUID, isMine: Bool) -> Color {
-        color(for: ownerId).opacity(isMine ? 0.52 : 0.28)
+        color(for: ownerId).opacity(isMine ? 0.50 : 0.44)
     }
 
-    static func stroke(for ownerId: UUID, isMine: Bool) -> Color {
+    static func uiColor(for ownerId: UUID) -> UIColor {
+        UIColor(
+            hue: CGFloat(Double(paletteIndex(for: ownerId)) / 48.0),
+            saturation: 0.72,
+            brightness: 0.88,
+            alpha: 1.0
+        )
+    }
+
+    static func uiFill(for ownerId: UUID, isMine: Bool) -> UIColor {
+        uiColor(for: ownerId).withAlphaComponent(isMine ? 0.50 : 0.44)
+    }
+
+    static func stroke(for ownerId: UUID, isMine: Bool, denseOverlay: Bool = false) -> Color {
+        if denseOverlay {
+            return .clear
+        }
         let base = color(for: ownerId)
         return isMine ? base : base.opacity(0.82)
     }
 
-    static func strokeWidth(isMine: Bool) -> CGFloat {
-        isMine ? 3.0 : 1.0
+    static func strokeWidth(isMine: Bool, denseOverlay: Bool = false) -> CGFloat {
+        if denseOverlay {
+            return 0
+        }
+        return isMine ? 3.0 : 1.0
     }
 }

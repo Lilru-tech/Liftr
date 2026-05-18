@@ -108,6 +108,11 @@ enum SortMode: String, CaseIterable, Identifiable {
     }
 }
 
+private enum ExercisePickerDestination: Hashable {
+    case contact
+    case request
+}
+
 struct ExercisePickerSheet: View {
     let all: [Exercise]
     @Binding var selected: Exercise?
@@ -118,65 +123,78 @@ struct ExercisePickerSheet: View {
     @State private var loading = false
     @State private var exercises: [Exercise] = []
     @State private var favorites = Set<Int64>()
+    @State private var navigationPath: [ExercisePickerDestination] = []
         
     private var exerciseLanguage: ExerciseLanguage {
         ExerciseLanguage(rawValue: exerciseLanguageRaw) ?? .spanish
     }
+
+    private var normalizedQuery: String {
+        query.normalizedLookupKey
+    }
     
     var filtered: [Exercise] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let q = normalizedQuery
         guard !q.isEmpty else { return exercises }
-        return exercises.filter { $0.localizedName(for: exerciseLanguage).lowercased().contains(q) }
+        return exercises.filter { exercise in
+            exercise.localizedName(for: exerciseLanguage).normalizedLookupKey.contains(q) ||
+            (exercise.localizedMusclePrimary(for: exerciseLanguage)?.normalizedLookupKey.contains(q) ?? false) ||
+            (exercise.muscle_primary?.normalizedLookupKey.contains(q) ?? false)
+        }
     }
     
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             List {
                 Section {
                     SectionCard {
                         LazyVStack(spacing: 0) {
-                            ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, ex in
-                                HStack(alignment: .center, spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(ex.localizedName(for: exerciseLanguage))
-                                        Text(
-                                            [ex.category, ex.localizedMusclePrimary(for: exerciseLanguage), ex.equipment]
-                                                .compactMap { $0 }
-                                                .filter { $0.lowercased() != "strength" }
-                                                .joined(separator: " · ")
-                                        )
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                            if filtered.isEmpty && !normalizedQuery.isEmpty {
+                                noResultsView
+                            } else {
+                                ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, ex in
+                                    HStack(alignment: .center, spacing: 12) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(ex.localizedName(for: exerciseLanguage))
+                                            Text(
+                                                [ex.category, ex.localizedMusclePrimary(for: exerciseLanguage), ex.equipment]
+                                                    .compactMap { $0 }
+                                                    .filter { $0.lowercased() != "strength" }
+                                                    .joined(separator: " · ")
+                                            )
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        }
+                                        
+                                        Spacer()
+                                        
+                                        Button {
+                                            Task { await toggleFavorite(ex.id) }
+                                        } label: {
+                                            Image(systemName: favorites.contains(ex.id) ? "star.fill" : "star")
+                                                .font(.subheadline)
+                                                .foregroundStyle(favorites.contains(ex.id) ? .yellow : .secondary)
+                                                .opacity(0.9)
+                                                .frame(width: 32, height: 32)
+                                                .contentShape(Rectangle())
+                                                .accessibilityLabel(favorites.contains(ex.id) ? "Unfavorite" : "Favorite")
+                                                .accessibilityAddTraits(.isButton)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
-                                    
-                                    Spacer()
-                                    
-                                    Button {
-                                        Task { await toggleFavorite(ex.id) }
-                                    } label: {
-                                        Image(systemName: favorites.contains(ex.id) ? "star.fill" : "star")
-                                            .font(.subheadline)
-                                            .foregroundStyle(favorites.contains(ex.id) ? .yellow : .secondary)
-                                            .opacity(0.9)
-                                            .frame(width: 32, height: 32)
-                                            .contentShape(Rectangle())
-                                            .accessibilityLabel(favorites.contains(ex.id) ? "Unfavorite" : "Favorite")
-                                            .accessibilityAddTraits(.isButton)
+                                    .padding(.vertical, 10)
+                                    .padding(.horizontal, 8)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        print("[EXERCISE_PICKER] Row tapped – id=\(ex.id), name='\(ex.name)' (language=\(exerciseLanguageRaw), sortMode=\(sortMode.rawValue))")
+                                        selected = ex
+                                        dismiss()
                                     }
-                                    .buttonStyle(.plain)
-                                }
-                                .padding(.vertical, 10)
-                                .padding(.horizontal, 8)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    print("[EXERCISE_PICKER] Row tapped – id=\(ex.id), name='\(ex.name)' (language=\(exerciseLanguageRaw), sortMode=\(sortMode.rawValue))")
-                                    selected = ex
-                                    dismiss()
-                                }
-                                if idx < filtered.count - 1 {
-                                    Divider()
-                                        .padding(.leading, 8)
-                                        .opacity(0.75)
+                                    if idx < filtered.count - 1 {
+                                        Divider()
+                                            .padding(.leading, 8)
+                                            .opacity(0.75)
+                                    }
                                 }
                             }
                         }
@@ -187,7 +205,16 @@ struct ExercisePickerSheet: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .searchable(text: $query)
+            .searchable(text: $query, prompt: "Search exercises or muscles")
+            .navigationDestination(for: ExercisePickerDestination.self) { destination in
+                switch destination {
+                case .contact:
+                    ContactSupportForm()
+                case .request:
+                    FeatureRequestsListView()
+                        .gradientBG()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -251,6 +278,49 @@ struct ExercisePickerSheet: View {
                 await loadExercises()
             }
         }
+    }
+
+    private var noResultsView: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 6) {
+                Text("No exercises found")
+                    .font(.headline)
+
+                Text("We couldn’t find any exercises for “\(query.trimmingCharacters(in: .whitespacesAndNewlines))”. If you want us to add it, contact us or send a feature request.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            HStack(spacing: 10) {
+                Button {
+                    navigationPath.append(.contact)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "envelope")
+                        Text("Contact")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    navigationPath.append(.request)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lightbulb")
+                        Text("Request")
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 34)
+        .padding(.horizontal, 18)
     }
     
     private func loadExercises() async {

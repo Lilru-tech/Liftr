@@ -57,6 +57,10 @@ private struct OnlyStartedAt: Decodable {
     let state: String?
 }
 
+private struct ParticipantWorkoutId: Decodable {
+    let workout_id: Int
+}
+
 private struct GetMonthActivityParams: Encodable {
     let p_user_id: UUID
     let p_year: Int
@@ -106,6 +110,18 @@ extension JSONDecoder {
         }
         return dec
     }
+}
+
+private func fetchParticipantWorkoutIds(for userId: UUID) async throws -> [Int] {
+    let response = try await SupabaseManager.shared.client
+        .from("workout_participants")
+        .select("workout_id")
+        .eq("user_id", value: userId.uuidString)
+        .execute()
+
+    return try JSONDecoder.supabase()
+        .decode([ParticipantWorkoutId].self, from: response.data)
+        .map(\.workout_id)
 }
 
 struct ProfileView: View {
@@ -1404,88 +1420,27 @@ struct ProfileView: View {
     }
     
     private var calendarView: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Button {
-                    monthDate = Calendar.current.date(byAdding: .month, value: -1, to: monthDate)!
-                } label: { Image(systemName: "chevron.left") }
-                
-                Spacer()
-                Text(monthTitle(for: monthDate)).font(.headline)
-                Spacer()
-                
-                Button {
-                    monthDate = Calendar.current.date(byAdding: .month, value: 1, to: monthDate)!
-                } label: { Image(systemName: "chevron.right") }
-            }
-            .padding(.horizontal)
-            
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
-                ForEach(weekdays(), id: \.self) { w in
-                    Text(w).font(.caption2).foregroundStyle(.secondary)
-                }
-                ForEach(monthDays.indices, id: \.self) { idx in
-                    let day = monthDays[idx]
-                    let daySelected = calendarDayIsSelected(day)
+        VStack(spacing: 14) {
+            ProfileCalendarView(
+                monthDate: $monthDate,
+                selectedDay: $selectedDay,
+                monthDays: monthDays,
+                activity: activity,
+                ownActivity: ownActivity,
+                participantActivity: participantActivity,
+                draftActivity: draftActivity,
+                monthTitle: monthTitle(for: monthDate),
+                weekdays: weekdays(),
+                onToday: selectTodayInCalendar
+            )
 
-                    Button {
-                        if let day { selectedDay = day }
-                    } label: {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill({
-                                    if let day {
-                                        let key = day.startOfDay
-                                        let own = ownActivity[key] ?? 0
-                                        let part = participantActivity[key] ?? 0
-                                        let total = (activity[key] ?? (own + part))
-
-                                        if total > 0 {
-                                            if draftActivity[key] == true {
-                                                return Color(red: 0.6, green: 0.1, blue: 0.2)
-                                                    .opacity(min(0.20 + Double(total) * 0.05, 0.45))
-                                            }
-
-                                            if own > 0 {
-                                                return Color.green
-                                                    .opacity(min(0.15 + Double(total) * 0.1, 0.35))
-                                            }
-
-                                            return Color.yellow
-                                                .opacity(min(0.15 + Double(total) * 0.1, 0.35))
-                                        }
-                                    }
-                                    return Color.clear
-                                }())
-
-                            if let day {
-                                Text("\(Calendar.current.component(.day, from: day))")
-                                    .font(.footnote.weight(daySelected ? .semibold : .regular))
-                            } else {
-                                Text("")
-                            }
-                        }
-                        .frame(height: 36)
-                        .overlay {
-                            if daySelected {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(Color.white.opacity(0.92), lineWidth: 2.5)
-                                    .shadow(color: Color.white.opacity(0.5), radius: 5, x: 0, y: 0)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(day == nil)
-                }
-            }
-            .padding(.horizontal)
-            
             if let selectedDay, let uid = viewingUserId {
-                DayWorkoutsList(userId: uid, selectedDay: selectedDay)
+                DayWorkoutsList(userId: uid, selectedDay: selectedDay, isOwnProfile: isOwnProfile)
                     .frame(maxWidth: .infinity, alignment: .top)
             } else {
-                Text("Select a day to see your workouts")
-                    .font(.subheadline).foregroundStyle(.secondary).padding(.top, 6)
+                ProfileCalendarEmptyMonthView(isOwnProfile: isOwnProfile) {
+                    app.openAdd(with: nil)
+                }
             }
         }
         .padding(.bottom, 12)
@@ -2397,14 +2352,7 @@ struct ProfileView: View {
     }
 
     private func fetchParticipantOnlyWorkoutCount(userId: UUID, start: Date, end: Date, iso: ISO8601DateFormatter) async throws -> Int {
-        let pres = try await SupabaseManager.shared.client
-            .from("workout_participants")
-            .select("workout_id")
-            .eq("user_id", value: userId.uuidString)
-            .execute()
-
-        struct PId: Decodable { let workout_id: Int }
-        let pIds = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+        let pIds = try await fetchParticipantWorkoutIds(for: userId)
         guard !pIds.isEmpty else { return 0 }
 
         let wres = try await SupabaseManager.shared.client
@@ -2502,14 +2450,7 @@ struct ProfileView: View {
                 }
             }
             
-            let pres = try await SupabaseManager.shared.client
-                .from("workout_participants")
-                .select("workout_id")
-                .eq("user_id", value: uid.uuidString)
-                .execute()
-            
-            struct PId: Decodable { let workout_id: Int }
-            let pIds = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+            let pIds = try await fetchParticipantWorkoutIds(for: uid)
             
             var dictPart: [Date: Int] = [:]
             if !pIds.isEmpty {
@@ -2541,6 +2482,7 @@ struct ProfileView: View {
                 self.participantActivity = dictPart
                 self.activity = dictTotal
                 self.draftActivity = dictDraft
+                self.applyDefaultCalendarSelection(from: dictTotal)
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
@@ -3009,6 +2951,28 @@ struct ProfileView: View {
         guard let day, let sel = selectedDay else { return false }
         return Calendar.current.isDate(day, inSameDayAs: sel)
     }
+
+    private func selectTodayInCalendar() {
+        let today = Date().startOfDay
+        monthDate = today
+        selectedDay = today
+    }
+
+    private func applyDefaultCalendarSelection(from activity: [Date: Int]) {
+        guard selectedDay == nil else { return }
+        let cal = Calendar.current
+
+        if cal.isDate(monthDate, equalTo: Date(), toGranularity: .month) {
+            selectedDay = Date().startOfDay
+            return
+        }
+
+        selectedDay = activity
+            .filter { $0.value > 0 && cal.isDate($0.key, equalTo: monthDate, toGranularity: .month) }
+            .map(\.key)
+            .sorted()
+            .first
+    }
     private let WEEK_START = 2
     
     private func weekdays() -> [String] {
@@ -3376,9 +3340,317 @@ struct AvatarZoomPreview: View {
     }
 }
 
+private enum ProfileCalendarActivityPalette {
+    static let own = WorkoutTint.strength
+    static let joined = WorkoutTint.cardio
+    static let planned = WorkoutTint.sport
+}
+
+private struct ProfileCalendarDayActivity {
+    let own: Int
+    let joined: Int
+    let total: Int
+    let planned: Bool
+
+    var hasActivity: Bool { total > 0 }
+    var markerColors: [Color] {
+        var colors: [Color] = []
+        if own > 0 { colors.append(ProfileCalendarActivityPalette.own) }
+        if joined > 0 { colors.append(ProfileCalendarActivityPalette.joined) }
+        if planned { colors.append(ProfileCalendarActivityPalette.planned) }
+        return colors
+    }
+}
+
+private struct ProfileCalendarView: View {
+    @Binding var monthDate: Date
+    @Binding var selectedDay: Date?
+    let monthDays: [Date?]
+    let activity: [Date: Int]
+    let ownActivity: [Date: Int]
+    let participantActivity: [Date: Int]
+    let draftActivity: [Date: Bool]
+    let monthTitle: String
+    let weekdays: [String]
+    let onToday: () -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    monthDate = Calendar.current.date(byAdding: .month, value: -1, to: monthDate) ?? monthDate
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Previous month")
+
+                Spacer(minLength: 4)
+
+                VStack(spacing: 3) {
+                    Text(monthTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    ProfileCalendarLegend()
+                }
+
+                Spacer(minLength: 4)
+
+                Button("Today", action: onToday)
+                    .font(.caption.weight(.semibold))
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 9)
+                    .background(Capsule().fill(Color(.systemBackground).opacity(0.28)))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.8))
+
+                Button {
+                    monthDate = Calendar.current.date(byAdding: .month, value: 1, to: monthDate) ?? monthDate
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Next month")
+            }
+
+            LazyVGrid(columns: columns, spacing: 5) {
+                ForEach(weekdays, id: \.self) { weekday in
+                    Text(weekday)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+
+                ForEach(monthDays.indices, id: \.self) { index in
+                    let day = monthDays[index]
+                    ProfileCalendarDayCell(
+                        day: day,
+                        activity: activityState(for: day),
+                        isSelected: isSelected(day),
+                        isToday: isToday(day)
+                    ) {
+                        if let day {
+                            selectedDay = day
+                        }
+                    }
+                    .disabled(day == nil)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
+        )
+        .padding(.horizontal)
+    }
+
+    private func activityState(for day: Date?) -> ProfileCalendarDayActivity {
+        guard let day else {
+            return ProfileCalendarDayActivity(own: 0, joined: 0, total: 0, planned: false)
+        }
+
+        let key = day.startOfDay
+        let own = ownActivity[key] ?? 0
+        let joined = participantActivity[key] ?? 0
+        let total = activity[key] ?? own + joined
+        return ProfileCalendarDayActivity(
+            own: own,
+            joined: joined,
+            total: total,
+            planned: draftActivity[key] == true
+        )
+    }
+
+    private func isSelected(_ day: Date?) -> Bool {
+        guard let day, let selectedDay else { return false }
+        return Calendar.current.isDate(day, inSameDayAs: selectedDay)
+    }
+
+    private func isToday(_ day: Date?) -> Bool {
+        guard let day else { return false }
+        return Calendar.current.isDateInToday(day)
+    }
+}
+
+private struct ProfileCalendarDayCell: View {
+    let day: Date?
+    let activity: ProfileCalendarDayActivity
+    let isSelected: Bool
+    let isToday: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(backgroundStyle)
+
+                if let day {
+                    Text("\(Calendar.current.component(.day, from: day))")
+                        .font(.footnote.weight(isSelected ? .bold : .semibold))
+                        .foregroundStyle(Color.primary.opacity(isSelected ? 1.0 : 0.88))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 4)
+
+                    if activity.total > 1 {
+                        Text("\(activity.total)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .padding(.vertical, 2)
+                            .padding(.horizontal, 5)
+                            .background(Capsule().fill(Color(.systemBackground).opacity(0.72)))
+                            .padding(4)
+                    }
+                }
+            }
+            .frame(height: 36)
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.72), lineWidth: 2)
+                } else if isToday {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(ProfileCalendarActivityPalette.own.opacity(0.85), lineWidth: 1.5)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var backgroundStyle: AnyShapeStyle {
+        if day == nil {
+            return AnyShapeStyle(Color.clear)
+        }
+
+        if !activity.markerColors.isEmpty {
+            let opacity = isSelected ? 0.58 : min(0.30 + Double(activity.total) * 0.06, 0.62)
+            let colors = activity.markerColors.map { $0.opacity(opacity) }
+            if colors.count == 1, let color = colors.first {
+                return AnyShapeStyle(color)
+            }
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: colors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+
+        if isToday {
+            return AnyShapeStyle(Color(.systemBackground).opacity(0.22))
+        }
+
+        return AnyShapeStyle(Color(.systemBackground).opacity(isSelected ? 0.76 : 0.10))
+    }
+
+    private var accessibilityText: String {
+        guard let day else { return "Empty calendar day" }
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        var parts = [formatter.string(from: day)]
+
+        if isToday {
+            parts.append("today")
+        }
+        if isSelected {
+            parts.append("selected")
+        }
+        if activity.total == 1 {
+            parts.append("1 workout")
+        } else {
+            parts.append("\(activity.total) workouts")
+        }
+        if activity.own > 0 {
+            parts.append("\(activity.own) own")
+        }
+        if activity.joined > 0 {
+            parts.append("\(activity.joined) joined")
+        }
+        if activity.planned {
+            parts.append("planned")
+        }
+
+        return parts.joined(separator: ", ")
+    }
+}
+
+private struct ProfileCalendarLegend: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            legendItem("Own", color: ProfileCalendarActivityPalette.own)
+            legendItem("Joined", color: ProfileCalendarActivityPalette.joined)
+            legendItem("Planned", color: ProfileCalendarActivityPalette.planned)
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func legendItem(_ title: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(title)
+        }
+    }
+}
+
+private struct ProfileCalendarEmptyMonthView: View {
+    let isOwnProfile: Bool
+    let startWorkout: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("Select a day to see workouts")
+                .font(.subheadline.weight(.semibold))
+            Text("Active days are now marked by workout type, joined sessions, and planned workouts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            if isOwnProfile {
+                Button {
+                    startWorkout()
+                } label: {
+                    Label("Start workout", systemImage: "plus.circle.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8)
+        )
+        .padding(.horizontal)
+    }
+}
+
 private struct DayWorkoutsList: View {
     let userId: UUID
     let selectedDay: Date
+    let isOwnProfile: Bool
     @EnvironmentObject var app: AppState
     @State private var workouts: [WorkoutRow] = []
     @State private var scores: [Int: Double] = [:]
@@ -3390,17 +3662,48 @@ private struct DayWorkoutsList: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(dateTitle(selectedDay))
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-            
             if workouts.isEmpty && participated.isEmpty {
-                Text("No workouts this day")
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
+                VStack(spacing: 8) {
+                    Text(dateTitle(selectedDay))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("No workouts on this day")
+                        .font(.subheadline.weight(.semibold))
+                    Text(isOwnProfile ? "Start a new workout from here or choose another active day." : "Choose another active day to see workouts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    if isOwnProfile {
+                        Button {
+                            app.openAdd(with: nil)
+                        } label: {
+                            Label("Start workout", systemImage: "plus.circle.fill")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8)
+                )
+                .padding(.horizontal)
             } else {
                 LazyVStack(spacing: 12) {
+                    Text(dateTitle(selectedDay))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+
                             ForEach(workouts) { w in
                                 NavigationLink {
                                     WorkoutDetailView(workoutId: w.id, ownerId: w.user_id)
@@ -3590,13 +3893,7 @@ private struct DayWorkoutsList: View {
                 .order("started_at", ascending: false)
                 .execute()
             let rowsOwn = try JSONDecoder.supabase().decode([WorkoutRow].self, from: resOwn.data)
-            let pres = try await SupabaseManager.shared.client
-                .from("workout_participants")
-                .select("workout_id")
-                .eq("user_id", value: uid.uuidString)
-                .execute()
-            struct PId: Decodable { let workout_id: Int }
-            let partIdsAll = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+            let partIdsAll = try await fetchParticipantWorkoutIds(for: uid)
             var rowsPart: [WorkoutRow] = []
             if !partIdsAll.isEmpty {
                 let resPart = try await SupabaseManager.shared.client

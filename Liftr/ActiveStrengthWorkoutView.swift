@@ -72,6 +72,8 @@ struct ActiveStrengthWorkoutView: View {
         let id: Int
         let exercise_id: Int64
         let order_index: Int
+        let superset_group_id: UUID?
+        let superset_position: Int?
         let notes: String?
         let custom_name: String?
         let target_sets: Int?
@@ -82,6 +84,7 @@ struct ActiveStrengthWorkoutView: View {
         let id: Int
         let workout_exercise_id: Int
         let set_number: Int
+        let order_index: Int?
         let reps: Int?
         let weight_kg: Decimal?
         let rpe: Decimal?
@@ -91,7 +94,7 @@ struct ActiveStrengthWorkoutView: View {
         let segmentsInRow: Int
 
         enum CodingKeys: String, CodingKey {
-            case id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments
+            case id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments
         }
 
         init(from decoder: Decoder) throws {
@@ -99,6 +102,7 @@ struct ActiveStrengthWorkoutView: View {
             id = try c.decode(Int.self, forKey: .id)
             workout_exercise_id = try c.decode(Int.self, forKey: .workout_exercise_id)
             set_number = try c.decode(Int.self, forKey: .set_number)
+            order_index = try c.decodeIfPresent(Int.self, forKey: .order_index)
             reps = try c.decodeIfPresent(Int.self, forKey: .reps)
             weight_kg = try c.decodeIfPresent(Decimal.self, forKey: .weight_kg)
             rpe = try c.decodeIfPresent(Decimal.self, forKey: .rpe)
@@ -113,6 +117,7 @@ struct ActiveStrengthWorkoutView: View {
             id: Int,
             workout_exercise_id: Int,
             set_number: Int,
+            order_index: Int? = nil,
             reps: Int?,
             weight_kg: Decimal?,
             rpe: Decimal?,
@@ -124,6 +129,7 @@ struct ActiveStrengthWorkoutView: View {
             self.id = id
             self.workout_exercise_id = workout_exercise_id
             self.set_number = set_number
+            self.order_index = order_index
             self.reps = reps
             self.weight_kg = weight_kg
             self.rpe = rpe
@@ -144,6 +150,99 @@ struct ActiveStrengthWorkoutView: View {
         let weight_segments: [StrengthWeightSegWire]?
     }
 
+    private struct ActiveExerciseSetupSet: Identifiable {
+        let id = UUID()
+        var repsText: String = "10"
+        var weightText: String = "0"
+        var rpeText: String = ""
+        var restText: String = "60"
+        var dropSegments: [StrengthEditorSegment] = []
+    }
+
+    private struct ActiveExerciseSetupExercise: Identifiable {
+        let id = UUID()
+        let exercise: Exercise
+        var sets: [ActiveExerciseSetupSet] = [ActiveExerciseSetupSet()]
+    }
+
+    private struct ActiveExerciseSetupParsedSet {
+        let reps: Int?
+        let weightKg: Decimal?
+        let rpe: Decimal?
+        let restSec: Int?
+        let weightSegments: [StrengthWeightSegWire]?
+        var segmentsInRow: Int { max(1, weightSegments?.count ?? 1) }
+    }
+
+    private struct ActiveWorkoutExerciseInsert: Encodable {
+        let workout_id: Int
+        let exercise_id: Int
+        let order_index: Int
+        let superset_group_id: UUID?
+        let superset_position: Int?
+        let notes: String?
+        let custom_name: String?
+    }
+
+    private struct ActiveWorkoutExerciseInsertedId: Decodable {
+        let id: Int
+    }
+
+    private struct ActiveWorkoutSetInsert: Encodable {
+        let workout_exercise_id: Int
+        let set_number: Int
+        let order_index: Int
+        let reps: Int?
+        let weight_kg: Double?
+        let rpe: Double?
+        let rest_sec: Int?
+        let weight_segments: [StrengthWeightSegWire]?
+    }
+
+    private struct ActiveWorkoutExerciseOrderPatch: Encodable {
+        let order_index: Int
+        let superset_group_id: UUID?
+        let superset_position: Int?
+
+        private enum CodingKeys: String, CodingKey {
+            case order_index, superset_group_id, superset_position
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(order_index, forKey: .order_index)
+            if let superset_group_id {
+                try container.encode(superset_group_id, forKey: .superset_group_id)
+            } else {
+                try container.encodeNil(forKey: .superset_group_id)
+            }
+            if let superset_position {
+                try container.encode(superset_position, forKey: .superset_position)
+            } else {
+                try container.encodeNil(forKey: .superset_position)
+            }
+        }
+    }
+
+    private struct NavStripBlock: Identifiable {
+        let id: String
+        let exerciseIndices: [Int]
+
+        var isSuperset: Bool {
+            exerciseIndices.count > 1
+        }
+    }
+
+    private struct NavRestOverlay {
+        let seconds: Int
+        let plannedTotalSeconds: Int
+    }
+
+    private enum SupersetSetAction {
+        case add
+        case remove
+    }
+
     private struct WorkoutSanitizePatch: Encodable {
         let ended_at: Date?
     }
@@ -161,6 +260,8 @@ struct ActiveStrengthWorkoutView: View {
         let id: Int
         let exercise_id: Int64
         let order_index: Int
+        let superset_group_id: UUID?
+        let superset_position: Int?
         let notes: String?
         let custom_name: String?
         let target_sets: Int?
@@ -264,6 +365,19 @@ struct ActiveStrengthWorkoutView: View {
     @State private var showElborblaCelebration = false
     @State private var quickRestPresets: [Int] = StrengthRestPresetService.defaultPresets
     @State private var strengthFinishDeferral: StrengthFinishDeferral?
+    @State private var showActiveExercisePicker = false
+    @State private var showActiveExerciseSetup = false
+    @State private var activeExerciseSetupLane: StrengthLaneKind = .host
+    @State private var activeExerciseSetupDrafts: [ActiveExerciseSetupExercise] = []
+    @State private var activeExerciseSetupError: String?
+    @State private var isPersistingActiveExerciseEdit = false
+    @State private var showDeleteExerciseConfirm = false
+    @State private var deleteExerciseCandidate: ExerciseRow?
+    @State private var deleteExerciseLane: StrengthLaneKind = .host
+    @State private var showSupersetSetActionConfirm = false
+    @State private var supersetSetActionCandidate: ExerciseRow?
+    @State private var supersetSetActionLane: StrengthLaneKind = .host
+    @State private var pendingSupersetSetAction: SupersetSetAction?
     private let swipeThreshold: CGFloat = 110
 
     private struct StrengthFinishDeferral: Identifiable {
@@ -431,12 +545,7 @@ struct ActiveStrengthWorkoutView: View {
                         || (isTripleMode && !orderedGuest2Exercises.isEmpty) {
                         exercisePager()
                     } else {
-                        VStack(spacing: 12) {
-                            Text("No exercises found")
-                                .font(.headline)
-                            Button("Close") { dismiss() }
-                        }
-                        .padding()
+                        activeExerciseEmptyState(lane: .host)
                     }
                 }
                 
@@ -541,6 +650,64 @@ struct ActiveStrengthWorkoutView: View {
         }
         .onDisappear {
             WorkoutLiveActivityManager.endIfAvailable()
+        }
+        .sheet(isPresented: $showActiveExercisePicker) {
+            ExercisePickerSheet(
+                all: [],
+                selected: Binding(
+                    get: { nil },
+                    set: { picked in
+                        showActiveExercisePicker = false
+                        if let picked {
+                            appendExerciseToActiveSetup(picked)
+                        }
+                    }
+                )
+            )
+            .gradientBG()
+            .presentationDetents([.large])
+            .presentationBackground(.clear)
+        }
+        .sheet(isPresented: $showActiveExerciseSetup) {
+            activeExerciseSetupSheet()
+                .presentationBackground(.clear)
+        }
+        .alert("Delete exercise?", isPresented: $showDeleteExerciseConfirm) {
+            Button("Delete", role: .destructive) {
+                if let ex = deleteExerciseCandidate {
+                    let lane = deleteExerciseLane
+                    Task { await deleteActiveExercise(ex, lane: lane) }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                deleteExerciseCandidate = nil
+            }
+        } message: {
+            if let ex = deleteExerciseCandidate {
+                Text("This removes \(ex.custom_name ?? ex.exercise_name ?? "this exercise") and its completed sets from this active workout.")
+            } else {
+                Text("This removes the exercise and its completed sets from this active workout.")
+            }
+        }
+        .alert("Update superserie sets?", isPresented: $showSupersetSetActionConfirm) {
+            Button("Only this exercise") {
+                applyPendingSupersetSetAction(toAllMembers: false)
+            }
+            Button("All superserie exercises (Recommended)") {
+                applyPendingSupersetSetAction(toAllMembers: true)
+            }
+            Button("Cancel", role: .cancel) {
+                clearPendingSupersetSetAction()
+            }
+        } message: {
+            switch pendingSupersetSetAction {
+            case .add:
+                Text("This exercise is part of a superserie. Add one set only here, or keep the superserie balanced by adding one set to every exercise in the group.")
+            case .remove:
+                Text("This exercise is part of a superserie. Remove one set only here, or keep the superserie balanced by removing one set from every exercise in the group.")
+            case .none:
+                Text("Choose how to update this superserie.")
+            }
         }
         .sheet(isPresented: $showEditSheet) {
             NavigationStack {
@@ -691,6 +858,8 @@ struct ActiveStrengthWorkoutView: View {
                 .navigationTitle("Edit set")
                 .navigationBarTitleDisplayMode(.inline)
                 .padding()
+                .background(Color.clear.gradientBG().ignoresSafeArea())
+                .toolbarBackground(.hidden, for: .navigationBar)
                 .sheet(isPresented: $showConvertToNormalSheet) {
                     NavigationStack {
                         VStack(alignment: .leading, spacing: 16) {
@@ -722,6 +891,7 @@ struct ActiveStrengthWorkoutView: View {
                         }
                     }
                     .presentationDetents([.medium])
+                    .presentationBackground(.clear)
                 }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -739,16 +909,11 @@ struct ActiveStrengthWorkoutView: View {
                             editTargetExpandedIndex = nil
                         }
                     }
-                    ToolbarItemGroup(placement: .keyboard) {
-                        Spacer()
-                        Button("Done") {
-                            editMetricFocus = nil
-                        }
-                    }
                 }
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+            .presentationBackground(.clear)
         }
         .onReceive(restTimer) { _ in
             if !isSessionPaused {
@@ -1316,11 +1481,14 @@ struct ActiveStrengthWorkoutView: View {
                     }
                     .buttonStyle(.plain)
                 } else {
+                    let shouldStartRest = shouldStartRestAfterCompletingSet(ex, lane: lane, setIndex: laneCurrentIndex)
                     Button {
                         completeCurrentSet(lane: lane)
-                        startRest(for: s, lane: lane)
+                        if shouldStartRest {
+                            startRest(for: s, lane: lane)
+                        }
                     } label: {
-                        Text("Rest \(s.rest_sec ?? 0)s")
+                        Text(shouldStartRest ? "Rest \(s.rest_sec ?? 0)s" : "Next superserie exercise")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .frame(height: 48)
@@ -1351,43 +1519,13 @@ struct ActiveStrengthWorkoutView: View {
             .frame(maxWidth: .infinity)
         }
 
-        VStack(spacing: 10) {
-            Button {
-                ensureBaseSetExists(for: ex, lane: lane)
-                addOneSetToConfigs(for: ex, lane: lane)
-                withAnimation { showToast("Added 1 set") }
-            } label: {
-                Text("Add set")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .contentShape(Rectangle())
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.accentColor, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(isSaving || lockRestActions)
-            .opacity((isSaving || lockRestActions) ? 0.45 : 1)
-
-            Button {
-                removeOneSet(for: ex, lane: lane)
-            } label: {
-                Text("Remove set")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .contentShape(Rectangle())
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Color.red.opacity(0.75), lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .disabled(laneIsResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex, lane: lane))
-            .opacity((laneIsResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex, lane: lane)) ? 0.45 : 1)
-        }
+        activeExerciseMoreMenu(
+            ex,
+            lane: lane,
+            canAddSet: !(isSaving || lockRestActions),
+            canRemoveSet: !(laneIsResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex, lane: lane)),
+            canDeleteExercise: canModifyActiveExercises
+        )
 
         let hasNextInLane = laneNextExercise(lane: lane) != nil
 
@@ -1461,6 +1599,53 @@ struct ActiveStrengthWorkoutView: View {
                 Text(earlyFinishAlertMessage())
             }
         }
+    }
+
+    private func activeExerciseMoreMenu(
+        _ ex: ExerciseRow,
+        lane: StrengthLaneKind,
+        canAddSet: Bool,
+        canRemoveSet: Bool,
+        canDeleteExercise: Bool
+    ) -> some View {
+        Menu {
+            Button {
+                requestAddSet(for: ex, lane: lane)
+            } label: {
+                Label("Add set", systemImage: "plus.circle")
+            }
+            .disabled(!canAddSet)
+
+            Button(role: .destructive) {
+                requestRemoveSet(for: ex, lane: lane)
+            } label: {
+                Label("Remove set", systemImage: "minus.circle")
+            }
+            .disabled(!canRemoveSet)
+
+            Button(role: .destructive) {
+                requestDeleteActiveExercise(ex, lane: lane)
+            } label: {
+                Label("Delete exercise", systemImage: "trash")
+            }
+            .disabled(!canDeleteExercise)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "ellipsis.circle")
+                Text("More")
+            }
+            .font(.subheadline.weight(.semibold))
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .contentShape(Rectangle())
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .stroke(Color.accentColor.opacity(0.75), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canAddSet && !canRemoveSet && !canDeleteExercise)
+        .opacity((canAddSet || canRemoveSet || canDeleteExercise) ? 1 : 0.45)
     }
 
     private func laneNextExercise(lane: StrengthLaneKind) -> ExerciseRow? {
@@ -1926,6 +2111,7 @@ struct ActiveStrengthWorkoutView: View {
         switch lane {
         case .host:
             guard let ex = currentExercise else { return }
+            let completedSetIndex = currentSetIndex
             var sets = setsFor(ex, lane: .host)
             if sets.isEmpty {
                 ensureBaseSetExists(for: ex, lane: .host)
@@ -1965,9 +2151,11 @@ struct ActiveStrengthWorkoutView: View {
             if navEmphasisLockExerciseIdHost == nil, completedRestSec == 0 {
                 navEmphasisLockExerciseIdHost = ex.id
             }
+            advanceToNextSupersetMemberIfNeeded(from: ex, lane: .host, setIndex: completedSetIndex)
 
         case .guest:
             guard let ex = currentGuestExercise else { return }
+            let completedSetIndex = gCurrentSetIndex
             var sets = setsFor(ex, lane: .guest)
             if sets.isEmpty {
                 ensureBaseSetExists(for: ex, lane: .guest)
@@ -2007,9 +2195,11 @@ struct ActiveStrengthWorkoutView: View {
             if navEmphasisLockExerciseIdGuest == nil, completedRestSec == 0 {
                 navEmphasisLockExerciseIdGuest = ex.id
             }
+            advanceToNextSupersetMemberIfNeeded(from: ex, lane: .guest, setIndex: completedSetIndex)
 
         case .guest2:
             guard let ex = currentGuest2Exercise else { return }
+            let completedSetIndex = g2CurrentSetIndex
             var sets = setsFor(ex, lane: .guest2)
             if sets.isEmpty {
                 ensureBaseSetExists(for: ex, lane: .guest2)
@@ -2049,6 +2239,132 @@ struct ActiveStrengthWorkoutView: View {
             if navEmphasisLockExerciseIdGuest2 == nil, completedRestSec == 0 {
                 navEmphasisLockExerciseIdGuest2 = ex.id
             }
+            advanceToNextSupersetMemberIfNeeded(from: ex, lane: .guest2, setIndex: completedSetIndex)
+        }
+    }
+
+    private func supersetMembers(for ex: ExerciseRow, lane: StrengthLaneKind) -> [ExerciseRow] {
+        guard let groupId = ex.superset_group_id else { return [] }
+        return orderedExercises(lane: lane)
+            .filter { $0.superset_group_id == groupId }
+            .sorted {
+                let ap = $0.superset_position ?? Int.max
+                let bp = $1.superset_position ?? Int.max
+                if ap != bp { return ap < bp }
+                return $0.order_index < $1.order_index
+            }
+    }
+
+    private func shouldStartRestAfterCompletingSet(_ ex: ExerciseRow, lane: StrengthLaneKind, setIndex: Int) -> Bool {
+        let members = supersetMembers(for: ex, lane: lane)
+        guard members.count > 1 else { return true }
+        let available = members.filter { setsFor($0, lane: lane).count > setIndex }
+        guard let currentAvailableIndex = available.firstIndex(where: { $0.id == ex.id }) else { return true }
+        return currentAvailableIndex == available.count - 1
+    }
+
+    private func nextSupersetMember(after ex: ExerciseRow, lane: StrengthLaneKind, setIndex: Int) -> ExerciseRow? {
+        let members = supersetMembers(for: ex, lane: lane)
+        guard members.count > 1 else { return nil }
+        let available = members.filter { setsFor($0, lane: lane).count > setIndex }
+        guard let currentAvailableIndex = available.firstIndex(where: { $0.id == ex.id }) else { return nil }
+        if currentAvailableIndex < available.count - 1 {
+            return available[currentAvailableIndex + 1]
+        }
+        return available.first(where: { $0.id != ex.id && effectiveSetIndex(for: $0, lane: lane) < setsFor($0, lane: lane).count })
+    }
+
+    private func advanceToNextSupersetMemberIfNeeded(from ex: ExerciseRow, lane: StrengthLaneKind, setIndex: Int) {
+        guard let next = nextSupersetMember(after: ex, lane: lane, setIndex: setIndex),
+              let idx = orderedExercises(lane: lane).firstIndex(where: { $0.id == next.id })
+        else { return }
+        persistStateForCurrentDualIndex()
+        switch lane {
+        case .host:
+            currentExerciseIndex = idx
+            pagerDisplayIndexHost = idx
+            navEmphasisLockExerciseIdHost = nil
+        case .guest:
+            guestCurrentExerciseIndex = idx
+            pagerDisplayIndexGuest = idx
+            navEmphasisLockExerciseIdGuest = nil
+        case .guest2:
+            g2CurrentExerciseIndex = idx
+            pagerDisplayIndexGuest2 = idx
+            navEmphasisLockExerciseIdGuest2 = nil
+        }
+        restoreStateForDualIndex()
+        dragOffsetY = 0
+    }
+
+    private func requestAddSet(for ex: ExerciseRow, lane: StrengthLaneKind) {
+        let members = supersetMembers(for: ex, lane: lane)
+        guard members.count > 1 else {
+            applyAddSet(to: [ex], lane: lane)
+            return
+        }
+        supersetSetActionCandidate = ex
+        supersetSetActionLane = lane
+        pendingSupersetSetAction = .add
+        showSupersetSetActionConfirm = true
+    }
+
+    private func requestRemoveSet(for ex: ExerciseRow, lane: StrengthLaneKind) {
+        let members = supersetMembers(for: ex, lane: lane)
+        guard members.count > 1 else {
+            removeOneSet(for: ex, lane: lane)
+            return
+        }
+        supersetSetActionCandidate = ex
+        supersetSetActionLane = lane
+        pendingSupersetSetAction = .remove
+        showSupersetSetActionConfirm = true
+    }
+
+    private func applyPendingSupersetSetAction(toAllMembers: Bool) {
+        guard let ex = supersetSetActionCandidate, let action = pendingSupersetSetAction else {
+            clearPendingSupersetSetAction()
+            return
+        }
+        let lane = supersetSetActionLane
+        let targets: [ExerciseRow]
+        if toAllMembers {
+            let members = supersetMembers(for: ex, lane: lane)
+            targets = members.isEmpty ? [ex] : members
+        } else {
+            targets = [ex]
+        }
+
+        switch action {
+        case .add:
+            applyAddSet(to: targets, lane: lane)
+        case .remove:
+            applyRemoveSet(to: targets, lane: lane)
+        }
+        clearPendingSupersetSetAction()
+    }
+
+    private func clearPendingSupersetSetAction() {
+        supersetSetActionCandidate = nil
+        pendingSupersetSetAction = nil
+    }
+
+    private func applyAddSet(to targets: [ExerciseRow], lane: StrengthLaneKind) {
+        for target in targets {
+            ensureBaseSetExists(for: target, lane: lane)
+            addOneSetToConfigs(for: target, lane: lane)
+        }
+        withAnimation {
+            showToast(targets.count > 1 ? "Added 1 set to superserie" : "Added 1 set")
+        }
+    }
+
+    private func applyRemoveSet(to targets: [ExerciseRow], lane: StrengthLaneKind) {
+        for target in targets {
+            removeOneSet(for: target, lane: lane, showsToast: false)
+        }
+        withAnimation {
+            showToast(targets.count > 1 ? "Removed 1 set from superserie" : "Removed 1 set")
         }
     }
 
@@ -2185,14 +2501,14 @@ struct ActiveStrengthWorkoutView: View {
         setsFor(ex, lane: lane).count > 0
     }
 
-    private func removeOneSet(for ex: ExerciseRow, lane: StrengthLaneKind = .host) {
+    private func removeOneSet(for ex: ExerciseRow, lane: StrengthLaneKind = .host, showsToast: Bool = true) {
         let key = ex.id
 
         switch lane {
         case .host:
             var configs = setsByExercise[key] ?? []
             guard !configs.isEmpty else {
-                showToast("No sets to remove")
+                if showsToast { showToast("No sets to remove") }
                 return
             }
 
@@ -2224,9 +2540,9 @@ struct ActiveStrengthWorkoutView: View {
             if var performed = performedSetsByExercise[key], performed.count > totalNow {
                 performed = Array(performed.prefix(totalNow))
                 performedSetsByExercise[key] = performed
-                showToast("Removed 1 set (and adjusted completed sets)")
+                if showsToast { showToast("Removed 1 set (and adjusted completed sets)") }
             } else {
-                showToast("Removed 1 set")
+                if showsToast { showToast("Removed 1 set") }
             }
 
             let currentIdxForThisExercise = currentSetIndexByExercise[key] ?? 0
@@ -2260,7 +2576,7 @@ struct ActiveStrengthWorkoutView: View {
         case .guest:
             var configs = gSetsByExercise[key] ?? []
             guard !configs.isEmpty else {
-                showToast("No sets to remove")
+                if showsToast { showToast("No sets to remove") }
                 return
             }
 
@@ -2292,9 +2608,9 @@ struct ActiveStrengthWorkoutView: View {
             if var performed = gPerformedSetsByExercise[key], performed.count > totalNow {
                 performed = Array(performed.prefix(totalNow))
                 gPerformedSetsByExercise[key] = performed
-                showToast("Removed 1 set (and adjusted completed sets)")
+                if showsToast { showToast("Removed 1 set (and adjusted completed sets)") }
             } else {
-                showToast("Removed 1 set")
+                if showsToast { showToast("Removed 1 set") }
             }
 
             let currentIdxForThisExercise = gCurrentSetIndexByExercise[key] ?? 0
@@ -2328,7 +2644,7 @@ struct ActiveStrengthWorkoutView: View {
         case .guest2:
             var configs = g2SetsByExercise[key] ?? []
             guard !configs.isEmpty else {
-                showToast("No sets to remove")
+                if showsToast { showToast("No sets to remove") }
                 return
             }
 
@@ -2360,9 +2676,9 @@ struct ActiveStrengthWorkoutView: View {
             if var performed = g2PerformedSetsByExercise[key], performed.count > totalNow {
                 performed = Array(performed.prefix(totalNow))
                 g2PerformedSetsByExercise[key] = performed
-                showToast("Removed 1 set (and adjusted completed sets)")
+                if showsToast { showToast("Removed 1 set (and adjusted completed sets)") }
             } else {
-                showToast("Removed 1 set")
+                if showsToast { showToast("Removed 1 set") }
             }
 
             let currentIdxForThisExercise = g2CurrentSetIndexByExercise[key] ?? 0
@@ -2493,6 +2809,9 @@ struct ActiveStrengthWorkoutView: View {
         if showCountdown { return false }
         if isSaving { return false }
         if showEditSheet { return false }
+        if showActiveExercisePicker { return false }
+        if showActiveExerciseSetup { return false }
+        if isPersistingActiveExerciseEdit { return false }
         if isTransitioningExercise { return false }
 
         if laneBlocksExerciseSwipe(mainDisplayLane) { return false }
@@ -2553,7 +2872,17 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     private var canJumpBetweenExercises: Bool {
-        !showCountdown && !isSaving && !showEditSheet && !isTransitioningExercise
+        !showCountdown
+            && !isSaving
+            && !showEditSheet
+            && !showActiveExercisePicker
+            && !showActiveExerciseSetup
+            && !isPersistingActiveExerciseEdit
+            && !isTransitioningExercise
+    }
+
+    private var canModifyActiveExercises: Bool {
+        canJumpBetweenExercises && !showDeleteExerciseConfirm && !showSupersetSetActionConfirm
     }
 
     @ViewBuilder
@@ -2591,11 +2920,877 @@ struct ActiveStrengthWorkoutView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            activeAddExerciseButton(lane: mainDisplayLane, compact: false)
         }
         .frame(maxWidth: .infinity)
         .frame(height: cardHeight)
         .padding()
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func activeExerciseEmptyState(lane: StrengthLaneKind) -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "dumbbell")
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                Text("No exercises found")
+                    .font(.headline)
+                Text("Add an exercise and configure its sets to continue this workout.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            activeAddExerciseButton(lane: lane, compact: false)
+            Button("Close") { dismiss() }
+                .buttonStyle(.bordered)
+        }
+        .padding()
+    }
+
+    @ViewBuilder
+    private func activeAddExerciseButton(lane: StrengthLaneKind, compact: Bool) -> some View {
+        Button {
+            startActiveExerciseAdd(lane: lane)
+        } label: {
+            if compact {
+                VStack(spacing: 5) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 34, height: 34)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().stroke(Color.accentColor.opacity(0.65), lineWidth: 1))
+                    Text("Add")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            } else {
+                Label("Add exercise", systemImage: "plus.circle.fill")
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(Color.accentColor)
+                    )
+                    .foregroundColor(.white)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!canModifyActiveExercises)
+        .opacity(canModifyActiveExercises ? 1 : 0.45)
+        .accessibilityLabel("Add exercise")
+    }
+
+    private func activeExerciseSetupSheet() -> some View {
+        NavigationStack {
+            ZStack {
+                Color.clear
+                    .gradientBG()
+                    .ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(activeExerciseSetupDrafts.count > 1 ? "Superserie" : (activeExerciseSetupDrafts.first?.exercise.localizedName(for: exerciseLanguageFromGlobalStorage()) ?? "Exercise"))
+                                .font(.title3.weight(.semibold))
+                            Text(activeExerciseSetupDrafts.count > 1 ? "Configure each exercise. The active workout will alternate them set-by-set." : "Configure the sets before adding it to this active workout.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        VStack(spacing: 16) {
+                            ForEach(activeExerciseSetupDrafts) { draft in
+                                activeExerciseSetupExerciseCard(draft)
+                            }
+                        }
+
+                        HStack(spacing: 10) {
+                            Button {
+                                addSetToActiveSetupDraft()
+                            } label: {
+                                Label("Add set", systemImage: "plus.circle")
+                            }
+                            .buttonStyle(.bordered)
+
+                            Button(role: .destructive) {
+                                removeSetFromActiveSetupDraft()
+                            } label: {
+                                Label("Remove set", systemImage: "minus.circle")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!canRemoveSetFromActiveSetupDraft)
+                        }
+
+                        Button {
+                            showActiveExercisePicker = true
+                        } label: {
+                            Label("Add superserie exercise", systemImage: "link.badge.plus")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(isPersistingActiveExerciseEdit)
+
+                        if activeExerciseSetupDrafts.count > 1 {
+                            Text("Superserie order: \(activeExerciseSetupDrafts.map { $0.exercise.localizedName(for: exerciseLanguageFromGlobalStorage()) }.joined(separator: " → "))")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let activeExerciseSetupError {
+                            Text(activeExerciseSetupError)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .padding()
+                }
+            }
+            .navigationTitle("Configure exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        resetActiveExerciseSetup()
+                    }
+                    .disabled(isPersistingActiveExerciseEdit)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task { await saveConfiguredActiveExercise() }
+                    } label: {
+                        if isPersistingActiveExerciseEdit {
+                            ProgressView()
+                        } else {
+                            Text("Add")
+                        }
+                    }
+                    .disabled(isPersistingActiveExerciseEdit || activeExerciseSetupDrafts.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func activeExerciseSetupExerciseCard(_ draft: ActiveExerciseSetupExercise) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(draft.exercise.localizedName(for: exerciseLanguageFromGlobalStorage()))
+                        .font(.headline.weight(.semibold))
+                    if activeExerciseSetupDrafts.count > 1, let pos = activeExerciseSetupDrafts.firstIndex(where: { $0.id == draft.id }) {
+                        Text("Superserie \(pos + 1)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                if activeExerciseSetupDrafts.count > 1 {
+                    Button(role: .destructive) {
+                        removeActiveSetupDraft(draft.id)
+                    } label: {
+                        Image(systemName: "minus.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Remove superserie exercise")
+                }
+            }
+
+            ForEach(draft.sets) { row in
+                activeExerciseSetupRow(
+                    exerciseId: draft.id,
+                    row: row,
+                    index: draft.sets.firstIndex(where: { $0.id == row.id }) ?? 0
+                )
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func activeExerciseSetupRow(exerciseId: UUID, row: ActiveExerciseSetupSet, index: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Set \(index + 1)")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+
+            if row.dropSegments.count >= 2 {
+                ForEach(row.dropSegments) { segment in
+                    let segmentIndex = row.dropSegments.firstIndex(where: { $0.id == segment.id }) ?? 0
+                    HStack(alignment: .top, spacing: 6) {
+                        Text("\(segmentIndex + 1)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, alignment: .leading)
+                        StrengthStyleMetricField(title: "Reps") {
+                            TextField("—", text: dropSegmentRepsBinding(exerciseId: exerciseId, setId: row.id, segmentId: segment.id))
+                                .font(.body)
+                                .keyboardType(.numberPad)
+                        }
+                        StrengthStyleMetricField(title: "kg") {
+                            TextField("—", text: dropSegmentWeightBinding(exerciseId: exerciseId, setId: row.id, segmentId: segment.id))
+                                .font(.body)
+                                .keyboardType(.decimalPad)
+                        }
+                    }
+                }
+                HStack(spacing: 8) {
+                    Button("Add step") {
+                        appendDropSegment(exerciseId: exerciseId, setId: row.id)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(row.dropSegments.count >= 12)
+                    Button("Remove step") {
+                        removeDropSegment(exerciseId: exerciseId, setId: row.id)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(row.dropSegments.count <= 2)
+                    Button("Clear drop") {
+                        clearDropSet(exerciseId: exerciseId, setId: row.id)
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .font(.caption.weight(.semibold))
+                HStack(alignment: .top, spacing: 6) {
+                    StrengthStyleMetricField(title: "Rest s") {
+                        TextField("60", text: setupSetTextBinding(exerciseId: exerciseId, setId: row.id, keyPath: \.restText))
+                            .font(.body)
+                            .keyboardType(.numberPad)
+                    }
+                    StrengthStyleMetricField(title: "RPE") {
+                        TextField("—", text: setupSetTextBinding(exerciseId: exerciseId, setId: row.id, keyPath: \.rpeText))
+                            .font(.body)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+            } else {
+                HStack(alignment: .top, spacing: 6) {
+                    StrengthStyleMetricField(title: "Reps") {
+                        TextField("10", text: setupSetTextBinding(exerciseId: exerciseId, setId: row.id, keyPath: \.repsText))
+                            .font(.body)
+                            .keyboardType(.numberPad)
+                    }
+                    StrengthStyleMetricField(title: "kg") {
+                        TextField("0", text: setupSetTextBinding(exerciseId: exerciseId, setId: row.id, keyPath: \.weightText))
+                            .font(.body)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+                HStack(alignment: .top, spacing: 6) {
+                    StrengthStyleMetricField(title: "Rest s") {
+                        TextField("60", text: setupSetTextBinding(exerciseId: exerciseId, setId: row.id, keyPath: \.restText))
+                            .font(.body)
+                            .keyboardType(.numberPad)
+                    }
+                    StrengthStyleMetricField(title: "RPE") {
+                        TextField("—", text: setupSetTextBinding(exerciseId: exerciseId, setId: row.id, keyPath: \.rpeText))
+                            .font(.body)
+                            .keyboardType(.decimalPad)
+                    }
+                }
+                Button("Drop set") {
+                    convertSetupSetToDropSet(exerciseId: exerciseId, setId: row.id)
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+            }
+        }
+        .padding(10)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func startActiveExerciseAdd(lane: StrengthLaneKind) {
+        guard canModifyActiveExercises else { return }
+        activeExerciseSetupLane = lane
+        activeExerciseSetupDrafts = []
+        activeExerciseSetupError = nil
+        showActiveExercisePicker = true
+    }
+
+    private func appendExerciseToActiveSetup(_ exercise: Exercise) {
+        activeExerciseSetupError = nil
+        if activeExerciseSetupDrafts.isEmpty {
+            activeExerciseSetupDrafts = [ActiveExerciseSetupExercise(exercise: exercise)]
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                showActiveExerciseSetup = true
+            }
+        } else if !activeExerciseSetupDrafts.contains(where: { $0.exercise.id == exercise.id }) {
+            activeExerciseSetupDrafts.append(ActiveExerciseSetupExercise(exercise: exercise))
+            showActiveExerciseSetup = true
+        }
+    }
+
+    private func resetActiveExerciseSetup() {
+        showActiveExerciseSetup = false
+        activeExerciseSetupDrafts = []
+        activeExerciseSetupError = nil
+    }
+
+    private var canRemoveSetFromActiveSetupDraft: Bool {
+        activeExerciseSetupDrafts.contains { $0.sets.count > 1 }
+    }
+
+    private func addSetToActiveSetupDraft() {
+        for idx in activeExerciseSetupDrafts.indices {
+            activeExerciseSetupDrafts[idx].sets.append(ActiveExerciseSetupSet())
+        }
+    }
+
+    private func removeSetFromActiveSetupDraft() {
+        for idx in activeExerciseSetupDrafts.indices {
+            if activeExerciseSetupDrafts[idx].sets.count > 1 {
+                activeExerciseSetupDrafts[idx].sets.removeLast()
+            }
+        }
+    }
+
+    private func removeActiveSetupDraft(_ id: UUID) {
+        activeExerciseSetupDrafts.removeAll { $0.id == id }
+        if activeExerciseSetupDrafts.isEmpty {
+            resetActiveExerciseSetup()
+        }
+    }
+
+    private func setupSetTextBinding(
+        exerciseId: UUID,
+        setId: UUID,
+        keyPath: WritableKeyPath<ActiveExerciseSetupSet, String>
+    ) -> Binding<String> {
+        Binding(
+            get: {
+                guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+                      let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId })
+                else { return "" }
+                return activeExerciseSetupDrafts[draftIdx].sets[setIdx][keyPath: keyPath]
+            },
+            set: { newValue in
+                guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+                      let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId })
+                else { return }
+                activeExerciseSetupDrafts[draftIdx].sets[setIdx][keyPath: keyPath] = newValue
+            }
+        )
+    }
+
+    private func dropSegmentRepsBinding(exerciseId: UUID, setId: UUID, segmentId: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                guard let segment = setupDropSegment(exerciseId: exerciseId, setId: setId, segmentId: segmentId) else { return "" }
+                return segment.reps.map(String.init) ?? ""
+            },
+            set: { newValue in
+                updateDropSegment(exerciseId: exerciseId, setId: setId, segmentId: segmentId) { segment in
+                    let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                    segment.reps = trimmed.isEmpty ? nil : Int(trimmed)
+                }
+            }
+        )
+    }
+
+    private func dropSegmentWeightBinding(exerciseId: UUID, setId: UUID, segmentId: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                setupDropSegment(exerciseId: exerciseId, setId: setId, segmentId: segmentId)?.weightKg ?? ""
+            },
+            set: { newValue in
+                updateDropSegment(exerciseId: exerciseId, setId: setId, segmentId: segmentId) { segment in
+                    segment.weightKg = newValue
+                }
+            }
+        )
+    }
+
+    private func setupDropSegment(exerciseId: UUID, setId: UUID, segmentId: UUID) -> StrengthEditorSegment? {
+        guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+              let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId }),
+              let segmentIdx = activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments.firstIndex(where: { $0.id == segmentId })
+        else { return nil }
+        return activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments[segmentIdx]
+    }
+
+    private func updateDropSegment(
+        exerciseId: UUID,
+        setId: UUID,
+        segmentId: UUID,
+        update: (inout StrengthEditorSegment) -> Void
+    ) {
+        guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+              let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId }),
+              let segmentIdx = activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments.firstIndex(where: { $0.id == segmentId })
+        else { return }
+        update(&activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments[segmentIdx])
+    }
+
+    private func convertSetupSetToDropSet(exerciseId: UUID, setId: UUID) {
+        guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+              let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId })
+        else { return }
+        let set = activeExerciseSetupDrafts[draftIdx].sets[setIdx]
+        activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments = [
+            StrengthEditorSegment(reps: Int(set.repsText.trimmingCharacters(in: .whitespacesAndNewlines)), weightKg: set.weightText),
+            StrengthEditorSegment(reps: nil, weightKg: "")
+        ]
+    }
+
+    private func appendDropSegment(exerciseId: UUID, setId: UUID) {
+        guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+              let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId })
+        else { return }
+        activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments.append(StrengthEditorSegment(reps: nil, weightKg: ""))
+    }
+
+    private func removeDropSegment(exerciseId: UUID, setId: UUID) {
+        guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+              let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId }),
+              activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments.count > 2
+        else { return }
+        activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments.removeLast()
+    }
+
+    private func clearDropSet(exerciseId: UUID, setId: UUID) {
+        guard let draftIdx = activeExerciseSetupDrafts.firstIndex(where: { $0.id == exerciseId }),
+              let setIdx = activeExerciseSetupDrafts[draftIdx].sets.firstIndex(where: { $0.id == setId })
+        else { return }
+        activeExerciseSetupDrafts[draftIdx].sets[setIdx].dropSegments = []
+    }
+
+    private func parseActiveExerciseSetupRows(_ rows: [ActiveExerciseSetupSet]) -> [ActiveExerciseSetupParsedSet]? {
+        var parsed: [ActiveExerciseSetupParsedSet] = []
+        for (idx, row) in rows.enumerated() {
+            let repsRaw = row.repsText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let reps: Int?
+            if repsRaw.isEmpty {
+                reps = nil
+            } else if let value = Int(repsRaw), value >= 0 {
+                reps = value
+            } else {
+                activeExerciseSetupError = "Set \(idx + 1) has invalid reps."
+                return nil
+            }
+
+            let weightRaw = row.weightText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: ",", with: ".")
+            let weight: Decimal?
+            if weightRaw.isEmpty {
+                weight = nil
+            } else if let value = Decimal(string: weightRaw), value >= 0 {
+                weight = value
+            } else {
+                activeExerciseSetupError = "Set \(idx + 1) has invalid weight."
+                return nil
+            }
+
+            let rpeRaw = row.rpeText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: ",", with: ".")
+            let rpe: Decimal?
+            if rpeRaw.isEmpty {
+                rpe = nil
+            } else if let value = Decimal(string: rpeRaw), value >= 0 {
+                rpe = value
+            } else {
+                activeExerciseSetupError = "Set \(idx + 1) has invalid RPE."
+                return nil
+            }
+
+            let restRaw = row.restText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rest: Int?
+            if restRaw.isEmpty {
+                rest = nil
+            } else if let value = Int(restRaw), value >= 0 {
+                rest = value
+            } else {
+                activeExerciseSetupError = "Set \(idx + 1) has invalid rest."
+                return nil
+            }
+
+            let weightSegments: [StrengthWeightSegWire]?
+            if row.dropSegments.count >= 2 {
+                var segments: [StrengthWeightSegWire] = []
+                for (segmentIdx, segment) in row.dropSegments.enumerated() {
+                    guard let segmentReps = segment.reps, segmentReps > 0 else {
+                        activeExerciseSetupError = "Set \(idx + 1), drop step \(segmentIdx + 1) has invalid reps."
+                        return nil
+                    }
+                    let segmentWeightRaw = segment.weightKg
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .replacingOccurrences(of: ",", with: ".")
+                    guard let segmentWeight = Double(segmentWeightRaw), segmentWeight >= 0 else {
+                        activeExerciseSetupError = "Set \(idx + 1), drop step \(segmentIdx + 1) has invalid weight."
+                        return nil
+                    }
+                    segments.append(StrengthWeightSegWire(reps: segmentReps, weight_kg: segmentWeight))
+                }
+                weightSegments = segments
+            } else {
+                weightSegments = nil
+            }
+
+            parsed.append(
+                ActiveExerciseSetupParsedSet(
+                    reps: weightSegments?.first?.reps ?? reps,
+                    weightKg: weightSegments?.first.map { Decimal($0.weight_kg) } ?? weight,
+                    rpe: rpe,
+                    restSec: rest,
+                    weightSegments: weightSegments
+                )
+            )
+        }
+        activeExerciseSetupError = nil
+        return parsed
+    }
+
+    private func workoutId(for lane: StrengthLaneKind) -> Int? {
+        switch lane {
+        case .host: return workoutId
+        case .guest: return dualGuestWorkoutId
+        case .guest2: return dualGuest2WorkoutId
+        }
+    }
+
+    private func nextExerciseOrderIndex(for lane: StrengthLaneKind) -> Int {
+        (orderedExercises(lane: lane).map(\.order_index).max() ?? 0) + 1
+    }
+
+    private func saveConfiguredActiveExercise() async {
+        guard !isPersistingActiveExerciseEdit else { return }
+        guard !activeExerciseSetupDrafts.isEmpty else { return }
+        guard let targetWorkoutId = workoutId(for: activeExerciseSetupLane) else {
+            activeExerciseSetupError = "This workout lane is not available."
+            return
+        }
+
+        let lane = activeExerciseSetupLane
+        let baseOrderIndex = nextExerciseOrderIndex(for: lane)
+        let supersetGroupId = activeExerciseSetupDrafts.count > 1 ? UUID() : nil
+        var parsedDrafts: [(draft: ActiveExerciseSetupExercise, sets: [ActiveExerciseSetupParsedSet])] = []
+        for draft in activeExerciseSetupDrafts {
+            guard let parsed = parseActiveExerciseSetupRows(draft.sets), !parsed.isEmpty else { return }
+            parsedDrafts.append((draft: draft, sets: parsed))
+        }
+
+        isPersistingActiveExerciseEdit = true
+        let client = SupabaseManager.shared.client
+
+        do {
+            var localRows: [(row: ExerciseRow, sets: [SetRow])] = []
+            for (draftIndex, parsedDraft) in parsedDrafts.enumerated() {
+                let orderIndex = baseOrderIndex + draftIndex
+                let insertedData = try await client
+                    .from("workout_exercises")
+                    .insert(
+                        ActiveWorkoutExerciseInsert(
+                            workout_id: targetWorkoutId,
+                            exercise_id: Int(parsedDraft.draft.exercise.id),
+                            order_index: orderIndex,
+                            superset_group_id: supersetGroupId,
+                            superset_position: supersetGroupId == nil ? nil : draftIndex + 1,
+                            notes: nil,
+                            custom_name: nil
+                        )
+                    )
+                    .select("id")
+                    .single()
+                    .execute()
+                    .data
+                let inserted = try JSONDecoder.supabase().decode(ActiveWorkoutExerciseInsertedId.self, from: insertedData)
+
+                let setRows = parsedDraft.sets.enumerated().map { idx, set in
+                    ActiveWorkoutSetInsert(
+                        workout_exercise_id: inserted.id,
+                        set_number: 1,
+                        order_index: idx + 1,
+                        reps: set.reps,
+                        weight_kg: set.weightKg.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        rpe: set.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+                        rest_sec: set.restSec,
+                        weight_segments: set.weightSegments
+                    )
+                }
+
+                _ = try await client
+                    .from("exercise_sets")
+                    .insert(setRows)
+                    .execute()
+
+                let exerciseName = parsedDraft.draft.exercise.localizedName(for: exerciseLanguageFromGlobalStorage())
+                let row = ExerciseRow(
+                    id: inserted.id,
+                    exercise_id: parsedDraft.draft.exercise.id,
+                    order_index: orderIndex,
+                    superset_group_id: supersetGroupId,
+                    superset_position: supersetGroupId == nil ? nil : draftIndex + 1,
+                    notes: nil,
+                    custom_name: nil,
+                    target_sets: nil,
+                    exercise_name: exerciseName
+                )
+                let localSets = parsedDraft.sets.enumerated().map { idx, set in
+                    SetRow(
+                        id: -(inserted.id * 1000 + idx + 1),
+                        workout_exercise_id: inserted.id,
+                        set_number: 1,
+                        order_index: idx + 1,
+                        reps: set.reps,
+                        weight_kg: set.weightKg,
+                        rpe: set.rpe,
+                        rest_sec: set.restSec,
+                        weight_segments: set.weightSegments,
+                        configId: -(inserted.id * 1000 + idx + 1),
+                        segmentsInRow: set.segmentsInRow
+                    )
+                }
+                localRows.append((row: row, sets: localSets))
+            }
+
+            appendActiveExercises(localRows, lane: lane)
+            NotificationCenter.default.post(name: .workoutDidChange, object: targetWorkoutId)
+            resetActiveExerciseSetup()
+            showToast(supersetGroupId == nil ? "Added exercise" : "Added superserie")
+        } catch {
+            activeExerciseSetupError = error.localizedDescription
+        }
+
+        isPersistingActiveExerciseEdit = false
+    }
+
+    private func appendActiveExercise(_ row: ExerciseRow, sets: [SetRow], lane: StrengthLaneKind) {
+        appendActiveExercises([(row: row, sets: sets)], lane: lane)
+    }
+
+    private func appendActiveExercises(_ rows: [(row: ExerciseRow, sets: [SetRow])], lane: StrengthLaneKind) {
+        guard !rows.isEmpty else { return }
+        persistStateForCurrentDualIndex()
+        let focusId = rows.first?.row.id
+        switch lane {
+        case .host:
+            for item in rows {
+                exercises.append(item.row)
+                setsByExercise[item.row.id] = item.sets
+                currentSetIndexByExercise[item.row.id] = 0
+                visitedSetIndexByExercise[item.row.id] = 0
+            }
+            if let focusId, let idx = orderedExercises.firstIndex(where: { $0.id == focusId }) {
+                currentExerciseIndex = idx
+                pagerDisplayIndexHost = idx
+            }
+        case .guest:
+            for item in rows {
+                gExercises.append(item.row)
+                gSetsByExercise[item.row.id] = item.sets
+                gCurrentSetIndexByExercise[item.row.id] = 0
+                gVisitedSetIndexByExercise[item.row.id] = 0
+            }
+            if let focusId, let idx = orderedGuestExercises.firstIndex(where: { $0.id == focusId }) {
+                guestCurrentExerciseIndex = idx
+                pagerDisplayIndexGuest = idx
+            }
+        case .guest2:
+            for item in rows {
+                g2Exercises.append(item.row)
+                g2SetsByExercise[item.row.id] = item.sets
+                g2CurrentSetIndexByExercise[item.row.id] = 0
+                g2VisitedSetIndexByExercise[item.row.id] = 0
+            }
+            if let focusId, let idx = orderedGuest2Exercises.firstIndex(where: { $0.id == focusId }) {
+                g2CurrentExerciseIndex = idx
+                pagerDisplayIndexGuest2 = idx
+            }
+        }
+        if isDualMode {
+            dualFocusLane = lane
+        }
+        clampLaneExerciseIndex(lane)
+        restoreStateForDualIndex()
+        dragOffsetY = 0
+    }
+
+    private func requestDeleteActiveExercise(_ ex: ExerciseRow, lane: StrengthLaneKind) {
+        guard canModifyActiveExercises else { return }
+        deleteExerciseCandidate = ex
+        deleteExerciseLane = lane
+        showDeleteExerciseConfirm = true
+    }
+
+    private func deleteActiveExercise(_ ex: ExerciseRow, lane: StrengthLaneKind) async {
+        guard !isPersistingActiveExerciseEdit else { return }
+        guard let targetWorkoutId = workoutId(for: lane) else { return }
+        isPersistingActiveExerciseEdit = true
+        let client = SupabaseManager.shared.client
+
+        do {
+            _ = try await client
+                .from("exercise_sets")
+                .delete()
+                .eq("workout_exercise_id", value: ex.id)
+                .execute()
+
+            _ = try await client
+                .from("workout_exercises")
+                .delete()
+                .eq("id", value: ex.id)
+                .execute()
+
+            let orderPatches = removeActiveExerciseLocally(ex, lane: lane)
+            for patch in orderPatches {
+                _ = try await client
+                    .from("workout_exercises")
+                    .update(
+                        ActiveWorkoutExerciseOrderPatch(
+                            order_index: patch.orderIndex,
+                            superset_group_id: patch.supersetGroupId,
+                            superset_position: patch.supersetPosition
+                        )
+                    )
+                    .eq("id", value: patch.id)
+                    .execute()
+            }
+
+            NotificationCenter.default.post(name: .workoutDidChange, object: targetWorkoutId)
+            deleteExerciseCandidate = nil
+            showToast("Deleted exercise")
+        } catch {
+            self.error = error.localizedDescription
+        }
+
+        isPersistingActiveExerciseEdit = false
+    }
+
+    private func removeActiveExerciseLocally(_ ex: ExerciseRow, lane: StrengthLaneKind) -> [(id: Int, orderIndex: Int, supersetGroupId: UUID?, supersetPosition: Int?)] {
+        persistStateForCurrentDualIndex()
+        let oldIndex = orderedExercises(lane: lane).firstIndex(where: { $0.id == ex.id }) ?? 0
+        clearActiveExerciseState(ex.id, lane: lane)
+
+        switch lane {
+        case .host:
+            exercises.removeAll { $0.id == ex.id }
+            exercises = renumberExerciseRows(exercises)
+            let n = orderedExercises.count
+            currentExerciseIndex = n > 0 ? min(oldIndex, n - 1) : 0
+            pagerDisplayIndexHost = currentExerciseIndex
+        case .guest:
+            gExercises.removeAll { $0.id == ex.id }
+            gExercises = renumberExerciseRows(gExercises)
+            let n = orderedGuestExercises.count
+            guestCurrentExerciseIndex = n > 0 ? min(oldIndex, n - 1) : 0
+            pagerDisplayIndexGuest = guestCurrentExerciseIndex
+        case .guest2:
+            g2Exercises.removeAll { $0.id == ex.id }
+            g2Exercises = renumberExerciseRows(g2Exercises)
+            let n = orderedGuest2Exercises.count
+            g2CurrentExerciseIndex = n > 0 ? min(oldIndex, n - 1) : 0
+            pagerDisplayIndexGuest2 = g2CurrentExerciseIndex
+        }
+
+        if isDualMode {
+            dualFocusLane = lane
+        }
+        clampLaneExerciseIndex(lane)
+        restoreStateForDualIndex()
+        dragOffsetY = 0
+        return orderedExercises(lane: lane).enumerated().map { idx, row in
+            (id: row.id, orderIndex: idx + 1, supersetGroupId: row.superset_group_id, supersetPosition: row.superset_position)
+        }
+    }
+
+    private func clearActiveExerciseState(_ exerciseId: Int, lane: StrengthLaneKind) {
+        switch lane {
+        case .host:
+            setsByExercise.removeValue(forKey: exerciseId)
+            performedSetsByExercise.removeValue(forKey: exerciseId)
+            currentSetIndexByExercise.removeValue(forKey: exerciseId)
+            visitedSetIndexByExercise.removeValue(forKey: exerciseId)
+            isRestingByExercise.removeValue(forKey: exerciseId)
+            remainingRestByExercise.removeValue(forKey: exerciseId)
+            restEndDateByExercise.removeValue(forKey: exerciseId)
+            restTotalPlannedByExercise.removeValue(forKey: exerciseId)
+            if currentExercise?.id == exerciseId {
+                currentSetIndex = 0
+                isResting = false
+                remainingRest = 0
+                restEndDate = nil
+                didFireRestFinishedFeedback = false
+            }
+            if navEmphasisLockExerciseIdHost == exerciseId {
+                navEmphasisLockExerciseIdHost = nil
+            }
+        case .guest:
+            gSetsByExercise.removeValue(forKey: exerciseId)
+            gPerformedSetsByExercise.removeValue(forKey: exerciseId)
+            gCurrentSetIndexByExercise.removeValue(forKey: exerciseId)
+            gVisitedSetIndexByExercise.removeValue(forKey: exerciseId)
+            gIsRestingByExercise.removeValue(forKey: exerciseId)
+            gRemainingRestByExercise.removeValue(forKey: exerciseId)
+            gRestEndDateByExercise.removeValue(forKey: exerciseId)
+            gRestTotalPlannedByExercise.removeValue(forKey: exerciseId)
+            if currentGuestExercise?.id == exerciseId {
+                gCurrentSetIndex = 0
+                gIsResting = false
+                gRemainingRest = 0
+                gRestEndDate = nil
+                gDidFireRestFinishedFeedback = false
+            }
+            if navEmphasisLockExerciseIdGuest == exerciseId {
+                navEmphasisLockExerciseIdGuest = nil
+            }
+        case .guest2:
+            g2SetsByExercise.removeValue(forKey: exerciseId)
+            g2PerformedSetsByExercise.removeValue(forKey: exerciseId)
+            g2CurrentSetIndexByExercise.removeValue(forKey: exerciseId)
+            g2VisitedSetIndexByExercise.removeValue(forKey: exerciseId)
+            g2IsRestingByExercise.removeValue(forKey: exerciseId)
+            g2RemainingRestByExercise.removeValue(forKey: exerciseId)
+            g2RestEndDateByExercise.removeValue(forKey: exerciseId)
+            g2RestTotalPlannedByExercise.removeValue(forKey: exerciseId)
+            if currentGuest2Exercise?.id == exerciseId {
+                g2CurrentSetIndex = 0
+                g2IsResting = false
+                g2RemainingRest = 0
+                g2RestEndDate = nil
+                g2DidFireRestFinishedFeedback = false
+            }
+            if navEmphasisLockExerciseIdGuest2 == exerciseId {
+                navEmphasisLockExerciseIdGuest2 = nil
+            }
+        }
+    }
+
+    private func renumberExerciseRows(_ rows: [ExerciseRow]) -> [ExerciseRow] {
+        let sorted = rows.sorted { $0.order_index < $1.order_index }
+        let groupCounts = Dictionary(grouping: sorted.compactMap(\.superset_group_id), by: { $0 }).mapValues(\.count)
+        var groupPositions: [UUID: Int] = [:]
+        return sorted.enumerated().map { idx, row in
+            let groupId: UUID?
+            let groupPosition: Int?
+            if let existingGroupId = row.superset_group_id, (groupCounts[existingGroupId] ?? 0) > 1 {
+                let nextPosition = (groupPositions[existingGroupId] ?? 0) + 1
+                groupPositions[existingGroupId] = nextPosition
+                groupId = existingGroupId
+                groupPosition = nextPosition
+            } else {
+                groupId = nil
+                groupPosition = nil
+            }
+            return ExerciseRow(
+                id: row.id,
+                exercise_id: row.exercise_id,
+                order_index: idx + 1,
+                superset_group_id: groupId,
+                superset_position: groupPosition,
+                notes: row.notes,
+                custom_name: row.custom_name,
+                target_sets: row.target_sets,
+                exercise_name: row.exercise_name
+            )
+        }
     }
 
     private func clampLaneExerciseIndex(_ lane: StrengthLaneKind) {
@@ -2678,11 +3873,116 @@ struct ActiveStrengthWorkoutView: View {
     private func navStripBubblesRow(lane: StrengthLaneKind) -> some View {
         let list = orderedExercises(lane: lane)
         HStack(alignment: .top, spacing: 8) {
-            ForEach(Array(list.enumerated()), id: \.element.id) { idx, _ in
-                exerciseNavColumnView(lane: lane, index: idx)
-                    .id(navStripRowId(lane: lane, index: idx))
+            ForEach(navStripBlocks(for: list)) { block in
+                if block.isSuperset {
+                    let restOverlay = navRestOverlay(lane: lane, indices: block.exerciseIndices, list: list)
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(block.exerciseIndices, id: \.self) { idx in
+                            exerciseNavColumnView(lane: lane, index: idx, showsRestOverlay: false)
+                                .id(navStripRowId(lane: lane, index: idx))
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .stroke(Color.accentColor.opacity(0.35), lineWidth: 1)
+                    )
+                    .overlay {
+                        if let restOverlay {
+                            supersetRestCountdownOverlay(restOverlay)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                } else if let idx = block.exerciseIndices.first {
+                    exerciseNavColumnView(lane: lane, index: idx)
+                        .id(navStripRowId(lane: lane, index: idx))
+                }
             }
+            activeAddExerciseButton(lane: lane, compact: true)
         }
+    }
+
+    private func navStripBlocks(for list: [ExerciseRow]) -> [NavStripBlock] {
+        var blocks: [NavStripBlock] = []
+        var idx = 0
+
+        while idx < list.count {
+            let ex = list[idx]
+            guard let groupId = ex.superset_group_id else {
+                blocks.append(NavStripBlock(id: "exercise-\(ex.id)", exerciseIndices: [idx]))
+                idx += 1
+                continue
+            }
+
+            var indices = [idx]
+            var nextIdx = idx + 1
+            while nextIdx < list.count, list[nextIdx].superset_group_id == groupId {
+                indices.append(nextIdx)
+                nextIdx += 1
+            }
+
+            if indices.count > 1 {
+                blocks.append(NavStripBlock(id: "superset-\(groupId.uuidString)-\(idx)", exerciseIndices: indices))
+            } else {
+                blocks.append(NavStripBlock(id: "exercise-\(ex.id)", exerciseIndices: [idx]))
+            }
+
+            idx = nextIdx
+        }
+
+        return blocks
+    }
+
+    private func navRestOverlay(lane: StrengthLaneKind, indices: [Int], list: [ExerciseRow]) -> NavRestOverlay? {
+        let overlays = indices.compactMap { idx -> NavRestOverlay? in
+            guard list.indices.contains(idx) else { return nil }
+            return navRestOverlay(lane: lane, exerciseId: list[idx].id)
+        }
+        return overlays.max { lhs, rhs in
+            lhs.seconds < rhs.seconds
+        }
+    }
+
+    private func navRestOverlay(lane: StrengthLaneKind, exerciseId: Int) -> NavRestOverlay? {
+        let end: Date?
+        let plannedTotal: Int?
+        switch lane {
+        case .host:
+            end = restEndDateByExercise[exerciseId]
+            plannedTotal = restTotalPlannedByExercise[exerciseId]
+        case .guest:
+            end = gRestEndDateByExercise[exerciseId]
+            plannedTotal = gRestTotalPlannedByExercise[exerciseId]
+        case .guest2:
+            end = g2RestEndDateByExercise[exerciseId]
+            plannedTotal = g2RestTotalPlannedByExercise[exerciseId]
+        }
+        guard let end else { return nil }
+        let seconds = max(0, Int(ceil(end.timeIntervalSinceNow)))
+        guard seconds > 0 else { return nil }
+        return NavRestOverlay(seconds: seconds, plannedTotalSeconds: max(max(plannedTotal ?? seconds, seconds), 1))
+    }
+
+    private func supersetRestCountdownOverlay(_ overlay: NavRestOverlay) -> some View {
+        let total = max(overlay.plannedTotalSeconds, overlay.seconds, 1)
+        let elapsedFrac = CGFloat(Double(total - overlay.seconds) / Double(total))
+        let restFrac = CGFloat(Double(overlay.seconds) / Double(total))
+        return ZStack {
+            RestDarkRectangleClockWedge(elapsedFraction: elapsedFrac, restFraction: restFrac)
+                .fill(Color.black.opacity(0.56))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Text("\(overlay.seconds)s")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+                .zIndex(1)
+        }
+        .allowsHitTesting(false)
+        .accessibilityLabel("Superserie rest, \(overlay.seconds) seconds remaining")
     }
 
     @ViewBuilder
@@ -2699,7 +3999,7 @@ struct ActiveStrengthWorkoutView: View {
             GeometryReader { g in
                 let availableWidth = g.size.width
                 let minRowWidth = max(0, availableWidth - 16)
-                let n = list.count
+                let n = list.count + 1
                 let bubbleBarWidth = CGFloat(n) * 34 + CGFloat(max(0, n - 1)) * 8
                 let useCenteringSpacers = bubbleBarWidth < minRowWidth
                 ZStack(alignment: .center) {
@@ -2940,7 +4240,7 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     @ViewBuilder
-    private func exerciseNavColumnView(lane: StrengthLaneKind, index idx: Int) -> some View {
+    private func exerciseNavColumnView(lane: StrengthLaneKind, index idx: Int, showsRestOverlay: Bool = true) -> some View {
         let list = orderedExercises(lane: lane)
         let ex = list[idx]
         let completed = isExerciseCompleted(ex, lane: lane)
@@ -2970,24 +4270,7 @@ struct ActiveStrengthWorkoutView: View {
                 }
             }
         )
-        let restBubbleSeconds: Int? = {
-            let end: Date?
-            switch lane {
-            case .host: end = restEndDateByExercise[ex.id]
-            case .guest: end = gRestEndDateByExercise[ex.id]
-            case .guest2: end = g2RestEndDateByExercise[ex.id]
-            }
-            guard let end else { return nil }
-            let sec = max(0, Int(ceil(end.timeIntervalSinceNow)))
-            return sec > 0 ? sec : nil
-        }()
-        let restPlannedTotal: Int? = {
-            switch lane {
-            case .host: return restTotalPlannedByExercise[ex.id]
-            case .guest: return gRestTotalPlannedByExercise[ex.id]
-            case .guest2: return g2RestTotalPlannedByExercise[ex.id]
-            }
-        }()
+        let restOverlay = showsRestOverlay ? navRestOverlay(lane: lane, exerciseId: ex.id) : nil
         StrengthExerciseNavColumn(
             displayNumber: idx + 1,
             exerciseTitle: title,
@@ -3001,8 +4284,8 @@ struct ActiveStrengthWorkoutView: View {
             isWavePulsing: strengthNavStripWaveIndex == idx,
             jumpOK: jumpOK,
             workAnchorExerciseId: workAnchorExerciseId,
-            restOverlaySeconds: restBubbleSeconds,
-            restPlannedTotalSeconds: restPlannedTotal,
+            restOverlaySeconds: restOverlay?.seconds,
+            restPlannedTotalSeconds: restOverlay?.plannedTotalSeconds,
             enlargeActiveBubbleForSolo: !isDualMode,
             popoverPresented: popBinding,
             onShortTap: { jumpToExercise(lane: lane, index: idx) },
@@ -3406,7 +4689,7 @@ struct ActiveStrengthWorkoutView: View {
     ) -> [StrengthProgramItem]? {
         var items: [StrengthProgramItem] = []
         for ex in exList.sorted(by: { $0.order_index < $1.order_index }) {
-            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            let templateSets = orderedSetRows(setsMap[ex.id] ?? [])
             let sets: [StrengthProgramSet]
             if !templateSets.isEmpty {
                 sets = templateSets.map { s in
@@ -3456,23 +4739,33 @@ struct ActiveStrengthWorkoutView: View {
         return items.isEmpty ? nil : items
     }
 
+    private func orderedSetRows(_ rows: [SetRow]) -> [SetRow] {
+        rows.sorted { a, b in
+            let ao = a.order_index ?? Int.max
+            let bo = b.order_index ?? Int.max
+            if ao != bo { return ao < bo }
+            return a.id < b.id
+        }
+    }
+
     private func editableExercisesForRoutineUpdateFromHost(
         exList: [ExerciseRow],
         setsMap: [Int: [SetRow]],
         performedMap: [Int: [PerformedSet]]
     ) -> [EditableExercise] {
         exList.sorted(by: { $0.order_index < $1.order_index }).map { ex in
-            let templateSets = (setsMap[ex.id] ?? []).sorted { $0.set_number < $1.set_number }
+            let templateSets = orderedSetRows(setsMap[ex.id] ?? [])
             var ee = EditableExercise()
             ee.exerciseId = ex.exercise_id
             ee.exerciseName = ex.custom_name ?? ""
             ee.orderIndex = ex.order_index
             ee.notes = ex.notes ?? ""
             if !templateSets.isEmpty {
-                ee.sets = templateSets.map { s in
+                ee.sets = templateSets.enumerated().map { idx, s in
                     let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
                     return EditableSet(
                         setNumber: s.set_number,
+                        orderIndex: s.order_index ?? idx + 1,
                         reps: s.reps,
                         weightKg: activeDecimalToWeightField(s.weight_kg),
                         rpe: activeDecimalToRpeField(s.rpe),
@@ -3487,6 +4780,7 @@ struct ActiveStrengthWorkoutView: View {
                     let segDraft = (p.weight_segments ?? []).asEditorSegmentsIfDropSet()
                     return EditableSet(
                         setNumber: i + 1,
+                        orderIndex: i + 1,
                         reps: p.reps,
                         weightKg: activeDecimalToWeightField(p.weight_kg),
                         rpe: activeDecimalToRpeField(p.rpe),
@@ -4113,12 +5407,49 @@ struct ActiveStrengthWorkoutView: View {
         case .guest: gSetsByExercise[ex.id] = configs
         case .guest2: g2SetsByExercise[ex.id] = configs
         }
+        if newRestSecRaw != nil {
+            applySupersetRestEdit(from: ex, lane: editTargetLane, setIndex: activeSetIndex, restSec: newRestSec)
+        }
+    }
+
+    private func applySupersetRestEdit(from ex: ExerciseRow, lane: StrengthLaneKind, setIndex: Int, restSec: Int?) {
+        let members = supersetMembers(for: ex, lane: lane)
+        guard members.count > 1 else { return }
+
+        for member in members where member.id != ex.id {
+            var configs = sortedStrengthConfigs(member, lane: lane)
+            guard !configs.isEmpty,
+                  let (idx, offset) = configBlockForSetIndex(member, setIndex: setIndex, lane: lane)
+            else { continue }
+
+            let old = configs[idx]
+            let targetId = nextSyntheticConfigId(in: configs)
+            let target = SetRow(
+                id: targetId,
+                workout_exercise_id: old.workout_exercise_id,
+                set_number: 1,
+                reps: old.reps,
+                weight_kg: old.weight_kg,
+                rpe: old.rpe,
+                rest_sec: restSec,
+                weight_segments: old.weight_segments,
+                configId: targetId,
+                segmentsInRow: old.segmentsInRow
+            )
+            let replacement = splitConfigBlock(old: old, offset: offset, target: target, baseConfigs: configs)
+            configs.replaceSubrange(idx...idx, with: replacement)
+            switch lane {
+            case .host: setsByExercise[member.id] = configs
+            case .guest: gSetsByExercise[member.id] = configs
+            case .guest2: g2SetsByExercise[member.id] = configs
+            }
+        }
     }
     
     private func fetchStrengthWorkoutData(forWid wid: Int) async throws -> ([ExerciseRow], [Int: [SetRow]]) {
         let exQ = try await SupabaseManager.shared.client
             .from("workout_exercises")
-            .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
+            .select("id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name, exercises(name)")
             .eq("workout_id", value: wid)
             .order("order_index", ascending: true)
             .execute()
@@ -4127,6 +5458,8 @@ struct ActiveStrengthWorkoutView: View {
             let id: Int
             let exercise_id: Int64
             let order_index: Int
+            let superset_group_id: UUID?
+            let superset_position: Int?
             let notes: String?
             let custom_name: String?
             let target_sets: Int?
@@ -4139,6 +5472,8 @@ struct ActiveStrengthWorkoutView: View {
                 id: $0.id,
                 exercise_id: $0.exercise_id,
                 order_index: $0.order_index,
+                superset_group_id: $0.superset_group_id,
+                superset_position: $0.superset_position,
                 notes: $0.notes,
                 custom_name: $0.custom_name,
                 target_sets: $0.target_sets,
@@ -4150,14 +5485,27 @@ struct ActiveStrengthWorkoutView: View {
         var byEx: [Int: [SetRow]] = [:]
 
         if !ids.isEmpty {
-            let sRes = try await SupabaseManager.shared.client
-                .from("exercise_sets")
-                .select("*")
-                .in("workout_exercise_id", values: ids)
-                .order("set_number", ascending: true)
-                .order("id", ascending: true)
-                .execute()
-            let sets = try JSONDecoder.supabase().decode([SetRow].self, from: sRes.data)
+            let setData: Data
+            do {
+                setData = try await SupabaseManager.shared.client
+                    .from("exercise_sets")
+                    .select("*")
+                    .in("workout_exercise_id", values: ids)
+                    .order("order_index", ascending: true)
+                    .order("id", ascending: true)
+                    .execute()
+                    .data
+            } catch {
+                setData = try await SupabaseManager.shared.client
+                    .from("exercise_sets")
+                    .select("*")
+                    .in("workout_exercise_id", values: ids)
+                    .order("set_number", ascending: true)
+                    .order("id", ascending: true)
+                    .execute()
+                    .data
+            }
+            let sets = try JSONDecoder.supabase().decode([SetRow].self, from: setData)
             for s in sets {
                 byEx[s.workout_exercise_id, default: []].append(s)
             }
@@ -4177,6 +5525,8 @@ struct ActiveStrengthWorkoutView: View {
                 id: $0.id,
                 exercise_id: $0.exercise_id,
                 order_index: $0.order_index,
+                superset_group_id: $0.superset_group_id,
+                superset_position: $0.superset_position,
                 notes: $0.notes,
                 custom_name: $0.custom_name,
                 target_sets: $0.target_sets,
@@ -4294,6 +5644,32 @@ private struct RestDarkClockWedge: Shape {
     func path(in rect: CGRect) -> Path {
         let c = CGPoint(x: rect.midX, y: rect.midY)
         let r = min(rect.width, rect.height) / 2
+        let e = min(max(elapsedFraction, 0), 1)
+        let rf = min(max(restFraction, 0), 1)
+        if rf < 0.001 { return Path() }
+        var p = Path()
+        p.move(to: c)
+        let startDeg = -90.0 + 360.0 * Double(e)
+        let endDeg = startDeg + 360.0 * Double(rf)
+        p.addArc(
+            center: c,
+            radius: r,
+            startAngle: .degrees(startDeg),
+            endAngle: .degrees(endDeg),
+            clockwise: false
+        )
+        p.closeSubpath()
+        return p
+    }
+}
+
+private struct RestDarkRectangleClockWedge: Shape {
+    var elapsedFraction: CGFloat
+    var restFraction: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let r = hypot(rect.width, rect.height)
         let e = min(max(elapsedFraction, 0), 1)
         let rf = min(max(restFraction, 0), 1)
         if rf < 0.001 { return Path() }

@@ -2,8 +2,9 @@ import Foundation
 import Testing
 @testable import Liftr
 
+@Suite(.serialized)
 struct HealthKitCardioSyncRegressionTests {
-    @Test func syncEnabledDefaultsTrueWhenKeyMissing() {
+    @Test func syncEnabledDefaultsFalseWhenKeyMissing() {
         let key = "cardioHealthSyncEnabled"
         let defaults = UserDefaults.standard
         let hadValue = defaults.object(forKey: key) != nil
@@ -16,7 +17,25 @@ struct HealthKitCardioSyncRegressionTests {
                 defaults.removeObject(forKey: key)
             }
         }
+        #expect(HealthKitCardioSyncService.shared.isSyncEnabled == false)
+    }
+
+    @Test func syncEnabledPersistsExplicitPreference() {
+        let key = "cardioHealthSyncEnabled"
+        let defaults = UserDefaults.standard
+        let hadValue = defaults.object(forKey: key) != nil
+        let previous = hadValue ? defaults.bool(forKey: key) : nil
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+        }
+        HealthKitCardioSyncService.shared.isSyncEnabled = true
         #expect(HealthKitCardioSyncService.shared.isSyncEnabled == true)
+        HealthKitCardioSyncService.shared.isSyncEnabled = false
+        #expect(HealthKitCardioSyncService.shared.isSyncEnabled == false)
     }
 
     @Test func shouldNotifyOnlyForRecentAutoImports() {

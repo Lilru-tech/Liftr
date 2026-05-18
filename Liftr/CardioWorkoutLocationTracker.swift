@@ -59,7 +59,6 @@ final class CardioWorkoutLocationTracker: NSObject, ObservableObject {
     }
 
     func startContinuousUpdates() {
-        guard CLLocationManager.locationServicesEnabled() else { return }
         let s = manager.authorizationStatus
         guard s == .authorizedAlways || s == .authorizedWhenInUse else { return }
         lastLocation = nil

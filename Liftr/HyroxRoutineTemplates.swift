@@ -55,6 +55,7 @@ struct HyroxRoutineListRow: Identifiable, Hashable, Decodable {
 struct HyroxRoutineExerciseWire: Decodable {
     let exercise_code: String
     let exercise_order: Int
+    let zone_order: Int?
     let distance_m: Int?
     let reps: Int?
     let weight_kg: Double?
@@ -82,7 +83,7 @@ struct HyroxRoutineDetailWire: Decodable {
 }
 
 func hyroxRoutineDetailSelect() -> String {
-    "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr,hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+    "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr,hyrox_routine_exercises(exercise_code,exercise_order,zone_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
 }
 
 func hyroxApplyPayloadFromDetail(_ detail: HyroxRoutineDetailWire) -> HyroxRoutineApplyPayload {
@@ -102,6 +103,7 @@ func hyroxApplyPayloadFromDetail(_ detail: HyroxRoutineDetailWire) -> HyroxRouti
             exerciseCode: fields.code,
             customDisplayName: fields.customDisplayName,
             exerciseOrder: w.exercise_order,
+            zoneOrder: w.zone_order.map { max(1, $0) },
             distanceM: s(w.distance_m),
             reps: s(w.reps),
             weightKg: wkg,
@@ -213,7 +215,7 @@ private func hyroxRoutineContentFingerprint(from sport: SportForm) -> String {
             notes: ex.notes
         )
         lines.append(
-            "\(p.code)|\(ex.exerciseOrder)|\(p.displayName ?? "")|\(ex.distanceM)|\(ex.reps)|\(ex.weightKg)|\(ex.durationSec)|\(ex.heightCm)|\(ex.implementCount)|\(ex.notes)"
+            "\(p.code)|\(ex.exerciseOrder)|\(ex.zoneOrder.map { String(max(1, $0)) } ?? "")|\(p.displayName ?? "")|\(ex.distanceM)|\(ex.reps)|\(ex.weightKg)|\(ex.durationSec)|\(ex.heightCm)|\(ex.implementCount)|\(ex.notes)"
         )
     }
     let joined = lines.joined(separator: "\n")
@@ -392,6 +394,7 @@ func insertHyroxRoutineTemplate(
         let routine_id: Int64
         let exercise_code: String
         let exercise_order: Int
+        let zone_order: Int?
         let distance_m: Int?
         let reps: Int?
         let weight_kg: Double?
@@ -414,6 +417,7 @@ func insertHyroxRoutineTemplate(
             routine_id: routineId,
             exercise_code: persisted.code,
             exercise_order: idx + 1,
+            zone_order: ex.zoneOrder.map { max(1, $0) },
             distance_m: hyroxIntOrNil(ex.distanceM),
             reps: hyroxIntOrNil(ex.reps),
             weight_kg: hyroxParseDouble(ex.weightKg),
@@ -510,6 +514,7 @@ func updateHyroxRoutineTemplateInPlace(
         let routine_id: Int64
         let exercise_code: String
         let exercise_order: Int
+        let zone_order: Int?
         let distance_m: Int?
         let reps: Int?
         let weight_kg: Double?
@@ -532,6 +537,7 @@ func updateHyroxRoutineTemplateInPlace(
             routine_id: routineId,
             exercise_code: persisted.code,
             exercise_order: idx + 1,
+            zone_order: ex.zoneOrder.map { max(1, $0) },
             distance_m: hyroxIntOrNil(ex.distanceM),
             reps: hyroxIntOrNil(ex.reps),
             weight_kg: hyroxParseDouble(ex.weightKg),

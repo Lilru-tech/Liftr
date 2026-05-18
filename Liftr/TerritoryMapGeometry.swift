@@ -39,6 +39,13 @@ enum TerritoryMapGeometry {
         return true
     }
 
+    static func regionsApproximatelyEqual(_ lhs: MKCoordinateRegion, _ rhs: MKCoordinateRegion) -> Bool {
+        abs(lhs.center.latitude - rhs.center.latitude) < 0.000001
+            && abs(lhs.center.longitude - rhs.center.longitude) < 0.000001
+            && abs(lhs.span.latitudeDelta - rhs.span.latitudeDelta) < 0.000001
+            && abs(lhs.span.longitudeDelta - rhs.span.longitudeDelta) < 0.000001
+    }
+
     static func polygonContains(point: CLLocationCoordinate2D, ring: [CLLocationCoordinate2D]) -> Bool {
         guard ring.count >= 3 else { return false }
         let x = point.longitude
@@ -69,6 +76,81 @@ enum TerritoryMapGeometry {
             j = i
         }
         return abs(area) * 0.5
+    }
+
+    static func ownerBalancedCells(
+        _ cells: [TerritoryMapCellRow],
+        maxCount: Int,
+        otherTarget: Int
+    ) -> [TerritoryMapCellRow] {
+        guard maxCount > 0 else { return [] }
+        guard cells.count > maxCount, otherTarget > 0 else {
+            return Array(cells.sorted(by: recencyThenIdentifier).prefix(maxCount))
+        }
+
+        let mine = cells
+            .filter { $0.is_mine == true }
+            .sorted(by: recencyThenIdentifier)
+        let others = cells
+            .filter { !($0.is_mine == true) }
+        let selectedOthers = routeBalancedOthers(others, limit: min(maxCount, otherTarget))
+        let mineLimit = max(0, maxCount - selectedOthers.count)
+
+        return Array(mine.prefix(mineLimit)) + selectedOthers
+    }
+
+    private static func recencyThenIdentifier(_ lhs: TerritoryMapCellRow, _ rhs: TerritoryMapCellRow) -> Bool {
+        let lhsCaptured = lhs.captured_at ?? .distantPast
+        let rhsCaptured = rhs.captured_at ?? .distantPast
+        if lhsCaptured != rhsCaptured {
+            return lhsCaptured > rhsCaptured
+        }
+        return lhs.cell_id < rhs.cell_id
+    }
+
+    private static func routeBalancedOthers(_ cells: [TerritoryMapCellRow], limit: Int) -> [TerritoryMapCellRow] {
+        guard limit > 0 else { return [] }
+        let grouped = Dictionary(grouping: cells) { cell in
+            let ownerKey = cell.owner_user_id?.uuidString ?? "unknown"
+            let routeKey = cell.last_workout_id.map(String.init) ?? cell.cell_id
+            return "\(ownerKey)|\(routeKey)"
+        }
+        let routeGroups = grouped.values.map { cells in
+            cells.sorted(by: recencyThenIdentifier)
+        }
+        let ownerGroups = Dictionary(grouping: routeGroups) { group in
+            group.first?.owner_user_id?.uuidString ?? "unknown"
+        }
+        let ownerKeys = ownerGroups.keys.sorted()
+        let groupsByOwner = ownerKeys.map { key in
+            ownerGroups[key, default: []].sorted { lhs, rhs in
+                guard let lhsFirst = lhs.first, let rhsFirst = rhs.first else {
+                    return lhs.count > rhs.count
+                }
+                return recencyThenIdentifier(lhsFirst, rhsFirst)
+            }
+        }
+        var balanced: [TerritoryMapCellRow] = []
+        var index = 0
+        while balanced.count < limit {
+            var added = false
+            for groupsForOwner in groupsByOwner {
+                guard index < groupsForOwner.count else { continue }
+                let group = groupsForOwner[index]
+                guard balanced.count + group.count <= limit else { continue }
+                balanced.append(contentsOf: group)
+                added = true
+                if balanced.count >= limit {
+                    break
+                }
+            }
+            guard added else { break }
+            index += 1
+        }
+        if balanced.isEmpty {
+            return Array(cells.sorted(by: recencyThenIdentifier).prefix(limit))
+        }
+        return balanced
     }
 
     static func selectedCell(at coordinate: CLLocationCoordinate2D, in cells: [TerritoryMapCellRow]) -> TerritoryMapCellRow? {
