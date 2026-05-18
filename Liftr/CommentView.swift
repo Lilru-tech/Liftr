@@ -3,6 +3,7 @@ import Supabase
 
 struct CommentsSheet: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
     let workoutId: Int
     let ownerId: UUID
     var onDidChange: (() async -> Void)?
@@ -14,6 +15,7 @@ struct CommentsSheet: View {
     @State private var profiles: [UUID: ProfileRow] = [:]
     @State private var newBody = ""
     @State private var sending = false
+    @FocusState private var inputFocused: Bool
     
     struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
     
@@ -97,34 +99,77 @@ struct CommentsSheet: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
 
-                HStack(alignment: .top, spacing: 10) {
-                    AvatarView(urlString: profiles[app.userId ?? UUID()]?.avatar_url)
-                        .frame(width: 32, height: 32)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    TextField("Add a comment…", text: $newBody, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...4)
-
-                    Button {
-                        Task { await sendComment(parentId: nil) }
-                    } label: {
-                        if sending {
-                            ProgressView()
-                        } else {
-                            Text("Send")
-                                .font(.callout.weight(.semibold))
-                        }
-                    }
-                    .disabled(sending || newBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
             }
             .padding(.top, 8)
+            .safeAreaInset(edge: .bottom) {
+                composer
+            }
             .task { await refreshAll() }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+            }
         }
         .gradientBG()
+    }
+
+    private var canSendComment: Bool {
+        !sending && !newBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var currentAvatarURL: String? {
+        guard let userId = app.userId else { return nil }
+        return profiles[userId]?.avatar_url
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            AvatarView(urlString: currentAvatarURL)
+                .frame(width: 36, height: 36)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            TextField("Add a comment...", text: $newBody, axis: .vertical)
+                .lineLimit(1...5)
+                .focused($inputFocused)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color(.tertiarySystemFill))
+                )
+
+            Button {
+                Task { await sendComment(parentId: nil) }
+            } label: {
+                Group {
+                    if sending {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                    }
+                }
+                .font(.body.weight(.semibold))
+                .frame(width: 36, height: 36)
+                .background(Color.accentColor.opacity(canSendComment ? 1 : 0.3), in: Circle())
+                .foregroundStyle(.white)
+            }
+            .disabled(!canSendComment)
+            .accessibilityLabel("Send")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
     }
     
     private func refreshAll() async {

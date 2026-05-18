@@ -1754,35 +1754,32 @@ struct AddWorkoutSheet: View {
         workoutId: Int,
         exercises: [HyroxExerciseForm]
     ) async throws {
-        let rows: [HyroxExerciseFormatting.HyroxExerciseRowInput] = exercises.enumerated().map { idx, ex in
-            HyroxExerciseFormatting.HyroxExerciseRowInput(
-                exerciseOrder: idx + 1,
+        let payload: [AnyJSON] = try exercises.enumerated().map { idx, ex in
+            let persisted = HyroxExerciseFormatting.persistedPayload(
                 exerciseCode: ex.exerciseCode,
                 customDisplayName: ex.customDisplayName,
                 notes: ex.notes
             )
+            var item: [String: AnyJSON] = [:]
+            item["exercise_order"] = try .init(idx + 1)
+            if let displayName = persisted.displayName {
+                item["exercise_display_name"] = try .init(displayName)
+            }
+            if let zoneOrder = ex.zoneOrder {
+                item["zone_order"] = try .init(max(1, zoneOrder))
+            }
+            return try AnyJSON(item)
         }
-        let updates = HyroxExerciseFormatting.hyroxDisplayNameColumnUpdates(rows: rows)
-        guard !updates.isEmpty else { return }
 
-        let sessionRes = try await client
-            .from("sport_sessions")
-            .select("id")
-            .eq("workout_id", value: workoutId)
-            .single()
+        _ = try await client
+            .rpc(
+                "patch_hyrox_session_exercise_metadata",
+                params: HyroxSessionExerciseMetadataPatchParams(
+                    p_workout_id: workoutId,
+                    p_exercises: try AnyJSON(payload)
+                )
+            )
             .execute()
-        struct SessionRow: Decodable { let id: Int }
-        let sessionId = try JSONDecoder().decode(SessionRow.self, from: sessionRes.data).id
-
-        struct Patch: Encodable { let exercise_display_name: String }
-        for u in updates {
-            _ = try await client
-                .from("hyrox_session_exercises")
-                .update(Patch(exercise_display_name: u.displayName))
-                .eq("session_id", value: sessionId)
-                .eq("exercise_order", value: u.exerciseOrder)
-                .execute()
-        }
     }
 
     private func recomputeDurationLabel() {
@@ -2217,7 +2214,9 @@ struct AddWorkoutSheet: View {
                     p_state: publishMode.stateParam,
                     p_stats: statsJSON,
                     p_healthkit_uuid: nil,
-                    p_route_geojson: nil
+                    p_route_geojson: nil,
+                    p_calories_kcal: nil,
+                    p_calories_method: nil
                 )
 
                 let res = try await client
@@ -2704,6 +2703,9 @@ struct AddWorkoutSheet: View {
                     item["exercise_display_name"] = try .init(d)
                 }
                 item["exercise_order"] = try .init(index + 1)
+                if let zoneOrder = ex.zoneOrder {
+                    item["zone_order"] = try .init(max(1, zoneOrder))
+                }
 
                 if let v = parseInt(ex.distanceM)      { item["distance_m"] = try .init(v) }
                 if let v = parseInt(ex.reps)           { item["reps"] = try .init(v) }
@@ -3284,6 +3286,7 @@ struct HyroxExerciseForm: Identifiable, Hashable {
     var exerciseCode: String = HyroxExerciseCode.run.rawValue
     var customDisplayName: String = ""
     var exerciseOrder: Int = 1
+    var zoneOrder: Int? = nil
     var distanceM: String = ""
     var reps: String = ""
     var weightKg: String = ""
@@ -3548,6 +3551,8 @@ struct RPCCardioV2Params: Encodable {
     let p_stats: AnyJSON
     let p_healthkit_uuid: String?
     let p_route_geojson: String?
+    let p_calories_kcal: Double?
+    let p_calories_method: String?
 }
 struct RPCCardioV2Wrapper: Encodable {
     let p: RPCCardioV2Params
@@ -3579,6 +3584,11 @@ struct RPCSportWrapper: Encodable {
 struct RPCSportV2Wrapper: Encodable {
     let p: AnyJSON
     let p_stats: AnyJSON?
+}
+
+struct HyroxSessionExerciseMetadataPatchParams: Encodable {
+    let p_workout_id: Int
+    let p_exercises: AnyJSON
 }
 
 private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {

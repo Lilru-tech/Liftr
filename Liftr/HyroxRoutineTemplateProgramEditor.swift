@@ -70,14 +70,14 @@ struct HyroxRoutineTemplateProgramEditor: View {
                 .font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            Text("Use the arrows on each exercise to change order.")
+            Text("Select exercises to create a zone, then use arrows to change order.")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, sport.hyExercises.count > 1 ? 2 : 4)
 
             if sport.hyExercises.count > 1 {
-                HStack {
+                HStack(spacing: 10) {
                     Spacer(minLength: 0)
                     Button("Clear all", role: .destructive) {
                         showClearAllConfirm = true
@@ -95,12 +95,28 @@ struct HyroxRoutineTemplateProgramEditor: View {
                     .foregroundStyle(.secondary)
             }
 
-            ForEach(sport.hyExercises.indices, id: \.self) { i in
+            ForEach(Array(orderedHyroxExerciseIndices.enumerated()), id: \.element) { position, i in
                 Divider()
+
+                if isFirstExerciseInZone(displayPosition: position) {
+                    HStack {
+                        Text("Zone \(sport.hyExercises[i].zoneOrder ?? 1)")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Button("Remove zone") {
+                            removeZone(sport.hyExercises[i].zoneOrder)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.borderless)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, position == 0 ? 0 : 4)
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        Text("Exercise \(i + 1)")
+                        Text("Exercise \(position + 1)")
                             .font(.footnote.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Spacer()
@@ -161,6 +177,30 @@ struct HyroxRoutineTemplateProgramEditor: View {
                         Spacer(minLength: 0)
 
                         if sport.hyExercises.count > 1 {
+                            HStack(spacing: 8) {
+                                if sport.hyExercises[i].zoneOrder != nil {
+                                    Button("Remove") {
+                                        removeExerciseFromZone(index: i)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                } else if canZoneWithNext(displayPosition: position) {
+                                    Button("Zone with next") {
+                                        zoneExerciseWithNext(displayPosition: position)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                }
+
+                                if canAddNextToZone(displayPosition: position) {
+                                    Button("Add next") {
+                                        addNextExerciseToZone(displayPosition: position)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+
                             HStack(spacing: 2) {
                                 Button {
                                     moveHyroxExercise(from: i, direction: -1)
@@ -171,8 +211,8 @@ struct HyroxRoutineTemplateProgramEditor: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(i == 0)
-                                .opacity(i == 0 ? 0.35 : 1)
+                                .disabled(position == 0)
+                                .opacity(position == 0 ? 0.35 : 1)
 
                                 Button {
                                     moveHyroxExercise(from: i, direction: 1)
@@ -183,8 +223,8 @@ struct HyroxRoutineTemplateProgramEditor: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(i == sport.hyExercises.count - 1)
-                                .opacity(i == sport.hyExercises.count - 1 ? 0.35 : 1)
+                                .disabled(position == sport.hyExercises.count - 1)
+                                .opacity(position == sport.hyExercises.count - 1 ? 0.35 : 1)
                             }
                             .foregroundStyle(.secondary)
                             .accessibilityElement(children: .combine)
@@ -194,9 +234,7 @@ struct HyroxRoutineTemplateProgramEditor: View {
                         if sport.hyExercises.count > 1 {
                             Button(role: .destructive) {
                                 sport.hyExercises.remove(at: i)
-                                for idx in sport.hyExercises.indices {
-                                    sport.hyExercises[idx].exerciseOrder = idx + 1
-                                }
+                                normalizeHyroxExerciseOrdering()
                             } label: {
                                 Image(systemName: "trash")
                                     .font(.body)
@@ -218,6 +256,7 @@ struct HyroxRoutineTemplateProgramEditor: View {
                         exerciseOrder: sport.hyExercises.count + 1
                     )
                 )
+                normalizeHyroxExerciseOrdering()
             } label: {
                 Label("Add exercise", systemImage: "plus")
             }
@@ -376,15 +415,108 @@ struct HyroxRoutineTemplateProgramEditor: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private func moveHyroxExercise(from index: Int, direction: Int) {
-        var list = sport.hyExercises
-        let j = index + direction
-        guard list.indices.contains(index), list.indices.contains(j) else { return }
-        list.swapAt(index, j)
-        for idx in list.indices {
-            list[idx].exerciseOrder = idx + 1
+    private var orderedHyroxExerciseIndices: [Int] {
+        sport.hyExercises.indices.sorted {
+            let lhs = sport.hyExercises[$0]
+            let rhs = sport.hyExercises[$1]
+            return lhs.exerciseOrder < rhs.exerciseOrder
         }
-        sport.hyExercises = list
+    }
+
+    private func isFirstExerciseInZone(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxExerciseIndices
+        guard ordered.indices.contains(displayPosition) else { return false }
+        let current = sport.hyExercises[ordered[displayPosition]].zoneOrder
+        guard current != nil else { return false }
+        guard displayPosition > 0 else { return true }
+        let previous = sport.hyExercises[ordered[displayPosition - 1]].zoneOrder
+        return current != previous
+    }
+
+    private func moveHyroxExercise(from index: Int, direction: Int) {
+        let ordered = orderedHyroxExerciseIndices
+        guard let position = ordered.firstIndex(of: index) else { return }
+        let nextPosition = position + direction
+        guard ordered.indices.contains(nextPosition) else { return }
+        let other = ordered[nextPosition]
+        let currentOrder = sport.hyExercises[index].exerciseOrder
+        sport.hyExercises[index].exerciseOrder = sport.hyExercises[other].exerciseOrder
+        sport.hyExercises[other].exerciseOrder = currentOrder
+        normalizeHyroxExerciseOrdering()
+    }
+
+    private func normalizeHyroxExerciseOrdering() {
+        let ordered = orderedHyroxExerciseIndices
+        for (idx, originalIndex) in ordered.enumerated() {
+            sport.hyExercises[originalIndex].exerciseOrder = idx + 1
+            sport.hyExercises[originalIndex].zoneOrder = sport.hyExercises[originalIndex].zoneOrder.map { max(1, $0) }
+        }
+        collapseSingleExerciseZones()
+    }
+
+    private func collapseSingleExerciseZones() {
+        let counts = Dictionary(grouping: sport.hyExercises.compactMap(\.zoneOrder), by: { $0 }).mapValues(\.count)
+        for idx in sport.hyExercises.indices {
+            guard let zoneOrder = sport.hyExercises[idx].zoneOrder else { continue }
+            if (counts[zoneOrder] ?? 0) <= 1 {
+                sport.hyExercises[idx].zoneOrder = nil
+            }
+        }
+    }
+
+    private func canZoneWithNext(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return false }
+        let current = sport.hyExercises[ordered[displayPosition]]
+        let next = sport.hyExercises[ordered[displayPosition + 1]]
+        return current.zoneOrder == nil && next.zoneOrder == nil
+    }
+
+    private func canAddNextToZone(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return false }
+        let current = sport.hyExercises[ordered[displayPosition]]
+        let next = sport.hyExercises[ordered[displayPosition + 1]]
+        return current.zoneOrder != nil && next.zoneOrder == nil
+    }
+
+    private func zoneExerciseWithNext(displayPosition: Int) {
+        let ordered = orderedHyroxExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return }
+        let nextZone = (sport.hyExercises.compactMap(\.zoneOrder).max() ?? 0) + 1
+        sport.hyExercises[ordered[displayPosition]].zoneOrder = nextZone
+        sport.hyExercises[ordered[displayPosition + 1]].zoneOrder = nextZone
+        normalizeHyroxExerciseOrdering()
+    }
+
+    private func addNextExerciseToZone(displayPosition: Int) {
+        let ordered = orderedHyroxExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1),
+              let zoneOrder = sport.hyExercises[ordered[displayPosition]].zoneOrder
+        else { return }
+        sport.hyExercises[ordered[displayPosition + 1]].zoneOrder = zoneOrder
+        normalizeHyroxExerciseOrdering()
+    }
+
+    private func removeExerciseFromZone(index: Int) {
+        guard sport.hyExercises.indices.contains(index) else { return }
+        sport.hyExercises[index].zoneOrder = nil
+        normalizeHyroxExerciseOrdering()
+    }
+
+    private func removeZone(_ zoneOrder: Int?) {
+        guard let zoneOrder else { return }
+        for idx in sport.hyExercises.indices where sport.hyExercises[idx].zoneOrder == zoneOrder {
+            sport.hyExercises[idx].zoneOrder = nil
+        }
+        normalizeHyroxExerciseOrdering()
     }
 }
 

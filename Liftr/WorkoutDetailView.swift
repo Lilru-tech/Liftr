@@ -1807,6 +1807,7 @@ struct WorkoutDetailView: View {
                         struct HyExRow: Decodable {
                             let exercise_code: String
                             let exercise_order: Int
+                            let zone_order: Int?
                             let distance_m: Int?
                             let reps: Int?
                             let weight_kg: Decimal?
@@ -1828,6 +1829,7 @@ struct WorkoutDetailView: View {
                                 exerciseCode: fields.code,
                                 customDisplayName: fields.customDisplayName,
                                 exerciseOrder: row.exercise_order,
+                                zoneOrder: row.zone_order.map { max(1, $0) },
                                 distanceM: row.distance_m.map(String.init) ?? "",
                                 reps: row.reps.map(String.init) ?? "",
                                 weightKg: row.weight_kg.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? "",
@@ -3037,6 +3039,7 @@ private struct SportDetailBlock: View {
         let session_id: Int
         let exercise_code: String
         let exercise_order: Int
+        let zone_order: Int?
         let distance_m: Int?
         let reps: Int?
         let weight_kg: Decimal?
@@ -3268,43 +3271,23 @@ private struct SportDetailBlock: View {
                         Divider().padding(.vertical, 4)
                         Text("Hyrox exercises").font(.headline)
 
-                        ForEach(hyExercises) { ex in
-                            VStack(alignment: .leading, spacing: 8) {
-                                let exerciseTitle = HyroxExerciseFormatting.label(
-                                    code: ex.exercise_code,
-                                    displayName: ex.exercise_display_name,
-                                    notes: ex.notes
-                                )
-                                Text("\(ex.exercise_order). \(exerciseTitle)")
-                                    .font(.subheadline.weight(.semibold))
-
-                                if let v = ex.distance_m {
-                                    info("Distance", "\(v) m")
-                                }
-                                if let v = ex.reps {
-                                    info("Reps", "\(v)")
-                                }
-                                if let v = ex.weight_kg {
-                                    info("Weight", String(format: "%.1f kg", NSDecimalNumber(decimal: v).doubleValue))
-                                }
-                                if let v = ex.duration_sec {
-                                    info("Duration", durationString(Double(v)))
-                                }
-                                if let v = ex.height_cm {
-                                    info("Height", "\(v) cm")
-                                }
-                                if let v = ex.implement_count {
-                                    info("Implements", "\(v)")
-                                }
-                                if let v = ex.notes, !v.isEmpty {
-                                    let trimmedNote = v.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    if trimmedNote != exerciseTitle.trimmingCharacters(in: .whitespacesAndNewlines) {
-                                        info("Notes", v)
+                        ForEach(orderedHyroxDetailExercisePairs, id: \.element.id) { pair in
+                            if let zoneOrder = pair.element.zone_order {
+                                if isFirstHyroxDetailExerciseInZone(position: pair.offset, zoneOrder: zoneOrder) {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text("Zone \(max(1, zoneOrder))")
+                                            .font(.subheadline.weight(.bold))
+                                        ForEach(hyroxDetailZoneExercisePairs(zoneOrder), id: \.element.id) { zonePair in
+                                            hyroxDetailExerciseCard(zonePair.element)
+                                        }
                                     }
+                                    .padding(10)
+                                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.accentColor.opacity(0.35), lineWidth: 1))
                                 }
+                            } else {
+                                hyroxDetailExerciseCard(pair.element)
                             }
-                            .padding(10)
-                            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                         }
                     }
                 }
@@ -3342,6 +3325,60 @@ private struct SportDetailBlock: View {
         .onChange(of: reloadKey) { _, _ in
             Task { await load() }
         }
+    }
+
+    private var orderedHyroxDetailExercisePairs: [(offset: Int, element: HyroxExerciseStats)] {
+        Array(hyExercises.sorted { $0.exercise_order < $1.exercise_order }.enumerated())
+    }
+
+    private func hyroxDetailZoneExercisePairs(_ zoneOrder: Int) -> [(offset: Int, element: HyroxExerciseStats)] {
+        orderedHyroxDetailExercisePairs.filter { $0.element.zone_order == zoneOrder }
+    }
+
+    private func isFirstHyroxDetailExerciseInZone(position: Int, zoneOrder: Int) -> Bool {
+        guard orderedHyroxDetailExercisePairs.indices.contains(position) else { return false }
+        guard position > 0 else { return true }
+        return orderedHyroxDetailExercisePairs[position - 1].element.zone_order != zoneOrder
+    }
+
+    @ViewBuilder
+    private func hyroxDetailExerciseCard(_ ex: HyroxExerciseStats) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let exerciseTitle = HyroxExerciseFormatting.label(
+                code: ex.exercise_code,
+                displayName: ex.exercise_display_name,
+                notes: ex.notes
+            )
+            Text("\(ex.exercise_order). \(exerciseTitle)")
+                .font(.subheadline.weight(.semibold))
+
+            if let v = ex.distance_m {
+                info("Distance", "\(v) m")
+            }
+            if let v = ex.reps {
+                info("Reps", "\(v)")
+            }
+            if let v = ex.weight_kg {
+                info("Weight", String(format: "%.1f kg", NSDecimalNumber(decimal: v).doubleValue))
+            }
+            if let v = ex.duration_sec {
+                info("Duration", durationString(Double(v)))
+            }
+            if let v = ex.height_cm {
+                info("Height", "\(v) cm")
+            }
+            if let v = ex.implement_count {
+                info("Implements", "\(v)")
+            }
+            if let v = ex.notes, !v.isEmpty {
+                let trimmedNote = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmedNote != exerciseTitle.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    info("Notes", v)
+                }
+            }
+        }
+        .padding(10)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
     
     private func load() async {

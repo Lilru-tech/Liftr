@@ -60,6 +60,7 @@ private struct EditHyroxExercise: Identifiable {
     var exerciseCode: String = HyroxExerciseCode.run.rawValue
     var customDisplayName: String = ""
     var exerciseOrder: Int = 1
+    var zoneOrder: Int? = nil
     var distanceM: String = ""
     var reps: String = ""
     var weightKg: String = ""
@@ -1143,6 +1144,7 @@ struct EditWorkoutMetaSheet: View {
                             let id: Int64
                             let exercise_code: String
                             let exercise_order: Int
+                            let zone_order: Int?
                             let distance_m: Int?
                             let reps: Int?
                             let weight_kg: Decimal?
@@ -1172,6 +1174,7 @@ struct EditWorkoutMetaSheet: View {
                                 exerciseCode: fields.code,
                                 customDisplayName: fields.customDisplayName,
                                 exerciseOrder: row.exercise_order,
+                                zoneOrder: row.zone_order.map { max(1, $0) },
                                 distanceM: row.distance_m.map(String.init) ?? "",
                                 reps: row.reps.map(String.init) ?? "",
                                 weightKg: row.weight_kg.map { "\(NSDecimalNumber(decimal: $0).doubleValue)" } ?? "",
@@ -2002,15 +2005,108 @@ struct EditWorkoutMetaSheet: View {
         }
     }
 
-    private func moveHyroxExerciseInEditor(from index: Int, direction: Int) {
-        var list = hyExercises
-        let j = index + direction
-        guard list.indices.contains(index), list.indices.contains(j) else { return }
-        list.swapAt(index, j)
-        for idx in list.indices {
-            list[idx].exerciseOrder = idx + 1
+    private var orderedHyroxEditExerciseIndices: [Int] {
+        hyExercises.indices.sorted {
+            let lhs = hyExercises[$0]
+            let rhs = hyExercises[$1]
+            return lhs.exerciseOrder < rhs.exerciseOrder
         }
-        hyExercises = list
+    }
+
+    private func isFirstHyroxEditExerciseInZone(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition) else { return false }
+        let current = hyExercises[ordered[displayPosition]].zoneOrder
+        guard current != nil else { return false }
+        guard displayPosition > 0 else { return true }
+        let previous = hyExercises[ordered[displayPosition - 1]].zoneOrder
+        return current != previous
+    }
+
+    private func moveHyroxExerciseInEditor(from index: Int, direction: Int) {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard let position = ordered.firstIndex(of: index) else { return }
+        let nextPosition = position + direction
+        guard ordered.indices.contains(nextPosition) else { return }
+        let other = ordered[nextPosition]
+        let currentOrder = hyExercises[index].exerciseOrder
+        hyExercises[index].exerciseOrder = hyExercises[other].exerciseOrder
+        hyExercises[other].exerciseOrder = currentOrder
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func normalizeHyroxEditExerciseOrdering() {
+        let ordered = orderedHyroxEditExerciseIndices
+        for (idx, originalIndex) in ordered.enumerated() {
+            hyExercises[originalIndex].exerciseOrder = idx + 1
+            hyExercises[originalIndex].zoneOrder = hyExercises[originalIndex].zoneOrder.map { max(1, $0) }
+        }
+        collapseSingleHyroxEditZones()
+    }
+
+    private func collapseSingleHyroxEditZones() {
+        let counts = Dictionary(grouping: hyExercises.compactMap(\.zoneOrder), by: { $0 }).mapValues(\.count)
+        for idx in hyExercises.indices {
+            guard let zoneOrder = hyExercises[idx].zoneOrder else { continue }
+            if (counts[zoneOrder] ?? 0) <= 1 {
+                hyExercises[idx].zoneOrder = nil
+            }
+        }
+    }
+
+    private func removeHyroxEditZone(_ zoneOrder: Int?) {
+        guard let zoneOrder else { return }
+        for idx in hyExercises.indices where hyExercises[idx].zoneOrder == zoneOrder {
+            hyExercises[idx].zoneOrder = nil
+        }
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func canZoneHyroxEditWithNext(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return false }
+        let current = hyExercises[ordered[displayPosition]]
+        let next = hyExercises[ordered[displayPosition + 1]]
+        return current.zoneOrder == nil && next.zoneOrder == nil
+    }
+
+    private func canAddNextToHyroxEditZone(displayPosition: Int) -> Bool {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return false }
+        let current = hyExercises[ordered[displayPosition]]
+        let next = hyExercises[ordered[displayPosition + 1]]
+        return current.zoneOrder != nil && next.zoneOrder == nil
+    }
+
+    private func zoneHyroxEditExerciseWithNext(displayPosition: Int) {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1)
+        else { return }
+        let nextZone = (hyExercises.compactMap(\.zoneOrder).max() ?? 0) + 1
+        hyExercises[ordered[displayPosition]].zoneOrder = nextZone
+        hyExercises[ordered[displayPosition + 1]].zoneOrder = nextZone
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func addNextHyroxEditExerciseToZone(displayPosition: Int) {
+        let ordered = orderedHyroxEditExerciseIndices
+        guard ordered.indices.contains(displayPosition),
+              ordered.indices.contains(displayPosition + 1),
+              let zoneOrder = hyExercises[ordered[displayPosition]].zoneOrder
+        else { return }
+        hyExercises[ordered[displayPosition + 1]].zoneOrder = zoneOrder
+        normalizeHyroxEditExerciseOrdering()
+    }
+
+    private func removeHyroxEditExerciseFromZone(index: Int) {
+        guard hyExercises.indices.contains(index) else { return }
+        hyExercises[index].zoneOrder = nil
+        normalizeHyroxEditExerciseOrdering()
     }
 
     private func editHyroxExercisePickerBinding(index: Int) -> Binding<String> {
@@ -2235,14 +2331,29 @@ struct EditWorkoutMetaSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             if !hyExercises.isEmpty {
-                Text("Use the arrows on each exercise to change order.")
+                Text("Select exercises to create a zone, then use arrows to change order.")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            ForEach(hyExercises.indices, id: \.self) { i in
+            ForEach(Array(orderedHyroxEditExerciseIndices.enumerated()), id: \.element) { position, i in
                 Divider().padding(.vertical, 6)
+
+                if isFirstHyroxEditExerciseInZone(displayPosition: position) {
+                    HStack {
+                        Text("Zone \(hyExercises[i].zoneOrder ?? 1)")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Button("Remove zone") {
+                            removeHyroxEditZone(hyExercises[i].zoneOrder)
+                        }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.borderless)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -2297,6 +2408,30 @@ struct EditWorkoutMetaSheet: View {
                         Spacer(minLength: 0)
 
                         if hyExercises.count > 1 {
+                            HStack(spacing: 8) {
+                                if hyExercises[i].zoneOrder != nil {
+                                    Button("Remove") {
+                                        removeHyroxEditExerciseFromZone(index: i)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                } else if canZoneHyroxEditWithNext(displayPosition: position) {
+                                    Button("Zone with next") {
+                                        zoneHyroxEditExerciseWithNext(displayPosition: position)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                }
+
+                                if canAddNextToHyroxEditZone(displayPosition: position) {
+                                    Button("Add next") {
+                                        addNextHyroxEditExerciseToZone(displayPosition: position)
+                                    }
+                                    .font(.caption.weight(.semibold))
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+
                             HStack(spacing: 2) {
                                 Button {
                                     moveHyroxExerciseInEditor(from: i, direction: -1)
@@ -2307,8 +2442,8 @@ struct EditWorkoutMetaSheet: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(i == 0)
-                                .opacity(i == 0 ? 0.35 : 1)
+                                .disabled(position == 0)
+                                .opacity(position == 0 ? 0.35 : 1)
 
                                 Button {
                                     moveHyroxExerciseInEditor(from: i, direction: 1)
@@ -2319,8 +2454,8 @@ struct EditWorkoutMetaSheet: View {
                                         .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(i == hyExercises.count - 1)
-                                .opacity(i == hyExercises.count - 1 ? 0.35 : 1)
+                                .disabled(position == hyExercises.count - 1)
+                                .opacity(position == hyExercises.count - 1 ? 0.35 : 1)
                             }
                             .foregroundStyle(.secondary)
                             .accessibilityElement(children: .combine)
@@ -2330,9 +2465,7 @@ struct EditWorkoutMetaSheet: View {
                         if hyExercises.count > 1 {
                             Button(role: .destructive) {
                                 hyExercises.remove(at: i)
-                                for idx in hyExercises.indices {
-                                    hyExercises[idx].exerciseOrder = idx + 1
-                                }
+                                normalizeHyroxEditExerciseOrdering()
                             } label: {
                                 Image(systemName: "trash")
                                     .font(.body)
@@ -2355,6 +2488,7 @@ struct EditWorkoutMetaSheet: View {
                         exerciseOrder: hyExercises.count + 1
                     )
                 )
+                normalizeHyroxEditExerciseOrdering()
             } label: {
                 Label("Add exercise", systemImage: "plus")
             }
@@ -2675,6 +2809,9 @@ struct EditWorkoutMetaSheet: View {
                     "exercise_code": .s(persisted.code),
                     "exercise_order": .i(ex.exerciseOrder)
                 ]
+                if let zoneOrder = ex.zoneOrder {
+                    values["zone_order"] = .i(max(1, zoneOrder))
+                }
                 if let d = persisted.displayName {
                     values["exercise_display_name"] = .s(d)
                 }
@@ -2898,8 +3035,11 @@ fileprivate func patchHyroxDisplayNamesForEditedWorkout(
             notes: $0.notes
         )
     }
-    let updates = HyroxExerciseFormatting.hyroxDisplayNameColumnUpdates(rows: rows)
-    guard !updates.isEmpty else { return }
+    let displayNamesByOrder = Dictionary(
+        uniqueKeysWithValues: HyroxExerciseFormatting
+            .hyroxDisplayNameColumnUpdates(rows: rows)
+            .map { ($0.exerciseOrder, $0.displayName) }
+    )
 
     let sessionRes = try await client
         .from("sport_sessions")
@@ -2910,13 +3050,19 @@ fileprivate func patchHyroxDisplayNamesForEditedWorkout(
     struct SessionRow: Decodable { let id: Int }
     let sessionId = try JSONDecoder().decode(SessionRow.self, from: sessionRes.data).id
 
-    struct Patch: Encodable { let exercise_display_name: String }
-    for u in updates {
+    struct Patch: Encodable {
+        let exercise_display_name: String?
+            let zone_order: Int?
+    }
+    for ex in hyExercises {
         _ = try await client
             .from("hyrox_session_exercises")
-            .update(Patch(exercise_display_name: u.displayName))
+            .update(Patch(
+                exercise_display_name: displayNamesByOrder[ex.exerciseOrder],
+                    zone_order: ex.zoneOrder.map { max(1, $0) }
+            ))
             .eq("session_id", value: sessionId)
-            .eq("exercise_order", value: u.exerciseOrder)
+            .eq("exercise_order", value: ex.exerciseOrder)
             .execute()
     }
 }

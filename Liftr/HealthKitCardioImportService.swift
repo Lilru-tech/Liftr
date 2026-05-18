@@ -44,6 +44,7 @@ final class HealthKitCardioImportService {
         if let d = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) { s.insert(d) }
         if let d = HKQuantityType.quantityType(forIdentifier: .distanceCycling) { s.insert(d) }
         if let d = HKQuantityType.quantityType(forIdentifier: .distanceSwimming) { s.insert(d) }
+        if let e = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) { s.insert(e) }
         if let hr = HKQuantityType.quantityType(forIdentifier: .heartRate) { s.insert(hr) }
         return s
     }
@@ -108,6 +109,7 @@ final class HealthKitCardioImportService {
 
             let (avgHR, maxHR) = await heartRateStats(for: w)
             let elevationM = elevationGainMeters(workout: w)
+            let activeEnergyKcal = await activeEnergyKilocalories(for: w)
 
             var routeGeoJSON: String?
             var routeLocations: [CLLocation] = []
@@ -167,7 +169,9 @@ final class HealthKitCardioImportService {
                 p_state: "published",
                 p_stats: statsJSON,
                 p_healthkit_uuid: hkUUID,
-                p_route_geojson: isTreadmill ? nil : routeGeoJSON
+                p_route_geojson: isTreadmill ? nil : routeGeoJSON,
+                p_calories_kcal: activeEnergyKcal,
+                p_calories_method: activeEnergyKcal == nil ? nil : "healthkit_active_energy"
             )
 
             do {
@@ -413,6 +417,26 @@ final class HealthKitCardioImportService {
             }
             store.execute(q)
         }
+    }
+
+    private func activeEnergyKilocalories(for workout: HKWorkout) async -> Double? {
+        guard let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else { return nil }
+        let pred = HKQuery.predicateForObjects(from: workout)
+        return await withCheckedContinuation { cont in
+            let q = HKStatisticsQuery(
+                quantityType: energyType,
+                quantitySamplePredicate: pred,
+                options: .cumulativeSum
+            ) { _, result, _ in
+                cont.resume(returning: Self.validKilocalories(result?.sumQuantity()?.doubleValue(for: .kilocalorie())))
+            }
+            store.execute(q)
+        }
+    }
+
+    private static func validKilocalories(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0, value < 100_000 else { return nil }
+        return (value * 10).rounded() / 10
     }
 
     private func fetchRouteLocations(for workout: HKWorkout) async throws -> [CLLocation] {

@@ -84,7 +84,9 @@ private enum QuickWorkoutStarter {
             p_state: PublishMode.plan.stateParam,
             p_stats: try AnyJSON([String: AnyJSON]()),
             p_healthkit_uuid: nil,
-            p_route_geojson: nil
+            p_route_geojson: nil,
+            p_calories_kcal: nil,
+            p_calories_method: nil
         )
         let res = try await client
             .rpc("create_cardio_workout_v2", params: RPCCardioV2Wrapper(p: params))
