@@ -405,6 +405,7 @@ set search_path to 'public'
 as $function$
 declare
   v_user_id uuid := nullif(p->>'p_user_id', '')::uuid;
+  v_auth_uid uuid := auth.uid();
   v_activity_code text := nullif(p->>'p_activity_code', '');
   v_title text := nullif(p->>'p_title', '');
   v_started_at timestamptz := nullif(p->>'p_started_at', '')::timestamptz;
@@ -426,6 +427,16 @@ declare
   v_workout_id bigint;
   v_session_id bigint;
 begin
+  if v_auth_uid is null then
+    raise exception 'not authenticated' using errcode = '42501';
+  end if;
+
+  if v_user_id is null then
+    v_user_id := v_auth_uid;
+  elsif v_user_id is distinct from v_auth_uid then
+    raise exception 'forbidden' using errcode = '42501';
+  end if;
+
   insert into public.workouts
     (user_id, title, started_at, ended_at, notes, perceived_intensity, state, kind, healthkit_uuid)
   values
