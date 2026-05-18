@@ -36,6 +36,7 @@ Tablas:
 - `level_thresholds`
 - `notifications`
 - `profiles`
+- `user_notification_settings` (preferencias push por usuario; `push_enabled` global y columnas `push_<notification_type>` para opt-out por tipo, usadas por `send-notifications`)
 - `racket_session_stats`
 - `rugby_session_stats`
 - `ski_session_stats`
@@ -72,6 +73,16 @@ Vistas:
 - `vw_sport_session_full`
 - `vw_user_prs`
 - `vw_workout_volume`
+
+## Columnas JSON compartidas
+
+### Drop sets de fuerza (`weight_segments`)
+
+- `exercise_sets.weight_segments` y `strength_routine_sets.weight_segments` son `jsonb` nullable. Cuando es `NULL`, la fila se interpreta como una serie normal usando `reps` y `weight_kg`.
+- Cuando existe, debe ser un array con **2 o más** objetos y cada objeto sigue la forma `{ "reps": number, "weight_kg": number }`. Los clientes escriben la misma forma desde iOS (`StrengthSetRowEditor`, `ActiveStrengthWorkoutView`, `StrengthRoutineRemotePersistence`) y Android (`StrengthRoutineOverwrite.kt`, `ActiveStrengthWorkoutViewModel`, editores de Add/detalle).
+- La primera entrada del array replica el resumen compatible (`reps`, `weight_kg`) para pantallas antiguas o listados compactos; las funciones SQL expanden el array completo para volumen, reps, max weight, scoring, rankings, retos y logros.
+- Migraciones relevantes: [`../Liftr/supabase/migrations/20260510140000_strength_weight_segments_v1.sql`](../Liftr/supabase/migrations/20260510140000_strength_weight_segments_v1.sql), [`../Liftr/supabase/migrations/20260510152000_create_strength_workout_weight_segments_v1.sql`](../Liftr/supabase/migrations/20260510152000_create_strength_workout_weight_segments_v1.sql), [`../Liftr/supabase/migrations/20260510200000_drop_len_check_weight_segments_constraints.sql`](../Liftr/supabase/migrations/20260510200000_drop_len_check_weight_segments_constraints.sql) y [`../Liftr/supabase/migrations/20260510210000_strength_drop_set_achievements_v1.sql`](../Liftr/supabase/migrations/20260510210000_strength_drop_set_achievements_v1.sql).
+- Al modificar queries de fuerza, no sumar solo `reps * weight_kg` si el resultado alimenta métricas de usuario. Usar o mantener equivalentes a `strength_set_segments_expand`, `exercise_set_segment_volume_kg`, `exercise_set_segment_reps_sum`, `exercise_set_segment_max_weight_kg` y `exercise_set_segment_max_reps`.
 
 ## Inventario de RPC detectadas en iOS
 
