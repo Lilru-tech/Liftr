@@ -235,7 +235,7 @@ struct MessagesInboxView: View {
                     }
                 }
                 HStack(alignment: .top) {
-                    Text(row.last_message_body?.isEmpty == false ? row.last_message_body! : "Say hi")
+                    Text(Self.previewText(for: row))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
@@ -259,5 +259,10 @@ struct MessagesInboxView: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .short
         return formatter.localizedString(for: d, relativeTo: Date())
+    }
+
+    private static func previewText(for row: ConversationOverview) -> String {
+        let preview = row.last_message_body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return preview.isEmpty ? "Say hi" : preview
     }
 }

@@ -1354,7 +1354,7 @@ struct WorkoutDetailView: View {
             do {
                 let exRes = try await SupabaseManager.shared.client
                     .from("workout_exercises")
-                    .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
+                    .select("id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name, exercises(name)")
                     .eq("workout_id", value: workoutId)
                     .order("order_index", ascending: true)
                     .execute()
@@ -1363,6 +1363,8 @@ struct WorkoutDetailView: View {
                     let id: Int
                     let exercise_id: Int64
                     let order_index: Int
+                    let superset_group_id: UUID?
+                    let superset_position: Int?
                     let notes: String?
                     let exercises: ExName?
                     let custom_name: String?
@@ -1428,6 +1430,8 @@ struct WorkoutDetailView: View {
                         exerciseId: ex.exercise_id,
                         exerciseName: (ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercises?.name ?? "")),
                         orderIndex: ex.order_index,
+                        supersetGroupId: ex.superset_group_id,
+                        supersetPosition: ex.superset_position,
                         notes: ex.notes ?? "",
                         sets: setsByEx[ex.id] ?? [EditableSet(setNumber: 1)]
                     )
@@ -2093,6 +2097,8 @@ private struct StrengthDetailBlock: View {
         let id: Int
         let exercise_id: Int64
         let order_index: Int
+        let superset_group_id: UUID?
+        let superset_position: Int?
         let notes: String?
         let custom_name: String?
         let exercise_name: String?
@@ -2109,6 +2115,16 @@ private struct StrengthDetailBlock: View {
         let rest_sec: Int?
         let weight_segments: [StrengthWeightSegWire]?
     }
+
+    private struct ExerciseDisplayBlock: Identifiable {
+        let id: String
+        let title: String?
+        let exercises: [ExerciseRow]
+
+        var isSuperset: Bool {
+            exercises.count > 1
+        }
+    }
     
     @State private var exercises: [ExerciseRow] = []
     @State private var setsByExercise: [Int: [SetRow]] = [:]
@@ -2122,55 +2138,12 @@ private struct StrengthDetailBlock: View {
             
             if loading { ProgressView().padding(.vertical, 8) }
             
-            ForEach(exercises.sorted(by: { $0.order_index < $1.order_index })) { ex in
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text((ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise #\(ex.exercise_id)")))
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                    }
-                    if let exNotes = ex.notes, !exNotes.isEmpty {
-                        Text(exNotes).font(.caption).foregroundStyle(.secondary)
-                    }
-                    
-                    let rows = setsByExercise[ex.id] ?? []
-                    if rows.isEmpty {
-                        Text("No sets").font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        VStack(spacing: 6) {
-                            ForEach(rows.sorted(by: { a, b in
-                                let ao = a.order_index ?? Int.max
-                                let bo = b.order_index ?? Int.max
-                                if ao != bo { return ao < bo }
-                                return a.id < b.id
-                            })) { s in
-                                let dropSummary: String? = {
-                                    guard let ws = s.weight_segments, ws.count >= 2 else { return nil }
-                                    return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
-                                }()
-                                HStack(spacing: 12) {
-                                    Text("#\(s.order_index ?? s.set_number)").font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
-                                    if let ds = dropSummary {
-                                        Text(ds).font(.footnote)
-                                    } else {
-                                        Text("\(s.reps ?? 0) reps").font(.footnote)
-                                        Text("• \(weightStr(s.weight_kg))").font(.footnote)
-                                    }
-                                    if let rpe = s.rpe {
-                                        Text("• RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))").font(.footnote)
-                                    }
-                                    if let rest = s.rest_sec {
-                                        Text("• Rest \(rest)s").font(.footnote)
-                                    }
-                                    Spacer()
-                                }
-                            }
-                        }
-                    }
+            ForEach(exerciseDisplayBlocks) { block in
+                if block.isSuperset {
+                    supersetExerciseCard(block)
+                } else if let ex = block.exercises.first {
+                    exerciseCard(ex)
                 }
-                .padding(12)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12)))
             }
             
             if let vol = totalVolumeKg {
@@ -2187,13 +2160,159 @@ private struct StrengthDetailBlock: View {
             Task { await load() }
         }
     }
+
+    private var exerciseDisplayBlocks: [ExerciseDisplayBlock] {
+        var blocks: [ExerciseDisplayBlock] = []
+        let ordered = exercises.sorted { lhs, rhs in
+            if lhs.order_index != rhs.order_index { return lhs.order_index < rhs.order_index }
+            return lhs.id < rhs.id
+        }
+        var idx = 0
+        while idx < ordered.count {
+            let current = ordered[idx]
+            guard let groupId = current.superset_group_id else {
+                blocks.append(ExerciseDisplayBlock(id: "exercise-\(current.id)", title: nil, exercises: [current]))
+                idx += 1
+                continue
+            }
+
+            var group: [ExerciseRow] = [current]
+            var nextIdx = idx + 1
+            while nextIdx < ordered.count, ordered[nextIdx].superset_group_id == groupId {
+                group.append(ordered[nextIdx])
+                nextIdx += 1
+            }
+
+            if group.count > 1 {
+                let sortedGroup = group.sorted {
+                    let lp = $0.superset_position ?? Int.max
+                    let rp = $1.superset_position ?? Int.max
+                    if lp != rp { return lp < rp }
+                    if $0.order_index != $1.order_index { return $0.order_index < $1.order_index }
+                    return $0.id < $1.id
+                }
+                blocks.append(
+                    ExerciseDisplayBlock(
+                        id: "superset-\(groupId.uuidString)",
+                        title: "Superserie",
+                        exercises: sortedGroup
+                    )
+                )
+            } else {
+                blocks.append(ExerciseDisplayBlock(id: "exercise-\(current.id)", title: nil, exercises: [current]))
+            }
+
+            idx = nextIdx
+        }
+        return blocks
+    }
+
+    private func supersetExerciseCard(_ block: ExerciseDisplayBlock) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.caption.weight(.semibold))
+                Text(block.title ?? "Superserie")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            .foregroundStyle(.blue)
+
+            ForEach(Array(block.exercises.enumerated()), id: \.element.id) { offset, ex in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(supersetPositionLabel(offset))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.blue)
+                        Text(exerciseDisplayName(ex))
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    if let exNotes = ex.notes, !exNotes.isEmpty {
+                        Text(exNotes).font(.caption).foregroundStyle(.secondary)
+                    }
+                    exerciseSetsSummary(ex)
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.blue.opacity(0.25), lineWidth: 1))
+    }
+
+    private func exerciseCard(_ ex: ExerciseRow) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(exerciseDisplayName(ex))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+            }
+            if let exNotes = ex.notes, !exNotes.isEmpty {
+                Text(exNotes).font(.caption).foregroundStyle(.secondary)
+            }
+            exerciseSetsSummary(ex)
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.12)))
+    }
+
+    private func exerciseDisplayName(_ ex: ExerciseRow) -> String {
+        ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise #\(ex.exercise_id)")
+    }
+
+    private func supersetPositionLabel(_ offset: Int) -> String {
+        let letter = Character(UnicodeScalar(65 + min(max(offset, 0), 25))!)
+        return "\(letter)1"
+    }
+
+    private func exerciseSetsSummary(_ ex: ExerciseRow) -> some View {
+        let rows = setsByExercise[ex.id] ?? []
+        return Group {
+            if rows.isEmpty {
+                Text("No sets").font(.caption).foregroundStyle(.secondary)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(rows.sorted(by: { a, b in
+                        let ao = a.order_index ?? Int.max
+                        let bo = b.order_index ?? Int.max
+                        if ao != bo { return ao < bo }
+                        return a.id < b.id
+                    })) { s in
+                        let dropSummary: String? = {
+                            guard let ws = s.weight_segments, ws.count >= 2 else { return nil }
+                            return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
+                        }()
+                        HStack(spacing: 12) {
+                            Text("#\(s.order_index ?? s.set_number)").font(.caption2).foregroundStyle(.secondary).frame(width: 26, alignment: .leading)
+                            if let ds = dropSummary {
+                                Text(ds).font(.footnote)
+                            } else {
+                                Text("\(s.reps ?? 0) reps").font(.footnote)
+                                Text("• \(weightStr(s.weight_kg))").font(.footnote)
+                            }
+                            if let rpe = s.rpe {
+                                Text("• RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))").font(.footnote)
+                            }
+                            if let rest = s.rest_sec {
+                                Text("• Rest \(rest)s").font(.footnote)
+                            }
+                            Spacer()
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     private func load() async {
         loading = true; defer { loading = false }
         do {
             let exQ = try await SupabaseManager.shared.client
                 .from("workout_exercises")
-                .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
+                .select("id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name, exercises(name)")
                 .eq("workout_id", value: workoutId)
                 .order("order_index", ascending: true)
                 .execute()
@@ -2202,6 +2321,8 @@ private struct StrengthDetailBlock: View {
                 let id: Int
                 let exercise_id: Int64
                 let order_index: Int
+                let superset_group_id: UUID?
+                let superset_position: Int?
                 let notes: String?
                 let custom_name: String?
                 let exercises: ExName?
@@ -2213,6 +2334,8 @@ private struct StrengthDetailBlock: View {
                     id: $0.id,
                     exercise_id: $0.exercise_id,
                     order_index: $0.order_index,
+                    superset_group_id: $0.superset_group_id,
+                    superset_position: $0.superset_position,
                     notes: $0.notes,
                     custom_name: $0.custom_name,
                     exercise_name: $0.exercises?.name
