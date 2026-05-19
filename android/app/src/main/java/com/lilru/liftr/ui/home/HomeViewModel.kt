@@ -261,7 +261,8 @@ class HomeViewModel(
             }
             runCatching {
                 val visible = (listOf(me) + cachedFolloweeIds).distinct()
-                fetchWorkoutPage(me, visible, st.kindFilter, from)
+                val participantWorkoutIds = fetchParticipantWorkoutIds(me)
+                fetchWorkoutPage(me, visible, participantWorkoutIds, st.kindFilter, from)
             }.onSuccess { (parsed, canMore) ->
                 if (parsed.isNotEmpty()) {
                     val merged = mergeOwnerProfiles(parsed)
@@ -356,6 +357,7 @@ class HomeViewModel(
                 val followees = fetchFolloweeIds(me)
                 cachedFolloweeIds = followees
                 val visibleUserIds = (listOf(me) + followees).distinct()
+                val participantWorkoutIds = fetchParticipantWorkoutIds(me)
                 nextFeedPage = 0
                 val response = supabase
                     .from(BackendContracts.Tables.WORKOUTS)
@@ -368,6 +370,9 @@ class HomeViewModel(
                         filter {
                             or {
                                 eq("user_id", me)
+                                if (participantWorkoutIds.isNotEmpty()) {
+                                    isIn("id", participantWorkoutIds)
+                                }
                                 and {
                                     isIn("user_id", visibleUserIds)
                                     neq("state", "planned")
@@ -870,6 +875,7 @@ class HomeViewModel(
     private suspend fun fetchWorkoutPage(
         me: String,
         visible: List<String>,
+        participantWorkoutIds: List<Int>,
         kind: HomeKindFilter,
         from: Int
     ): Pair<List<WorkoutSummary>, Boolean> {
@@ -885,6 +891,9 @@ class HomeViewModel(
                 filter {
                     or {
                         eq("user_id", me)
+                        if (participantWorkoutIds.isNotEmpty()) {
+                            isIn("id", participantWorkoutIds)
+                        }
                         and {
                             isIn("user_id", visible)
                             neq("state", "planned")
@@ -927,6 +936,7 @@ class HomeViewModel(
         val me = supabase.auth.currentUserOrNull()?.id ?: return
         val followees = cachedFolloweeIds
         val visibleUserIds = (listOf(me) + followees).distinct()
+        val participantWorkoutIds = fetchParticipantWorkoutIds(me)
         val st = _uiState.value
         val raw = supabase
             .from(BackendContracts.Tables.WORKOUTS)
@@ -948,7 +958,11 @@ class HomeViewModel(
             return
         }
         val kindFilter = st.kindFilter
-        val shouldList = (w.userId == me || (visibleUserIds.contains(w.userId) && w.state?.lowercase() != "planned")) &&
+        val shouldList = (
+            w.userId == me ||
+                participantWorkoutIds.contains(w.id) ||
+                (visibleUserIds.contains(w.userId) && w.state?.lowercase() != "planned")
+            ) &&
             (kindFilter == HomeKindFilter.ALL || w.kind?.lowercase() == kindFilter.name.lowercase())
         if (!shouldList) {
             _uiState.update { s ->
@@ -1396,6 +1410,38 @@ class HomeViewModel(
             }
             .data
         return parseLikesList(raw)
+    }
+
+    private suspend fun fetchParticipantWorkoutIds(me: String): List<Int> {
+        val raw = supabase
+            .from(BackendContracts.Tables.WORKOUT_PARTICIPANTS)
+            .select(columns = Columns.raw("workout_id")) {
+                filter { eq("user_id", me) }
+                limit(2000)
+            }
+            .data
+        val t = raw.trim()
+        if (t.isEmpty()) return emptyList()
+        val arr = when {
+            t.startsWith("[") -> JSONArray(t)
+            t.startsWith("{") -> {
+                val o = JSONObject(t)
+                when (val d = o.opt("data")) {
+                    is JSONArray -> d
+                    is JSONObject -> JSONArray().put(d)
+                    else -> return emptyList()
+                }
+            }
+            else -> return emptyList()
+        }
+        val out = ArrayList<Int>()
+        for (i in 0 until arr.length()) {
+            val id = arr.optJSONObject(i)?.optInt("workout_id", Int.MIN_VALUE)
+                ?.takeIf { it != Int.MIN_VALUE }
+                ?: continue
+            out.add(id)
+        }
+        return out.distinct()
     }
 
     private fun parseLikesList(raw: String): List<Pair<Int, String>> {

@@ -1588,17 +1588,12 @@ struct ProfileView: View {
             loading = true; defer { loading = false }
             
             do {
-                var query: PostgrestFilterBuilder = SupabaseManager.shared.client
-                    .from("vw_user_prs")
-                    .select("*")
-                    .eq("user_id", value: uid.uuidString)
-                
+                var params: [String: String] = ["p_user_id": uid.uuidString]
                 if filter != .all {
-                    query = query.eq("kind", value: filter.rawValue.lowercased())
+                    params["p_kind"] = filter.rawValue.lowercased()
                 }
-                
-                let res = try await query
-                    .order("achieved_at", ascending: false)
+                let res = try await SupabaseManager.shared.client
+                    .rpc("get_user_prs", params: params)
                     .execute()
                 let rows = try JSONDecoder.supabase().decode([PRRow].self, from: res.data)
                 await MainActor.run { prs = rows }

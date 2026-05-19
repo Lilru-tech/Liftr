@@ -177,10 +177,7 @@ struct ComparePRsView: View {
     
     private func fetchPRs(for uid: UUID) async throws -> [PRRow] {
         let res = try await SupabaseManager.shared.client
-            .from("vw_user_prs")
-            .select("*")
-            .eq("user_id", value: uid.uuidString)
-            .order("achieved_at", ascending: false)
+            .rpc("get_user_prs", params: ["p_user_id": uid.uuidString])
             .execute()
         return try JSONDecoder.supabase().decode([PRRow].self, from: res.data)
     }

@@ -1552,12 +1552,28 @@ struct HomeView: View {
         do {
             let allIds = [me] + followees
             print("[Home.loadPage] fetching page=\(request.page) pageSize=\(pageSize) userIds=\(allIds.count)")
+
+            let participantWorkoutRows = try await SupabaseManager.shared.client
+                .from("workout_participants")
+                .select("workout_id,user_id")
+                .eq("user_id", value: me.uuidString)
+                .execute()
+            let participantWorkoutIds = try JSONDecoder.supabase()
+                .decode([ParticipantRow].self, from: participantWorkoutRows.data)
+                .map(\.workout_id)
             
             let idsCSV = allIds.map { $0.uuidString }.joined(separator: ",")
+            let visibilityFilter: String
+            if participantWorkoutIds.isEmpty {
+                visibilityFilter = "user_id.eq.\(me.uuidString),and(user_id.in.(\(idsCSV)),state.neq.planned)"
+            } else {
+                let participantIdsCSV = participantWorkoutIds.map(String.init).joined(separator: ",")
+                visibilityFilter = "user_id.eq.\(me.uuidString),id.in.(\(participantIdsCSV)),and(user_id.in.(\(idsCSV)),state.neq.planned)"
+            }
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
                 .from("workouts")
                 .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
-                .or("user_id.eq.\(me.uuidString),and(user_id.in.(\(idsCSV)),state.neq.planned)")
+                .or(visibilityFilter)
             
             if request.filter != KindFilter.all {
                 q = q.eq("kind", value: request.filter.rawValue.lowercased())
