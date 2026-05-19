@@ -228,17 +228,17 @@ struct WorkoutDetailView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.ultraThinMaterial)
                 .onChange(of: showDualStartChoice) { _, isOpen in
-                    if isOpen, let first = participants.first {
+                    if isOpen, let first = dualStartParticipantOptions.first {
                         dualSheetSelectedParticipantIds = [first.user_id]
                     }
                 }
                 .onChange(of: participants.map(\.user_id)) { _, _ in
                     guard showDualStartChoice else { return }
-                    let allowed = Set(participants.map(\.user_id))
+                    let allowed = Set(dualStartParticipantOptions.map(\.user_id))
                     dualSheetSelectedParticipantIds = Set(
                         dualSheetSelectedParticipantIds.filter { allowed.contains($0) }
                     )
-                    if dualSheetSelectedParticipantIds.isEmpty, let first = participants.first {
+                    if dualSheetSelectedParticipantIds.isEmpty, let first = dualStartParticipantOptions.first {
                         dualSheetSelectedParticipantIds = [first.user_id]
                     }
                 }
@@ -529,7 +529,12 @@ struct WorkoutDetailView: View {
     }
     
     private var shouldOfferDualStrengthStart: Bool {
-        effectiveWorkoutKindForDual == "strength" && !participants.isEmpty
+        effectiveWorkoutKindForDual == "strength" && !dualStartParticipantOptions.isEmpty
+    }
+
+    private var dualStartParticipantOptions: [ParticipantRow] {
+        guard let me = app.userId else { return participants }
+        return participants.filter { $0.user_id != me }
     }
 
     private var effectiveWorkoutKindForDual: String {
@@ -542,16 +547,17 @@ struct WorkoutDetailView: View {
 
     @ViewBuilder
     private var dualStartChoiceSheet: some View {
-        if participants.isEmpty {
+        let selectableParticipants = dualStartParticipantOptions
+        if selectableParticipants.isEmpty {
             EmptyView()
         } else {
-            let multiInviteWorkout = participants.count > 1
+            let multiInviteWorkout = selectableParticipants.count > 1
             let showsAsGroupSession = dualSheetSelectedParticipantIds.count > 1
             let soleSelectedPick: ParticipantRow? = {
                 guard dualSheetSelectedParticipantIds.count == 1,
                       let only = dualSheetSelectedParticipantIds.first
                 else { return nil }
-                return participants.first { $0.user_id == only }
+                return selectableParticipants.first { $0.user_id == only }
             }()
             VStack(spacing: 16) {
                 Text(showsAsGroupSession ? "Group workout" : "Dual workout")
@@ -566,7 +572,7 @@ struct WorkoutDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     ScrollView {
                         VStack(spacing: 8) {
-                            ForEach(participants) { p in
+                            ForEach(selectableParticipants) { p in
                                 dualParticipantSelectRow(
                                     participant: p,
                                     isSelected: dualSheetSelectedParticipantIds.contains(p.user_id)
@@ -586,7 +592,7 @@ struct WorkoutDetailView: View {
                         }
                     }
                     .frame(maxHeight: 240)
-                } else if let p = participants.first {
+                } else if let p = selectableParticipants.first {
                     HStack(spacing: 12) {
                         AvatarView(urlString: p.avatar_url)
                             .frame(width: 56, height: 56)
@@ -610,7 +616,7 @@ struct WorkoutDetailView: View {
                     Button(showsAsGroupSession ? "Group" : "Dual") {
                         showDualStartChoice = false
                         if dualSheetSelectedParticipantIds.count > 1 {
-                            let picks = participants.filter { dualSheetSelectedParticipantIds.contains($0.user_id) }
+                            let picks = selectableParticipants.filter { dualSheetSelectedParticipantIds.contains($0.user_id) }
                             guard picks.count >= 2 else { return }
                             let pair = Array(picks.prefix(2))
                             guard pair.count == 2 else { return }
@@ -1241,36 +1247,19 @@ struct WorkoutDetailView: View {
         }
     }
     
-    private struct WorkoutStartPatch: Encodable {
-        let started_at: Date
-        let ended_at: Date?
-
-        enum CodingKeys: String, CodingKey {
-            case started_at
-            case ended_at
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var c = encoder.container(keyedBy: CodingKeys.self)
-            try c.encode(started_at, forKey: .started_at)
-
-            if ended_at == nil {
-                try c.encodeNil(forKey: .ended_at)
-            } else {
-                try c.encode(ended_at, forKey: .ended_at)
-            }
-        }
+    private struct StartWorkoutRPCParams: Encodable {
+        let p_workout_id: Int64
+        let p_started_at: String
     }
 
     private func setWorkoutStartedNow() async throws {
         let now = Date()
-        let patch = WorkoutStartPatch(started_at: now, ended_at: nil)
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let params = StartWorkoutRPCParams(p_workout_id: Int64(workoutId), p_started_at: iso.string(from: now))
 
         let res = try await SupabaseManager.shared.client
-            .from("workouts")
-            .update(patch)
-            .eq("id", value: workoutId)
-            .select("id")
+            .rpc("start_workout_v1", params: params)
             .execute()
 
         let body = String(data: res.data, encoding: .utf8) ?? ""
