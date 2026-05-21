@@ -1,6 +1,7 @@
 package com.lilru.liftr.ui.compare
 
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.domain.strengthSetMultiplicities
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
@@ -66,18 +67,6 @@ private data class StrengthStats(
     val avgRestSec: Double?
 )
 
-/**
- * Misma lógica que [compareStrengthSetMultiplicities] en [Liftr.CompareWorkoutsView].
- */
-private fun compareStrengthSetMultiplicities(sortedSetNumbers: List<Int>): List<Int> {
-    val r = sortedSetNumbers.size
-    if (r <= 0) return emptyList()
-    if (sortedSetNumbers == (1..r).toList()) {
-        return List(r) { 1 }
-    }
-    return sortedSetNumbers.map { max(it, 1) }
-}
-
 private fun bestDurationSecMeta(meta: WMetaRow): Double? {
     val dm = meta.durationMin
     if (dm != null && dm > 0) return (dm * 60).toDouble()
@@ -115,14 +104,45 @@ private fun compareDateSuffix(iso: String?, otherIso: String?): String {
     return " (${f.format(t.atZone(z))})"
 }
 
+suspend fun loadCompareWorkoutData(
+    supabase: SupabaseClient,
+    currentWorkoutId: Int,
+    otherWorkoutId: Int
+): Result<CompareWorkoutLoadData> =
+    loadCompareWorkoutData(
+        supabase = supabase,
+        currentWorkoutId = currentWorkoutId,
+        other = CompareOtherTarget.Workout(otherWorkoutId),
+        averageRightLabel = null
+    )
+
 /**
  * Carga etiquetas y métricas alineada a [Liftr.CompareWorkoutsView.load].
  */
 suspend fun loadCompareWorkoutData(
     supabase: SupabaseClient,
     currentWorkoutId: Int,
-    otherWorkoutId: Int
+    other: CompareOtherTarget,
+    averageRightLabel: String?
 ): Result<CompareWorkoutLoadData> = runCatching {
+    when (other) {
+        is CompareOtherTarget.Workout -> loadCompareWorkoutPair(
+            supabase, currentWorkoutId, other.id
+        )
+        is CompareOtherTarget.Average -> loadCompareWorkoutAverage(
+            supabase,
+            currentWorkoutId,
+            other,
+            averageRightLabel ?: "Average"
+        )
+    }
+}
+
+private suspend fun loadCompareWorkoutPair(
+    supabase: SupabaseClient,
+    currentWorkoutId: Int,
+    otherWorkoutId: Int
+): CompareWorkoutLoadData {
     val lRes = supabase.from(BackendContracts.Tables.WORKOUTS)
         .select(columns = Columns.raw("id, kind, title, user_id, started_at")) {
             filter { eq("id", currentWorkoutId) }
@@ -146,29 +166,13 @@ suspend fun loadCompareWorkoutData(
     }
     val showNames = L.userId != R.userId
     val bothMine = L.userId == R.userId
-    fun makeLabel(
-        w: CompareWRow,
-        fallback: String,
-        nameOverride: String?,
-        forceUserName: Boolean
-    ): String {
-        if (forceUserName) {
-            val n = nameOverride?.trim().orEmpty()
-            return if (n.isEmpty()) fallback else n
-        }
-        val n2 = nameOverride?.trim().orEmpty()
-        if (n2.isNotEmpty()) return n2
-        val t = w.title?.trim().orEmpty()
-        if (t.isNotEmpty()) return t
-        return fallback
-    }
-    val leftBase = makeLabel(
+    val leftBase = makeWorkoutLabel(
         L,
         if (showNames) "User" else "Workout A",
         aName,
         showNames
     )
-    val rightBase = makeLabel(
+    val rightBase = makeWorkoutLabel(
         R,
         if (showNames) "User" else "Workout B",
         bName,
@@ -184,16 +188,76 @@ suspend fun loadCompareWorkoutData(
         leftUserName = aName,
         rightUserName = bName
     )
-    val kind = L.kind.lowercase()
-    val metrics = when (kind) {
-        "cardio" -> buildCardioMetrics(supabase, currentWorkoutId, otherWorkoutId)
-        "sport" -> CompareSportMetrics.build(
-            compJson, supabase, currentWorkoutId, otherWorkoutId
-        )
-        "strength" -> buildStrengthMetrics(supabase, currentWorkoutId, otherWorkoutId)
-        else -> error("Unsupported workout kind.")
+    val metrics = metricsForKind(
+        supabase,
+        L.kind.lowercase(),
+        currentWorkoutId,
+        otherWorkoutId
+    )
+    return CompareWorkoutLoadData(labels = labels, metrics = metrics)
+}
+
+private suspend fun loadCompareWorkoutAverage(
+    supabase: SupabaseClient,
+    currentWorkoutId: Int,
+    average: CompareOtherTarget.Average,
+    averageRightLabel: String
+): CompareWorkoutLoadData {
+    val poolIds = average.workoutIds
+    if (poolIds.size < CompareAveragePoolLoader.MIN_SAMPLES) {
+        error("Not enough workouts for average.")
     }
-    CompareWorkoutLoadData(labels = labels, metrics = metrics)
+    val lRes = supabase.from(BackendContracts.Tables.WORKOUTS)
+        .select(columns = Columns.raw("id, kind, title, user_id, started_at")) {
+            filter { eq("id", currentWorkoutId) }
+        }
+    val L = compJson.decodeFromString<List<CompareWRow>>(lRes.data).firstOrNull()
+        ?: error("Workout not found: $currentWorkoutId")
+    val leftBase = makeWorkoutLabel(L, fallback = "Workout A", nameOverride = null, forceUserName = false)
+    val leftLabel = leftBase + compareDateSuffix(L.startedAt, null)
+    val kind = L.kind.lowercase()
+    val perSession = poolIds.map { pid ->
+        metricsForKind(supabase, kind, currentWorkoutId, pid)
+    }
+    val metrics = averageCompareMetricRows(perSession)
+    val labels = CompareSessionLabels(
+        kind = L.kind,
+        bothMine = true,
+        leftLabel = leftLabel,
+        rightLabel = averageRightLabel,
+        leftUserName = null,
+        rightUserName = null
+    )
+    return CompareWorkoutLoadData(labels = labels, metrics = metrics)
+}
+
+private fun makeWorkoutLabel(
+    w: CompareWRow,
+    fallback: String,
+    nameOverride: String?,
+    forceUserName: Boolean
+): String {
+    if (forceUserName) {
+        val n = nameOverride?.trim().orEmpty()
+        return if (n.isEmpty()) fallback else n
+    }
+    val n2 = nameOverride?.trim().orEmpty()
+    if (n2.isNotEmpty()) return n2
+    val t = w.title?.trim().orEmpty()
+    if (t.isNotEmpty()) return t
+    return fallback
+}
+
+private suspend fun metricsForKind(
+    supabase: SupabaseClient,
+    kind: String,
+    leftWid: Int,
+    rightWid: Int
+): List<CompareMetricRow> = when (kind) {
+    "cardio" -> buildCardioMetrics(supabase, leftWid, rightWid)
+    "sport" -> CompareSportMetrics.build(compJson, supabase, leftWid, rightWid)
+    "strength" -> buildStrengthMetrics(supabase, leftWid, rightWid)
+    else -> error("Unsupported workout kind.")
 }
 
 private suspend fun fetchUserName(supabase: SupabaseClient, userId: String): String? {
@@ -238,7 +302,7 @@ private suspend fun buildStrengthStats(supabase: SupabaseClient, wid: Int): Stre
     for ((_, mutRows) in byWe) {
         val rows = mutRows.sortedBy { it.id }
         val nums = rows.map { it.setNumber }
-        val mults = compareStrengthSetMultiplicities(nums)
+        val mults = strengthSetMultiplicities(nums)
         for ((s, mult) in rows.zip(mults)) {
             setsCount += mult
             val reps = max(s.reps ?: 0, 0)

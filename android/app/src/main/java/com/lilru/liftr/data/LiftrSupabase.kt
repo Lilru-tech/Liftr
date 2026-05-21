@@ -20,11 +20,16 @@ object LiftrSupabase {
     var client: SupabaseClient? = null
         private set
 
+    @Volatile
+    var appContext: Context? = null
+        private set
+
     /**
      * Debe llamarse al arranque (p. ej. desde [com.lilru.liftr.LiftrApplication]).
      * Si faltan URL o clave, [client] permanece nulo: la UI puede mostrar un aviso.
      */
-    fun init(@Suppress("UNUSED_PARAMETER") context: Context) {
+    fun init(context: Context) {
+        appContext = context.applicationContext
         if (client != null) return
         val url = BuildConfig.SUPABASE_URL
         val key = BuildConfig.SUPABASE_ANON_KEY

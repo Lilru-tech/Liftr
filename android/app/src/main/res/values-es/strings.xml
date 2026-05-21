@@ -118,4 +118,21 @@
     <string name="chat_routine_share_updated">Actualizado %1$s</string>
     <string name="active_strength_pause">Pausa</string>
     <string name="active_strength_resume">Reanudar</string>
+    <string name="active_strength_superset_label">Superserie</string>
+    <string name="active_strength_superset_set_round">Serie %1$d · %2$d ejercicios</string>
+    <string name="active_strength_superset_member_position">Ejercicio %1$d de %2$d</string>
+    <string name="active_strength_next_exercise">Siguiente ejercicio</string>
+    <string name="active_strength_rest_skip">Descanso %1$ds · Saltar</string>
+    <string name="compare_average_mine">Mi media</string>
+    <string name="compare_average_global">Media global</string>
+    <string name="compare_average_subtitle">%1$s · últimos %2$d</string>
+    <string name="compare_average_sample_short">Últimos %1$d</string>
+    <string name="compare_average_picker_sessions">Entrenos anteriores</string>
+    <string name="workout_detail_start_failed_title">No se pudo iniciar el entreno</string>
+    <string name="workout_detail_start_failed_ok">Cancelar</string>
+    <string name="workout_detail_start_failed_solo">Empezar solo</string>
+    <string name="workout_detail_start_failed_offline">Empezar sin conexión</string>
+    <string name="active_workout_syncing_start">Sincronizando inicio…</string>
+    <string name="active_workout_sync_will_retry">Inicio guardado en el dispositivo — se sincronizará al volver la conexión</string>
+    <string name="active_workout_finish_saved_offline">Entreno guardado en el dispositivo — se sincronizará al volver la conexión</string>
 </resources>

@@ -20,7 +20,8 @@ data class CompareWorkoutsUiState(
 class CompareWorkoutsViewModel(
     private val supabase: SupabaseClient,
     val currentWorkoutId: Int,
-    val otherWorkoutId: Int
+    val other: CompareOtherTarget,
+    private val averageRightLabel: String?
 ) : ViewModel() {
     private companion object {
         const val TAG = "CompareWorkoutsVM"
@@ -36,7 +37,12 @@ class CompareWorkoutsViewModel(
     fun load() {
         viewModelScope.launch {
             _uiState.value = CompareWorkoutsUiState(loading = true, error = null)
-            val r = loadCompareWorkoutData(supabase, currentWorkoutId, otherWorkoutId)
+            val r = loadCompareWorkoutData(
+                supabase = supabase,
+                currentWorkoutId = currentWorkoutId,
+                other = other,
+                averageRightLabel = averageRightLabel
+            )
             r.onSuccess { data ->
                 _uiState.value = CompareWorkoutsUiState(
                     loading = false,
@@ -58,13 +64,19 @@ class CompareWorkoutsViewModel(
 class CompareWorkoutsViewModelFactory(
     private val supabase: SupabaseClient,
     private val currentWorkoutId: Int,
-    private val otherWorkoutId: Int
+    private val other: CompareOtherTarget,
+    private val averageRightLabel: String?
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass != CompareWorkoutsViewModel::class.java) {
             error("Unknown ViewModel: ${modelClass.name}")
         }
-        return CompareWorkoutsViewModel(supabase, currentWorkoutId, otherWorkoutId) as T
+        return CompareWorkoutsViewModel(
+            supabase,
+            currentWorkoutId,
+            other,
+            averageRightLabel
+        ) as T
     }
 }

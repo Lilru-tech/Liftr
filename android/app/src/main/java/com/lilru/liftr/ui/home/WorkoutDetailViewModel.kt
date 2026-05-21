@@ -8,6 +8,7 @@ import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.territory.TerritoryCaptureClient
 import com.lilru.liftr.territory.TerritoryWorkoutTakeoverRowWire
 import com.lilru.liftr.ui.compare.CompareCandidateLoader
+import com.lilru.liftr.ui.compare.ComparePickerState
 import com.lilru.liftr.ui.compare.CompareWorkoutCandidate
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -29,7 +30,10 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
+import com.lilru.liftr.data.LiftrSupabase
 import com.lilru.liftr.ui.active.patchWorkoutStartedAtNow
+import com.lilru.liftr.workout.WorkoutProgramCache
+import com.lilru.liftr.workout.WorkoutStartSync
 import java.time.Instant
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
@@ -265,8 +269,7 @@ data class WorkoutDetailUiState(
     val likersLoading: Boolean = false,
     val commentsCanLoadMore: Boolean = false,
     val commentsLoadingMore: Boolean = false,
-    /** Candidatos para [Liftr.WorkoutDetailView.loadCompareCandidates] (RPC list_comparable_workouts_v1). */
-    val compareCandidates: List<CompareWorkoutCandidate> = emptyList(),
+    val comparePicker: ComparePickerState = ComparePickerState(),
     val compareReady: Boolean = false,
     val compareCandidateId: Int? = null,
     /** [p_stats] + Hyrox al editar sport (cargado con [loadSportEditEnrichment]). */
@@ -331,7 +334,7 @@ class WorkoutDetailViewModel(
             val me = meUserId ?: supabase.auth.currentUserOrNull()?.id
             if (me == null) {
                 _uiState.value = _uiState.value.copy(
-                    compareCandidates = emptyList(),
+                    comparePicker = ComparePickerState(),
                     compareReady = false,
                     compareCandidateId = null
                 )
@@ -347,14 +350,14 @@ class WorkoutDetailViewModel(
             }
             res.onSuccess { r ->
                 _uiState.value = _uiState.value.copy(
-                    compareCandidates = r.candidates,
-                    compareReady = r.candidates.isNotEmpty(),
+                    comparePicker = r.picker,
+                    compareReady = r.picker.hasAnyOption,
                     compareCandidateId = r.defaultOtherId
                 )
             }.onFailure { e ->
                 Log.w(TAG, "loadCompareCandidates failed workoutId=$workoutId", e)
                 _uiState.value = _uiState.value.copy(
-                    compareCandidates = emptyList(),
+                    comparePicker = ComparePickerState(),
                     compareReady = false,
                     compareCandidateId = null
                 )
@@ -517,6 +520,11 @@ class WorkoutDetailViewModel(
                         WorkoutSportDetailStatsBundle()
                     }
                 val prev = _uiState.value
+                strengthRead?.let { ro ->
+                    LiftrSupabase.appContext?.let { ctx ->
+                        WorkoutProgramCache.store(ctx, ro, workoutId)
+                    }
+                }
                 WorkoutDetailUiState(
                     loading = false,
                     workout = workout,
@@ -533,7 +541,7 @@ class WorkoutDetailViewModel(
                     cardioSession = cardioSess,
                     likers = emptyList(),
                     likersLoading = false,
-                    compareCandidates = prev.compareCandidates,
+                    comparePicker = prev.comparePicker,
                     compareReady = prev.compareReady,
                     compareCandidateId = prev.compareCandidateId,
                     sportEditEnrichment = sportEnrich,
@@ -1612,7 +1620,9 @@ class WorkoutDetailViewModel(
                     }
                 }
                 if (participantUserId == null) return@runCatching null
-                createLinkedStrengthWorkoutCopy(participantUserId)
+                WorkoutStartSync.withRetries {
+                    createLinkedStrengthWorkoutCopy(participantUserId)
+                }
             }
             onResult(r)
         }
@@ -1638,8 +1648,8 @@ class WorkoutDetailViewModel(
                         filter { eq("id", workoutId) }
                     }
                 }
-                val id1 = createLinkedStrengthWorkoutCopy(guestAUserId)
-                val id2 = createLinkedStrengthWorkoutCopy(guestBUserId)
+                val id1 = WorkoutStartSync.withRetries { createLinkedStrengthWorkoutCopy(guestAUserId) }
+                val id2 = WorkoutStartSync.withRetries { createLinkedStrengthWorkoutCopy(guestBUserId) }
                 id1 to id2
             }
             onResult(r)

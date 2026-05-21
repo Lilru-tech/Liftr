@@ -752,7 +752,12 @@
     <string name="workout_detail_sheet_btn_dual">Dual</string>
     <string name="workout_detail_sheet_btn_group">Group</string>
     <string name="workout_detail_start_failed_title">Could not start workout</string>
-    <string name="workout_detail_start_failed_ok">OK</string>
+    <string name="workout_detail_start_failed_ok">Cancel</string>
+    <string name="workout_detail_start_failed_solo">Start solo</string>
+    <string name="workout_detail_start_failed_offline">Start offline</string>
+    <string name="active_workout_syncing_start">Syncing start…</string>
+    <string name="active_workout_sync_will_retry">Start saved locally — will sync when online</string>
+    <string name="active_workout_finish_saved_offline">Workout saved on device — will sync when online</string>
     <string name="workout_detail_feedback_title">Feedback</string>
     <string name="workout_detail_open_comments">Comments</string>
     <string name="workout_detail_draft_badge">Draft</string>
@@ -878,6 +883,11 @@
     <string name="home_detail_compare_picker_title">Compare with</string>
     <string name="home_detail_compare_search_hint">Search in this list</string>
     <string name="home_detail_compare_search_no_matches">No matches</string>
+    <string name="compare_average_mine">My average</string>
+    <string name="compare_average_global">Global average</string>
+    <string name="compare_average_subtitle">%1$s · last %2$d</string>
+    <string name="compare_average_sample_short">Last %1$d</string>
+    <string name="compare_average_picker_sessions">Past workouts</string>
     <string name="compare_workouts_close">Close</string>
     <string name="compare_workouts_title">Compare workouts</string>
     <string name="compare_workouts_vs">vs</string>
@@ -1034,6 +1044,11 @@
     <string name="active_strength_field_weight_kg">Weight (kg)</string>
     <string name="active_strength_field_rpe">RPE</string>
     <string name="active_strength_set_done">Set done</string>
+    <string name="active_strength_superset_label">Superserie</string>
+    <string name="active_strength_superset_set_round">Set %1$d · %2$d exercises</string>
+    <string name="active_strength_superset_member_position">Exercise %1$d of %2$d</string>
+    <string name="active_strength_next_exercise">Next exercise</string>
+    <string name="active_strength_rest_skip">Rest %1$ds · Skip</string>
     <string name="active_strength_finish">Finish workout</string>
     <string name="active_strength_saving">Saving…</string>
     <string name="elborbla_finish_title">¡Entreno terminado!</string>

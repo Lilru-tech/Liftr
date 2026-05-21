@@ -2,6 +2,48 @@ package com.lilru.liftr.ui.compare
 
 import java.util.Locale
 
+enum class CompareAverageScope {
+    MINE,
+    GLOBAL
+}
+
+sealed class CompareOtherTarget {
+    data class Workout(val id: Int) : CompareOtherTarget()
+    data class Average(
+        val scope: CompareAverageScope,
+        val workoutIds: List<Int>,
+        val sampleCount: Int
+    ) : CompareOtherTarget()
+}
+
+data class CompareAverageOption(
+    val scope: CompareAverageScope,
+    val workoutIds: List<Int>,
+    val sampleCount: Int,
+    val typeLabel: String
+)
+
+sealed class ComparePickerEntry {
+    data class AverageRow(val option: CompareAverageOption) : ComparePickerEntry()
+    data class SessionRow(val candidate: CompareWorkoutCandidate) : ComparePickerEntry()
+}
+
+data class ComparePickerState(
+    val sessions: List<CompareWorkoutCandidate> = emptyList(),
+    val myAverage: CompareAverageOption? = null,
+    val globalAverage: CompareAverageOption? = null
+) {
+    val hasAnyOption: Boolean =
+        sessions.isNotEmpty() || myAverage != null || globalAverage != null
+
+    val entries: List<ComparePickerEntry>
+        get() = buildList {
+            myAverage?.let { add(ComparePickerEntry.AverageRow(it)) }
+            globalAverage?.let { add(ComparePickerEntry.AverageRow(it)) }
+            sessions.forEach { add(ComparePickerEntry.SessionRow(it)) }
+        }
+}
+
 /**
  * Paridad con [Liftr.WorkoutDetailView.CompareCandidate] (RPC [list_comparable_workouts_v1]).
  */

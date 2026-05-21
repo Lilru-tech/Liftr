@@ -233,9 +233,25 @@ struct ActiveStrengthWorkoutView: View {
         }
     }
 
+    private struct StrengthDisplayGroup: Identifiable {
+        let id: String
+        let supersetGroupId: UUID?
+        let exerciseIndices: [Int]
+
+        var isSuperset: Bool {
+            supersetGroupId != nil && exerciseIndices.count > 1
+        }
+    }
+
     private struct NavRestOverlay {
         let seconds: Int
         let plannedTotalSeconds: Int
+    }
+
+    private struct SupersetGroupRestState {
+        let isActive: Bool
+        let seconds: Int
+        let anchorExerciseId: Int?
     }
 
     private enum SupersetSetAction {
@@ -284,6 +300,7 @@ struct ActiveStrengthWorkoutView: View {
     @State private var setsByExercise: [Int: [SetRow]] = [:]
     @State private var loading = false
     @State private var error: String?
+    @State private var startSyncStatus: WorkoutStartSyncStatus = .idle
     @State private var guestDataError: String?
     @State private var isSaving = false
     @State private var showCountdown = true
@@ -484,28 +501,88 @@ struct ActiveStrengthWorkoutView: View {
         orderedExercises(lane: mainDisplayLane)
     }
 
+    private func strengthDisplayGroups(lane: StrengthLaneKind) -> [StrengthDisplayGroup] {
+        let list = orderedExercises(lane: lane)
+        var groups: [StrengthDisplayGroup] = []
+        var idx = 0
+        while idx < list.count {
+            let ex = list[idx]
+            guard let groupId = ex.superset_group_id else {
+                groups.append(StrengthDisplayGroup(id: "exercise-\(ex.id)", supersetGroupId: nil, exerciseIndices: [idx]))
+                idx += 1
+                continue
+            }
+            var indices = [idx]
+            var nextIdx = idx + 1
+            while nextIdx < list.count, list[nextIdx].superset_group_id == groupId {
+                indices.append(nextIdx)
+                nextIdx += 1
+            }
+            if indices.count > 1 {
+                groups.append(
+                    StrengthDisplayGroup(
+                        id: "superset-\(groupId.uuidString)-\(idx)",
+                        supersetGroupId: groupId,
+                        exerciseIndices: indices
+                    )
+                )
+            } else {
+                groups.append(StrengthDisplayGroup(id: "exercise-\(ex.id)", supersetGroupId: nil, exerciseIndices: [idx]))
+            }
+            idx = nextIdx
+        }
+        return groups
+    }
+
+    private func displayGroup(forExerciseIndex exerciseIndex: Int, lane: StrengthLaneKind) -> StrengthDisplayGroup? {
+        strengthDisplayGroups(lane: lane).first { $0.exerciseIndices.contains(exerciseIndex) }
+    }
+
+    private func displayGroupIndex(forExerciseIndex exerciseIndex: Int, lane: StrengthLaneKind) -> Int? {
+        let groups = strengthDisplayGroups(lane: lane)
+        return groups.firstIndex { $0.exerciseIndices.contains(exerciseIndex) }
+    }
+
+    private func pagerAnchorExerciseIndex(for exerciseIndex: Int, lane: StrengthLaneKind) -> Int {
+        displayGroup(forExerciseIndex: exerciseIndex, lane: lane)?.exerciseIndices.first ?? exerciseIndex
+    }
+
+    private var pagerCurrentDisplayGroup: StrengthDisplayGroup? {
+        displayGroup(forExerciseIndex: pagerExerciseIndex, lane: mainDisplayLane)
+    }
+
     private var pagerCurrentExercise: ExerciseRow? {
         let list = pagerOrdered
-        let idx = pagerExerciseIndex
+        let anchorIdx = pagerAnchorExerciseIndex(for: pagerExerciseIndex, lane: mainDisplayLane)
         guard !list.isEmpty,
-              idx >= 0,
-              idx < list.count
+              anchorIdx >= 0,
+              anchorIdx < list.count
         else { return nil }
-        return list[idx]
+        return list[anchorIdx]
     }
 
     private var pagerNextExercise: ExerciseRow? {
+        let lane = mainDisplayLane
+        let groups = strengthDisplayGroups(lane: lane)
+        guard let gi = displayGroupIndex(forExerciseIndex: pagerExerciseIndex, lane: lane),
+              gi + 1 < groups.count
+        else { return nil }
         let list = pagerOrdered
-        let nextIndex = pagerExerciseIndex + 1
-        guard nextIndex >= 0, nextIndex < list.count else { return nil }
-        return list[nextIndex]
+        let nextIdx = groups[gi + 1].exerciseIndices.first ?? 0
+        guard nextIdx >= 0, nextIdx < list.count else { return nil }
+        return list[nextIdx]
     }
 
     private var pagerPreviousExercise: ExerciseRow? {
+        let lane = mainDisplayLane
+        let groups = strengthDisplayGroups(lane: lane)
+        guard let gi = displayGroupIndex(forExerciseIndex: pagerExerciseIndex, lane: lane),
+              gi > 0
+        else { return nil }
         let list = pagerOrdered
-        let prevIndex = pagerExerciseIndex - 1
-        guard prevIndex >= 0, prevIndex < list.count else { return nil }
-        return list[prevIndex]
+        let prevIdx = groups[gi - 1].exerciseIndices.first ?? 0
+        guard prevIdx >= 0, prevIdx < list.count else { return nil }
+        return list[prevIdx]
     }
 
     private var nextExercise: ExerciseRow? {
@@ -533,10 +610,12 @@ struct ActiveStrengthWorkoutView: View {
                 Group {
                     if loading {
                         ProgressView("Loading workout…")
-                    } else if let error {
+                    } else if let error, exercises.isEmpty {
                         VStack(spacing: 12) {
                             Text("Error").font(.headline)
                             Text(error).foregroundStyle(.secondary)
+                            Button("Retry") { Task { await load() } }
+                                .buttonStyle(.borderedProminent)
                             Button("Close") { dismiss() }
                         }
                         .padding()
@@ -561,6 +640,21 @@ struct ActiveStrengthWorkoutView: View {
                     .zIndex(4)
                 }
                 
+                if startSyncBannerVisible {
+                    VStack {
+                        Text(startSyncBannerText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.top, 8)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .zIndex(3)
+                }
+
                 if let msg = toastMessage {
                     VStack {
                         Spacer()
@@ -976,6 +1070,7 @@ struct ActiveStrengthWorkoutView: View {
             }
         }
         .onAppear {
+            startSyncStatus = WorkoutStartSync.status(for: workoutId)
             #if DEBUG
             dualStrengthDebug(
                 "onAppear showCountdown=\(showCountdown) isDualMode=\(dualGuestWorkoutId != nil) "
@@ -983,6 +1078,18 @@ struct ActiveStrengthWorkoutView: View {
                     + "hostHasURL=\(dualHostAvatarURL != nil) guestHasURL=\(dualGuestAvatarURL != nil)"
             )
             #endif
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .workoutStartSyncStatusChanged)) { note in
+            guard let wid = note.userInfo?["workoutId"] as? Int, wid == workoutId,
+                  let raw = note.userInfo?["status"] as? String
+            else { return }
+            switch raw {
+            case "pending": startSyncStatus = .pending
+            case "syncing": startSyncStatus = .syncing
+            case "synced": startSyncStatus = .synced
+            case "willRetry": startSyncStatus = .willRetry
+            default: startSyncStatus = .idle
+            }
         }
         .task { await load() }
         .task(id: app.userId) {
@@ -1080,6 +1187,499 @@ struct ActiveStrengthWorkoutView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    @ViewBuilder
+    private func supersetExerciseContent(_ group: StrengthDisplayGroup, isActive: Bool, lane: StrengthLaneKind) -> some View {
+        let list = orderedExercises(lane: lane)
+        let members = group.exerciseIndices.compactMap { list.indices.contains($0) ? list[$0] : nil }
+        let laneSetIndex = currentSetIndex(for: lane)
+        let activeExerciseId: Int? = {
+            switch lane {
+            case .host: return currentExercise?.id
+            case .guest: return currentGuestExercise?.id
+            case .guest2: return currentGuest2Exercise?.id
+            }
+        }()
+        let activeMember = members.first { $0.id == activeExerciseId } ?? members.first
+        let activeSet = activeMember.flatMap { currentSetFor($0, setIndex: laneSetIndex, lane: lane) }
+        let groupAllSetsDone = members.allSatisfy { isExerciseCompleted($0, lane: lane) }
+        let groupRest = supersetGroupRestState(members: members, lane: lane)
+
+        VStack {
+            Spacer(minLength: 0)
+
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Superserie")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Set \(laneSetIndex + 1) · \(members.count) exercises")
+                        .font(.subheadline.weight(.semibold))
+                    Text(supersetGroupTitle(members))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                ScrollView(showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(members.enumerated()), id: \.element.id) { offset, ex in
+                            supersetMemberRow(
+                                ex,
+                                position: offset + 1,
+                                memberCount: members.count,
+                                lane: lane,
+                                setIndex: laneSetIndex,
+                                isActiveMember: ex.id == activeExerciseId,
+                                isActiveCard: isActive,
+                                groupRest: groupRest
+                            )
+                            if offset < members.count - 1 {
+                                Divider()
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(maxHeight: 336)
+
+                if let ex = activeMember {
+                    supersetGroupActions(
+                        ex: ex,
+                        members: members,
+                        lane: lane,
+                        laneSetIndex: laneSetIndex,
+                        currentSet: activeSet,
+                        allSetsDone: groupAllSetsDone,
+                        isActiveCard: isActive,
+                        groupRest: groupRest
+                    )
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22)
+                    .stroke(.white.opacity(isActive ? 0.18 : 0.10), lineWidth: 1)
+            )
+
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func supersetGroupTitle(_ members: [ExerciseRow]) -> String {
+        members.map { exerciseTitle($0) }.joined(separator: " → ")
+    }
+
+    private func supersetGroupRestState(members: [ExerciseRow], lane: StrengthLaneKind) -> SupersetGroupRestState {
+        var bestSeconds = 0
+        var anchorId: Int?
+        for ex in members {
+            guard let overlay = navRestOverlay(lane: lane, exerciseId: ex.id) else { continue }
+            if overlay.seconds > bestSeconds {
+                bestSeconds = overlay.seconds
+                anchorId = ex.id
+            }
+        }
+        if bestSeconds > 0, let anchorId {
+            return SupersetGroupRestState(isActive: true, seconds: bestSeconds, anchorExerciseId: anchorId)
+        }
+        return SupersetGroupRestState(isActive: false, seconds: 0, anchorExerciseId: nil)
+    }
+
+    @ViewBuilder
+    private func supersetMemberRow(
+        _ ex: ExerciseRow,
+        position: Int,
+        memberCount: Int,
+        lane: StrengthLaneKind,
+        setIndex: Int,
+        isActiveMember: Bool,
+        isActiveCard: Bool,
+        groupRest: SupersetGroupRestState
+    ) -> some View {
+        let plannedSet = currentSetFor(ex, setIndex: setIndex, lane: lane)
+        let memberDone = effectiveSetIndex(for: ex, lane: lane) > setIndex
+        let isGroupResting = groupRest.isActive
+        let isCurrent = isActiveCard && isActiveMember && plannedSet != nil && !isGroupResting
+        let isUpcoming = isActiveCard && !memberDone && !isCurrent && !isGroupResting
+        let statusLabel: String = isGroupResting ? "Rest" : (memberDone ? "Done" : (isCurrent ? "Current" : "Upcoming"))
+        let statusColor: Color = isGroupResting
+            ? Color.accentColor
+            : (memberDone ? .green : (isCurrent ? Color.accentColor : Color.orange))
+        let rowBg: Color = isGroupResting
+            ? Color.accentColor.opacity(0.10)
+            : (isCurrent ? Color.accentColor.opacity(0.12) : Color.clear)
+
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
+                Text("\(position). \(exerciseTitle(ex))")
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) {
+                    if memberDone && !isGroupResting {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.caption)
+                            .foregroundStyle(statusColor)
+                    }
+                    Text(statusLabel.uppercased())
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(statusColor)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Capsule().fill(statusColor.opacity(0.15)))
+                }
+            }
+
+            if isGroupResting {
+                supersetMemberRestCountdown(seconds: groupRest.seconds)
+            } else if memberDone {
+                let performed = performedSetsFor(ex, lane: lane)
+                let performedSet = performed.indices.contains(setIndex) ? performed[setIndex] : nil
+                let reps = performedSet?.reps ?? plannedSet?.reps ?? 0
+                let weight = performedSet?.weight_kg ?? plannedSet?.weight_kg
+                Text("\(reps) reps · \(weightStr(weight))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            } else if let s = plannedSet {
+                if let ws = s.weight_segments, ws.count >= 2 {
+                    Text("Drop set")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(Array(ws.enumerated()), id: \.offset) { _, seg in
+                        Text("\(seg.reps) reps · \(weightStr(Decimal(seg.weight_kg)))")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                } else {
+                    Text("\(s.reps ?? 0) reps · \(weightStr(s.weight_kg))")
+                        .font(.subheadline.weight(.semibold))
+                    if let rpe = s.rpe {
+                        Text("Target RPE \(String(format: "%.1f", NSDecimalNumber(decimal: rpe).doubleValue))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } else if isExerciseCompleted(ex, lane: lane) {
+                Text("All sets done")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("Exercise \(position) of \(memberCount)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .background(rowBg, in: RoundedRectangle(cornerRadius: 14))
+        .contentShape(RoundedRectangle(cornerRadius: 14))
+        .onTapGesture {
+            guard isActiveCard, canJumpBetweenExercises,
+                  let idx = orderedExercises(lane: lane).firstIndex(where: { $0.id == ex.id })
+            else { return }
+            withAnimation(.easeInOut(duration: 0.22)) {
+                jumpToExercise(lane: lane, index: idx)
+            }
+        }
+        .opacity(isUpcoming ? 0.88 : 1)
+    }
+
+    @ViewBuilder
+    private func supersetMemberRestCountdown(seconds: Int) -> some View {
+        HStack(spacing: 0) {
+            Text("Rest")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .leading)
+            Text("\(seconds)s")
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+            Color.clear.frame(width: 40)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func supersetGroupActions(
+        ex: ExerciseRow,
+        members: [ExerciseRow],
+        lane: StrengthLaneKind,
+        laneSetIndex: Int,
+        currentSet: SetRow?,
+        allSetsDone: Bool,
+        isActiveCard: Bool,
+        groupRest: SupersetGroupRestState
+    ) -> some View {
+        let isActiveExercise = isActiveCard
+        let hasNextInLane = laneNextExercise(lane: lane) != nil
+        let skipExerciseId = groupRest.anchorExerciseId ?? ex.id
+
+        Group {
+            if groupRest.isActive {
+                HStack {
+                    Spacer(minLength: 0)
+                    Button("Skip rest") {
+                        skipRest(for: lane, exerciseId: skipExerciseId)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 2)
+            } else {
+                strengthPrimarySetActions(
+                    ex: ex,
+                    lane: lane,
+                    currentSet: currentSet,
+                    allSetsDone: allSetsDone,
+                    isActiveExercise: isActiveExercise,
+                    canShowSetSlider: false,
+                    laneSetIndex: laneSetIndex,
+                    visitedIndex: laneSetIndex,
+                    isVisitingCurrent: true,
+                    visitedIsPast: false,
+                    compactRest: true
+                )
+            }
+
+            activeExerciseMoreMenu(
+                ex,
+                lane: lane,
+                canAddSet: !(isSaving || (isResting && isActiveExercise && !allSetsDone)),
+                canRemoveSet: !(isResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex, lane: lane)),
+                canDeleteExercise: canModifyActiveExercises
+            )
+
+            if allSetsDone {
+                supersetGroupCompletionActions(lane: lane, hasNextInLane: hasNextInLane)
+            } else if !hasNextInLane {
+                finishWorkoutEarlyButton()
+            }
+        }
+    }
+
+    private func primarySetActionButtonTitle(
+        for ex: ExerciseRow,
+        lane: StrengthLaneKind,
+        setIndex: Int,
+        currentSet: SetRow
+    ) -> String {
+        let shouldStartRest = shouldStartRestAfterCompletingSet(ex, lane: lane, setIndex: setIndex)
+        if shouldStartRest, (currentSet.rest_sec ?? 0) > 0 {
+            return "Rest \(currentSet.rest_sec ?? 0)s"
+        }
+        if let next = nextSupersetMember(after: ex, lane: lane, setIndex: setIndex) {
+            return "Next · \(exerciseTitle(next))"
+        }
+        return "Set done"
+    }
+
+    @ViewBuilder
+    private func strengthRestCountdownBlock(
+        laneRemainingRest: Int,
+        compact: Bool,
+        onSkip: @escaping () -> Void
+    ) -> some View {
+        let timerSize: CGFloat = compact ? 29 : 36
+        if compact {
+            HStack(spacing: 0) {
+                Text("Rest")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(width: 52, alignment: .leading)
+                Text("\(laneRemainingRest)s")
+                    .font(.system(size: timerSize, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .frame(maxWidth: .infinity)
+                    .multilineTextAlignment(.center)
+                Button("Skip rest", action: onSkip)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .frame(width: 88, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        } else {
+            VStack(spacing: 12) {
+                Text("Rest")
+                    .font(.headline)
+                Text("\(laneRemainingRest)s")
+                    .font(.system(size: timerSize, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Button("Skip rest", action: onSkip)
+                    .buttonStyle(.bordered)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func strengthPrimarySetActions(
+        ex: ExerciseRow,
+        lane: StrengthLaneKind,
+        currentSet: SetRow?,
+        allSetsDone: Bool,
+        isActiveExercise: Bool,
+        canShowSetSlider: Bool,
+        laneSetIndex: Int,
+        visitedIndex: Int,
+        isVisitingCurrent: Bool,
+        visitedIsPast: Bool,
+        compactRest: Bool = false
+    ) -> some View {
+        let laneIsResting: Bool = {
+            switch lane {
+            case .host: return isResting
+            case .guest: return gIsResting
+            case .guest2: return g2IsResting
+            }
+        }()
+        let laneRemainingRest: Int = {
+            switch lane {
+            case .host: return remainingRest
+            case .guest: return gRemainingRest
+            case .guest2: return g2RemainingRest
+            }
+        }()
+
+        if isActiveExercise, let s = currentSet, !allSetsDone {
+            VStack(spacing: compactRest ? 10 : 12) {
+                if laneIsResting {
+                    strengthRestCountdownBlock(laneRemainingRest: laneRemainingRest, compact: compactRest) {
+                        skipRest(for: lane, exerciseId: ex.id)
+                    }
+                } else if canShowSetSlider && !isVisitingCurrent {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            snapVisitedToCurrent(for: ex, lane: lane)
+                        }
+                    } label: {
+                        Text("Back to current set")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .foregroundColor(.white)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Color.accentColor.opacity(0.85))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                } else if !canShowSetSlider || isVisitingCurrent {
+                    Button {
+                        completeCurrentSet(lane: lane)
+                        if shouldStartRestAfterCompletingSet(ex, lane: lane, setIndex: laneSetIndex) {
+                            startRest(for: s, lane: lane)
+                        }
+                    } label: {
+                        Text(primarySetActionButtonTitle(for: ex, lane: lane, setIndex: laneSetIndex, currentSet: s))
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .foregroundColor(.white)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Color.accentColor)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+
+        if allSetsDone && isActiveExercise && laneIsResting && laneRemainingRest > 0 {
+            strengthRestCountdownBlock(laneRemainingRest: laneRemainingRest, compact: compactRest) {
+                skipRest(for: lane, exerciseId: ex.id)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func supersetGroupCompletionActions(lane: StrengthLaneKind, hasNextInLane: Bool) -> some View {
+        VStack(spacing: 12) {
+            if hasNextInLane {
+                Button {
+                    goToNextExercise()
+                } label: {
+                    Text("Next exercise")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 54)
+                        .background(
+                            RoundedRectangle(cornerRadius: 18)
+                                .fill(Color.accentColor)
+                        )
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button {
+                    if isDualMode && !bothLanesFullyComplete() {
+                        showDualIncompleteFinishConfirm = true
+                    } else {
+                        Task { await saveAndFinishWorkout() }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        if isSaving {
+                            ProgressView().progressViewStyle(.circular)
+                        }
+                        Text(isSaving ? "Saving workout…" : "Finish workout")
+                            .font(.headline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 54)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(Color.green.gradient)
+                    )
+                    .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaving)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func finishWorkoutEarlyButton() -> some View {
+        Button {
+            showFinishEarlyConfirm = true
+        } label: {
+            Text("Finish workout")
+                .font(.headline.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(Color.green.gradient)
+                )
+                .foregroundColor(.white)
+        }
+        .buttonStyle(.plain)
+        .disabled(isSaving)
+        .alert("Finish workout early?", isPresented: $showFinishEarlyConfirm) {
+            Button("Finish", role: .destructive) {
+                Task { await saveAndFinishWorkout() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(earlyFinishAlertMessage())
+        }
+    }
+
     private func currentSetIndex(for lane: StrengthLaneKind) -> Int {
         switch lane {
         case .host: return currentSetIndex
@@ -1161,7 +1761,7 @@ struct ActiveStrengthWorkoutView: View {
             ? (performedSet?.weight_segments ?? plannedSet?.weight_segments)
             : plannedSet?.weight_segments
         let statusLabel: String = isPast ? "Completed" : (isCurrent ? "Current" : "Upcoming")
-        let statusColor: Color = isPast ? .secondary : (isCurrent ? Color.accentColor : Color.orange)
+        let statusColor: Color = isPast ? .green : (isCurrent ? Color.accentColor : Color.orange)
 
         VStack(spacing: 10) {
             HStack(spacing: 6) {
@@ -1295,7 +1895,7 @@ struct ActiveStrengthWorkoutView: View {
             case .guest2: return g2IsResting
             }
         }()
-        let laneRemainingRest: Int = {
+        let _: Int = {
             switch lane {
             case .host: return remainingRest
             case .guest: return gRemainingRest
@@ -1309,6 +1909,7 @@ struct ActiveStrengthWorkoutView: View {
         let visitedIndex = visitedSetIndex(for: ex, lane: lane)
         let isVisitingCurrent = (visitedIndex == laneCurrentIndex)
         let visitedIsPast = canShowSlider && visitedIndex < laneCurrentIndex
+        let hasNextInLane = laneNextExercise(lane: lane) != nil
 
         if canShowSlider {
             let maxSegments = expandedSets.map { max(1, $0.weight_segments?.count ?? 1) }.max() ?? 1
@@ -1451,152 +2052,32 @@ struct ActiveStrengthWorkoutView: View {
                 .foregroundStyle(.secondary)
         }
 
-        if isActiveExercise, let s = currentSet, (s.rest_sec ?? 0) > 0 {
-            VStack(spacing: 12) {
-                if laneIsResting {
-                    Text("Rest")
-                        .font(.headline)
-                    Text("\(laneRemainingRest)s")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+        Group {
+            strengthPrimarySetActions(
+                ex: ex,
+                lane: lane,
+                currentSet: currentSet,
+                allSetsDone: allSetsDone,
+                isActiveExercise: isActiveExercise,
+                canShowSetSlider: canShowSlider,
+                laneSetIndex: laneCurrentIndex,
+                visitedIndex: visitedIndex,
+                isVisitingCurrent: isVisitingCurrent,
+                visitedIsPast: visitedIsPast
+            )
 
-                    Button("Skip rest") {
-                        skipRest(for: lane, exerciseId: ex.id)
-                    }
-                    .buttonStyle(.bordered)
-                } else if !isVisitingCurrent {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            snapVisitedToCurrent(for: ex, lane: lane)
-                        }
-                    } label: {
-                        Text("Back to current set")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .foregroundColor(.white)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color.accentColor.opacity(0.85))
-                            )
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    let shouldStartRest = shouldStartRestAfterCompletingSet(ex, lane: lane, setIndex: laneCurrentIndex)
-                    Button {
-                        completeCurrentSet(lane: lane)
-                        if shouldStartRest {
-                            startRest(for: s, lane: lane)
-                        }
-                    } label: {
-                        Text(shouldStartRest ? "Rest \(s.rest_sec ?? 0)s" : "Next superserie exercise")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .foregroundColor(.white)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color.accentColor)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
+            activeExerciseMoreMenu(
+                ex,
+                lane: lane,
+                canAddSet: !(isSaving || lockRestActions),
+                canRemoveSet: !(laneIsResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex, lane: lane)),
+                canDeleteExercise: canModifyActiveExercises
+            )
 
-        if allSetsDone && isActiveExercise && laneIsResting && laneRemainingRest > 0 {
-            VStack(spacing: 12) {
-                Text("Rest")
-                    .font(.headline)
-                Text("\(laneRemainingRest)s")
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
-
-                Button("Skip rest") {
-                    skipRest(for: lane, exerciseId: ex.id)
-                }
-                .buttonStyle(.bordered)
-            }
-            .frame(maxWidth: .infinity)
-        }
-
-        activeExerciseMoreMenu(
-            ex,
-            lane: lane,
-            canAddSet: !(isSaving || lockRestActions),
-            canRemoveSet: !(laneIsResting || isSaving || (isActiveExercise && allSetsDone) || !canRemoveAnySet(for: ex, lane: lane)),
-            canDeleteExercise: canModifyActiveExercises
-        )
-
-        let hasNextInLane = laneNextExercise(lane: lane) != nil
-
-        if allSetsDone {
-            VStack(spacing: 12) {
-                if hasNextInLane {
-                    Button {
-                        goToNextExercise()
-                    } label: {
-                        Text("Next exercise")
-                            .font(.headline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(
-                                RoundedRectangle(cornerRadius: 18)
-                                    .fill(Color.accentColor)
-                            )
-                            .foregroundColor(.white)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Button {
-                        if isDualMode && !bothLanesFullyComplete() {
-                            showDualIncompleteFinishConfirm = true
-                        } else {
-                            Task { await saveAndFinishWorkout() }
-                        }
-                    } label: {
-                        HStack(spacing: 8) {
-                            if isSaving {
-                                ProgressView().progressViewStyle(.circular)
-                            }
-                            Text(isSaving ? "Saving workout…" : "Finish workout")
-                                .font(.headline.weight(.semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 54)
-                        .background(
-                            RoundedRectangle(cornerRadius: 18)
-                                .fill(Color.green.gradient)
-                        )
-                        .foregroundColor(.white)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isSaving)
-                }
-            }
-        }
-        if !hasNextInLane && !allSetsDone {
-            Button {
-                showFinishEarlyConfirm = true
-            } label: {
-                Text("Finish workout")
-                    .font(.headline.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 54)
-                    .background(
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(Color.green.gradient)
-                    )
-                    .foregroundColor(.white)
-            }
-            .buttonStyle(.plain)
-            .disabled(isSaving)
-            .alert("Finish workout early?", isPresented: $showFinishEarlyConfirm) {
-                Button("Finish", role: .destructive) {
-                    Task { await saveAndFinishWorkout() }
-                }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text(earlyFinishAlertMessage())
+            if allSetsDone {
+                supersetGroupCompletionActions(lane: lane, hasNextInLane: hasNextInLane)
+            } else if !hasNextInLane {
+                finishWorkoutEarlyButton()
             }
         }
     }
@@ -1657,9 +2138,14 @@ struct ActiveStrengthWorkoutView: View {
             case .guest2: return g2CurrentExerciseIndex
             }
         }()
-        let nextIndex = idx + 1
-        guard nextIndex >= 0, nextIndex < list.count else { return nil }
-        return list[nextIndex]
+        let groups = strengthDisplayGroups(lane: lane)
+        guard let gi = displayGroupIndex(forExerciseIndex: idx, lane: lane),
+              gi + 1 < groups.count,
+              let nextIdx = groups[gi + 1].exerciseIndices.first,
+              nextIdx >= 0,
+              nextIdx < list.count
+        else { return nil }
+        return list[nextIdx]
     }
 
     private func hostLaneFullyComplete() -> Bool {
@@ -2279,18 +2765,19 @@ struct ActiveStrengthWorkoutView: View {
               let idx = orderedExercises(lane: lane).firstIndex(where: { $0.id == next.id })
         else { return }
         persistStateForCurrentDualIndex()
+        let pagerAnchor = pagerAnchorExerciseIndex(for: idx, lane: lane)
         switch lane {
         case .host:
             currentExerciseIndex = idx
-            pagerDisplayIndexHost = idx
+            pagerDisplayIndexHost = pagerAnchor
             navEmphasisLockExerciseIdHost = nil
         case .guest:
             guestCurrentExerciseIndex = idx
-            pagerDisplayIndexGuest = idx
+            pagerDisplayIndexGuest = pagerAnchor
             navEmphasisLockExerciseIdGuest = nil
         case .guest2:
             g2CurrentExerciseIndex = idx
-            pagerDisplayIndexGuest2 = idx
+            pagerDisplayIndexGuest2 = pagerAnchor
             navEmphasisLockExerciseIdGuest2 = nil
         }
         restoreStateForDualIndex()
@@ -2713,7 +3200,6 @@ struct ActiveStrengthWorkoutView: View {
 
     private func goToNextExercise() {
         let lane = mainDisplayLane
-        let ordered = orderedExercises(lane: lane)
         let workIdx: Int = {
             switch lane {
             case .host: return currentExerciseIndex
@@ -2721,7 +3207,11 @@ struct ActiveStrengthWorkoutView: View {
             case .guest2: return g2CurrentExerciseIndex
             }
         }()
-        guard !ordered.isEmpty, workIdx < ordered.count - 1 else { return }
+        let groups = strengthDisplayGroups(lane: lane)
+        guard let gi = displayGroupIndex(forExerciseIndex: workIdx, lane: lane),
+              gi + 1 < groups.count,
+              let nextIdx = groups[gi + 1].exerciseIndices.first
+        else { return }
 
         persistStateForCurrentDualIndex()
 
@@ -2731,53 +3221,27 @@ struct ActiveStrengthWorkoutView: View {
         case .guest2: navEmphasisLockExerciseIdGuest2 = nil
         }
 
-        switch lane {
-        case .host:
-            currentExerciseIndex += 1
-            pagerDisplayIndexHost = currentExerciseIndex
-        case .guest:
-            guestCurrentExerciseIndex += 1
-            pagerDisplayIndexGuest = guestCurrentExerciseIndex
-        case .guest2:
-            g2CurrentExerciseIndex += 1
-            pagerDisplayIndexGuest2 = g2CurrentExerciseIndex
-        }
-
-        restoreStateForDualIndex()
+        jumpToExercise(lane: lane, index: nextIdx)
     }
 
     private func pagerShiftForward() {
         let lane = mainDisplayLane
-        let ordered = orderedExercises(lane: lane)
-        let idx = pagerExerciseIndex
-        guard !ordered.isEmpty, idx < ordered.count - 1 else { return }
-
-        persistStateForCurrentDualIndex()
-
-        switch lane {
-        case .host: pagerDisplayIndexHost += 1
-        case .guest: pagerDisplayIndexGuest += 1
-        case .guest2: pagerDisplayIndexGuest2 += 1
-        }
-
-        restoreStateForDualIndex()
+        let groups = strengthDisplayGroups(lane: lane)
+        guard let gi = displayGroupIndex(forExerciseIndex: pagerExerciseIndex, lane: lane),
+              gi + 1 < groups.count,
+              let nextIdx = groups[gi + 1].exerciseIndices.first
+        else { return }
+        jumpToExercise(lane: lane, index: nextIdx)
     }
     
     private func pagerShiftBackward() {
         let lane = mainDisplayLane
-        let ordered = orderedExercises(lane: lane)
-        let idx = pagerExerciseIndex
-        guard !ordered.isEmpty, idx > 0 else { return }
-
-        persistStateForCurrentDualIndex()
-
-        switch lane {
-        case .host: pagerDisplayIndexHost -= 1
-        case .guest: pagerDisplayIndexGuest -= 1
-        case .guest2: pagerDisplayIndexGuest2 -= 1
-        }
-
-        restoreStateForDualIndex()
+        let groups = strengthDisplayGroups(lane: lane)
+        guard let gi = displayGroupIndex(forExerciseIndex: pagerExerciseIndex, lane: lane),
+              gi > 0,
+              let prevIdx = groups[gi - 1].exerciseIndices.first
+        else { return }
+        jumpToExercise(lane: lane, index: prevIdx)
     }
 
     private func laneBlocksExerciseSwipe(_ lane: StrengthLaneKind) -> Bool {
@@ -2816,17 +3280,24 @@ struct ActiveStrengthWorkoutView: View {
 
         if laneBlocksExerciseSwipe(mainDisplayLane) { return false }
 
+        if pagerCurrentDisplayGroup?.isSuperset == true { return false }
+
         return true
     }
     
     private func canGoNextExercise() -> Bool {
-        let ordered = orderedExercises(lane: mainDisplayLane)
-        guard !ordered.isEmpty else { return false }
-        return pagerExerciseIndex < ordered.count - 1
+        let lane = mainDisplayLane
+        let groups = strengthDisplayGroups(lane: lane)
+        guard !groups.isEmpty,
+              let gi = displayGroupIndex(forExerciseIndex: pagerExerciseIndex, lane: lane)
+        else { return false }
+        return gi < groups.count - 1
     }
 
     private func canGoPreviousExercise() -> Bool {
-        pagerExerciseIndex > 0
+        let lane = mainDisplayLane
+        guard let gi = displayGroupIndex(forExerciseIndex: pagerExerciseIndex, lane: lane) else { return false }
+        return gi > 0
     }
 
     private var shouldShowExerciseNavStrip: Bool {
@@ -3580,7 +4051,7 @@ struct ActiveStrengthWorkoutView: View {
             }
             if let focusId, let idx = orderedExercises.firstIndex(where: { $0.id == focusId }) {
                 currentExerciseIndex = idx
-                pagerDisplayIndexHost = idx
+                pagerDisplayIndexHost = pagerAnchorExerciseIndex(for: idx, lane: .host)
             }
         case .guest:
             for item in rows {
@@ -3591,7 +4062,7 @@ struct ActiveStrengthWorkoutView: View {
             }
             if let focusId, let idx = orderedGuestExercises.firstIndex(where: { $0.id == focusId }) {
                 guestCurrentExerciseIndex = idx
-                pagerDisplayIndexGuest = idx
+                pagerDisplayIndexGuest = pagerAnchorExerciseIndex(for: idx, lane: .guest)
             }
         case .guest2:
             for item in rows {
@@ -3602,7 +4073,7 @@ struct ActiveStrengthWorkoutView: View {
             }
             if let focusId, let idx = orderedGuest2Exercises.firstIndex(where: { $0.id == focusId }) {
                 g2CurrentExerciseIndex = idx
-                pagerDisplayIndexGuest2 = idx
+                pagerDisplayIndexGuest2 = pagerAnchorExerciseIndex(for: idx, lane: .guest2)
             }
         }
         if isDualMode {
@@ -3658,7 +4129,7 @@ struct ActiveStrengthWorkoutView: View {
             deleteExerciseCandidate = nil
             showToast("Deleted exercise")
         } catch {
-            self.error = error.localizedDescription
+            showToast(error.localizedDescription)
         }
 
         isPersistingActiveExerciseEdit = false
@@ -3675,19 +4146,19 @@ struct ActiveStrengthWorkoutView: View {
             exercises = renumberExerciseRows(exercises)
             let n = orderedExercises.count
             currentExerciseIndex = n > 0 ? min(oldIndex, n - 1) : 0
-            pagerDisplayIndexHost = currentExerciseIndex
+            pagerDisplayIndexHost = pagerAnchorExerciseIndex(for: currentExerciseIndex, lane: .host)
         case .guest:
             gExercises.removeAll { $0.id == ex.id }
             gExercises = renumberExerciseRows(gExercises)
             let n = orderedGuestExercises.count
             guestCurrentExerciseIndex = n > 0 ? min(oldIndex, n - 1) : 0
-            pagerDisplayIndexGuest = guestCurrentExerciseIndex
+            pagerDisplayIndexGuest = pagerAnchorExerciseIndex(for: guestCurrentExerciseIndex, lane: .guest)
         case .guest2:
             g2Exercises.removeAll { $0.id == ex.id }
             g2Exercises = renumberExerciseRows(g2Exercises)
             let n = orderedGuest2Exercises.count
             g2CurrentExerciseIndex = n > 0 ? min(oldIndex, n - 1) : 0
-            pagerDisplayIndexGuest2 = g2CurrentExerciseIndex
+            pagerDisplayIndexGuest2 = pagerAnchorExerciseIndex(for: g2CurrentExerciseIndex, lane: .guest2)
         }
 
         if isDualMode {
@@ -3852,16 +4323,17 @@ struct ActiveStrengthWorkoutView: View {
         }
 
         if indexChanged {
+            let pagerAnchor = pagerAnchorExerciseIndex(for: index, lane: lane)
             switch lane {
             case .host:
                 currentExerciseIndex = index
-                pagerDisplayIndexHost = index
+                pagerDisplayIndexHost = pagerAnchor
             case .guest:
                 guestCurrentExerciseIndex = index
-                pagerDisplayIndexGuest = index
+                pagerDisplayIndexGuest = pagerAnchor
             case .guest2:
                 g2CurrentExerciseIndex = index
-                pagerDisplayIndexGuest2 = index
+                pagerDisplayIndexGuest2 = pagerAnchor
             }
         }
 
@@ -4535,10 +5007,16 @@ struct ActiveStrengthWorkoutView: View {
             let peekHeight: CGFloat = 78
             let peekGap: CGFloat = 12
             let usableForCluster = H - minClusterTop
-            let cardHeightIfLoose = max(usableForCluster * 0.66, 220)
+            let isSupersetPager = pagerCurrentDisplayGroup?.isSuperset == true
+            let clusterFill: CGFloat = isSupersetPager ? 0.72 : 0.66
+            let minCardHeight: CGFloat = isSupersetPager ? 264 : 220
+            let cardHeightBase = max(usableForCluster * clusterFill, minCardHeight)
+            let cardHeightIfLoose = isSupersetPager
+                ? min(cardHeightBase * 1.2, usableForCluster - 2 * (peekHeight + peekGap))
+                : cardHeightBase
             let neededIfLoose = cardHeightIfLoose + 2 * (peekHeight + peekGap)
             let cardHeight: CGFloat = neededIfLoose > usableForCluster
-                ? max(usableForCluster - 2 * (peekHeight + peekGap), 200)
+                ? max(usableForCluster - 2 * (peekHeight + peekGap), isSupersetPager ? 240 : 200)
                 : cardHeightIfLoose
             let needed = cardHeight + 2 * (peekHeight + peekGap)
 
@@ -4602,7 +5080,12 @@ struct ActiveStrengthWorkoutView: View {
                     .allowsHitTesting(false)
             }
 
-            if let cur = pagerCurrentExercise {
+            if let group = pagerCurrentDisplayGroup, group.isSuperset {
+                supersetExerciseContent(group, isActive: true, lane: mainDisplayLane)
+                    .frame(height: cardHeight)
+                    .offset(y: dragOffsetY)
+                    .allowsHitTesting(true)
+            } else if let cur = pagerCurrentExercise {
                 exerciseContent(cur, isActive: true, lane: mainDisplayLane)
                     .frame(height: cardHeight)
                     .offset(y: dragOffsetY)
@@ -4948,11 +5431,33 @@ struct ActiveStrengthWorkoutView: View {
                 }
             }
         } catch {
-            await MainActor.run {
-                self.isSaving = false
-                self.error = error.localizedDescription
+            await MainActor.run { self.isSaving = false }
+            if WorkoutStartSync.isRetriable(error) {
+                WorkoutFinishSync.enqueue(
+                    workoutId: workoutId,
+                    endedAtIso: endedAtIso,
+                    pausedSec: pausedSec,
+                    exercises: hostExercises,
+                    linked: linked
+                )
+                await MainActor.run {
+                    completeFinishLocallyAfterOfflineEnqueue()
+                }
+            } else {
+                await MainActor.run {
+                    showToast(error.localizedDescription)
+                }
             }
         }
+    }
+
+    @MainActor
+    private func completeFinishLocallyAfterOfflineEnqueue() {
+        for wid in [workoutId, dualGuestWorkoutId, dualGuest2WorkoutId].compactMap({ $0 }) {
+            NotificationCenter.default.post(name: .workoutDidChange, object: wid)
+        }
+        showToast(String(localized: "Workout saved on device — will sync when online"))
+        dismiss()
     }
 
     private func saveAndFinishWorkout() async {
@@ -5540,9 +6045,75 @@ struct ActiveStrengthWorkoutView: View {
         return (exRows, byEx)
     }
 
+    private var startSyncBannerVisible: Bool {
+        switch startSyncStatus {
+        case .pending, .syncing, .willRetry:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private var startSyncBannerText: String {
+        switch startSyncStatus {
+        case .pending, .syncing:
+            return String(localized: "Syncing start…")
+        case .willRetry:
+            return String(localized: "Start saved locally — will sync when online")
+        default:
+            return ""
+        }
+    }
+
+    @MainActor
+    private func hydrateFromProgramCache() -> Bool {
+        guard let entry = WorkoutProgramCache.entry(for: workoutId), !entry.exercises.isEmpty else {
+            return false
+        }
+        exercises = entry.exercises.map {
+            ExerciseRow(
+                id: $0.id,
+                exercise_id: $0.exercise_id,
+                order_index: $0.order_index,
+                superset_group_id: $0.superset_group_id,
+                superset_position: $0.superset_position,
+                notes: $0.notes,
+                custom_name: $0.custom_name,
+                target_sets: nil,
+                exercise_name: $0.exercise_name
+            )
+        }
+        setsByExercise = entry.setsByExerciseId.mapValues { rows in
+            rows.map { s in
+                SetRow(
+                    id: s.id,
+                    workout_exercise_id: s.workout_exercise_id,
+                    set_number: s.set_number,
+                    order_index: s.order_index,
+                    reps: s.reps,
+                    weight_kg: s.weight_kg,
+                    rpe: s.rpe,
+                    rest_sec: s.rest_sec,
+                    weight_segments: nil,
+                    configId: s.id,
+                    segmentsInRow: 1
+                )
+            }
+        }
+        error = nil
+        return true
+    }
+
     private func load() async {
-        loading = true
-        defer { loading = false }
+        let hydratedFromCache = await MainActor.run { hydrateFromProgramCache() }
+        if hydratedFromCache {
+            await MainActor.run { loading = false }
+        } else {
+            await MainActor.run { loading = true }
+        }
+        defer {
+            Task { @MainActor in loading = false }
+        }
 
         #if DEBUG
         dualStrengthDebug("load() start guestWid=\(dualGuestWorkoutId.map(String.init) ?? "nil")")
@@ -5617,7 +6188,9 @@ struct ActiveStrengthWorkoutView: View {
         } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
             await MainActor.run {
-                self.error = error.localizedDescription
+                if exercises.isEmpty {
+                    self.error = error.localizedDescription
+                }
             }
         }
     }

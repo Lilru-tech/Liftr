@@ -20,6 +20,7 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -75,7 +76,9 @@ import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
+import com.lilru.liftr.ui.AppSnackbar
 import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.workout.WorkoutStartSync
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
 import com.lilru.liftr.ui.add.StrengthSegmentPayload
@@ -141,6 +144,16 @@ fun ActiveStrengthWorkoutScreen(
     LaunchedEffect(Unit) {
         showNavHint = !LiftrPreferences.activeStrengthNavHintSeen(appCtx)
         isPremium = LiftrPreferences.isPremium(appCtx)
+        vm.updateStartSyncStatus(WorkoutStartSync.status(workoutId))
+    }
+    val syncListener: (Int, WorkoutStartSync.Status) -> Unit = remember(workoutId) {
+        { wid, status ->
+            if (wid == workoutId) vm.updateStartSyncStatus(status)
+        }
+    }
+    DisposableEffect(workoutId, syncListener) {
+        WorkoutStartSync.addListener(syncListener)
+        onDispose { WorkoutStartSync.removeListener(syncListener) }
     }
     val ongoingSubtitle = stringResource(R.string.active_strength_title)
     DisposableEffect(ongoingSubtitle, workoutId) {
@@ -235,7 +248,7 @@ fun ActiveStrengthWorkoutScreen(
             return@LaunchedEffect
         }
         if (ui.currentExerciseIndex != lastSyncedHostWorkIndex) {
-            hostPagerDisplayIndex = ui.currentExerciseIndex
+            hostPagerDisplayIndex = pagerAnchorExerciseIndex(ui.currentExerciseIndex, ui.exercises)
             lastSyncedHostWorkIndex = ui.currentExerciseIndex
         }
     }
@@ -245,8 +258,20 @@ fun ActiveStrengthWorkoutScreen(
     } else {
         hostPagerDisplayIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
     }
+    val isGuestLaneActive = activeLane == 1 && ui.guestExercises.isNotEmpty()
+    val laneDisplayGroups = strengthDisplayGroups(laneExercises)
+    val laneGroupIndex = displayGroupIndexForExerciseIndex(laneExerciseIndex, laneExercises) ?: 0
+    val currentDisplayGroup = laneDisplayGroups.getOrNull(laneGroupIndex)
+    val isSupersetCard = currentDisplayGroup?.isSuperset == true && !isGuestLaneActive
     val laneProgressMap = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) guestSetProgress else ui.currentSetIndexByExerciseId
-    val ex = laneExercises.getOrNull(laneExerciseIndex)
+    val workExerciseIndex = if (isGuestLaneActive) {
+        guestCurrentExerciseIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
+    } else {
+        ui.currentExerciseIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
+    }
+    val ex = laneExercises.getOrNull(
+        if (isSupersetCard) workExerciseIndex else laneExerciseIndex
+    )
     val currentSetIndex = ex?.let { laneProgressMap[it.workoutExerciseId] ?: 0 } ?: 0
     val set = ex?.sets?.getOrNull(currentSetIndex)
     var editingExpandedIndex by remember { mutableStateOf<Int?>(null) }
@@ -278,7 +303,6 @@ fun ActiveStrengthWorkoutScreen(
     } else {
         ui.restSecondsLeft
     }
-    val isGuestLaneActive = activeLane == 1 && ui.guestExercises.isNotEmpty()
     val hostPagerPreviewWeId = ui.exercises.getOrNull(
         hostPagerDisplayIndex.coerceIn(0, ui.exercises.lastIndex.coerceAtLeast(0))
     )?.workoutExerciseId
@@ -288,7 +312,7 @@ fun ActiveStrengthWorkoutScreen(
     )?.workoutExerciseId
     val guestBubbleEmphasisWeId = guestNavEmphasisLockWeId ?: guestPagerPreviewWeId
     val allSetsDoneCurrent = ex != null && currentSetIndex >= ex.sets.size
-    val isLastExercise = laneExerciseIndex == laneExercises.lastIndex
+    val isLastExercise = laneGroupIndex == laneDisplayGroups.lastIndex
     val allExercisesDone = laneExercises.isNotEmpty() && laneExercises.all { line ->
         (laneProgressMap[line.workoutExerciseId] ?: 0) >= line.sets.size
     }
@@ -368,6 +392,30 @@ fun ActiveStrengthWorkoutScreen(
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
+                    when (ui.startSyncStatus) {
+                        WorkoutStartSync.Status.PENDING,
+                        WorkoutStartSync.Status.SYNCING -> {
+                            Text(
+                                text = stringResource(R.string.active_workout_syncing_start),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            )
+                        }
+                        WorkoutStartSync.Status.WILL_RETRY -> {
+                            Text(
+                                text = stringResource(R.string.active_workout_sync_will_retry),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            )
+                        }
+                        else -> Unit
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -556,7 +604,18 @@ fun ActiveStrengthWorkoutScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         val isSolo = ui.guestExercises.isEmpty()
-                        laneExercises.forEachIndexed { index, bubbleEx ->
+                        val bubbleGroups = if (isGuestLaneActive) {
+                            laneExercises.mapIndexed { i, _ ->
+                                StrengthDisplayGroup("exercise-$i", null, listOf(i))
+                            }
+                        } else {
+                            strengthDisplayGroups(laneExercises)
+                        }
+                        bubbleGroups.forEach { bubbleGroup ->
+                            val bubbleIndices = bubbleGroup.exerciseIndices
+                            val bubbleGroupContent: @Composable () -> Unit = {
+                                bubbleIndices.forEach { index ->
+                                    val bubbleEx = laneExercises[index]
                             val total = bubbleEx.sets.size.coerceAtLeast(1)
                             val done = (laneProgressMap[bubbleEx.workoutExerciseId] ?: 0).coerceIn(0, total)
                             val progress = done.toFloat() / total.toFloat()
@@ -626,6 +685,7 @@ fun ActiveStrengthWorkoutScreen(
                                         if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
                                             guestCurrentExerciseIndex = index
                                         } else {
+                                            hostPagerDisplayIndex = pagerAnchorExerciseIndex(index, ui.exercises)
                                             vm.goToExercise(index)
                                         }
                                     }
@@ -670,6 +730,22 @@ fun ActiveStrengthWorkoutScreen(
                                     )
                                 }
                             }
+                                }
+                            }
+                            if (bubbleGroup.isSuperset) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = 4.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color.White.copy(alpha = 0.35f))
+                                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    bubbleGroupContent()
+                                }
+                            } else {
+                                bubbleGroupContent()
+                            }
                         }
                     }
 
@@ -678,8 +754,12 @@ fun ActiveStrengthWorkoutScreen(
                             .weight(1f, fill = true)
                             .padding(top = 14.dp)
                     ) {
-                        val prevEx = laneExercises.getOrNull(laneExerciseIndex - 1)
-                        val nextEx = laneExercises.getOrNull(laneExerciseIndex + 1)
+                        val prevEx = laneDisplayGroups.getOrNull(laneGroupIndex - 1)
+                            ?.exerciseIndices?.firstOrNull()
+                            ?.let { laneExercises.getOrNull(it) }
+                        val nextEx = laneDisplayGroups.getOrNull(laneGroupIndex + 1)
+                            ?.exerciseIndices?.firstOrNull()
+                            ?.let { laneExercises.getOrNull(it) }
                         if (prevEx != null) {
                             Card(
                                 modifier = Modifier
@@ -716,7 +796,8 @@ fun ActiveStrengthWorkoutScreen(
                                 .align(Alignment.Center)
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp)
-                                .pointerInput(laneExerciseIndex, currentSetIndex, activeLane, hostPagerDisplayIndex) {
+                                .pointerInput(laneExerciseIndex, currentSetIndex, activeLane, hostPagerDisplayIndex, isSupersetCard) {
+                                    if (isSupersetCard) return@pointerInput
                                     var totalDrag = 0f
                                     detectVerticalDragGestures(
                                         onVerticalDrag = { _, dragAmount -> totalDrag += dragAmount },
@@ -726,11 +807,18 @@ fun ActiveStrengthWorkoutScreen(
                                                     if (totalDrag < 0f && guestCurrentExerciseIndex < laneExercises.lastIndex) guestCurrentExerciseIndex++
                                                     if (totalDrag > 0f && guestCurrentExerciseIndex > 0) guestCurrentExerciseIndex--
                                                 } else {
-                                                    if (totalDrag < 0f && hostPagerDisplayIndex < laneExercises.lastIndex) {
-                                                        hostPagerDisplayIndex++
+                                                    val gi = laneGroupIndex
+                                                    if (totalDrag < 0f && gi + 1 < laneDisplayGroups.size) {
+                                                        laneDisplayGroups[gi + 1].exerciseIndices.firstOrNull()?.let {
+                                                            hostPagerDisplayIndex = it
+                                                            vm.goToExercise(it)
+                                                        }
                                                     }
-                                                    if (totalDrag > 0f && hostPagerDisplayIndex > 0) {
-                                                        hostPagerDisplayIndex--
+                                                    if (totalDrag > 0f && gi > 0) {
+                                                        laneDisplayGroups[gi - 1].exerciseIndices.firstOrNull()?.let {
+                                                            hostPagerDisplayIndex = it
+                                                            vm.goToExercise(it)
+                                                        }
                                                     }
                                                 }
                                             }
@@ -739,7 +827,44 @@ fun ActiveStrengthWorkoutScreen(
                                 },
                             colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.52f))
                         ) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(
+                                Modifier.padding(if (isSupersetCard) 18.dp else 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (isSupersetCard && currentDisplayGroup != null) {
+                                    ActiveStrengthSupersetCard(
+                                        group = currentDisplayGroup,
+                                        exercises = laneExercises,
+                                        activeExerciseIndex = workExerciseIndex,
+                                        setProgress = laneProgressMap,
+                                        completedSetsByExerciseId = ui.completedSetsByExerciseId,
+                                        restSecondsByExerciseId = if (isGuestLaneActive) {
+                                            guestRestSecByExerciseId
+                                        } else {
+                                            ui.restSecondsLeftByExerciseId
+                                        },
+                                        finishing = ui.finishing,
+                                        onMemberTap = { idx ->
+                                            hostPagerDisplayIndex = pagerAnchorExerciseIndex(idx, ui.exercises)
+                                            vm.goToExercise(idx)
+                                        },
+                                        onSetDone = { vm.onSetDone() },
+                                        onSkipRest = {
+                                            if (isGuestLaneActive) {
+                                                ex?.workoutExerciseId?.let { wid ->
+                                                    guestRestEndMsByExerciseId =
+                                                        guestRestEndMsByExerciseId.filterKeys { it != wid }
+                                                    guestRestPlannedTotalSecByExerciseId =
+                                                        guestRestPlannedTotalSecByExerciseId.filterKeys { it != wid }
+                                                }
+                                            } else {
+                                                vm.skipRest()
+                                            }
+                                        },
+                                        onNextExercise = { vm.goToNextExercise() },
+                                        showNextExercise = !isLastExercise
+                                    )
+                                } else {
                                 Text(
                                     text = ex?.displayName.orEmpty(),
                                     style = MaterialTheme.typography.headlineSmall,
@@ -1015,8 +1140,18 @@ fun ActiveStrengthWorkoutScreen(
                                             enabled = set != null && !ui.finishing,
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            val rest = set?.restSec?.takeIf { it > 0 }
-                                            Text(if (rest != null) "Rest ${rest}s" else stringResource(R.string.active_strength_set_done))
+                                            val label = if (set != null && ex != null) {
+                                                primarySetActionLabel(
+                                                    ex = ex,
+                                                    exercises = ui.exercises,
+                                                    setIndex = currentSetIndex,
+                                                    setProgress = ui.currentSetIndexByExerciseId,
+                                                    currentSet = set
+                                                )
+                                            } else {
+                                                stringResource(R.string.active_strength_set_done)
+                                            }
+                                            Text(label)
                                         }
                                     }
                                 }
@@ -1076,8 +1211,9 @@ fun ActiveStrengthWorkoutScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("Next exercise")
+                                        Text(stringResource(R.string.active_strength_next_exercise))
                                     }
+                                }
                                 }
                             }
                         }
@@ -1085,7 +1221,16 @@ fun ActiveStrengthWorkoutScreen(
 
                     if (isLastExercise) {
                         Button(
-                            onClick = { vm.finishWorkout(onClose) },
+                            onClick = {
+                                vm.finishWorkout { offlineQueued ->
+                                    if (offlineQueued) {
+                                        AppSnackbar.showSuccess(
+                                            startCtx.getString(R.string.active_workout_finish_saved_offline)
+                                        )
+                                    }
+                                    onClose()
+                                }
+                            },
                             enabled = !ui.finishing,
                             modifier = Modifier
                                 .fillMaxWidth()

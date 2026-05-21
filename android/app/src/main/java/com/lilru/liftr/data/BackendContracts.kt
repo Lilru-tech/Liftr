@@ -125,6 +125,7 @@ object BackendContracts {
         const val GET_USER_LEVEL = "get_user_level"
         const val GET_WEEKLY_GOAL_RECOMMENDATION = "get_weekly_goal_recommendation"
         const val LIST_COMPARABLE_WORKOUTS_V1 = "list_comparable_workouts_v1"
+        const val LIST_COMPARE_AVERAGE_POOL_V1 = "list_compare_average_pool_v1"
         const val PLAN_STRENGTH_SQUAD_PROGRAMS = "plan_strength_squad_programs"
         const val PRECHECK_SIGNUP = "precheck_signup"
         const val RECOMPUTE_WEEKLY_GOAL_RESULTS = "recompute_weekly_goal_results"

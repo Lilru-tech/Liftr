@@ -61,7 +61,7 @@ private data class CardioBaselineRow(
 )
 
 data class CompareCandidateLoadResult(
-    val candidates: List<CompareWorkoutCandidate>,
+    val picker: ComparePickerState,
     val defaultOtherId: Int?
 )
 
@@ -90,18 +90,30 @@ object CompareCandidateLoader {
         }
         val res = supabase.postgrest.rpc(BackendContracts.Rpc.LIST_COMPARABLE_WORKOUTS_V1, params) { }
         val wires = decodeFlexibleList<CompareCandidateWire>(res.data)
-        if (wires.isEmpty()) {
-            return CompareCandidateLoadResult(emptyList(), null)
+        val candidates = if (wires.isEmpty()) {
+            emptyList()
+        } else {
+            val enriched = enrichWithOwnerUsernames(supabase, wires).map { it.toCandidate() }
+            sortForPicker(
+                supabase = supabase,
+                baselineId = currentWorkoutId,
+                kind = workout.kind,
+                rows = enriched
+            )
         }
-        val candidates = enrichWithOwnerUsernames(supabase, wires).map { it.toCandidate() }
-        val sorted = sortForPicker(
+        val typeLabel = CompareAveragePoolLoader.typeLabelForWorkout(workout)
+        val (mine, global) = CompareAveragePoolLoader.loadPickerAverages(
             supabase = supabase,
-            baselineId = currentWorkoutId,
-            kind = workout.kind,
-            rows = candidates
+            baselineWorkoutId = currentWorkoutId,
+            typeLabel = typeLabel
         )
-        val def = sorted.firstOrNull()?.id
-        return CompareCandidateLoadResult(candidates = sorted, defaultOtherId = def)
+        val picker = ComparePickerState(
+            sessions = candidates,
+            myAverage = mine,
+            globalAverage = global
+        )
+        val def = candidates.firstOrNull()?.id
+        return CompareCandidateLoadResult(picker = picker, defaultOtherId = def)
     }
 
     private suspend fun enrichWithOwnerUsernames(

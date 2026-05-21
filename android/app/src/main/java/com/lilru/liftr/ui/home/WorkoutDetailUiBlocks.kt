@@ -39,6 +39,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.lilru.liftr.R
+import com.lilru.liftr.domain.strengthSetRowsWithMultiplicities
+import com.lilru.liftr.domain.strengthSetSummaryWithMultiplier
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
@@ -309,7 +311,15 @@ fun WorkoutDetailStrengthReadonlySection(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
-                        ex.sets.sortedBy { it.setNumber }.forEach { s ->
+                        val paired = strengthSetRowsWithMultiplicities(
+                            rows = ex.sets,
+                            orderIndex = { it.orderIndex },
+                            id = { it.rowId },
+                            setNumber = { it.setNumber }
+                        )
+                        paired.forEach { item ->
+                            val s = item.row
+                            val mult = item.multiplier
                             val dropSummary = if (s.weightSegments.size >= 2) {
                                 s.weightSegments.joinToString(" → ") { seg ->
                                     "${seg.repsText.trim()}×${seg.weightText.trim().ifBlank { "0" }}"
@@ -317,25 +327,29 @@ fun WorkoutDetailStrengthReadonlySection(
                             } else {
                                 null
                             }
+                            val summaryBody = if (dropSummary != null) {
+                                dropSummary
+                            } else {
+                                buildList {
+                                    add("${s.reps ?: 0} reps")
+                                    add("${String.format(Locale.US, "%.1f kg", s.weightKg ?: 0.0)}")
+                                    s.rpe?.let { r ->
+                                        add("RPE ${String.format(Locale.US, "%.1f", r)}")
+                                    }
+                                    s.restSec?.let { r -> add("Rest ${r}s") }
+                                }.joinToString(" • ")
+                            }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(
-                                    "#${s.setNumber}",
+                                    "#${item.lineOrdinal}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(end = 4.dp)
                                 )
-                                if (dropSummary != null) {
-                                    Text(dropSummary, style = MaterialTheme.typography.bodySmall)
-                                } else {
-                                    Text("${s.reps ?: 0} reps", style = MaterialTheme.typography.bodySmall)
-                                    Text("• ${String.format(Locale.US, "%.1f kg", s.weightKg ?: 0.0)}", style = MaterialTheme.typography.bodySmall)
-                                }
-                                s.rpe?.let { r ->
-                                    Text("• RPE ${String.format(Locale.US, "%.1f", r)}", style = MaterialTheme.typography.bodySmall)
-                                }
-                                s.restSec?.let { r ->
-                                    Text("• Rest ${r}s", style = MaterialTheme.typography.bodySmall)
-                                }
+                                Text(
+                                    strengthSetSummaryWithMultiplier(summaryBody, mult),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
                         }
                     }

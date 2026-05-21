@@ -108,11 +108,13 @@ Vistas:
 - `get_user_level`
 - `get_weekly_goal_recommendation`
 - `list_comparable_workouts_v1`
+- `list_compare_average_pool_v1` (`p_baseline_workout`, `p_scope` `mine`|`global`, `p_limit`) → `workout_id`, `started_at` for compare-average pools (cardio activity / sport / strength exact primary-muscle set); see `Liftr/supabase/migrations/20260521120000_compare_average_pool_v1.sql`
 - `plan_strength_squad_programs`
 - `precheck_signup`
 - `recompute_weekly_goal_results`
 - `record_search`
 - `review_competition_workout`
+- `start_workout_v1` (`p_workout_id`, `p_started_at` opcional ISO8601) → JSON del workout con `started_at` y `ended_at` limpiado; owner o participante; idempotente ante reintentos
 - `submit_workout_to_competition`
 - `trending_search_queries_24h`
 - `update_sport_workout_v2`
@@ -181,6 +183,19 @@ Añadir filas a `achievements` o cambiar triggers sin actualizar `check_and_unlo
 Implementadas en:
 
 - `android/app/src/main/java/com/lilru/liftr/auth/AuthViewModel.kt`
+
+## Inicio de entreno en vivo (`start_workout_v1`)
+
+- iOS y Android marcan `started_at` en el cliente al pulsar **Start** y abren la pantalla activa sin esperar la red.
+- El RPC se encola y reintenta (≈0.5s / 2s / 5s) hasta éxito o error no recuperable; `p_started_at` puede llegar unos segundos antes que el ack del servidor.
+- El programa de fuerza (ejercicios + series) se cachea al cargar el detalle y rehidrata la pantalla activa si la segunda lectura falla.
+- Dual/grupo: si `create_linked_strength_workout_copy` falla, el cliente ofrece **Start solo** / **Start offline** además de reintentar.
+
+## Fin de entreno en vivo (`finish_strength_workout_v1` / persistencia Android)
+
+- iOS: al pulsar **Finish workout**, si la red falla de forma recuperable, el cliente encola el payload de `finish_strength_workout_v1`, muestra un toast y cierra la pantalla activa (sin pantalla de error bloqueante).
+- Android: misma semántica con cola local (`WorkoutFinishSync`) que reejecuta la persistencia de series + cierre del workout cuando vuelve la conexión.
+- Los errores de **carga** del programa siguen bloqueando solo cuando no hay caché local; los errores de **finish** no reemplazan la UI del entreno en curso.
 
 ## Política de cambios de contrato
 

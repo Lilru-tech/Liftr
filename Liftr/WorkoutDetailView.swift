@@ -91,8 +91,18 @@ struct WorkoutDetailView: View {
     @State private var shareWorkoutChatToken: ShareWorkoutChatToken?
     @State private var showErrorAlert = false
     @State private var alertMessage = ""
+    @State private var showStartFailureAlert = false
+    @State private var startFailureOffersSolo = false
+    private enum PendingStartFailure {
+        case dualGuest(UUID, String?)
+        case trio(ParticipantRow, ParticipantRow)
+    }
+    @State private var pendingStartFailure: PendingStartFailure?
     @State private var compareCandidateId: Int? = nil
     @State private var compareCandidates: [CompareCandidate] = []
+    @State private var comparePicker = ComparePickerState()
+    @State private var compareAverageScope: CompareAverageScope? = nil
+    @State private var compareAverageRightLabel: String? = nil
     @State private var showComparePicker = false
     @State private var compareReady = false
     @State private var compareComputing = false
@@ -181,6 +191,24 @@ struct WorkoutDetailView: View {
         } message: {
             Text(alertMessage.isEmpty ? "Unknown error" : alertMessage)
         }
+        .alert("Could not start workout", isPresented: $showStartFailureAlert) {
+            if startFailureOffersSolo {
+                Button("Start solo") {
+                    Task { await resolveStartFailure(startSolo: true) }
+                }
+            }
+            Button("Retry") {
+                Task { await resolveStartFailure(retry: true) }
+            }
+            Button("Start offline") {
+                Task { await resolveStartFailure(startOffline: true) }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingStartFailure = nil
+            }
+        } message: {
+            Text(alertMessage.isEmpty ? "Unknown error" : alertMessage)
+        }
         .sheet(isPresented: $showLikesSheet) { LikersSheet(likers: likers)
                 .onAppear { Task { await loadLikers() } }
                 .presentationDetents(Set([.medium, .large]))
@@ -204,8 +232,8 @@ struct WorkoutDetailView: View {
             .gradientBG()
         }
         .sheet(isPresented: $showComparePicker) {
-            CompareCandidatePicker(items: compareCandidates) { chosen in
-                compareCandidateId = chosen
+            CompareCandidatePicker(picker: comparePicker) { target, rightLabel in
+                applyCompareTarget(target, rightLabel: rightLabel)
                 showCompare = true
             }
             .gradientBG()
@@ -213,11 +241,15 @@ struct WorkoutDetailView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showCompare) {
-            if let otherId = compareCandidateId {
-                CompareWorkoutsView(currentWorkoutId: workoutId, myOtherWorkoutId: otherId)
-                    .gradientBG()
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
+            if let target = resolvedCompareTarget() {
+                CompareWorkoutsView(
+                    currentWorkoutId: workoutId,
+                    other: target,
+                    averageRightLabel: compareAverageRightLabel
+                )
+                .gradientBG()
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
             }
         }
         .sheet(isPresented: $showDualStartChoice) {
@@ -708,93 +740,161 @@ struct WorkoutDetailView: View {
         NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
     }
 
-    private func startPlannedWorkout(dualParticipantId: UUID?, dualGuestAvatar: String?) async {
-        do {
-            try await setWorkoutStartedNow()
+    private func applyLocalWorkoutStartedNow() {
+        let now = Date()
+        if let w = workout {
+            workout = WorkoutDetailRow(
+                id: w.id,
+                user_id: w.user_id,
+                kind: w.kind,
+                title: w.title,
+                notes: w.notes,
+                started_at: now,
+                ended_at: nil,
+                duration_min: w.duration_min,
+                paused_sec: w.paused_sec,
+                perceived_intensity: w.perceived_intensity,
+                state: w.state,
+                calories_kcal: w.calories_kcal
+            )
+        }
+        NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
+    }
 
-            if let pid = dualParticipantId, effectiveWorkoutKindForDual == "strength" {
-                try await ensureStrengthKindPersistedBeforeLinkedCopy()
-                let newWid = try await rpcCreateLinkedStrengthCopy(targetUserId: pid)
-                await MainActor.run {
-                    let gid = Int(newWid)
-                    dualGuestWorkoutIdForActive = gid
-                    dualGuest2WorkoutIdForActive = nil
-                    let hostURL = profile?.avatar_url
-                    switch effectiveWorkoutKindForDual {
-                    case "strength":
-                        activeStrengthPresentation = .dual(
-                            guestWorkoutId: gid,
-                            guestAvatarURL: dualGuestAvatar,
-                            hostAvatarURL: hostURL
-                        )
-                    case "cardio":
-                        showActiveCardio = true
-                    case "sport":
-                        showActiveSport = true
-                    default:
-                        break
-                    }
-                    #if DEBUG
-                    print(
-                        "[DualStrengthPresent] item=dual guestWid=\(gid) "
-                            + "guestAvLen=\(dualGuestAvatar?.count ?? 0) hostAvLen=\(hostURL?.count ?? 0) "
-                            + "profileNil=\(profile == nil)"
-                    )
-                    #endif
-                }
+    @MainActor
+    private func presentPlannedActive(
+        dualParticipantId: UUID?,
+        dualGuestAvatar: String?,
+        guestWorkoutId: Int? = nil,
+        guest2WorkoutId: Int? = nil,
+        guest2Avatar: String? = nil
+    ) {
+        dualGuestWorkoutIdForActive = guestWorkoutId
+        dualGuest2WorkoutIdForActive = guest2WorkoutId
+        let hostURL = profile?.avatar_url
+        switch effectiveWorkoutKindForDual {
+        case "strength":
+            if let g2 = guest2WorkoutId, let g1 = guestWorkoutId {
+                activeStrengthPresentation = .trio(
+                    guest1WorkoutId: g1,
+                    guest1AvatarURL: dualGuestAvatar,
+                    guest2WorkoutId: g2,
+                    guest2AvatarURL: guest2Avatar,
+                    hostAvatarURL: hostURL
+                )
+            } else if let gid = guestWorkoutId, dualParticipantId != nil {
+                activeStrengthPresentation = .dual(
+                    guestWorkoutId: gid,
+                    guestAvatarURL: dualGuestAvatar,
+                    hostAvatarURL: hostURL
+                )
             } else {
+                activeStrengthPresentation = .solo
+            }
+        case "cardio":
+            showActiveCardio = true
+        case "sport":
+            showActiveSport = true
+        default:
+            break
+        }
+    }
+
+    private func beginOptimisticServerStart() {
+        applyLocalWorkoutStartedNow()
+        _ = WorkoutStartSync.enqueueStart(workoutId: workoutId)
+    }
+
+    private func rpcCreateLinkedStrengthCopyWithRetries(targetUserId: UUID) async throws -> Int64 {
+        try await WorkoutStartSync.withRetries {
+            try await rpcCreateLinkedStrengthCopy(targetUserId: targetUserId)
+        }
+    }
+
+    private func startPlannedWorkout(dualParticipantId: UUID?, dualGuestAvatar: String?) async {
+        beginOptimisticServerStart()
+
+        if let pid = dualParticipantId, effectiveWorkoutKindForDual == "strength" {
+            do {
+                try await ensureStrengthKindPersistedBeforeLinkedCopy()
+                let newWid = try await rpcCreateLinkedStrengthCopyWithRetries(targetUserId: pid)
                 await MainActor.run {
-                    dualGuestWorkoutIdForActive = nil
-                    dualGuest2WorkoutIdForActive = nil
-                    switch effectiveWorkoutKindForDual {
-                    case "strength":
-                        activeStrengthPresentation = .solo
-                    case "cardio":
-                        showActiveCardio = true
-                    case "sport":
-                        showActiveSport = true
-                    default:
-                        break
-                    }
+                    presentPlannedActive(
+                        dualParticipantId: pid,
+                        dualGuestAvatar: dualGuestAvatar,
+                        guestWorkoutId: Int(newWid)
+                    )
+                }
+            } catch {
+                let detail = Self.describeSupabaseError(error)
+                print("[DualStart][ERROR] workoutId=\(workoutId) :: \(detail)")
+                await MainActor.run {
+                    pendingStartFailure = .dualGuest(pid, dualGuestAvatar)
+                    startFailureOffersSolo = true
+                    alertMessage = WorkoutStartSync.userFacingMessage(for: error)
+                    showStartFailureAlert = true
                 }
             }
-        } catch {
-            let detail = Self.describeSupabaseError(error)
-            print("[DualStart][ERROR] workoutId=\(workoutId) dual=\(dualParticipantId != nil) :: \(detail)")
-            await MainActor.run {
-                alertMessage = error.localizedDescription
-                showErrorAlert = true
-            }
+            return
+        }
+
+        await MainActor.run {
+            presentPlannedActive(dualParticipantId: nil, dualGuestAvatar: nil)
         }
     }
 
     private func startPlannedTrioStrength(guestA: ParticipantRow, guestB: ParticipantRow) async {
+        beginOptimisticServerStart()
         do {
-            try await setWorkoutStartedNow()
             try await ensureStrengthKindPersistedBeforeLinkedCopy()
-            let w1 = try await rpcCreateLinkedStrengthCopy(targetUserId: guestA.user_id)
-            let w2 = try await rpcCreateLinkedStrengthCopy(targetUserId: guestB.user_id)
+            let w1 = try await rpcCreateLinkedStrengthCopyWithRetries(targetUserId: guestA.user_id)
+            let w2 = try await rpcCreateLinkedStrengthCopyWithRetries(targetUserId: guestB.user_id)
             await MainActor.run {
-                let id1 = Int(w1)
-                let id2 = Int(w2)
-                dualGuestWorkoutIdForActive = id1
-                dualGuest2WorkoutIdForActive = id2
-                let hostURL = profile?.avatar_url
-                activeStrengthPresentation = .trio(
-                    guest1WorkoutId: id1,
-                    guest1AvatarURL: guestA.avatar_url,
-                    guest2WorkoutId: id2,
-                    guest2AvatarURL: guestB.avatar_url,
-                    hostAvatarURL: hostURL
+                presentPlannedActive(
+                    dualParticipantId: guestA.user_id,
+                    dualGuestAvatar: guestA.avatar_url,
+                    guestWorkoutId: Int(w1),
+                    guest2WorkoutId: Int(w2),
+                    guest2Avatar: guestB.avatar_url
                 )
             }
         } catch {
             let detail = Self.describeSupabaseError(error)
             print("[TrioStart][ERROR] workoutId=\(workoutId) :: \(detail)")
             await MainActor.run {
-                alertMessage = error.localizedDescription
-                showErrorAlert = true
+                pendingStartFailure = .trio(guestA, guestB)
+                startFailureOffersSolo = true
+                alertMessage = WorkoutStartSync.userFacingMessage(for: error)
+                showStartFailureAlert = true
             }
+        }
+    }
+
+    private func resolveStartFailure(
+        retry: Bool = false,
+        startOffline: Bool = false,
+        startSolo: Bool = false
+    ) async {
+        let failure = pendingStartFailure
+        await MainActor.run {
+            showStartFailureAlert = false
+            pendingStartFailure = nil
+            startFailureOffersSolo = false
+        }
+
+        if startOffline || startSolo {
+            await MainActor.run {
+                presentPlannedActive(dualParticipantId: nil, dualGuestAvatar: nil)
+            }
+            return
+        }
+
+        guard retry, let failure else { return }
+        switch failure {
+        case .dualGuest(let pid, let avatar):
+            await startPlannedWorkout(dualParticipantId: pid, dualGuestAvatar: avatar)
+        case .trio(let a, let b):
+            await startPlannedTrioStrength(guestA: a, guestB: b)
         }
     }
 
@@ -952,11 +1052,11 @@ struct WorkoutDetailView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     if compareReady, workout?.state != "planned" {
-                        if compareCandidates.count > 1 {
+                        if shouldShowComparePicker(comparePicker) {
                             Button("Compare…") { showComparePicker = true }
-                        } else if let only = (compareCandidates.first?.id ?? compareCandidateId) {
+                        } else if let only = singleCompareTarget(comparePicker) {
                             Button("Compare") {
-                                compareCandidateId = only
+                                applyCompareTarget(only, rightLabel: nil)
                                 showCompare = true
                             }
                         }
@@ -2040,10 +2140,24 @@ struct WorkoutDetailView: View {
                 baselineWorkoutId: workoutId,
                 kind: workout?.kind ?? ""
             )
+            let typeLabel: String = {
+                guard let w = workout else { return "Workout" }
+                return CompareAveragePoolLoader.typeLabel(for: w)
+            }()
+            let (mine, global) = await CompareAveragePoolLoader.loadPickerAverages(
+                baselineWorkoutId: workoutId,
+                typeLabel: typeLabel
+            )
+            let picker = ComparePickerState(
+                sessions: rows,
+                myAverage: mine,
+                globalAverage: global
+            )
             await MainActor.run {
                 compareCandidates = rows
+                comparePicker = picker
                 compareCandidateId = rows.first?.id
-                compareReady = !rows.isEmpty
+                compareReady = picker.hasAnyOption
             }
         } catch {
             await MainActor.run {
@@ -2315,7 +2429,7 @@ private struct StrengthDetailBlock: View {
     @State private var error: String?
     
     var body: some View {
-        DetailSectionCard(title: "Strength", subtitle: strengthSubtitle) {
+        DetailSectionCard(title: "Strength", subtitle: nil) {
             if loading && exercises.isEmpty {
                 ProgressView()
                     .frame(maxWidth: .infinity)
@@ -2354,13 +2468,15 @@ private struct StrengthDetailBlock: View {
         setsByExercise.values.flatMap { $0 }
     }
 
-    private var strengthSubtitle: String? {
-        guard !exercises.isEmpty else { return nil }
-        let setCount = allSets.count
-        if setCount > 0 {
-            return "\(exercises.count) exercises · \(setCount) sets"
-        }
-        return "\(exercises.count) exercises"
+    private var strengthAggregates: StrengthDetailAggregates {
+        strengthDetailAggregates(
+            setsByExercise: setsByExercise,
+            orderIndex: { $0.order_index },
+            id: { $0.id },
+            setNumber: { $0.set_number },
+            reps: { $0.reps },
+            rpe: { $0.rpe }
+        )
     }
 
     private var strengthMetrics: [DetailMetric] {
@@ -2368,12 +2484,12 @@ private struct StrengthDetailBlock: View {
         if !exercises.isEmpty {
             metrics.append(DetailMetric("Exercises", "\(exercises.count)", systemImage: "list.bullet"))
         }
-        if !allSets.isEmpty {
-            metrics.append(DetailMetric("Sets", "\(allSets.count)", systemImage: "number"))
+        let agg = strengthAggregates
+        if agg.totalSets > 0 {
+            metrics.append(DetailMetric("Sets", "\(agg.totalSets)", systemImage: "number"))
         }
-        let totalReps = allSets.compactMap { detailPositiveInt($0.reps) }.reduce(0, +)
-        if totalReps > 0 {
-            metrics.append(DetailMetric("Reps", "\(totalReps)", systemImage: "repeat"))
+        if agg.totalReps > 0 {
+            metrics.append(DetailMetric("Reps", "\(agg.totalReps)", systemImage: "repeat"))
         }
         if let totalVolumeKg, totalVolumeKg > 0 {
             metrics.append(DetailMetric("Volume", String(format: "%.1f kg", totalVolumeKg), systemImage: "scalemass"))
@@ -2382,10 +2498,8 @@ private struct StrengthDetailBlock: View {
         if let maxWeight {
             metrics.append(DetailMetric("Top weight", String(format: "%.1f kg", maxWeight), systemImage: "arrow.up"))
         }
-        let rpes = allSets.compactMap { detailPositiveDecimalDouble($0.rpe) }
-        if !rpes.isEmpty {
-            let avg = rpes.reduce(0, +) / Double(rpes.count)
-            metrics.append(DetailMetric("Avg RPE", String(format: "%.1f", avg), systemImage: "gauge.medium"))
+        if let avgRpe = agg.avgRpe {
+            metrics.append(DetailMetric("Avg RPE", String(format: "%.1f", avgRpe), systemImage: "gauge.medium"))
         }
         return metrics
     }
@@ -2499,37 +2613,42 @@ private struct StrengthDetailBlock: View {
 
     private func exerciseSetsSummary(_ ex: ExerciseRow) -> some View {
         let rows = setsByExercise[ex.id] ?? []
+        let paired = strengthSetRowsWithMultiplicities(
+            rows,
+            orderIndex: { $0.order_index },
+            id: { $0.id },
+            setNumber: { $0.set_number }
+        )
         return Group {
-            if rows.isEmpty {
+            if paired.isEmpty {
                 Text("No sets").font(.caption).foregroundStyle(.secondary)
             } else {
                 VStack(spacing: 8) {
-                    ForEach(rows.sorted(by: { a, b in
-                        let ao = a.order_index ?? Int.max
-                        let bo = b.order_index ?? Int.max
-                        if ao != bo { return ao < bo }
-                        return a.id < b.id
-                    })) { s in
+                    ForEach(Array(paired.enumerated()), id: \.element.row.id) { offset, item in
+                        let s = item.row
+                        let mult = item.multiplier
+                        let lineOrdinal = s.order_index ?? (offset + 1)
                         let dropSummary: String? = {
                             guard let ws = s.weight_segments, ws.count >= 2 else { return nil }
                             return ws.map { "\($0.reps)×\(String(format: "%.1f", $0.weight_kg))" }.joined(separator: " → ")
                         }()
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(spacing: 12) {
-                                Text("#\(s.order_index ?? s.set_number)")
+                                Text("#\(lineOrdinal)")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                                     .frame(width: 26, alignment: .leading)
                                 if let ds = dropSummary {
-                                    Text(ds).font(.footnote)
+                                    Text(strengthSetSummaryText(dropSummary: ds, set: s, multiplier: mult))
+                                        .font(.footnote)
                                 } else {
-                                    let parts = setSummaryParts(s)
-                                    if parts.isEmpty {
+                                    let summary = strengthSetSummaryText(dropSummary: nil, set: s, multiplier: mult)
+                                    if summary.isEmpty {
                                         Text("No set data")
                                             .font(.footnote)
                                             .foregroundStyle(.secondary)
                                     } else {
-                                        Text(parts.joined(separator: " • "))
+                                        Text(summary)
                                             .font(.footnote)
                                     }
                                 }
@@ -2547,6 +2666,21 @@ private struct StrengthDetailBlock: View {
                 }
             }
         }
+    }
+
+    private func strengthSetSummaryText(dropSummary: String?, set s: SetRow, multiplier mult: Int) -> String {
+        let body: String
+        if let dropSummary {
+            body = dropSummary
+        } else {
+            let parts = setSummaryParts(s)
+            guard !parts.isEmpty else { return "" }
+            body = parts.joined(separator: " • ")
+        }
+        if mult > 1 {
+            return "\(mult)× · \(body)"
+        }
+        return body
     }
 
     private func setSummaryParts(_ s: SetRow) -> [String] {
@@ -2644,6 +2778,39 @@ private struct StrengthDetailBlock: View {
                 vol = nil
             }
             
+            let cachedExercises = exRows.map {
+                WorkoutProgramCache.CachedExercise(
+                    id: $0.id,
+                    exercise_id: $0.exercise_id,
+                    order_index: $0.order_index,
+                    superset_group_id: $0.superset_group_id,
+                    superset_position: $0.superset_position,
+                    notes: $0.notes,
+                    custom_name: $0.custom_name,
+                    exercise_name: $0.exercise_name
+                )
+            }
+            let cachedSets = byEx.mapValues { rows in
+                rows.map {
+                    WorkoutProgramCache.CachedSet(
+                        id: $0.id,
+                        workout_exercise_id: $0.workout_exercise_id,
+                        set_number: $0.set_number,
+                        order_index: $0.order_index,
+                        reps: $0.reps,
+                        weight_kg: $0.weight_kg,
+                        rpe: $0.rpe,
+                        rest_sec: $0.rest_sec,
+                        notes: $0.notes
+                    )
+                }
+            }
+            WorkoutProgramCache.store(
+                workoutId: workoutId,
+                exercises: cachedExercises,
+                setsByExerciseId: cachedSets
+            )
+
             await MainActor.run {
                 setsByExercise = byEx
                 totalVolumeKg = vol
@@ -4043,35 +4210,75 @@ private struct LikersSheet: View {
 }
 
 private struct CompareCandidatePicker: View {
-    let items: [WorkoutDetailView.CompareCandidate]
-    let onPick: (Int) -> Void
+    let picker: ComparePickerState
+    let onPick: (CompareOtherTarget, String?) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
 
-    private var filteredItems: [WorkoutDetailView.CompareCandidate] {
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return items }
-        let n = q.lowercased()
-        return items.filter { c in
-            if c.displayTitle.lowercased().contains(n) { return true }
-            if let u = c.owner_username, !u.isEmpty, u.lowercased().contains(n) { return true }
-            if c.started_at.formatted(date: .abbreviated, time: .shortened).lowercased().contains(n) { return true }
-            return false
-        }
+    private var filteredSessions: [WorkoutDetailView.CompareCandidate] {
+        filterComparePickerSessions(picker, query: searchText)
+    }
+
+    private var visibleMyAverage: CompareAverageOption? {
+        guard let o = picker.myAverage else { return nil }
+        return compareAverageMatchesSearch(o, query: searchText) ? o : nil
+    }
+
+    private var visibleGlobalAverage: CompareAverageOption? {
+        guard let o = picker.globalAverage else { return nil }
+        return compareAverageMatchesSearch(o, query: searchText) ? o : nil
+    }
+
+    private var showAverageCTAs: Bool {
+        visibleMyAverage != nil || visibleGlobalAverage != nil
+    }
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var showEmptySearch: Bool {
+        isSearching && !showAverageCTAs && filteredSessions.isEmpty
     }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if filteredItems.isEmpty, !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                if showAverageCTAs {
+                    CompareAverageCTARow(
+                        myAverage: visibleMyAverage,
+                        globalAverage: visibleGlobalAverage,
+                        onSelect: { option in
+                            let target: CompareOtherTarget = .average(
+                                scope: option.scope,
+                                workoutIds: option.workoutIds,
+                                sampleCount: option.sampleCount
+                            )
+                            onPick(target, compareAverageRightLabel(scope: option.scope, sampleCount: option.sampleCount))
+                            dismiss()
+                        }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, 12)
+                }
+
+                if showEmptySearch {
                     Text("No matches")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, minHeight: 120)
                 } else {
-                    List(filteredItems) { c in
+                    if !filteredSessions.isEmpty {
+                        Text("Past workouts")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 6)
+                    }
+                    List(filteredSessions) { c in
                         Button {
-                            onPick(c.id)
+                            onPick(.workout(c.id), nil)
                             dismiss()
                         } label: {
                             VStack(alignment: .leading, spacing: 2) {
@@ -4098,6 +4305,101 @@ private struct CompareCandidatePicker: View {
             .navigationTitle("Choose workout")
             .navigationBarTitleDisplayMode(.inline)
         }
+    }
+}
+
+private struct CompareAverageCTARow: View {
+    let myAverage: CompareAverageOption?
+    let globalAverage: CompareAverageOption?
+    let onSelect: (CompareAverageOption) -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let mine = myAverage {
+                CompareAverageCTAButton(option: mine, onTap: { onSelect(mine) })
+            }
+            if let global = globalAverage {
+                CompareAverageCTAButton(option: global, onTap: { onSelect(global) })
+            }
+        }
+    }
+}
+
+private struct CompareAverageCTAButton: View {
+    let option: CompareAverageOption
+    let onTap: () -> Void
+
+    private var title: String { compareAveragePickerTitle(option) }
+    private var icon: String {
+        option.scope == .mine ? "person.crop.circle.fill" : "globe.americas.fill"
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary.opacity(0.85))
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                }
+                Text(option.typeLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text("Last \(option.sampleCount)")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.08), in: Capsule())
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+extension WorkoutDetailView {
+    fileprivate func applyCompareTarget(_ target: CompareOtherTarget, rightLabel: String?) {
+        switch target {
+        case .workout(let id):
+            compareCandidateId = id
+            compareAverageScope = nil
+            compareAverageRightLabel = nil
+        case .average(let scope, _, _):
+            compareCandidateId = nil
+            compareAverageScope = scope
+            compareAverageRightLabel = rightLabel
+        }
+    }
+
+    fileprivate func resolvedCompareTarget() -> CompareOtherTarget? {
+        if let scope = compareAverageScope {
+            let opt: CompareAverageOption? = switch scope {
+            case .mine: comparePicker.myAverage
+            case .global: comparePicker.globalAverage
+            }
+            if let o = opt {
+                return .average(scope: o.scope, workoutIds: o.workoutIds, sampleCount: o.sampleCount)
+            }
+            return nil
+        }
+        if let id = compareCandidateId {
+            return .workout(id)
+        }
+        return nil
     }
 }
 

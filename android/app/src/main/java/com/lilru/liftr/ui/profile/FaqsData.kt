@@ -48,7 +48,7 @@ object FaqsData {
         ),
         FaqItem(
             question = "Can I run supersets in the active strength view?",
-            answer = "There is no dedicated superset mode in this flow. Work is tracked exercise by exercise with per-set reps, weight and rest.",
+            answer = "Yes. Exercises in the same superserie appear together on one card (like Hyrox zones), with a single action to move through each exercise in the round. Rest runs after the full superserie round, not between exercises in the group.",
             category = "Active Strength Workout"
         ),
         FaqItem(
