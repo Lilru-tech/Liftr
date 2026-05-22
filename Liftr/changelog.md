@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-05-22
+
+### Added
+- **Compare workouts** — Compare against your last **10** sessions and the **average** of the last **50** workouts (all users).
+- **Cardio import** — Option to **prevent duplicate** workouts when logging in-app and auto-importing from external devices.
+- **Home** — **Merged** Quick Actions and Chat into a single floating dock.
+- **Territory / GPS** — Improvement for **low signal** conditions.
+
+### Changed
+- **Active strength** — **Completed** tag shown in **green**.
+- **Home** — Chat icon behavior aligned with Quick Actions (including merged dock).
+- **Database** — Refactors to reduce disk I/O and improve performance.
+
+### Fixed
+- **Workout detail** — Set count displayed correctly.
+- **Supersets** — Display fixed in Active Strength, Edit Workout, and routines.
+- **Home floating dock** — Dragging Chat or Quick Actions no longer opens the action.
+
 ## [1.13.0] - 2026-05-14
 
 ### Added
@@ -107,6 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.14.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.14.0
 [1.13.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.13.0
 [1.12.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.12.0
 [1.11.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.11.0

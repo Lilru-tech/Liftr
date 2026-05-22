@@ -109,6 +109,7 @@ Vistas:
 - `get_weekly_goal_recommendation`
 - `list_comparable_workouts_v1`
 - `list_compare_average_pool_v1` (`p_baseline_workout`, `p_scope` `mine`|`global`, `p_limit`) → `workout_id`, `started_at` for compare-average pools (cardio activity / sport / strength exact primary-muscle set); see `Liftr/supabase/migrations/20260521120000_compare_average_pool_v1.sql`
+- `get_home_feed_page_v1` (`p_page`, `p_page_size`, optional `p_kind`) → JSON `{ workouts, scores, likes, participants }` for authenticated home feed (one round-trip); see `Liftr/supabase/migrations/20260522140000_disk_io_optimizations_v1.sql`
 - `plan_strength_squad_programs`
 - `precheck_signup`
 - `recompute_weekly_goal_results`
@@ -136,6 +137,15 @@ Vistas:
 - `get_challenge_my_progress_v1` (`p_instance_id`) → progreso del viewer hacia el umbral (`progress_value`, `target_value`, `secondary_cap`, `metric_kind`, `is_eligible`).
 - `get_challenge_podiums_period_leaderboard_v1` (`p_scope` `global` | `friends`, `p_period` `day` | `week` | `month` | `all`, `p_limit`, `p_sex`, `p_age_band`) → `rank`, `user_id`, `username`, `avatar_url`, `podium_count` (claims con `adjudication_ts` en la ventana; mismo patrón demográfico que otros leaderboards por periodo).
 - `evaluate_challenges_for_user` (`p_user_id` uuid) — **no** expuesto a `authenticated` en el SQL de referencia; se invoca vía trigger al pasar un `workout` a `published` (y opcionalmente `service_role` para replays).
+
+## Cardio import deduplication (`create_cardio_workout_v2`)
+
+Migración: [`Liftr/supabase/migrations/20260522160000_cardio_workout_dedupe_v1.sql`](../Liftr/supabase/migrations/20260522160000_cardio_workout_dedupe_v1.sql).
+
+- **`workouts.healthkit_uuid`**: id externo estable (Apple Health HK UUID en minúsculas; Health Connect en Android como `hc:{metadata.id}`). Índice único parcial `(user_id, healthkit_uuid)` donde `healthkit_uuid` no es null.
+- Antes de insertar, `find_cardio_workout_duplicate` busca por UUID o por coincidencia difusa (misma actividad compatible, `started_at` ±5 min, duración ±10% o ±90s).
+- Si hay candidato, `merge_cardio_workout_from_import` enriquece el entreno existente (HR, ruta, calorías HealthKit, `healthkit_uuid`, stats) sin sobrescribir título/notas/distancia ya rellenados.
+- El RPC sigue devolviendo `integer` (id del workout); clientes iOS detectan merge por `created_at` antiguo (>120s).
 
 ## Retos (Challenges MVP)
 

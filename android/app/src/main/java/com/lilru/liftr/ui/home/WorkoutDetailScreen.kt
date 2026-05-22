@@ -76,6 +76,7 @@ import com.lilru.liftr.ui.add.AddSportType
 import com.lilru.liftr.ui.add.duplicate.AddWorkoutDuplicateStore
 import com.lilru.liftr.ui.add.duplicate.loadDuplicateForAdd
 import com.lilru.liftr.ui.compare.CompareAverageScope
+import com.lilru.liftr.ui.compare.CompareWorkoutCandidate
 import com.lilru.liftr.ui.compare.CompareAverageOption
 import com.lilru.liftr.ui.compare.CompareOtherTarget
 import com.lilru.liftr.ui.compare.ComparePickerEntry
@@ -104,6 +105,7 @@ fun WorkoutDetailScreen(
         factory = WorkoutDetailViewModelFactory(supabase = supabase, workoutId = workoutId)
     )
     val ui by vm.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var duplicateBusy by rememberSaveable(workoutId) { mutableStateOf(false) }
     var duplicateError by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }

@@ -7,6 +7,7 @@ import androidx.work.WorkManager
 import com.lilru.liftr.data.LiftrSupabase
 import com.lilru.liftr.ui.active.CompletedSetLine
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import java.io.IOException
@@ -36,6 +37,7 @@ object WorkoutFinishSync {
     private const val PREFS = "liftr_workout_finish_sync"
     private const val KEY_PENDING = "pending.v1"
     private val json = Json { ignoreUnknownKeys = true }
+    private val pendingListSerializer = ListSerializer(PendingStrengthFinish.serializer())
 
     fun enqueue(
         context: Context,
@@ -128,7 +130,7 @@ object WorkoutFinishSync {
             .getString(KEY_PENDING, null)
             ?: return emptyList()
         return runCatching {
-            json.decodeFromString<List<PendingStrengthFinish>>(raw)
+            json.decodeFromString(pendingListSerializer, raw)
         }.getOrDefault(emptyList())
     }
 
@@ -136,7 +138,7 @@ object WorkoutFinishSync {
         context.applicationContext
             .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit()
-            .putString(KEY_PENDING, json.encodeToString(items))
+            .putString(KEY_PENDING, json.encodeToString(pendingListSerializer, items))
             .apply()
     }
 

@@ -83,7 +83,7 @@ object FaqsData {
         ),
         FaqItem(
             question = "Why was a Health Connect workout not imported?",
-            answer = "Common reasons: unsupported activity type, date outside your selected range, a duplicate workout already imported, or missing read permissions in Health Connect.",
+            answer = "Common reasons: unsupported activity type, date outside your selected range, a duplicate workout already imported, or missing read permissions in Health Connect. If you already logged the same session in Liftr, import may merge Health Connect data into that workout instead of creating a second one.",
             category = "Health Connect Import (Cardio)"
         ),
         FaqItem(

@@ -315,8 +315,9 @@ object TerritoryCaptureClient {
         minLon: Double,
         maxLat: Double,
         maxLon: Double,
-        limit: Int = 500
+        limit: Int = 5_000
     ): List<TerritoryMapCellWire> {
+        val effectiveLimit = minOf(5_000, maxOf(limit, 1))
         return runCatching {
             val res = supabase.postgrest.rpc(
                 BackendContracts.Rpc.GET_TERRITORY_MAP_V1,
@@ -325,7 +326,7 @@ object TerritoryCaptureClient {
                     put("p_min_lon", minLon)
                     put("p_max_lat", maxLat)
                     put("p_max_lon", maxLon)
-                    put("p_limit", limit)
+                    put("p_limit", effectiveLimit)
                 }
             )
             json.decodeFromString<List<TerritoryMapCellWire>>(res.data)

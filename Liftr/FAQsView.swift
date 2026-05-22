@@ -92,7 +92,7 @@ struct FAQsView: View {
             ),
             FAQ(
                 question: "Why was a Health workout not imported?",
-                answer: "Common reasons: unsupported activity type, date outside your selected range, duplicate workout already imported, or missing read permissions.",
+                answer: "Common reasons: unsupported activity type, date outside your selected range, duplicate workout already imported, or missing read permissions. If you already logged the same session in Liftr, auto-import may merge Apple Health data into that workout instead of creating a second one.",
                 category: "Apple Health Import (Cardio)"
             ),
             FAQ(

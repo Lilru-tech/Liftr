@@ -728,7 +728,10 @@ fun AddWorkoutTabScreen(
                     onRemoveExercise = { vm.removeExercise(it) },
                     onAddBlankExercise = { vm.addBlankStrengthExercise() },
                     onClearAllExercises = { showClearStrengthDialog = true },
-                    showClearAllButton = canClearAllStrength
+                    showClearAllButton = canClearAllStrength,
+                    onStartSuperset = { vm.startSuperset(it) },
+                    onAddNextToSuperset = { vm.addNextToSuperset(it) },
+                    onRemoveFromSuperset = { vm.removeFromSuperset(it) }
                 )
             }
             item {

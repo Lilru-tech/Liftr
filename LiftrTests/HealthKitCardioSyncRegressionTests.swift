@@ -51,4 +51,20 @@ struct HealthKitCardioSyncRegressionTests {
         let boundary = now.addingTimeInterval(-HealthKitCardioImportNotificationPolicy.recentImportWindow)
         #expect(HealthKitCardioImportNotificationPolicy.shouldNotifyAutoImport(workoutEndedAt: boundary, now: now))
     }
+
+    @Test func detectsMergedWorkoutByCreatedAtAge() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let old = now.addingTimeInterval(-600)
+        let recent = now.addingTimeInterval(-30)
+        #expect(HealthKitCardioImportNotificationPolicy.wasExistingWorkoutBeforeImport(createdAt: old, now: now))
+        #expect(!HealthKitCardioImportNotificationPolicy.wasExistingWorkoutBeforeImport(createdAt: recent, now: now))
+    }
+
+    @Test func detectsMergedWorkoutJustPastThreshold() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let boundary = now.addingTimeInterval(
+            -(HealthKitCardioImportNotificationPolicy.mergedWorkoutAgeThreshold + 1)
+        )
+        #expect(HealthKitCardioImportNotificationPolicy.wasExistingWorkoutBeforeImport(createdAt: boundary, now: now))
+    }
 }

@@ -236,6 +236,8 @@ struct EditWorkoutMetaSheet: View {
         var name: String
         var alias: String
         var notes: String
+        var supersetGroupId: UUID?
+        var supersetPosition: Int?
         var sets: [SEditableSet]
     }
     
@@ -734,6 +736,11 @@ struct EditWorkoutMetaSheet: View {
                                 }
                             )
                         }
+
+                        if s_items.count > 1 {
+                            Divider().padding(.vertical, 4)
+                            editSupersetControls(for: i)
+                        }
                         
                         Divider().padding(.vertical, 4)
                         VStack(alignment: .leading, spacing: 4) {
@@ -783,6 +790,7 @@ struct EditWorkoutMetaSheet: View {
                                             if s_items.indices.contains(i) {
                                                 s_items.remove(at: i)
                                                 renumberStrengthExerciseOrder()
+                                                s_items = compactSupersetMetadataForEdit(s_items)
                                             }
                                         }
                                     } label: {
@@ -1359,7 +1367,7 @@ struct EditWorkoutMetaSheet: View {
             case "strength":
                 let exQ = try await SupabaseManager.shared.client
                     .from("workout_exercises")
-                    .select("id, exercise_id, order_index, notes, custom_name, exercises(name)")
+                    .select("id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name, exercises(name)")
                     .eq("workout_id", value: workoutId)
                     .order("order_index", ascending: true)
                     .execute()
@@ -1368,6 +1376,8 @@ struct EditWorkoutMetaSheet: View {
                     let id: Int
                     let exercise_id: Int
                     let order_index: Int
+                    let superset_group_id: UUID?
+                    let superset_position: Int?
                     let notes: String?
                     let exercises: ExName?
                     let custom_name: String?
@@ -1435,6 +1445,8 @@ struct EditWorkoutMetaSheet: View {
                         name: ex.exercises?.name ?? "Exercise",
                         alias: ex.custom_name ?? "",
                         notes: ex.notes ?? "",
+                        supersetGroupId: ex.superset_group_id,
+                        supersetPosition: ex.superset_position,
                         sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, orderIndex: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]]
                     )
                 }
@@ -1667,6 +1679,18 @@ struct EditWorkoutMetaSheet: View {
                     )
                 }
                 WorkoutSavePerf.end(.editStrength)
+                let compacted = compactSupersetMetadataForEdit(s_items)
+                try await StrengthSupersetPatch.patchWorkoutExerciseSupersets(
+                    client: SupabaseManager.shared.client,
+                    exercises: compacted.map {
+                        WorkoutExerciseSupersetPatchInput(
+                            workoutExerciseId: $0.workoutExerciseId,
+                            supersetGroupId: $0.supersetGroupId,
+                            supersetPosition: $0.supersetPosition
+                        )
+                    }
+                )
+                await MainActor.run { s_items = compacted }
                 NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
                 let scorePayload: Any = saved.score.map { $0 as Any } ?? NSNull()
                 NotificationCenter.default.post(
@@ -1768,6 +1792,8 @@ struct EditWorkoutMetaSheet: View {
                         name: ex.name,
                         alias: "",
                         notes: "",
+                        supersetGroupId: nil,
+                        supersetPosition: nil,
                         sets: [SEditableSet(setId: nil, setNumber: 1, orderIndex: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]
                     )
                 )
@@ -1803,13 +1829,121 @@ struct EditWorkoutMetaSheet: View {
         for idx in list.indices {
             list[idx].orderIndex = idx + 1
         }
-        s_items = list
+        s_items = compactSupersetMetadataForEdit(list)
     }
 
     private func renumberStrengthExerciseOrder() {
         for idx in s_items.indices {
             s_items[idx].orderIndex = idx + 1
         }
+        s_items = compactSupersetMetadataForEdit(s_items)
+    }
+
+    @ViewBuilder
+    private func editSupersetControls(for index: Int) -> some View {
+        if let exercise = s_items[safe: index], let groupId = exercise.supersetGroupId {
+            HStack(spacing: 8) {
+                Text("Superserie")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("Group \(editSupersetGroupDisplayNumber(groupId, in: s_items)) · \(exercise.supersetPosition ?? 1)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.primary)
+
+                Spacer(minLength: 8)
+
+                if canAddNextToEditSuperset(groupId: groupId) {
+                    Button("Add next") {
+                        addNextExerciseToEditSuperset(groupId: groupId)
+                    }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+                }
+
+                Button("Remove") {
+                    removeExerciseFromEditSuperset(index)
+                }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+                .foregroundStyle(.red)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        } else {
+            HStack(spacing: 8) {
+                Text("Superserie")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Button {
+                    startEditSuperset(at: index)
+                } label: {
+                    Label("Superset with next", systemImage: "link.badge.plus")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canStartEditSuperset(at: index))
+                .opacity(canStartEditSuperset(at: index) ? 1 : 0.45)
+            }
+        }
+    }
+
+    private func editExerciseSelected(_ exercise: SEditableExercise) -> Bool {
+        exercise.exerciseId > 0
+    }
+
+    private func startEditSuperset(at index: Int) {
+        guard canStartEditSuperset(at: index) else { return }
+        var next = s_items
+        let groupId = next[index].supersetGroupId ?? next[index + 1].supersetGroupId ?? UUID()
+        next[index].supersetGroupId = groupId
+        next[index + 1].supersetGroupId = groupId
+        s_items = compactSupersetMetadataForEdit(next)
+    }
+
+    private func addNextExerciseToEditSuperset(groupId: UUID) {
+        guard let nextIndex = nextExerciseIndexAfterEditSuperset(groupId: groupId) else { return }
+        var next = s_items
+        next[nextIndex].supersetGroupId = groupId
+        s_items = compactSupersetMetadataForEdit(next)
+    }
+
+    private func removeExerciseFromEditSuperset(_ index: Int) {
+        guard s_items.indices.contains(index) else { return }
+        var next = s_items
+        next[index].supersetGroupId = nil
+        next[index].supersetPosition = nil
+        s_items = compactSupersetMetadataForEdit(next)
+    }
+
+    private func canStartEditSuperset(at index: Int) -> Bool {
+        guard s_items.indices.contains(index),
+              s_items.indices.contains(index + 1)
+        else { return false }
+        return editExerciseSelected(s_items[index]) && editExerciseSelected(s_items[index + 1])
+    }
+
+    private func canAddNextToEditSuperset(groupId: UUID) -> Bool {
+        guard let nextIndex = nextExerciseIndexAfterEditSuperset(groupId: groupId) else { return false }
+        return editExerciseSelected(s_items[nextIndex])
+    }
+
+    private func nextExerciseIndexAfterEditSuperset(groupId: UUID) -> Int? {
+        let groupIndices = s_items.indices.filter { s_items[$0].supersetGroupId == groupId }
+        guard let lastGroupIndex = groupIndices.max() else { return nil }
+        let nextIndex = lastGroupIndex + 1
+        guard s_items.indices.contains(nextIndex),
+              s_items[nextIndex].supersetGroupId != groupId
+        else { return nil }
+        return nextIndex
+    }
+
+    private func editSupersetGroupDisplayNumber(_ groupId: UUID, in exercises: [SEditableExercise]) -> Int {
+        let groups = exercises.compactMap(\.supersetGroupId).reduce(into: [UUID]()) { result, id in
+            if !result.contains(id) {
+                result.append(id)
+            }
+        }
+        return (groups.firstIndex(of: groupId) ?? 0) + 1
     }
 
     private func moveSetInEditor(exerciseIndex: Int, setIndex: Int, direction: Int) {
@@ -2851,6 +2985,29 @@ struct EditWorkoutMetaSheet: View {
             return out
         }
     }
+}
+
+func compactSupersetMetadataForEdit(_ source: [EditWorkoutMetaSheet.SEditableExercise]) -> [EditWorkoutMetaSheet.SEditableExercise] {
+    var next = source
+    for idx in next.indices {
+        next[idx].orderIndex = idx + 1
+    }
+
+    let groupCounts = Dictionary(grouping: next.compactMap(\.supersetGroupId), by: { $0 }).mapValues(\.count)
+    var groupPositions: [UUID: Int] = [:]
+
+    for idx in next.indices {
+        guard let groupId = next[idx].supersetGroupId, (groupCounts[groupId] ?? 0) > 1 else {
+            next[idx].supersetGroupId = nil
+            next[idx].supersetPosition = nil
+            continue
+        }
+        let position = (groupPositions[groupId] ?? 0) + 1
+        groupPositions[groupId] = position
+        next[idx].supersetPosition = position
+    }
+
+    return next
 }
 
 private extension Binding where Value == Int {

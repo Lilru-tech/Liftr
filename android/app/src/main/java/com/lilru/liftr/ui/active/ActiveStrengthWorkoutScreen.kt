@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -275,6 +276,70 @@ fun ActiveStrengthWorkoutScreen(
     val currentSetIndex = ex?.let { laneProgressMap[it.workoutExerciseId] ?: 0 } ?: 0
     val set = ex?.sets?.getOrNull(currentSetIndex)
     var editingExpandedIndex by remember { mutableStateOf<Int?>(null) }
+    var editingWorkoutExerciseId by remember { mutableStateOf<Int?>(null) }
+    var editDraftsByWorkoutExerciseId by remember { mutableStateOf<Map<Int, SetEditDraft>>(emptyMap()) }
+
+    fun populateEditFieldsFromSet(visitedSet: ActiveStrengthSetLine) {
+        vm.setEditRepsText(visitedSet.reps?.toString() ?: "")
+        vm.setEditWeightText(
+            visitedSet.weightKg?.let { v ->
+                if (v == v.toInt().toDouble()) v.toInt().toString()
+                else String.format(Locale.US, "%.1f", v)
+            } ?: ""
+        )
+        vm.setEditRestText(visitedSet.restSec?.toString() ?: "")
+        vm.setEditRpeText(visitedSet.rpe?.toString() ?: "")
+    }
+
+    fun currentEditDraft(): SetEditDraft = SetEditDraft(
+        repsText = if (isGuestLaneActive) guestEditRepsText else ui.editRepsText,
+        weightText = if (isGuestLaneActive) guestEditWeightText else ui.editWeightText,
+        rpeText = if (isGuestLaneActive) "" else ui.editRpeText,
+        restText = if (isGuestLaneActive) guestEditRestText else ui.editRestText
+    )
+
+    fun stashCurrentEditDraft() {
+        val id = editingWorkoutExerciseId ?: return
+        editDraftsByWorkoutExerciseId = editDraftsByWorkoutExerciseId + (id to currentEditDraft())
+    }
+
+    fun editShowsRestField(anchor: ActiveStrengthExerciseLine?): Boolean {
+        if (isGuestLaneActive || anchor == null) return true
+        val members = supersetMembers(anchor, ui.exercises)
+        if (members.size <= 1) return true
+        val setIndex = editingExpandedIndex ?: currentSetIndex
+        val available = members.filter { it.sets.size > setIndex }
+        return available.lastOrNull()?.workoutExerciseId == editingWorkoutExerciseId
+    }
+
+    fun openEditSet(exerciseIndex: Int, expandedIndex: Int) {
+        val targetEx = ui.exercises.getOrNull(exerciseIndex) ?: return
+        val visitedSet = targetEx.sets.getOrNull(expandedIndex) ?: return
+        if (!showEditSheet) {
+            editDraftsByWorkoutExerciseId = emptyMap()
+        }
+        populateEditFieldsFromSet(visitedSet)
+        editingExpandedIndex = expandedIndex
+        editingWorkoutExerciseId = targetEx.workoutExerciseId
+        showEditSheet = true
+    }
+
+    fun switchEditSupersetMember(memberIndex: Int, expandedIndex: Int) {
+        stashCurrentEditDraft()
+        val targetEx = ui.exercises.getOrNull(memberIndex) ?: return
+        editingExpandedIndex = expandedIndex
+        editingWorkoutExerciseId = targetEx.workoutExerciseId
+        val draft = editDraftsByWorkoutExerciseId[targetEx.workoutExerciseId]
+        if (draft != null) {
+            vm.setEditRepsText(draft.repsText)
+            vm.setEditWeightText(draft.weightText)
+            vm.setEditRpeText(draft.rpeText)
+            vm.setEditRestText(draft.restText)
+        } else {
+            val visitedSet = targetEx.sets.getOrNull(expandedIndex) ?: return
+            populateEditFieldsFromSet(visitedSet)
+        }
+    }
     var snapToCurrentSignal by remember(ex?.workoutExerciseId, activeLane) { mutableIntStateOf(0) }
     val guestRestSecByExerciseId = remember(ui.sessionElapsedSec, guestRestEndMsByExerciseId) {
         val n = System.currentTimeMillis()
@@ -848,6 +913,10 @@ fun ActiveStrengthWorkoutScreen(
                                             hostPagerDisplayIndex = pagerAnchorExerciseIndex(idx, ui.exercises)
                                             vm.goToExercise(idx)
                                         },
+                                        onEditSet = { exerciseIndex, roundIndex ->
+                                            openEditSet(exerciseIndex, roundIndex)
+                                        },
+                                        editEnabled = !isGuestLaneActive,
                                         onSetDone = { vm.onSetDone() },
                                         onSkipRest = {
                                             if (isGuestLaneActive) {
@@ -1059,27 +1128,20 @@ fun ActiveStrengthWorkoutScreen(
                                     if (!visitedIsPast) {
                                         OutlinedButton(
                                             onClick = {
-                                                editingExpandedIndex = visitedSetIndexForActions
                                                 val visitedSet = ex?.sets?.getOrNull(visitedSetIndexForActions)
                                                 if (visitedSet != null && !isGuestLaneActive) {
-                                                    vm.setEditRepsText(visitedSet.reps?.toString() ?: "")
-                                                    vm.setEditWeightText(
-                                                        visitedSet.weightKg?.let { v ->
-                                                            if (v == v.toInt().toDouble()) v.toInt().toString()
-                                                            else String.format(Locale.US, "%.1f", v)
-                                                        } ?: ""
-                                                    )
-                                                    vm.setEditRestText(visitedSet.restSec?.toString() ?: "")
-                                                    vm.setEditRpeText(visitedSet.rpe?.toString() ?: "")
+                                                    openEditSet(workExerciseIndex, visitedSetIndexForActions)
                                                 } else if (visitedSet != null && isGuestLaneActive) {
+                                                    editingExpandedIndex = visitedSetIndexForActions
+                                                    editingWorkoutExerciseId = null
                                                     guestEditRepsText = visitedSet.reps?.toString() ?: ""
                                                     guestEditWeightText = visitedSet.weightKg?.let { v ->
                                                         if (v == v.toInt().toDouble()) v.toInt().toString()
                                                         else String.format(Locale.US, "%.1f", v)
                                                     } ?: ""
                                                     guestEditRestText = visitedSet.restSec?.toString() ?: ""
+                                                    showEditSheet = true
                                                 }
-                                                showEditSheet = true
                                             },
                                             enabled = ex?.sets?.getOrNull(visitedSetIndexForActions) != null && !laneIsResting && !ui.finishing,
                                             modifier = Modifier.fillMaxWidth()
@@ -1087,21 +1149,27 @@ fun ActiveStrengthWorkoutScreen(
                                     }
 
                                     if (laneIsResting) {
-                                        Button(
-                                            onClick = {
-                                                if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
-                                                    ex?.workoutExerciseId?.let { wid ->
-                                                        guestRestEndMsByExerciseId =
-                                                            guestRestEndMsByExerciseId.filterKeys { it != wid }
-                                                        guestRestPlannedTotalSecByExerciseId =
-                                                            guestRestPlannedTotalSecByExerciseId.filterKeys { it != wid }
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            ActiveStrengthRestTimerRow(restSec = laneRestSec)
+                                            ActiveStrengthSkipRestOutlinedButton(
+                                                onClick = {
+                                                    if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+                                                        ex?.workoutExerciseId?.let { wid ->
+                                                            guestRestEndMsByExerciseId =
+                                                                guestRestEndMsByExerciseId.filterKeys { it != wid }
+                                                            guestRestPlannedTotalSecByExerciseId =
+                                                                guestRestPlannedTotalSecByExerciseId.filterKeys { it != wid }
+                                                        }
+                                                    } else {
+                                                        vm.skipRest()
                                                     }
-                                                } else {
-                                                    vm.skipRest()
-                                                }
-                                            },
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) { Text("Rest ${laneRestSec}s · Skip") }
+                                                },
+                                                enabled = !ui.finishing
+                                            )
+                                        }
                                     } else if (!isVisitingCurrent && sliderEnabled) {
                                         Button(
                                             onClick = { snapToCurrentSignal += 1 },
@@ -1225,7 +1293,7 @@ fun ActiveStrengthWorkoutScreen(
                                 vm.finishWorkout { offlineQueued ->
                                     if (offlineQueued) {
                                         AppSnackbar.showSuccess(
-                                            startCtx.getString(R.string.active_workout_finish_saved_offline)
+                                            ctx.getString(R.string.active_workout_finish_saved_offline)
                                         )
                                     }
                                     onClose()
@@ -1257,9 +1325,16 @@ fun ActiveStrengthWorkoutScreen(
                 }
             }
         }
+        val editTargetEx = editingWorkoutExerciseId?.let { wid ->
+            ui.exercises.firstOrNull { it.workoutExerciseId == wid }
+        } ?: ex
         val editingSet = run {
             val idx = editingExpandedIndex ?: currentSetIndex
-            ex?.sets?.getOrNull(idx) ?: set
+            editTargetEx?.sets?.getOrNull(idx) ?: set
+        }
+        val editSupersetMembers = remember(editingWorkoutExerciseId, showEditSheet, ui.exercises) {
+            val anchor = editTargetEx ?: return@remember emptyList()
+            supersetMembers(anchor, ui.exercises).takeIf { it.size > 1 }.orEmpty()
         }
         if (showEditSheet && editingSet != null) {
         var showConvertToNormal by remember(showEditSheet, editingSet.setId) { mutableStateOf(false) }
@@ -1289,6 +1364,32 @@ fun ActiveStrengthWorkoutScreen(
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Edit reps, weight & rest", style = MaterialTheme.typography.titleMedium)
+
+                if (editSupersetMembers.isNotEmpty() && !isGuestLaneActive) {
+                    Text("Exercise", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        editSupersetMembers.forEach { member ->
+                            val memberIndex = ui.exercises.indexOfFirst { it.workoutExerciseId == member.workoutExerciseId }
+                            if (memberIndex < 0) return@forEach
+                            val selected = editingWorkoutExerciseId == member.workoutExerciseId
+                            OutlinedButton(
+                                onClick = {
+                                    switchEditSupersetMember(memberIndex, editingExpandedIndex ?: currentSetIndex)
+                                },
+                                border = if (selected) {
+                                    androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                                } else null
+                            ) {
+                                Text(member.displayName, maxLines = 1)
+                            }
+                        }
+                    }
+                }
 
                 val isDropSet = !isGuestLaneActive && (dropSegs.size >= 2)
                 if (isDropSet) {
@@ -1369,26 +1470,29 @@ fun ActiveStrengthWorkoutScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
-                    OutlinedTextField(
-                        value = if (isGuestLaneActive) guestEditRestText else ui.editRestText,
-                        onValueChange = {
-                            if (isGuestLaneActive) {
-                                guestEditRestText = it
-                            } else {
-                                vm.setEditRestText(it)
-                            }
-                        },
-                        label = { Text("Rest (sec)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
+                    if (editShowsRestField(editTargetEx)) {
+                        OutlinedTextField(
+                            value = if (isGuestLaneActive) guestEditRestText else ui.editRestText,
+                            onValueChange = {
+                                if (isGuestLaneActive) {
+                                    guestEditRestText = it
+                                } else {
+                                    vm.setEditRestText(it)
+                                }
+                            },
+                            label = { Text("Rest (sec)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
                 val isWireDropSet = editingSet.weightSegments != null && editingSet.weightSegments.size >= 2
                 if (!isGuestLaneActive && !isDropSet && !isWireDropSet) {
                         OutlinedButton(
                             onClick = {
-                                vm.convertCurrentSetToDropSet(editingExpandedIndex)
+                                vm.convertCurrentSetToDropSet(editingExpandedIndex, editingWorkoutExerciseId)
                                 showEditSheet = false
                                 editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Convert to drop set") }
@@ -1398,6 +1502,8 @@ fun ActiveStrengthWorkoutScreen(
                             onClick = {
                                 showEditSheet = false
                                 editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
+                                editDraftsByWorkoutExerciseId = emptyMap()
                             },
                             modifier = Modifier.weight(1f)
                         ) {
@@ -1436,14 +1542,21 @@ fun ActiveStrengthWorkoutScreen(
                                         StrengthSegmentPayload(r, w)
                                     }
                                     if (segPayload.size >= 2) {
-                                        vm.applyCurrentDropSetEdits(segPayload, editingExpandedIndex)
+                                        stashCurrentEditDraft()
+                                        vm.applyCurrentDropSetEdits(segPayload, editingExpandedIndex, editingWorkoutExerciseId)
                                     }
                                 } else {
-                                    vm.applyCurrentSetEdits(editingExpandedIndex)
+                                    stashCurrentEditDraft()
+                                    vm.applyAllSetEditDrafts(
+                                        editingExpandedIndex ?: currentSetIndex,
+                                        editDraftsByWorkoutExerciseId
+                                    )
                                 }
                                 }
                                 showEditSheet = false
                                 editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
+                                editDraftsByWorkoutExerciseId = emptyMap()
                             },
                             modifier = Modifier.weight(1f)
                         ) { Text("Save") }
@@ -1484,10 +1597,11 @@ fun ActiveStrengthWorkoutScreen(
                             onClick = {
                                 val r = convertNormalRepsText.trim().toIntOrNull() ?: 10
                                 val w = convertNormalWeightText.trim().replace(',', '.').toDoubleOrNull() ?: 0.0
-                                vm.convertCurrentSetToNormalSet(r, w, editingExpandedIndex)
+                                vm.convertCurrentSetToNormalSet(r, w, editingExpandedIndex, editingWorkoutExerciseId)
                                 showConvertToNormal = false
                                 showEditSheet = false
                                 editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
                             },
                             modifier = Modifier.weight(1f)
                         ) { Text("Convert") }

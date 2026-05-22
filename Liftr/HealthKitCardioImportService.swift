@@ -6,6 +6,7 @@ import Supabase
 struct HealthKitImportSummary: Sendable {
     var imported: Int = 0
     var skippedDuplicate: Int = 0
+    var mergedDuplicate: Int = 0
     var failed: Int = 0
     var errorMessages: [String] = []
 }
@@ -17,9 +18,14 @@ enum HealthKitCardioImportMode: Sendable {
 
 enum HealthKitCardioImportNotificationPolicy {
     static let recentImportWindow: TimeInterval = 48 * 3600
+    static let mergedWorkoutAgeThreshold: TimeInterval = 120
 
     static func shouldNotifyAutoImport(workoutEndedAt: Date, now: Date = Date()) -> Bool {
         now.timeIntervalSince(workoutEndedAt) <= recentImportWindow
+    }
+
+    static func wasExistingWorkoutBeforeImport(createdAt: Date, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(createdAt) > mergedWorkoutAgeThreshold
     }
 }
 
@@ -184,6 +190,12 @@ final class HealthKitCardioImportService {
                     wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID)
                 }
                 if let wid {
+                    let merged = await wasMergedIntoExistingWorkout(workoutId: wid)
+                    if merged {
+                        summary.mergedDuplicate += 1
+                    } else {
+                        summary.imported += 1
+                    }
                     if !isTreadmill, routeGeoJSON != nil {
                         if let summary = await TerritoryCaptureClient.applyCapture(workoutId: wid),
                            let message = TerritoryCapturePresentation.message(for: summary) {
@@ -196,12 +208,14 @@ final class HealthKitCardioImportService {
                     await MainActor.run {
                         NotificationCenter.default.post(name: .workoutDidChange, object: wid)
                     }
-                    if mode == .automatic,
+                    if !merged,
+                       mode == .automatic,
                        HealthKitCardioImportNotificationPolicy.shouldNotifyAutoImport(workoutEndedAt: w.endDate) {
                         await notifyAutoImportedWorkout(workoutId: wid, title: title)
                     }
+                } else {
+                    summary.imported += 1
                 }
-                summary.imported += 1
             } catch {
                 summary.failed += 1
                 summary.errorMessages.append("\(mapped.label): \(error.localizedDescription)")
@@ -505,6 +519,21 @@ final class HealthKitCardioImportService {
 
     private func isDuplicateHealthKitUUID(_ uuid: String) async -> Bool {
         await (try? fetchWorkoutIdByHealthKitUUID(uuid)) != nil
+    }
+
+    private func wasMergedIntoExistingWorkout(workoutId: Int) async -> Bool {
+        struct Row: Decodable {
+            let created_at: Date
+        }
+        guard let res = try? await SupabaseManager.shared.client
+            .from("workouts")
+            .select("created_at")
+            .eq("id", value: workoutId)
+            .limit(1)
+            .execute(),
+              let row = try? JSONDecoder.supabase().decode([Row].self, from: res.data).first
+        else { return false }
+        return HealthKitCardioImportNotificationPolicy.wasExistingWorkoutBeforeImport(createdAt: row.created_at)
     }
 
     private func fetchWorkoutIdByHealthKitUUID(_ uuid: String) async throws -> Int? {

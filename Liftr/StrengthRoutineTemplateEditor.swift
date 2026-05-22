@@ -18,6 +18,8 @@ struct StrengthTemplateDetailWire: Decodable {
 struct StrengthTemplateExerciseWire: Decodable {
     let exercise_id: Int64
     let order_index: Int
+    let superset_group_id: UUID?
+    let superset_position: Int?
     let notes: String?
     let custom_name: String?
     let strength_routine_sets: [StrengthTemplateSetWire]?
@@ -34,7 +36,48 @@ struct StrengthTemplateSetWire: Decodable {
 }
 
 func strengthTemplateDetailSelect() -> String {
+    "id,name,strength_routine_exercises(exercise_id,order_index,superset_group_id,superset_position,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
+}
+
+func strengthTemplateDetailSelectLegacy() -> String {
     "id,name,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
+}
+
+func strengthRoutineSupersetColumnsUnavailable(_ error: Error) -> Bool {
+    let text = error.localizedDescription.lowercased()
+    return text.contains("superset_group_id") || text.contains("superset_position")
+}
+
+func fetchStrengthRoutineTemplateDetailData(
+    client: SupabaseClient,
+    routineId: Int64
+) async throws -> Data {
+    do {
+        let res = try await client
+            .from("strength_routines")
+            .select(strengthTemplateDetailSelect())
+            .eq("id", value: Int(routineId))
+            .single()
+            .execute()
+        return res.data
+    } catch {
+        guard strengthRoutineSupersetColumnsUnavailable(error) else { throw error }
+        let res = try await client
+            .from("strength_routines")
+            .select(strengthTemplateDetailSelectLegacy())
+            .eq("id", value: Int(routineId))
+            .single()
+            .execute()
+        return res.data
+    }
+}
+
+func fetchStrengthRoutineTemplateDetail(
+    client: SupabaseClient,
+    routineId: Int64
+) async throws -> StrengthTemplateDetailWire {
+    let data = try await fetchStrengthRoutineTemplateDetailData(client: client, routineId: routineId)
+    return try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: data)
 }
 
 func editableExercisesFromStrengthTemplateDetail(
@@ -42,7 +85,7 @@ func editableExercisesFromStrengthTemplateDetail(
     exerciseDisplayName: (Int64) -> String
 ) -> [EditableExercise] {
     let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
-    return exs.map { ex in
+    let mapped = exs.map { ex in
         let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
         let mappedSets: [EditableSet] = setsSorted.enumerated().map { idx, s in
             let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
@@ -66,11 +109,143 @@ func editableExercisesFromStrengthTemplateDetail(
             exerciseId: ex.exercise_id,
             exerciseName: displayName,
             orderIndex: ex.order_index,
-            supersetGroupId: nil,
-            supersetPosition: nil,
+            supersetGroupId: ex.superset_group_id,
+            supersetPosition: ex.superset_position,
             notes: ex.notes ?? "",
             sets: fallbackSets
         )
+    }
+    return compactSupersetMetadata(mapped)
+}
+
+struct StrengthRoutinePreviewBlock: Identifiable {
+    let id: String
+    let isSuperset: Bool
+    let exercises: [EditableExercise]
+}
+
+func strengthRoutinePreviewBlocks(from exercises: [EditableExercise]) -> [StrengthRoutinePreviewBlock] {
+    var blocks: [StrengthRoutinePreviewBlock] = []
+    let ordered = exercises.sorted { $0.orderIndex < $1.orderIndex }
+    var idx = 0
+    while idx < ordered.count {
+        let current = ordered[idx]
+        guard let groupId = current.supersetGroupId else {
+            blocks.append(StrengthRoutinePreviewBlock(id: "exercise-\(idx)", isSuperset: false, exercises: [current]))
+            idx += 1
+            continue
+        }
+        var group: [EditableExercise] = [current]
+        var nextIdx = idx + 1
+        while nextIdx < ordered.count, ordered[nextIdx].supersetGroupId == groupId {
+            group.append(ordered[nextIdx])
+            nextIdx += 1
+        }
+        if group.count > 1 {
+            let sortedGroup = group.sorted {
+                let lp = $0.supersetPosition ?? Int.max
+                let rp = $1.supersetPosition ?? Int.max
+                if lp != rp { return lp < rp }
+                return $0.orderIndex < $1.orderIndex
+            }
+            blocks.append(
+                StrengthRoutinePreviewBlock(
+                    id: "superset-\(groupId.uuidString)",
+                    isSuperset: true,
+                    exercises: sortedGroup
+                )
+            )
+        } else {
+            blocks.append(StrengthRoutinePreviewBlock(id: "exercise-\(idx)", isSuperset: false, exercises: [current]))
+        }
+        idx = nextIdx
+    }
+    return blocks
+}
+
+private func strengthRoutinePreviewMemberLabel(position: Int, memberCount: Int) -> String {
+    String(localized: "Exercise \(position) of \(memberCount)")
+}
+
+struct StrengthRoutinePreviewExercisesList<SetLine: View>: View {
+    let exercises: [EditableExercise]
+    @ViewBuilder let setLine: (EditableSet) -> SetLine
+
+    var body: some View {
+        let blocks = strengthRoutinePreviewBlocks(from: exercises)
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(Array(blocks.enumerated()), id: \.element.id) { blockIdx, block in
+                if block.isSuperset {
+                    strengthRoutinePreviewSupersetCard(block)
+                } else if let ex = block.exercises.first {
+                    strengthRoutinePreviewSingleExercise(ex)
+                }
+                if blockIdx < blocks.count - 1 {
+                    Divider()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func strengthRoutinePreviewSupersetCard(_ block: StrengthRoutinePreviewBlock) -> some View {
+        let memberCount = block.exercises.count
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "link")
+                    .font(.caption.weight(.semibold))
+                Text(String(localized: "Superserie"))
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(String(localized: "\(memberCount) exercises"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(.blue)
+
+            ForEach(Array(block.exercises.enumerated()), id: \.offset) { offset, ex in
+                let position = ex.supersetPosition ?? (offset + 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(strengthRoutinePreviewMemberLabel(position: position, memberCount: memberCount))
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.blue)
+                        Text(ex.exerciseName)
+                            .font(.subheadline.weight(.semibold))
+                        Spacer(minLength: 0)
+                    }
+                    if !ex.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(ex.notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(ex.sets.sorted { $0.setNumber < $1.setNumber }) { s in
+                        setLine(s)
+                    }
+                }
+                .padding(10)
+                .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.blue.opacity(0.25), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func strengthRoutinePreviewSingleExercise(_ ex: EditableExercise) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(ex.exerciseName)
+                .font(.subheadline.weight(.semibold))
+            if !ex.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(ex.notes)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(ex.sets.sorted { $0.setNumber < $1.setNumber }) { s in
+                setLine(s)
+            }
+        }
     }
 }
 
@@ -722,13 +897,7 @@ struct EditSavedStrengthRoutineSheet: View {
         }
         do {
             let client = SupabaseManager.shared.client
-            let res = try await client
-                .from("strength_routines")
-                .select(strengthTemplateDetailSelect())
-                .eq("id", value: Int(routineId))
-                .single()
-                .execute()
-            let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+            let detail = try await fetchStrengthRoutineTemplateDetail(client: client, routineId: routineId)
             let built = editableExercisesFromStrengthTemplateDetail(detail, exerciseDisplayName: exerciseDisplayName)
             guard !built.isEmpty else {
                 await MainActor.run { errorMessage = "This routine has no exercises." }
@@ -763,11 +932,7 @@ struct EditSavedStrengthRoutineSheet: View {
             let client = SupabaseManager.shared.client
             let session = try await client.auth.session
             let toSave = await MainActor.run {
-                var copy = exercises
-                for idx in copy.indices {
-                    copy[idx].orderIndex = idx + 1
-                }
-                return copy
+                compactSupersetMetadata(exercises)
             }
             try await applyStrengthRoutinePrescriptionUpdate(
                 client: client,

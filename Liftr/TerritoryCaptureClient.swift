@@ -350,23 +350,24 @@ enum TerritoryCaptureClient {
         minLon: Double,
         maxLat: Double,
         maxLon: Double,
-        limit: Int = 500
+        limit: Int = 5_000
     ) async -> [TerritoryMapCellRow] {
-        print("[TerritoryMap][RPC] start minLat=\(minLat) minLon=\(minLon) maxLat=\(maxLat) maxLon=\(maxLon) limit=\(limit)")
-        let pageSize = min(1_000, max(limit, 1))
+        let effectiveLimit = min(5_000, max(limit, 1))
+        print("[TerritoryMap][RPC] start minLat=\(minLat) minLon=\(minLon) maxLat=\(maxLat) maxLon=\(maxLon) limit=\(effectiveLimit)")
+        let pageSize = min(500, effectiveLimit)
         let params = MapParams(
             p_min_lat: minLat,
             p_min_lon: minLon,
             p_max_lat: maxLat,
             p_max_lon: maxLon,
-            p_limit: limit
+            p_limit: effectiveLimit
         )
         do {
             var allRows: [TerritoryMapCellRow] = []
             var offset = 0
             var totalBytes = 0
-            while offset < limit {
-                let pageLimit = min(pageSize, limit - offset)
+            while offset < effectiveLimit {
+                let pageLimit = min(pageSize, effectiveLimit - offset)
                 let res = try await SupabaseManager.shared.client
                     .rpc("get_territory_map_v1", params: params)
                     .range(from: offset, to: offset + pageLimit - 1)

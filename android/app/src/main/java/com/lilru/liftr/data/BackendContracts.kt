@@ -149,6 +149,7 @@ object BackendContracts {
         const val APPLY_TERRITORY_CAPTURE_V1 = "apply_territory_capture_v1"
         const val PREVIEW_TERRITORY_CAPTURE_V1 = "preview_territory_capture_v1"
         const val GET_TERRITORY_MAP_V1 = "get_territory_map_v1"
+        const val GET_HOME_FEED_PAGE_V1 = "get_home_feed_page_v1"
         const val GET_MY_TERRITORY_SUMMARY_V1 = "get_my_territory_summary_v1"
         const val GET_TERRITORY_SHARE_LEADERBOARD_V1 = "get_territory_share_leaderboard_v1"
         const val LIST_TERRITORY_CITY_REGIONS_V1 = "list_territory_city_regions_v1"

@@ -89,7 +89,9 @@ import com.lilru.liftr.ui.active.ActiveSportWorkoutScreen
 import com.lilru.liftr.ui.active.ActiveStrengthWorkoutScreen
 import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddSportType
-import com.lilru.liftr.ui.chat.MessagesFloatingButton
+import com.lilru.liftr.ui.common.FloatingDockEdge
+import com.lilru.liftr.ui.common.floatingEdgeAnchor
+import com.lilru.liftr.ui.common.floatingEdgeDock
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -114,13 +116,6 @@ private enum class HomeQuickStartKind {
     STRENGTH,
     CARDIO,
     SPORT
-}
-
-private enum class HomeQuickDockEdge {
-    LEFT,
-    RIGHT,
-    TOP,
-    BOTTOM
 }
 
 private data class HomeQuickActiveWorkout(
@@ -149,18 +144,8 @@ fun HomeTabScreen(
     var selected by rememberSaveable { mutableStateOf<Int?>(null) }
     var guestDetailGate by remember { mutableStateOf(false) }
     var quickStartSignInGate by remember { mutableStateOf(false) }
-    var showQuickActions by remember { mutableStateOf(false) }
     var showQuickCardioPicker by remember { mutableStateOf(false) }
     var showQuickSportPicker by remember { mutableStateOf(false) }
-    var quickActionsHintDismissed by rememberSaveable {
-        mutableStateOf(quickPrefs.getBoolean("hintDismissed", false))
-    }
-    var quickActionsEdgeRaw by rememberSaveable {
-        mutableStateOf(quickPrefs.getString("edge", HomeQuickDockEdge.RIGHT.name) ?: HomeQuickDockEdge.RIGHT.name)
-    }
-    var quickActionsPosition by rememberSaveable {
-        mutableStateOf(quickPrefs.getFloat("position", 0.64f))
-    }
     var quickStartBusyKind by rememberSaveable { mutableStateOf<HomeQuickStartKind?>(null) }
     var quickStartError by remember { mutableStateOf<String?>(null) }
     var quickActiveWorkout by remember { mutableStateOf<HomeQuickActiveWorkout?>(null) }
@@ -347,58 +332,28 @@ fun HomeTabScreen(
                         }
                     }
                 )
-                HomeQuickActionsEdgeMenu(
+                val homeBottomInsetPx = with(LocalDensity.current) { 72.dp.toPx() }
+                HomeFloatingDockOverlay(
+                    supabase = supabase,
+                    quickPrefs = quickPrefs,
+                    bottomInsetPx = homeBottomInsetPx,
                     busy = quickStartBusyKind != null,
-                    showMenu = showQuickActions,
-                    showHint = !quickActionsHintDismissed,
-                    edgeRaw = quickActionsEdgeRaw,
-                    position = quickActionsPosition,
-                    onToggleMenu = {
-                        if (quickStartBusyKind == null) {
-                            if (me == null) {
-                                quickStartSignInGate = true
-                            } else {
-                                quickActionsHintDismissed = true
-                                quickPrefs.edit().putBoolean("hintDismissed", true).apply()
-                                showQuickActions = !showQuickActions
-                            }
-                        }
-                    },
-                    onDismissMenu = { showQuickActions = false },
-                    onDismissHint = {
-                        quickActionsHintDismissed = true
-                        quickPrefs.edit().putBoolean("hintDismissed", true).apply()
-                    },
-                    onDockChanged = { edge, pos ->
-                        quickActionsEdgeRaw = edge.name
-                        quickActionsPosition = pos
-                        quickActionsHintDismissed = true
-                        quickPrefs.edit()
-                            .putString("edge", edge.name)
-                            .putFloat("position", pos)
-                            .putBoolean("hintDismissed", true)
-                            .apply()
-                    },
-                    onStrength = {
-                        showQuickActions = false
-                        startHomeQuickWorkout(
-                            scope = scope,
-                            supabase = supabase,
-                            userId = me,
-                            kind = HomeQuickStartKind.STRENGTH,
-                            setBusy = { quickStartBusyKind = it },
-                            setError = { quickStartError = it },
-                            setActive = { quickActiveWorkout = it }
-                        )
-                    },
-                    onCardio = {
-                        showQuickActions = false
-                        showQuickCardioPicker = true
-                    },
-                    onSport = {
-                        showQuickActions = false
-                        showQuickSportPicker = true
-                    },
+                    showChat = me != null,
+                    isSignedIn = me != null,
+                    onQuickSignInRequired = { quickStartSignInGate = true },
+                        onStrength = {
+                            startHomeQuickWorkout(
+                                scope = scope,
+                                supabase = supabase,
+                                userId = me,
+                                kind = HomeQuickStartKind.STRENGTH,
+                                setBusy = { quickStartBusyKind = it },
+                                setError = { quickStartError = it },
+                                setActive = { quickActiveWorkout = it }
+                            )
+                        },
+                        onCardio = { showQuickCardioPicker = true },
+                    onSport = { showQuickSportPicker = true },
                     modifier = Modifier.fillMaxSize()
                 )
                 if (guestDetailGate) {
@@ -492,9 +447,6 @@ fun HomeTabScreen(
                             )
                         }
                     )
-                }
-                if (me != null) {
-                    MessagesFloatingButton(supabase = supabase)
                 }
                 if (quickStartBusyKind != null) {
                     HomeQuickStartLoadingOverlay()
@@ -852,94 +804,7 @@ private fun HomeQuickStartLoadingOverlay() {
 }
 
 @Composable
-private fun HomeQuickActionsEdgeMenu(
-    busy: Boolean,
-    showMenu: Boolean,
-    showHint: Boolean,
-    edgeRaw: String,
-    position: Float,
-    onToggleMenu: () -> Unit,
-    onDismissMenu: () -> Unit,
-    onDismissHint: () -> Unit,
-    onDockChanged: (HomeQuickDockEdge, Float) -> Unit,
-    onStrength: () -> Unit,
-    onCardio: () -> Unit,
-    onSport: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    BoxWithConstraints(modifier = modifier) {
-        val density = LocalDensity.current
-        val widthPx = with(density) { maxWidth.toPx() }
-        val heightPx = with(density) { maxHeight.toPx() }
-        val tabSizePx = with(density) { 52.dp.toPx() }
-        val edge = runCatching { HomeQuickDockEdge.valueOf(edgeRaw) }.getOrDefault(HomeQuickDockEdge.RIGHT)
-        val anchor = homeQuickAnchor(edge, position, widthPx, heightPx, tabSizePx)
-
-        if (showMenu) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clickable(onClick = onDismissMenu)
-            )
-            HomeQuickActionsMenu(
-                onStrength = onStrength,
-                onCardio = onCardio,
-                onSport = onSport,
-                modifier = Modifier.offset {
-                    homeQuickMenuOffset(anchor, edge, widthPx, heightPx, density)
-                }
-            )
-        }
-
-        if (showHint && !showMenu && !busy) {
-            HomeQuickActionsTooltip(
-                onDismiss = onDismissHint,
-                modifier = Modifier.offset {
-                    homeQuickTooltipOffset(anchor, edge, widthPx, heightPx, density)
-                }
-            )
-        }
-
-        FloatingActionButton(
-            onClick = onToggleMenu,
-            modifier = Modifier
-                .offset {
-                    IntOffset(
-                        (anchor.x - tabSizePx / 2f).roundToInt(),
-                        (anchor.y - tabSizePx / 2f).roundToInt()
-                    )
-                }
-                .size(52.dp)
-                .pointerInput(widthPx, heightPx, edgeRaw, position) {
-                    var dragAnchor = anchor
-                    detectDragGestures(
-                        onDragStart = {
-                            dragAnchor = anchor
-                            onDismissMenu()
-                        },
-                        onDragEnd = {},
-                        onDrag = { _, dragAmount ->
-                            dragAnchor += dragAmount
-                            val dock = homeQuickDock(dragAnchor, widthPx, heightPx, tabSizePx)
-                            onDockChanged(dock.first, dock.second)
-                        }
-                    )
-                }
-        ) {
-            if (busy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Text("⚡", style = MaterialTheme.typography.titleLarge)
-            }
-        }
-    }
-}
-
-@Composable
-private fun HomeQuickActionsMenu(
+internal fun HomeQuickActionsMenu(
     onStrength: () -> Unit,
     onCardio: () -> Unit,
     onSport: () -> Unit,
@@ -991,7 +856,7 @@ private fun HomeQuickActionsMenuButton(
 }
 
 @Composable
-private fun HomeQuickActionsTooltip(
+internal fun HomeQuickActionsTooltip(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1015,57 +880,9 @@ private fun HomeQuickActionsTooltip(
     }
 }
 
-private fun homeQuickAnchor(
-    edge: HomeQuickDockEdge,
-    position: Float,
-    widthPx: Float,
-    heightPx: Float,
-    tabSizePx: Float
-): Offset {
-    val minX = tabSizePx / 2f
-    val maxX = (widthPx - tabSizePx / 2f).coerceAtLeast(minX)
-    val minY = tabSizePx / 2f + 10f
-    val maxY = (heightPx - tabSizePx / 2f - 72f).coerceAtLeast(minY)
-    val p = position.coerceIn(0f, 1f)
-
-    return when (edge) {
-        HomeQuickDockEdge.LEFT -> Offset(minX, minY + (maxY - minY) * p)
-        HomeQuickDockEdge.RIGHT -> Offset(maxX, minY + (maxY - minY) * p)
-        HomeQuickDockEdge.TOP -> Offset(minX + (maxX - minX) * p, minY)
-        HomeQuickDockEdge.BOTTOM -> Offset(minX + (maxX - minX) * p, maxY)
-    }
-}
-
-private fun homeQuickDock(
-    point: Offset,
-    widthPx: Float,
-    heightPx: Float,
-    tabSizePx: Float
-): Pair<HomeQuickDockEdge, Float> {
-    val minX = tabSizePx / 2f
-    val maxX = (widthPx - tabSizePx / 2f).coerceAtLeast(minX)
-    val minY = tabSizePx / 2f + 10f
-    val maxY = (heightPx - tabSizePx / 2f - 72f).coerceAtLeast(minY)
-    val edge = listOf(
-        HomeQuickDockEdge.LEFT to abs(point.x - minX),
-        HomeQuickDockEdge.RIGHT to abs(point.x - maxX),
-        HomeQuickDockEdge.TOP to abs(point.y - minY),
-        HomeQuickDockEdge.BOTTOM to abs(point.y - maxY)
-    ).minBy { it.second }.first
-
-    val pos = when (edge) {
-        HomeQuickDockEdge.LEFT, HomeQuickDockEdge.RIGHT ->
-            ((point.y - minY) / (maxY - minY).coerceAtLeast(1f)).coerceIn(0f, 1f)
-        HomeQuickDockEdge.TOP, HomeQuickDockEdge.BOTTOM ->
-            ((point.x - minX) / (maxX - minX).coerceAtLeast(1f)).coerceIn(0f, 1f)
-    }
-
-    return edge to pos
-}
-
 private fun homeQuickMenuOffset(
     anchor: Offset,
-    edge: HomeQuickDockEdge,
+    edge: FloatingDockEdge,
     widthPx: Float,
     heightPx: Float,
     density: androidx.compose.ui.unit.Density
@@ -1074,10 +891,10 @@ private fun homeQuickMenuOffset(
     val menuHeight = with(density) { 188.dp.toPx() }
     val spacing = with(density) { 92.dp.toPx() }
     val raw = when (edge) {
-        HomeQuickDockEdge.LEFT -> Offset(anchor.x + spacing, anchor.y)
-        HomeQuickDockEdge.RIGHT -> Offset(anchor.x - spacing, anchor.y)
-        HomeQuickDockEdge.TOP -> Offset(anchor.x, anchor.y + spacing)
-        HomeQuickDockEdge.BOTTOM -> Offset(anchor.x, anchor.y - spacing)
+        FloatingDockEdge.LEFT -> Offset(anchor.x + spacing, anchor.y)
+        FloatingDockEdge.RIGHT -> Offset(anchor.x - spacing, anchor.y)
+        FloatingDockEdge.TOP -> Offset(anchor.x, anchor.y + spacing)
+        FloatingDockEdge.BOTTOM -> Offset(anchor.x, anchor.y - spacing)
     }
 
     return IntOffset(
@@ -1086,9 +903,9 @@ private fun homeQuickMenuOffset(
     )
 }
 
-private fun homeQuickTooltipOffset(
+internal fun homeQuickTooltipOffset(
     anchor: Offset,
-    edge: HomeQuickDockEdge,
+    edge: FloatingDockEdge,
     widthPx: Float,
     heightPx: Float,
     density: androidx.compose.ui.unit.Density
@@ -1098,10 +915,10 @@ private fun homeQuickTooltipOffset(
     val spacing = with(density) { 142.dp.toPx() }
     val verticalSpacing = with(density) { 58.dp.toPx() }
     val raw = when (edge) {
-        HomeQuickDockEdge.LEFT -> Offset(anchor.x + spacing, anchor.y)
-        HomeQuickDockEdge.RIGHT -> Offset(anchor.x - spacing, anchor.y)
-        HomeQuickDockEdge.TOP -> Offset(anchor.x, anchor.y + verticalSpacing)
-        HomeQuickDockEdge.BOTTOM -> Offset(anchor.x, anchor.y - verticalSpacing)
+        FloatingDockEdge.LEFT -> Offset(anchor.x + spacing, anchor.y)
+        FloatingDockEdge.RIGHT -> Offset(anchor.x - spacing, anchor.y)
+        FloatingDockEdge.TOP -> Offset(anchor.x, anchor.y + verticalSpacing)
+        FloatingDockEdge.BOTTOM -> Offset(anchor.x, anchor.y - verticalSpacing)
     }
 
     return IntOffset(

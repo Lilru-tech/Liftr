@@ -158,10 +158,6 @@ private struct QuickActiveWorkout: Identifiable, Hashable {
     let kind: Kind
 }
 
-private enum QuickActionDockEdge: String {
-    case left, right, top, bottom
-}
-
 struct HomeView: View {
     @EnvironmentObject var app: AppState
     @AppStorage("isPremium") private var isPremium = false
@@ -199,6 +195,24 @@ struct HomeView: View {
     private struct WorkoutScoreRow: Decodable { let workout_id: Int; let score: Decimal }
     private struct LikeRow: Decodable { let workout_id: Int; let user_id: UUID }
     private struct ParticipantRow: Decodable { let workout_id: Int; let user_id: UUID }
+
+    private struct HomeFeedPageResponse: Decodable {
+        let workouts: [WorkoutRow]?
+        let scores: [HomeFeedScoreTotal]?
+        let likes: [LikeRow]?
+        let participants: [ParticipantRow]?
+    }
+
+    private struct HomeFeedScoreTotal: Decodable {
+        let workout_id: Int
+        let score: Decimal
+    }
+
+    private struct HomeFeedParams: Encodable {
+        let p_page: Int
+        let p_page_size: Int
+        let p_kind: String?
+    }
     
     struct PRRow: Decodable, Identifiable {
         let kind: String
@@ -330,21 +344,15 @@ struct HomeView: View {
     @AppStorage("homeCollapseStreak") private var collapseStreak = false
     @AppStorage("homeCollapseInsights") private var collapseInsights = false
     @AppStorage("homeCollapseMonthly") private var collapseMonthly = false
-    @AppStorage("homeQuickActionsHintDismissed") private var quickActionsHintDismissed = false
-    @AppStorage("homeQuickActionsEdge") private var quickActionsEdgeRaw = QuickActionDockEdge.right.rawValue
-    @AppStorage("homeQuickActionsPosition") private var quickActionsPosition = 0.64
-    
     @State private var showScrollToTopButton = false
     @State private var showGuestSignInAlert = false
     @State private var showQuickStartSignInAlert = false
-    @State private var showQuickActions = false
     @State private var showQuickCardioPicker = false
     @State private var showQuickSportPicker = false
     @State private var quickStartBusyKind: WorkoutKind?
     @State private var quickStartError: String?
     @State private var quickActiveWorkout: QuickActiveWorkout?
     @State private var lastQuickActiveWorkoutId: Int?
-    @State private var quickActionsDragLocation: CGPoint?
     
     private let highlightsInsertIndex = 5
     private let scrollToTopThreshold: CGFloat = 120
@@ -659,17 +667,18 @@ struct HomeView: View {
         }
         .background(.clear)
         .overlay {
-            if app.isAuthenticated {
-                MessagesFloatingButton()
-                    .environmentObject(app)
-                    .allowsHitTesting(true)
-                    .zIndex(99)
-            }
-        }
-        .overlay {
-            GeometryReader { proxy in
-                quickActionsFloatingOverlay(in: proxy.size)
-            }
+            HomeFloatingDockOverlay(
+                bottomSafeInset: isPremium ? 18 : 70,
+                showChat: app.isAuthenticated,
+                quickStartBusyKind: quickStartBusyKind,
+                onQuickStrength: { startQuickWorkout(.strength) },
+                onQuickCardio: { showQuickCardioPicker = true },
+                onQuickSport: { showQuickSportPicker = true },
+                onQuickSignInRequired: { showQuickStartSignInAlert = true }
+            )
+            .environmentObject(app)
+            .allowsHitTesting(true)
+            .zIndex(99)
         }
         .overlay {
             if quickStartBusyKind != nil {
@@ -850,42 +859,6 @@ struct HomeView: View {
         }
     }
 
-    private func quickActionsFloatingOverlay(in size: CGSize) -> some View {
-        let tabSize = CGSize(width: 56, height: 52)
-        let point = quickActionsDragLocation ?? quickActionsPoint(in: size, tabSize: tabSize)
-
-        return ZStack(alignment: .topLeading) {
-            if showQuickActions {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                            showQuickActions = false
-                        }
-                    }
-
-                quickActionsMenu(edge: quickActionEdge)
-                    .position(quickActionsMenuPoint(anchor: point, edge: quickActionEdge, in: size))
-                    .transition(.scale(scale: 0.92).combined(with: .opacity))
-                    .zIndex(2)
-            }
-
-            if !quickActionsHintDismissed && !showQuickActions && quickStartBusyKind == nil {
-                quickActionsTooltip(edge: quickActionEdge)
-                    .position(quickActionsTooltipPoint(anchor: point, edge: quickActionEdge, in: size))
-                    .transition(.opacity.combined(with: .move(edge: .trailing)))
-                    .zIndex(1)
-            }
-
-            quickActionsSideTab(in: size, tabSize: tabSize)
-                .position(point)
-                .zIndex(3)
-        }
-        .animation(.spring(response: 0.28, dampingFraction: 0.82), value: showQuickActions)
-        .coordinateSpace(name: "quickActionsOverlay")
-    }
-
     private var quickStartLoadingOverlay: some View {
         ZStack {
             Color.black.opacity(0.34)
@@ -911,219 +884,6 @@ struct HomeView: View {
             .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 8)
         }
         .contentShape(Rectangle())
-    }
-
-    private func quickActionsSideTab(in size: CGSize, tabSize: CGSize) -> some View {
-        Button {
-            if app.userId == nil {
-                showQuickStartSignInAlert = true
-            } else {
-                quickActionsHintDismissed = true
-                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                    showQuickActions.toggle()
-                }
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "bolt.fill")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(.yellow)
-                if quickStartBusyKind != nil {
-                    ProgressView()
-                        .tint(.primary)
-                        .scaleEffect(0.8)
-                }
-            }
-            .padding(.leading, 12)
-            .padding(.trailing, 10)
-            .frame(width: 56, height: 52)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(.white.opacity(0.22), lineWidth: 0.8)
-            )
-        }
-        .buttonStyle(.plain)
-        .disabled(quickStartBusyKind != nil)
-        .accessibilityLabel("Quick actions")
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 10, coordinateSpace: .named("quickActionsOverlay"))
-                .onChanged { value in
-                    showQuickActions = false
-                    quickActionsDragLocation = value.location
-                }
-                .onEnded { value in
-                    let dock = quickActionsDock(for: value.location, in: size, tabSize: tabSize)
-                    quickActionsEdgeRaw = dock.edge.rawValue
-                    quickActionsPosition = dock.position
-                    quickActionsDragLocation = nil
-                    quickActionsHintDismissed = true
-                }
-        )
-    }
-
-    private func quickActionsMenu(edge: QuickActionDockEdge) -> some View {
-        VStack(spacing: 8) {
-            Text("Quick actions")
-                .font(.subheadline.weight(.semibold))
-                .padding(.bottom, 2)
-            quickActionsMenuButton("Strength") {
-                showQuickActions = false
-                startQuickWorkout(.strength)
-            }
-            quickActionsMenuButton("Cardio") {
-                showQuickActions = false
-                showQuickCardioPicker = true
-            }
-            quickActionsMenuButton("Sport") {
-                showQuickActions = false
-                showQuickSportPicker = true
-            }
-        }
-        .padding(12)
-        .frame(width: 158)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(.white.opacity(0.22), lineWidth: 0.8)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 16, x: 0, y: 8)
-    }
-
-    private func quickActionsMenuButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 11)
-                .background(.thinMaterial, in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(quickStartBusyKind != nil)
-    }
-
-    private func quickActionsTooltip(edge: QuickActionDockEdge) -> some View {
-        HStack(spacing: 8) {
-            Text("Start a workout from here")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-            Button("Got it") {
-                quickActionsHintDismissed = true
-            }
-            .font(.caption.weight(.bold))
-        }
-        .padding(.vertical, 9)
-        .padding(.horizontal, 12)
-        .background(.ultraThinMaterial, in: Capsule())
-        .overlay(Capsule().stroke(.white.opacity(0.22), lineWidth: 0.8))
-        .shadow(color: .black.opacity(0.12), radius: 12, x: 0, y: 6)
-    }
-
-    private var quickActionEdge: QuickActionDockEdge {
-        QuickActionDockEdge(rawValue: quickActionsEdgeRaw) ?? .right
-    }
-
-    private func quickActionsPoint(in size: CGSize, tabSize: CGSize) -> CGPoint {
-        let edge = quickActionEdge
-        let safeBottom = isPremium ? 18.0 : 70.0
-        let minX = tabSize.width / 2
-        let maxX = max(minX, size.width - tabSize.width / 2)
-        let minY = tabSize.height / 2 + 10
-        let maxY = max(minY, size.height - tabSize.height / 2 - safeBottom)
-        let fraction = min(max(quickActionsPosition, 0.0), 1.0)
-
-        switch edge {
-        case .left:
-            return CGPoint(x: minX, y: minY + (maxY - minY) * fraction)
-        case .right:
-            return CGPoint(x: maxX, y: minY + (maxY - minY) * fraction)
-        case .top:
-            return CGPoint(x: minX + (maxX - minX) * fraction, y: minY)
-        case .bottom:
-            return CGPoint(x: minX + (maxX - minX) * fraction, y: maxY)
-        }
-    }
-
-    private func quickActionsDock(
-        for point: CGPoint,
-        in size: CGSize,
-        tabSize: CGSize
-    ) -> (edge: QuickActionDockEdge, position: Double) {
-        let safeBottom = isPremium ? 18.0 : 70.0
-        let minX = tabSize.width / 2
-        let maxX = max(minX, size.width - tabSize.width / 2)
-        let minY = tabSize.height / 2 + 10
-        let maxY = max(minY, size.height - tabSize.height / 2 - safeBottom)
-        let distances: [(QuickActionDockEdge, CGFloat)] = [
-            (.left, abs(point.x - minX)),
-            (.right, abs(point.x - maxX)),
-            (.top, abs(point.y - minY)),
-            (.bottom, abs(point.y - maxY))
-        ]
-        let edge = distances.min { $0.1 < $1.1 }?.0 ?? .right
-
-        switch edge {
-        case .left, .right:
-            let ratio = (point.y - minY) / max(maxY - minY, 1)
-            return (edge, Double(min(max(ratio, 0), 1)))
-        case .top, .bottom:
-            let ratio = (point.x - minX) / max(maxX - minX, 1)
-            return (edge, Double(min(max(ratio, 0), 1)))
-        }
-    }
-
-    private func quickActionsMenuPoint(
-        anchor: CGPoint,
-        edge: QuickActionDockEdge,
-        in size: CGSize
-    ) -> CGPoint {
-        let menuSize = CGSize(width: 158, height: 188)
-        let spacing = 92.0
-        let raw: CGPoint
-
-        switch edge {
-        case .left:
-            raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
-        case .right:
-            raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
-        case .top:
-            raw = CGPoint(x: anchor.x, y: anchor.y + spacing + 8)
-        case .bottom:
-            raw = CGPoint(x: anchor.x, y: anchor.y - spacing - 8)
-        }
-
-        return CGPoint(
-            x: min(max(raw.x, menuSize.width / 2 + 12), size.width - menuSize.width / 2 - 12),
-            y: min(max(raw.y, menuSize.height / 2 + 12), size.height - menuSize.height / 2 - 12)
-        )
-    }
-
-    private func quickActionsTooltipPoint(
-        anchor: CGPoint,
-        edge: QuickActionDockEdge,
-        in size: CGSize
-    ) -> CGPoint {
-        let tooltipSize = CGSize(width: 210, height: 44)
-        let spacing = 134.0
-        let raw: CGPoint
-
-        switch edge {
-        case .left:
-            raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
-        case .right:
-            raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
-        case .top:
-            raw = CGPoint(x: anchor.x, y: anchor.y + 58)
-        case .bottom:
-            raw = CGPoint(x: anchor.x, y: anchor.y - 58)
-        }
-
-        return CGPoint(
-            x: min(max(raw.x, tooltipSize.width / 2 + 12), size.width - tooltipSize.width / 2 - 12),
-            y: min(max(raw.y, tooltipSize.height / 2 + 12), size.height - tooltipSize.height / 2 - 12)
-        )
     }
 
     private var quickCardioPicker: some View {
@@ -1550,99 +1310,47 @@ struct HomeView: View {
         }
         
         do {
-            let allIds = [me] + followees
-            print("[Home.loadPage] fetching page=\(request.page) pageSize=\(pageSize) userIds=\(allIds.count)")
+            print("[Home.loadPage] fetching page=\(request.page) pageSize=\(pageSize) via get_home_feed_page_v1")
 
-            let participantWorkoutRows = try await SupabaseManager.shared.client
-                .from("workout_participants")
-                .select("workout_id,user_id")
-                .eq("user_id", value: me.uuidString)
+            let kindParam: String? = request.filter == .all
+                ? nil
+                : request.filter.rawValue.lowercased()
+
+            let feedRes = try await SupabaseManager.shared.client
+                .rpc(
+                    "get_home_feed_page_v1",
+                    params: HomeFeedParams(
+                        p_page: request.page,
+                        p_page_size: pageSize,
+                        p_kind: kindParam
+                    )
+                )
                 .execute()
-            let participantWorkoutIds = try JSONDecoder.supabase()
-                .decode([ParticipantRow].self, from: participantWorkoutRows.data)
-                .map(\.workout_id)
-            
-            let idsCSV = allIds.map { $0.uuidString }.joined(separator: ",")
-            let visibilityFilter: String
-            if participantWorkoutIds.isEmpty {
-                visibilityFilter = "user_id.eq.\(me.uuidString),and(user_id.in.(\(idsCSV)),state.neq.planned)"
-            } else {
-                let participantIdsCSV = participantWorkoutIds.map(String.init).joined(separator: ",")
-                visibilityFilter = "user_id.eq.\(me.uuidString),id.in.(\(participantIdsCSV)),and(user_id.in.(\(idsCSV)),state.neq.planned)"
+
+            let page = try JSONDecoder.supabase().decode(HomeFeedPageResponse.self, from: feedRes.data)
+            let workouts = page.workouts ?? []
+            print("[Home.loadPage] fetched workouts=\(workouts.count)")
+
+            let uniqueUserIds = Array(Set(workouts.map(\.user_id)))
+            var participantIdsByWorkout: [Int: [UUID]] = [:]
+            for p in page.participants ?? [] {
+                participantIdsByWorkout[p.workout_id, default: []].append(p.user_id)
             }
-            var q: PostgrestFilterBuilder = SupabaseManager.shared.client
-                .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
-                .or(visibilityFilter)
-            
-            if request.filter != KindFilter.all {
-                q = q.eq("kind", value: request.filter.rawValue.lowercased())
-                print("[Home.loadPage] filter=\(request.filter.rawValue.lowercased())")
-            }
-            
-            let from = request.page * pageSize
-            let to   = from + pageSize - 1
-            
-            let wRes = try await q
-                .order("started_at", ascending: false)
-                .range(from: from, to: to)
-                .execute()
-            
-            let workouts = try JSONDecoder.supabase().decode([WorkoutRow].self, from: wRes.data)
-            print("[Home.loadPage] fetched workouts=\(workouts.count) from=\(from) to=\(to)")
-            
-            let ids = workouts.map { $0.id }
-            let uniqueUserIds = Array(Set(workouts.map { $0.user_id }))
-            try await ensureProfilesAvailable(for: uniqueUserIds)
-            
+            let allParticipantUids = Array(Set((page.participants ?? []).map(\.user_id)))
+            try await ensureProfilesAvailable(for: uniqueUserIds + allParticipantUids)
+
             var scoresDict: [Int: Double] = [:]
-            if !ids.isEmpty {
-                let sRes = try await SupabaseManager.shared.client
-                    .from("workout_scores")
-                    .select("workout_id, score")
-                    .in("workout_id", values: ids)
-                    .execute()
-                
-                let sRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: sRes.data)
-                print("[Home.loadPage] fetched scores rows=\(sRows.count)")
-                var tmp: [Int: Double] = [:]
-                for row in sRows {
-                    let value = NSDecimalNumber(decimal: row.score).doubleValue
-                    tmp[row.workout_id, default: 0] += value
-                }
-                scoresDict = tmp
+            for row in page.scores ?? [] {
+                scoresDict[row.workout_id] = NSDecimalNumber(decimal: row.score).doubleValue
             }
-            
+
             var likeCountByWorkout: [Int: Int] = [:]
             var likedByMe: Set<Int> = []
-            if !ids.isEmpty {
-                let lRes = try await SupabaseManager.shared.client
-                    .from("workout_likes")
-                    .select("workout_id,user_id")
-                    .in("workout_id", values: ids)
-                    .execute()
-                let lRows = try JSONDecoder.supabase().decode([LikeRow].self, from: lRes.data)
-                for row in lRows {
-                    likeCountByWorkout[row.workout_id, default: 0] += 1
-                    if row.user_id == me { likedByMe.insert(row.workout_id) }
-                }
+            for row in page.likes ?? [] {
+                likeCountByWorkout[row.workout_id, default: 0] += 1
+                if row.user_id == me { likedByMe.insert(row.workout_id) }
             }
-            
-            var participantIdsByWorkout: [Int: [UUID]] = [:]
-            if !ids.isEmpty {
-                let pRes = try await SupabaseManager.shared.client
-                    .from("workout_participants")
-                    .select("workout_id,user_id")
-                    .in("workout_id", values: ids)
-                    .execute()
-                let pRows = try JSONDecoder.supabase().decode([ParticipantRow].self, from: pRes.data)
-                for p in pRows {
-                    participantIdsByWorkout[p.workout_id, default: []].append(p.user_id)
-                }
-                let allParticipantUids = Array(Set(pRows.map { $0.user_id }))
-                try await ensureProfilesAvailable(for: allParticipantUids)
-            }
-            
+
             let items: [FeedItem] = workouts.map { w in
                 let ownerProf = profiles[w.user_id]
                 let pIds = participantIdsByWorkout[w.id] ?? []

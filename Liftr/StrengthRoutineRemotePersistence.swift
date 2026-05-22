@@ -22,7 +22,8 @@ enum StrengthRoutineRemotePersistence {
         exercises: [EditableExercise],
         replaceRoutineId: Int64? = nil
     ) async throws -> StrengthRoutinePersistOutcome {
-        let strengthItems = exercises.compactMap { $0.toStrengthItem() }
+        let normalized = normalizedSupersetPrograms(exercises)
+        let strengthItems = normalized.compactMap { $0.toStrengthItem() }
         guard !strengthItems.isEmpty else {
             throw NSError(
                 domain: "StrengthRoutine",
@@ -39,7 +40,7 @@ enum StrengthRoutineRemotePersistence {
             return StrengthRoutinePersistOutcome(alsoHasAnotherRoutineWithSameProgram: false)
         }
 
-        let contentHash = strengthRoutineContentFingerprint(from: exercises)
+        let contentHash = strengthRoutineContentFingerprint(from: normalized)
 
         if let rid = replaceRoutineId {
             _ = try await client
@@ -85,14 +86,6 @@ enum StrengthRoutineRemotePersistence {
             )
         }
 
-        struct StrengthRoutineExerciseRowInsert: Encodable {
-            let routine_id: Int64
-            let exercise_id: Int64
-            let order_index: Int
-            let notes: String?
-            let custom_name: String?
-        }
-
         struct StrengthRoutineSetRowInsert: Encodable {
             let routine_exercise_id: Int64
             let set_number: Int
@@ -104,7 +97,8 @@ enum StrengthRoutineRemotePersistence {
             let weight_segments: [StrengthWeightSegWire]?
         }
 
-        for item in strengthItems {
+        for ex in normalized {
+            guard let item = ex.toStrengthItem() else { continue }
             let exRes = try await client
                 .from("strength_routine_exercises")
                 .insert(
@@ -113,7 +107,9 @@ enum StrengthRoutineRemotePersistence {
                         exercise_id: item.exercise_id,
                         order_index: item.order_index,
                         notes: item.notes,
-                        custom_name: item.custom_name
+                        custom_name: item.custom_name,
+                        superset_group_id: ex.supersetGroupId,
+                        superset_position: ex.supersetPosition
                     ),
                     returning: .representation
                 )

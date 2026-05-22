@@ -564,6 +564,8 @@
     <string name="home_quick_actions_tooltip_dismiss">Got it</string>
     <string name="home_quick_actions_loading_title">Starting workout...</string>
     <string name="home_quick_actions_loading_message">Creating your workout and opening Active Workout.</string>
+    <string name="home_floating_dock_messages">Messages</string>
+    <string name="home_floating_dock_separate_buttons">Separate buttons</string>
     <string name="home_feed_you">You</string>
     <string name="home_feed_today">Today</string>
     <string name="home_feed_yesterday">Yesterday</string>
@@ -1033,9 +1035,13 @@
     <string name="active_strength_pause">Pause</string>
     <string name="active_strength_resume">Resume</string>
     <string name="active_strength_all_sets_done">All sets completed. You can finish the workout.</string>
+    <string name="active_strength_all_sets_done_title">All sets completed ✅</string>
+    <string name="active_strength_all_sets_done_subtitle">Great job! Move on when ready.</string>
     <string name="active_strength_rest_title">Rest</string>
     <string name="active_strength_rest_sec">%1$d s</string>
     <string name="active_strength_skip_rest">Skip rest</string>
+    <string name="active_strength_back_to_current_set">Back to current set</string>
+    <string name="active_strength_viewing_set">Viewing set %1$d</string>
     <string name="active_strength_set_progress">Step %1$d of %2$d in this exercise</string>
     <string name="active_strength_reps">Reps: %1$s</string>
     <string name="active_strength_kg">Weight (kg): %1$s</string>
@@ -1045,6 +1051,11 @@
     <string name="active_strength_field_rpe">RPE</string>
     <string name="active_strength_set_done">Set done</string>
     <string name="active_strength_superset_label">Superserie</string>
+    <string name="add_strength_superset_with_next">Superset with next</string>
+    <string name="add_strength_superset_add_next">Add next</string>
+    <string name="add_strength_superset_remove">Remove</string>
+    <string name="add_strength_superset_group_format">Group %1$d · %2$d</string>
+    <string name="add_strength_superset_exercise_count">%1$d exercises</string>
     <string name="active_strength_superset_set_round">Set %1$d · %2$d exercises</string>
     <string name="active_strength_superset_member_position">Exercise %1$d of %2$d</string>
     <string name="active_strength_next_exercise">Next exercise</string>
@@ -1379,7 +1390,7 @@
     <string name="chat_share_routine_card_strength">Strength routine</string>
     <string name="chat_share_routine_card_hyrox">Hyrox routine</string>
     <string name="chat_share_sent_fallback">Sent a share</string>
-    <string name="chat_fab_drag_hint_message">Drag the messages button to any corner of the screen.</string>
+    <string name="chat_fab_drag_hint_message">Drag the messages button to any side of the screen.</string>
     <string name="chat_fab_drag_hint_ok">Got it</string>
     <string name="share_achievement_title">Send achievement</string>
     <string name="share_achievement_no_conversations">No conversations yet. Start a new chat with the + button.</string>

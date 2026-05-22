@@ -37,7 +37,7 @@ object CompareAveragePoolLoader {
     fun typeLabelForWorkout(workout: WorkoutDetailRow): String {
         val t = workout.title?.trim().orEmpty()
         if (t.isNotEmpty()) return t
-        return when (workout.kind.lowercase()) {
+        return when (workout.kind?.lowercase().orEmpty()) {
             "sport" -> "Sport"
             "cardio" -> "Cardio"
             else -> "Workout"

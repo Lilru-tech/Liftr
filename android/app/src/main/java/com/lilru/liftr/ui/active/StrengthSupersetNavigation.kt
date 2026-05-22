@@ -1,5 +1,7 @@
 package com.lilru.liftr.ui.active
 
+import kotlin.math.max
+
 data class StrengthDisplayGroup(
     val id: String,
     val supersetGroupId: String?,
@@ -123,6 +125,24 @@ fun nextSupersetMemberExerciseIndex(
     return exercises.indexOfFirst { it.workoutExerciseId == next.workoutExerciseId }.takeIf { it >= 0 }
 }
 
+fun supersetGroupWorkSetIndex(
+    members: List<ActiveStrengthExerciseLine>,
+    setProgress: Map<Int, Int>
+): Int {
+    if (members.isEmpty()) return 0
+    return members.minOf { (setProgress[it.workoutExerciseId] ?: 0).coerceAtMost(it.sets.size) }
+}
+
+fun supersetMemberFinishedRound(
+    member: ActiveStrengthExerciseLine,
+    roundIndex: Int,
+    setProgress: Map<Int, Int>,
+    completedSets: List<CompletedSetLine>
+): Boolean {
+    val progress = setProgress[member.workoutExerciseId] ?: 0
+    return completedSets.size > roundIndex || progress > roundIndex
+}
+
 fun primarySetActionLabel(
     ex: ActiveStrengthExerciseLine,
     exercises: List<ActiveStrengthExerciseLine>,
@@ -134,7 +154,40 @@ fun primarySetActionLabel(
         val rest = currentSet.restSec?.takeIf { it > 0 }
         if (rest != null) return "Rest ${rest}s"
     }
+    if (supersetMembers(ex, exercises).size > 1) {
+        return "Set done"
+    }
     val next = nextSupersetMember(ex, exercises, setIndex, setProgress)
     if (next != null) return "Next · ${next.displayName}"
+    return "Set done"
+}
+
+fun supersetMaxRoundCount(
+    members: List<ActiveStrengthExerciseLine>
+): Int = members.maxOfOrNull { it.sets.size } ?: 0
+
+fun supersetMembersContentHeightDp(memberCount: Int): Int {
+    val rowHeight = 108
+    val dividerHeight = 13
+    val verticalPadding = 8
+    val raw = memberCount * rowHeight + max(0, memberCount - 1) * dividerHeight + verticalPadding
+    return minOf(raw, 336)
+}
+
+fun supersetRoundRestSec(
+    members: List<ActiveStrengthExerciseLine>,
+    setIndex: Int
+): Int {
+    val available = members.filter { it.sets.size > setIndex }
+    val last = available.lastOrNull() ?: return 0
+    return last.sets.getOrNull(setIndex)?.restSec?.takeIf { it > 0 } ?: 0
+}
+
+fun supersetRoundActionLabel(
+    members: List<ActiveStrengthExerciseLine>,
+    setIndex: Int
+): String {
+    val rest = supersetRoundRestSec(members, setIndex)
+    if (rest > 0) return "Rest ${rest}s"
     return "Set done"
 }
