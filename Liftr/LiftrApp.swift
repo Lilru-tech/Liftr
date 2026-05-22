@@ -9,6 +9,9 @@ struct LiftrApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(appState)
+                .onAppear {
+                    WorkoutStartSync.startMonitoring()
+                }
                 .onOpenURL { url in
                     AuthCallbackLogger.log("SwiftUI onOpenURL", url: url, source: "LiftrApp")
                     Task { await appState.handleAuthCallbackURL(url) }

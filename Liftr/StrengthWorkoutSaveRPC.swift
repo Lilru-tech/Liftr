@@ -12,12 +12,12 @@ struct StrengthWorkoutSaveResult: Decodable {
     let score: Double?
 }
 
-struct StrengthWorkoutFinishLinkedInput: Encodable {
+struct StrengthWorkoutFinishLinkedInput: Codable {
     let workout_id: Int
     let exercises: [StrengthWorkoutExerciseSaveInput]
 }
 
-struct StrengthWorkoutExerciseSaveInput: Encodable {
+struct StrengthWorkoutExerciseSaveInput: Codable {
     let workout_exercise_id: Int
     let exercise_id: Int?
     let order_index: Int?
@@ -26,7 +26,7 @@ struct StrengthWorkoutExerciseSaveInput: Encodable {
     let sets: [StrengthWorkoutSetSaveInput]
 }
 
-struct StrengthWorkoutSetSaveInput: Encodable {
+struct StrengthWorkoutSetSaveInput: Codable {
     let set_number: Int
     let order_index: Int?
     let reps: Int?

@@ -131,7 +131,10 @@ fun EditStrengthRoutineTemplateSheetContent(
                         onRemoveExercise = { vm.templateEditRemoveExercise(it) },
                         onAddBlankExercise = { vm.templateEditAddBlankStrengthExercise() },
                         onClearAllExercises = { showClearDialog = true },
-                        showClearAllButton = canClearAll
+                        showClearAllButton = canClearAll,
+                        onStartSuperset = { vm.templateEditStartSuperset(it) },
+                        onAddNextToSuperset = { vm.templateEditAddNextToSuperset(it) },
+                        onRemoveFromSuperset = { vm.templateEditRemoveFromSuperset(it) }
                     )
                 }
             }

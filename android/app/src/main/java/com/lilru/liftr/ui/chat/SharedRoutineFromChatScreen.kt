@@ -302,52 +302,11 @@ fun SharedRoutineFromChatScreen(
                             )
                         } else {
                             val emDash = stringResource(R.string.shared_routine_em_dash)
-                            for (ex in exs) {
-                                val display = ex.customName?.trim().orEmpty().ifEmpty {
-                                    exerciseNames[ex.exerciseId] ?: "Exercise ${ex.exerciseId}"
-                                }
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(
-                                        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f)
-                                    )
-                                ) {
-                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(display, style = MaterialTheme.typography.titleSmall)
-                                        val exNotes = ex.notes?.trim().orEmpty()
-                                        if (exNotes.isNotEmpty()) {
-                                            Text(exNotes, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                        val setsSorted = ex.strengthRoutineSets.orEmpty().sortedBy { it.setNumber }
-                                        if (setsSorted.isEmpty()) {
-                                            Text(
-                                                stringResource(R.string.shared_routine_set_line, 1, emDash, emDash, emDash, emDash),
-                                                style = MaterialTheme.typography.bodySmall
-                                            )
-                                        } else {
-                                            for (s in setsSorted) {
-                                                val reps = s.reps?.toString() ?: emDash
-                                                val kg = s.weightKg?.let { v ->
-                                                    if (v == kotlin.math.floor(v)) v.toInt().toString() else String.format("%.1f", v)
-                                                } ?: emDash
-                                                val rpe = s.rpe?.let { v ->
-                                                    if (v == kotlin.math.floor(v)) v.toInt().toString() else String.format("%.1f", v)
-                                                } ?: emDash
-                                                val rest = s.restSec?.let { stringResource(R.string.shared_routine_rest_sec, it) } ?: emDash
-                                                Text(
-                                                    stringResource(R.string.shared_routine_set_line, s.setNumber, reps, kg, rpe, rest),
-                                                    style = MaterialTheme.typography.bodySmall
-                                                )
-                                                val sn = s.notes?.trim().orEmpty()
-                                                if (sn.isNotEmpty()) {
-                                                    Text(sn, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                Spacer(Modifier.size(4.dp))
-                            }
+                            StrengthRoutineSharePreview(
+                                exercises = exs,
+                                exerciseNames = exerciseNames,
+                                emDash = emDash
+                            )
                         }
                     }
                 }

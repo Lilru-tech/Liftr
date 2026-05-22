@@ -2417,70 +2417,16 @@ struct AddWorkoutSheet: View {
         return rows.first?.id
     }
 
-    private struct CreatedWorkoutExerciseRow: Decodable {
-        let id: Int
-        let order_index: Int
-    }
-
-    private struct WorkoutExerciseSupersetPatch: Encodable {
-        let superset_group_id: UUID?
-        let superset_position: Int?
-
-        private enum CodingKeys: String, CodingKey {
-            case superset_group_id, superset_position
-        }
-
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            if let superset_group_id {
-                try container.encode(superset_group_id, forKey: .superset_group_id)
-            } else {
-                try container.encodeNil(forKey: .superset_group_id)
-            }
-            if let superset_position {
-                try container.encode(superset_position, forKey: .superset_position)
-            } else {
-                try container.encodeNil(forKey: .superset_position)
-            }
-        }
-    }
-
     private func patchSupersetsForCreatedWorkouts(
         client: SupabaseClient,
         workoutIds: [Int64],
         programs: [[EditableExercise]]
     ) async throws {
-        for (idx, workoutId) in workoutIds.enumerated() {
-            guard programs.indices.contains(idx) else { continue }
-            let program = normalizedSupersetPrograms(programs[idx])
-            guard program.contains(where: { $0.supersetGroupId != nil }) else { continue }
-
-            let res = try await client
-                .from("workout_exercises")
-                .select("id, order_index")
-                .eq("workout_id", value: Int(workoutId))
-                .order("order_index", ascending: true)
-                .execute()
-            let rows = try JSONDecoder.supabase().decode([CreatedWorkoutExerciseRow].self, from: res.data)
-
-            for row in rows {
-                guard let exercise = program.first(where: { $0.orderIndex == row.order_index }),
-                      let groupId = exercise.supersetGroupId,
-                      let position = exercise.supersetPosition
-                else { continue }
-
-                _ = try await client
-                    .from("workout_exercises")
-                    .update(
-                        WorkoutExerciseSupersetPatch(
-                            superset_group_id: groupId,
-                            superset_position: position
-                        )
-                    )
-                    .eq("id", value: row.id)
-                    .execute()
-            }
-        }
+        try await StrengthSupersetPatch.patchSupersetsForCreatedWorkouts(
+            client: client,
+            workoutIds: workoutIds,
+            programs: programs
+        )
     }
 
     private func strengthExercisesForRoutineTemplate() -> [EditableExercise] {
@@ -4571,13 +4517,7 @@ private struct StrengthRoutinesPickerSheet: View {
                 }
                 return
             }
-            let res = try await client
-                .from("strength_routines")
-                .select(strengthTemplateDetailSelect())
-                .eq("id", value: Int(src.id))
-                .single()
-                .execute()
-            let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+            let detail = try await fetchStrengthRoutineTemplateDetail(client: client, routineId: src.id)
             let built = editableExercisesFromStrengthTemplateDetail(detail, exerciseDisplayName: exerciseDisplayName)
             guard !built.isEmpty else {
                 await MainActor.run { duplicateError = "This routine has no exercises to copy." }
@@ -4646,14 +4586,9 @@ private struct StrengthRoutinesPickerSheet: View {
             .single()
             .execute()
         let prof = try JSONDecoder.supabase().decode(ProfileLite.self, from: pRes.data)
-        let res = try await client
-            .from("strength_routines")
-            .select(strengthTemplateDetailSelect())
-            .eq("id", value: Int(row.id))
-            .single()
-            .execute()
-        let json = String(decoding: res.data, as: UTF8.self)
-        let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+        let data = try await fetchStrengthRoutineTemplateDetailData(client: client, routineId: row.id)
+        let json = String(decoding: data, as: UTF8.self)
+        let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: data)
         let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
         let exerciseCount = exs.count
         var totalSets = 0
@@ -4691,13 +4626,7 @@ private struct StrengthRoutinesPickerSheet: View {
         await MainActor.run { errorMessage = nil }
         do {
             let client = SupabaseManager.shared.client
-            let res = try await client
-                .from("strength_routines")
-                .select(strengthTemplateDetailSelect())
-                .eq("id", value: Int(id))
-                .single()
-                .execute()
-            let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+            let detail = try await fetchStrengthRoutineTemplateDetail(client: client, routineId: id)
             let built = editableExercisesFromStrengthTemplateDetail(detail, exerciseDisplayName: exerciseDisplayName)
             guard !built.isEmpty else {
                 await MainActor.run { errorMessage = "This routine has no exercises." }

@@ -84,6 +84,72 @@ struct StrengthWorkoutSaveRegressionTests {
         #expect(compacted[2].supersetPosition == nil)
     }
 
+    @Test func strengthRoutineContentFingerprintIncludesSupersetMetadata() {
+        let group = UUID()
+        var withSuperset = EditableExercise()
+        withSuperset.exerciseId = 10
+        withSuperset.supersetGroupId = group
+        withSuperset.supersetPosition = 1
+        withSuperset.sets = [EditableSet(setNumber: 1, reps: 8)]
+
+        var withoutSuperset = EditableExercise()
+        withoutSuperset.exerciseId = 10
+        withoutSuperset.sets = [EditableSet(setNumber: 1, reps: 8)]
+
+        let hashA = strengthRoutineContentFingerprint(from: [withSuperset])
+        let hashB = strengthRoutineContentFingerprint(from: [withoutSuperset])
+        #expect(hashA != hashB)
+    }
+
+    @Test func compactSupersetMetadataForEditClearsSingletonAndRenumbersPositions() {
+        let groupA = UUID()
+        let groupB = UUID()
+
+        let first = EditWorkoutMetaSheet.SEditableExercise(
+            workoutExerciseId: 1,
+            exerciseId: 1,
+            orderIndex: 1,
+            name: "A",
+            alias: "",
+            notes: "",
+            supersetGroupId: groupA,
+            supersetPosition: 4,
+            sets: []
+        )
+        let second = EditWorkoutMetaSheet.SEditableExercise(
+            workoutExerciseId: 2,
+            exerciseId: 2,
+            orderIndex: 2,
+            name: "B",
+            alias: "",
+            notes: "",
+            supersetGroupId: groupA,
+            supersetPosition: 9,
+            sets: []
+        )
+        let third = EditWorkoutMetaSheet.SEditableExercise(
+            workoutExerciseId: 3,
+            exerciseId: 3,
+            orderIndex: 3,
+            name: "C",
+            alias: "",
+            notes: "",
+            supersetGroupId: groupB,
+            supersetPosition: 1,
+            sets: []
+        )
+
+        let compacted = compactSupersetMetadataForEdit([first, second, third])
+
+        #expect(compacted.map(\.orderIndex) == [1, 2, 3])
+        #expect(compacted[0].supersetGroupId == groupA)
+        #expect(compacted[0].supersetPosition == 1)
+        #expect(compacted[1].supersetGroupId == groupA)
+        #expect(compacted[1].supersetPosition == 2)
+        #expect(compacted[2].supersetGroupId == nil)
+        #expect(compacted[2].supersetPosition == nil)
+    }
+
     @Test func collapseLegacyIdenticalSets() {
         let lines = [
             StrengthWorkoutFinishCollapse.Line(

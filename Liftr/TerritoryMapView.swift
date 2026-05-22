@@ -42,14 +42,15 @@ struct TerritoryMapView: View {
     @State private var refreshTask: Task<Void, Never>?
     @State private var loadedSnapshotRegion: MKCoordinateRegion?
 
-    private static let mapCellFetchLimit = 20_000
-    private static let maxRenderedHexCells = 20_000
+    private static let mapCellFetchLimit = 5_000
+    private static let maxRenderedHexCells = 5_000
     private static let otherRenderedHexCellsTarget = maxRenderedHexCells
 
     private static let drawRegionInflationFactor = 1.12
-    private static let pruneCacheMaxEntries = 24_000
+    private static let pruneCacheMaxEntries = 6_000
     private static let pruneRegionSpanMultiplier = 1.75
-    private static let snapshotFetchRegionMultiplier = 1.15
+    private static let snapshotFetchRegionMultiplier = 1.4
+    private static let mapFetchDebounceNanoseconds: UInt64 = 450_000_000
 
     private static func log(_ message: String) {
         print("[TerritoryMap][View] \(message)")
@@ -364,6 +365,8 @@ struct TerritoryMapView: View {
         refreshTask?.cancel()
         Self.log("enqueue viewport fetch \(Self.regionLog(region))")
         refreshTask = Task {
+            try? await Task.sleep(nanoseconds: Self.mapFetchDebounceNanoseconds)
+            guard !Task.isCancelled else { return }
             await performSnapshotFetch(for: region)
         }
     }

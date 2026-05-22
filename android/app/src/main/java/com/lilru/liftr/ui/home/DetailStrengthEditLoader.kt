@@ -34,6 +34,7 @@ private data class SetWire(
     val id: Int = 0,
     @SerialName("workout_exercise_id") val workoutExerciseId: Int,
     @SerialName("set_number") val setNumber: Int,
+    @SerialName("order_index") val orderIndex: Int? = null,
     val reps: Int? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
     val rpe: Double? = null,
@@ -137,6 +138,8 @@ private fun jsonArrayData(raw: String): String =
     }
 
 data class StrengthReadonlySetLine(
+    val rowId: Int,
+    val orderIndex: Int?,
     val setNumber: Int,
     val reps: Int?,
     val weightKg: Double?,
@@ -185,11 +188,11 @@ suspend fun loadStrengthReadonlyForDetail(
                 supabase.from(BackendContracts.Tables.EXERCISE_SETS)
                     .select(
                         columns = Columns.raw(
-                            "id, workout_exercise_id, set_number, reps, weight_kg, rpe, rest_sec, weight_segments"
+                            "id, workout_exercise_id, set_number, order_index, reps, weight_kg, rpe, rest_sec, weight_segments"
                         )
                     ) {
                         filter { isIn("workout_exercise_id", exIds) }
-                        order("set_number", Order.ASCENDING)
+                        order("order_index", Order.ASCENDING)
                         order("id", Order.ASCENDING)
                     }
             }.getOrNull() ?: return null
@@ -198,6 +201,8 @@ suspend fun loadStrengthReadonlyForDetail(
             sRows.groupBy({ it.workoutExerciseId }, { s ->
                 val segs = parseWeightSegmentsColumn(s.weightSegments)
                 StrengthReadonlySetLine(
+                    rowId = s.id,
+                    orderIndex = s.orderIndex,
                     setNumber = s.setNumber,
                     reps = s.reps,
                     weightKg = s.weightKg,

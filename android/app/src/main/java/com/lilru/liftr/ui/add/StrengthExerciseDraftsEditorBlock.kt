@@ -62,6 +62,9 @@ fun StrengthExerciseDraftsEditorBlock(
     onAddBlankExercise: () -> Unit,
     onClearAllExercises: () -> Unit,
     showClearAllButton: Boolean,
+    onStartSuperset: ((exerciseDraftId: String) -> Unit)? = null,
+    onAddNextToSuperset: ((exerciseDraftId: String) -> Unit)? = null,
+    onRemoveFromSuperset: ((exerciseDraftId: String) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier.fillMaxWidth()) {
@@ -134,6 +137,53 @@ fun StrengthExerciseDraftsEditorBlock(
                     minLines = 2,
                     maxLines = 4
                 )
+                if (
+                    lifts.size >= 2 &&
+                    onStartSuperset != null &&
+                    onAddNextToSuperset != null &&
+                    onRemoveFromSuperset != null
+                ) {
+                    val groupId = ex.supersetGroupId
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            stringResource(R.string.active_strength_superset_label),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (groupId != null) {
+                            Text(
+                                stringResource(
+                                    R.string.add_strength_superset_group_format,
+                                    supersetGroupDisplayNumber(groupId, lifts),
+                                    ex.supersetPosition ?: 1
+                                ),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                            if (canAddNextToSuperset(lifts, groupId)) {
+                                TextButton(onClick = { onAddNextToSuperset(ex.id) }) {
+                                    Text(stringResource(R.string.add_strength_superset_add_next))
+                                }
+                            }
+                            TextButton(onClick = { onRemoveFromSuperset(ex.id) }) {
+                                Text(
+                                    stringResource(R.string.add_strength_superset_remove),
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        } else {
+                            TextButton(
+                                onClick = { onStartSuperset(ex.id) },
+                                enabled = canStartSupersetAt(lifts, index)
+                            ) {
+                                Text(stringResource(R.string.add_strength_superset_with_next))
+                            }
+                        }
+                    }
+                }
                 ex.sets.forEachIndexed { setIndex, set ->
                     val errColor = MaterialTheme.colorScheme.error
                     val sn = set.setNumber.coerceIn(1, 99)

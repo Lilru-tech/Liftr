@@ -111,6 +111,10 @@ struct AppleHealthImportView: View {
                             LabeledContent("Imported", value: "\(s.imported)")
                             Divider().opacity(0.15)
                             LabeledContent("Already in Liftr", value: "\(s.skippedDuplicate)")
+                            if s.mergedDuplicate > 0 {
+                                Divider().opacity(0.15)
+                                LabeledContent("Merged with existing", value: "\(s.mergedDuplicate)")
+                            }
                             Divider().opacity(0.15)
                             LabeledContent("Failed", value: "\(s.failed)")
                             if !s.errorMessages.isEmpty {
@@ -274,7 +278,7 @@ struct AppleHealthImportView: View {
             if enabled {
                 let result = try await HealthKitCardioSyncService.shared.enableBackgroundSync()
                 summary = result
-                if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0 {
+                if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
                     banner = "Automatic import enabled. No compatible cardio workouts found in the last 90 days."
                 } else if result.failed > 0, let firstError = result.errorMessages.first {
                     banner = "Automatic import enabled, but the initial import reported: \(firstError)"
@@ -333,7 +337,7 @@ struct AppleHealthImportView: View {
         await MainActor.run {
             importing = false
             summary = result
-            if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0 {
+            if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
                 banner = "No compatible cardio workouts found in this date range."
             }
         }

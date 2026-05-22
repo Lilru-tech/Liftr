@@ -66,6 +66,7 @@ fun TerritoryMapScreen(
     var summary by remember { mutableStateOf<TerritorySummaryWire?>(null) }
     var loading by remember { mutableStateOf(false) }
     var lastFetchKey by remember { mutableStateOf("") }
+    var loadedSnapshotBounds by remember { mutableStateOf<LatLngBounds?>(null) }
     var selectedCell by remember { mutableStateOf<TerritoryMapCellWire?>(null) }
     var showLeaderboard by remember { mutableStateOf(false) }
     var showMineOnly by remember { mutableStateOf(false) }
@@ -96,10 +97,22 @@ fun TerritoryMapScreen(
         val zoom = cameraPositionState.position.zoom
         val latDelta = 360.0 / (1 shl zoom.toInt().coerceAtLeast(1)).toDouble()
         val lonDelta = latDelta
-        val minLat = target.latitude - latDelta / 2.0
-        val maxLat = target.latitude + latDelta / 2.0
-        val minLon = target.longitude - lonDelta / 2.0
-        val maxLon = target.longitude + lonDelta / 2.0
+        val visibleLatDelta = latDelta
+        val visibleLonDelta = lonDelta
+        val pad = 1.4
+        val minLat = target.latitude - latDelta * pad / 2.0
+        val maxLat = target.latitude + latDelta * pad / 2.0
+        val minLon = target.longitude - lonDelta * pad / 2.0
+        val maxLon = target.longitude + lonDelta * pad / 2.0
+        val visibleBounds = LatLngBounds.Builder()
+            .include(LatLng(target.latitude - visibleLatDelta / 2.0, target.longitude - visibleLonDelta / 2.0))
+            .include(LatLng(target.latitude + visibleLatDelta / 2.0, target.longitude + visibleLonDelta / 2.0))
+            .build()
+        loadedSnapshotBounds?.let { loaded ->
+            if (loaded.contains(visibleBounds.northeast) && loaded.contains(visibleBounds.southwest)) {
+                return
+            }
+        }
         val key = "%.4f|%.4f|%.4f|%.4f".format(minLat, minLon, maxLat, maxLon)
         if (key == lastFetchKey) return
         lastFetchKey = key
@@ -109,8 +122,13 @@ fun TerritoryMapScreen(
             minLat = minLat,
             minLon = minLon,
             maxLat = maxLat,
-            maxLon = maxLon
+            maxLon = maxLon,
+            limit = 5_000
         )
+        loadedSnapshotBounds = LatLngBounds.Builder()
+            .include(LatLng(minLat, minLon))
+            .include(LatLng(maxLat, maxLon))
+            .build()
         val drawableCells = cells.count { (it.cellGeojson?.ringLatLng()?.size ?: 0) >= 3 }
         TerritoryMapDiagnostics.logCellsFetched(cells.size, drawableCells)
         loading = false
@@ -137,7 +155,7 @@ fun TerritoryMapScreen(
     }
 
     LaunchedEffect(cameraPositionState.position) {
-        delay(350)
+        delay(450)
         refreshForCamera()
     }
 

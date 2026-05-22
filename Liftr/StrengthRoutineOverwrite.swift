@@ -13,13 +13,25 @@ struct StrengthProgramItem: Equatable {
     var orderIndex: Int
     var notes: String?
     var customName: String?
+    var supersetGroupId: UUID?
+    var supersetPosition: Int?
     var sets: [StrengthProgramSet]
 
-    init(exerciseId: Int64, orderIndex: Int, notes: String?, customName: String?, sets: [StrengthProgramSet]) {
+    init(
+        exerciseId: Int64,
+        orderIndex: Int,
+        notes: String?,
+        customName: String?,
+        supersetGroupId: UUID? = nil,
+        supersetPosition: Int? = nil,
+        sets: [StrengthProgramSet]
+    ) {
         self.exerciseId = exerciseId
         self.orderIndex = orderIndex
         self.notes = notes
         self.customName = customName
+        self.supersetGroupId = supersetGroupId
+        self.supersetPosition = supersetPosition
         self.sets = sets
     }
 
@@ -30,6 +42,8 @@ struct StrengthProgramItem: Equatable {
             orderIndex: item.order_index,
             notes: item.notes,
             customName: item.custom_name,
+            supersetGroupId: editable.supersetGroupId,
+            supersetPosition: editable.supersetPosition,
             sets: item.sets
                 .sorted { $0.set_number < $1.set_number }
                 .map { StrengthProgramSet(from: $0) }
@@ -91,7 +105,9 @@ func strengthRoutineContentFingerprint(from items: [StrengthProgramItem]) -> Str
         }
         let cn = item.customName ?? ""
         let note = item.notes ?? ""
-        lines.append("\(item.exerciseId)|\(item.orderIndex)|\(cn)|\(note)|" + setParts.joined(separator: ";"))
+        let sg = item.supersetGroupId?.uuidString ?? ""
+        let sp = item.supersetPosition.map(String.init) ?? ""
+        lines.append("\(item.exerciseId)|\(item.orderIndex)|\(cn)|\(note)|\(sg)|\(sp)|" + setParts.joined(separator: ";"))
     }
     let joined = lines.joined(separator: "\n")
     let digest = SHA256.hash(data: Data(joined.utf8))
@@ -364,6 +380,8 @@ private struct StrengthRoutineFullRow: Decodable {
 private struct StrengthRoutineExerciseWire: Decodable {
     let exercise_id: Int64
     let order_index: Int
+    let superset_group_id: UUID?
+    let superset_position: Int?
     let notes: String?
     let custom_name: String?
     let strength_routine_sets: [StrengthRoutineSetWire]?
@@ -380,7 +398,33 @@ private struct StrengthRoutineSetWire: Decodable {
 }
 
 private func strengthRoutineFullDetailSelect() -> String {
+    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,superset_group_id,superset_position,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
+}
+
+private func strengthRoutineFullDetailSelectLegacy() -> String {
     "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
+}
+
+private func fetchAllStrengthRoutineFullRows(
+    client: SupabaseClient,
+    userId: UUID
+) async throws -> [StrengthRoutineFullRow] {
+    do {
+        let res = try await client
+            .from("strength_routines")
+            .select(strengthRoutineFullDetailSelect())
+            .eq("user_id", value: userId)
+            .execute()
+        return try JSONDecoder.supabase().decode([StrengthRoutineFullRow].self, from: res.data)
+    } catch {
+        guard strengthRoutineSupersetColumnsUnavailable(error) else { throw error }
+        let res = try await client
+            .from("strength_routines")
+            .select(strengthRoutineFullDetailSelectLegacy())
+            .eq("user_id", value: userId)
+            .execute()
+        return try JSONDecoder.supabase().decode([StrengthRoutineFullRow].self, from: res.data)
+    }
 }
 
 private func programItemsFromRoutineRow(_ row: StrengthRoutineFullRow) -> [StrengthProgramItem] {
@@ -407,6 +451,8 @@ private func programItemsFromRoutineRow(_ row: StrengthRoutineFullRow) -> [Stren
             orderIndex: ex.order_index,
             notes: ex.notes,
             customName: ex.custom_name,
+            supersetGroupId: ex.superset_group_id,
+            supersetPosition: ex.superset_position,
             sets: mapped
         )
     }
@@ -547,13 +593,7 @@ func fetchStrengthRoutineOverwriteCandidate(
     guard !proposed.isEmpty else { return .none }
     let proposedContent = strengthRoutineContentFingerprint(from: proposed)
 
-    let res = try await client
-        .from("strength_routines")
-        .select(strengthRoutineFullDetailSelect())
-        .eq("user_id", value: userId)
-        .execute()
-
-    let rows = try JSONDecoder.supabase().decode([StrengthRoutineFullRow].self, from: res.data)
+    let rows = try await fetchAllStrengthRoutineFullRows(client: client, userId: userId)
     var matches: [(row: StrengthRoutineFullRow, items: [StrengthProgramItem], contentHash: String)] = []
     for row in rows {
         let items = programItemsFromRoutineRow(row)
@@ -600,7 +640,8 @@ func applyStrengthRoutinePrescriptionUpdate(
 
     struct RoutineExerciseIdRow: Decodable { let id: Int64 }
 
-    let contentHash = strengthRoutineContentFingerprint(from: exercises)
+    let normalized = normalizedSupersetPrograms(exercises)
+    let contentHash = strengthRoutineContentFingerprint(from: normalized)
 
     struct ExistingRoutineExerciseId: Decodable { let id: Int64 }
     let existingRes = try await client
@@ -623,14 +664,6 @@ func applyStrengthRoutinePrescriptionUpdate(
         .eq("routine_id", value: Int(routineId))
         .execute()
 
-    struct StrengthRoutineExerciseRowInsert: Encodable {
-        let routine_id: Int64
-        let exercise_id: Int64
-        let order_index: Int
-        let notes: String?
-        let custom_name: String?
-    }
-
     struct StrengthRoutineSetRowInsert: Encodable {
         let routine_exercise_id: Int64
         let set_number: Int
@@ -642,7 +675,8 @@ func applyStrengthRoutinePrescriptionUpdate(
         let weight_segments: [StrengthWeightSegWire]?
     }
 
-    for item in strengthItems.sorted(by: { $0.order_index < $1.order_index }) {
+    for ex in normalized {
+        guard let item = ex.toStrengthItem() else { continue }
         let exRes = try await client
             .from("strength_routine_exercises")
             .insert(
@@ -651,7 +685,9 @@ func applyStrengthRoutinePrescriptionUpdate(
                     exercise_id: item.exercise_id,
                     order_index: item.order_index,
                     notes: item.notes,
-                    custom_name: item.custom_name
+                    custom_name: item.custom_name,
+                    superset_group_id: ex.supersetGroupId,
+                    superset_position: ex.supersetPosition
                 ),
                 returning: .representation
             )

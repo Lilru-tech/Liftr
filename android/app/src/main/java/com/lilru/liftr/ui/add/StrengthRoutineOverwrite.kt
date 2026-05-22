@@ -37,6 +37,8 @@ internal data class StrengthProgramItem(
     val orderIndex: Int,
     val notes: String?,
     val customName: String?,
+    val supersetGroupId: String? = null,
+    val supersetPosition: Int? = null,
     val sets: List<StrengthProgramSet>
 )
 
@@ -187,7 +189,9 @@ internal fun strengthRoutineContentFingerprintFromItems(items: List<StrengthProg
         }
         val cn = item.customName ?: ""
         val note = item.notes ?: ""
-        "${item.exerciseId}|${item.orderIndex}|$cn|$note|${setParts.joinToString(";")}"
+        val sg = item.supersetGroupId ?: ""
+        val sp = item.supersetPosition?.toString() ?: ""
+        "${item.exerciseId}|${item.orderIndex}|$cn|$note|$sg|$sp|${setParts.joinToString(";")}"
     }
     return sha256Hex(lines.joinToString("\n"))
 }
@@ -219,6 +223,8 @@ internal fun strengthProgramItemsFromDrafts(exercises: List<StrengthExerciseDraf
                 orderIndex = exerciseIndex + 1,
                 notes = note,
                 customName = cn,
+                supersetGroupId = exercise.supersetGroupId,
+                supersetPosition = exercise.supersetPosition,
                 sets = validSets
             )
         )
@@ -372,6 +378,8 @@ private data class RoutineFullRow(
 private data class RoutineExWire(
     @SerialName("exercise_id") val exerciseId: Long,
     @SerialName("order_index") val orderIndex: Int,
+    @SerialName("superset_group_id") val supersetGroupId: String? = null,
+    @SerialName("superset_position") val supersetPosition: Int? = null,
     val notes: String? = null,
     @SerialName("custom_name") val customName: String? = null,
     @SerialName("strength_routine_sets") val sets: List<RoutineSetWire>? = null
@@ -397,6 +405,8 @@ private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgra
             orderIndex = ex.orderIndex,
             notes = ex.notes,
             customName = ex.customName,
+            supersetGroupId = ex.supersetGroupId,
+            supersetPosition = ex.supersetPosition,
             sets = setsSorted.map { s ->
                 val arr = s.weightSegments
                 val segPayload = if (arr == null || arr.size < 2) {
@@ -424,8 +434,6 @@ private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgra
     }
 }
 
-private const val ROUTINE_FULL_SELECT =
-    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
 
 internal suspend fun fetchStrengthRoutineOverwriteCandidate(
     supabase: SupabaseClient,
@@ -435,8 +443,15 @@ internal suspend fun fetchStrengthRoutineOverwriteCandidate(
 ): StrengthRoutineOverwriteCandidate {
     if (proposed.isEmpty()) return StrengthRoutineOverwriteCandidate.None
     val proposedContent = strengthRoutineContentFingerprintFromItems(proposed)
-    val res = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(columns = Columns.raw(ROUTINE_FULL_SELECT)) {
-        filter { eq("user_id", userId) }
+    val res = runCatching {
+        supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(columns = Columns.raw(STRENGTH_ROUTINE_FULL_SELECT)) {
+            filter { eq("user_id", userId) }
+        }
+    }.getOrElse { err ->
+        if (!strengthRoutineSupersetColumnsUnavailable(err)) throw err
+        supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(columns = Columns.raw(STRENGTH_ROUTINE_FULL_SELECT_LEGACY)) {
+            filter { eq("user_id", userId) }
+        }
     }
     val dec = Json { ignoreUnknownKeys = true }
     val rows: List<RoutineFullRow> = runCatching {
@@ -481,8 +496,9 @@ suspend fun applyStrengthRoutinePrescriptionUpdate(
     routineId: Long,
     exercises: List<StrengthExerciseDraft>
 ) {
-    val payloadItems = buildStrengthPayloadItemsForRoutineUpdate(exercises)
-    val contentHash = strengthRoutineContentFingerprintFromDrafts(exercises)
+    val normalized = normalizedSupersetDrafts(exercises)
+    val payloadItems = buildStrengthPayloadItemsForRoutineUpdate(normalized)
+    val contentHash = strengthRoutineContentFingerprintFromDrafts(normalized)
 
     val existingRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES).select(
         columns = Columns.raw("id")
@@ -514,12 +530,13 @@ suspend fun applyStrengthRoutinePrescriptionUpdate(
             if (exercise.customName.isNotBlank()) {
                 put("custom_name", JsonPrimitive(exercise.customName.trim()))
             }
+            applyRoutineExerciseSupersetFields(exercise)
         }
         supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES).insert(routineExPayload) { }
     }
 
     val insertedRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES).select(
-        columns = Columns.raw("id, routine_id, exercise_id, order_index, notes, custom_name")
+        columns = Columns.raw("id, routine_id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name")
     ) {
         filter { eq("routine_id", routineId) }
         order("order_index", Order.ASCENDING)

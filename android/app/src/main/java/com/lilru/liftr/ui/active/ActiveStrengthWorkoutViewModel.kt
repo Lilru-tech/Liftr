@@ -5,6 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.LiftrSupabase
+import com.lilru.liftr.workout.StrengthFinishPersistence
+import com.lilru.liftr.workout.WorkoutFinishSync
+import com.lilru.liftr.workout.WorkoutProgramCache
+import com.lilru.liftr.workout.WorkoutProgramCacheEntry
+import com.lilru.liftr.workout.WorkoutStartSync
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -44,6 +50,13 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
+data class SetEditDraft(
+    val repsText: String,
+    val weightText: String,
+    val rpeText: String,
+    val restText: String
+)
+
 data class ActiveStrengthSetLine(
     val setId: Int,
     val configId: Int,
@@ -59,7 +72,10 @@ data class ActiveStrengthSetLine(
 data class ActiveStrengthExerciseLine(
     val workoutExerciseId: Int,
     val displayName: String,
-    val sets: List<ActiveStrengthSetLine>
+    val sets: List<ActiveStrengthSetLine>,
+    val orderIndex: Int = 0,
+    val supersetGroupId: String? = null,
+    val supersetPosition: Int? = null
 )
 
 data class CompletedSetLine(
@@ -115,7 +131,8 @@ data class ActiveStrengthUiState(
     val showElborblaCelebration: Boolean = false,
     /** Burbuja de énfasis fijada al primer descanso / primera serie sin descanso hasta cambiar de ejercicio (host). */
     val navEmphasisLockWorkoutExerciseId: Int? = null,
-    val strengthRoutineOverwritePrompt: StrengthRoutineOverwritePrompt? = null
+    val strengthRoutineOverwritePrompt: StrengthRoutineOverwritePrompt? = null,
+    val startSyncStatus: WorkoutStartSync.Status = WorkoutStartSync.Status.IDLE
 ) {
     val atEnd: Boolean
         get() {
@@ -144,7 +161,7 @@ class ActiveStrengthWorkoutViewModel(
     private val restPlannedTotalSecByExerciseIdMutable: MutableMap<Int, Int> = mutableMapOf()
     private val completedSetLines: MutableList<CompletedSetLine> = mutableListOf()
     private var hostWeRows: List<WeWire> = emptyList()
-    private var pendingFinishOnDone: (() -> Unit)? = null
+    private var pendingFinishOnDone: ((offlineQueued: Boolean) -> Unit)? = null
     private var accumulatedPausedSeconds: Int = 0
     private var pauseBeganEpochMs: Long? = null
 
@@ -197,17 +214,59 @@ class ActiveStrengthWorkoutViewModel(
         }
     }
 
+    fun updateStartSyncStatus(status: WorkoutStartSync.Status) {
+        _ui.value = _ui.value.copy(startSyncStatus = status)
+    }
+
+    private fun hydrateFromProgramCache(entry: WorkoutProgramCacheEntry): List<ActiveStrengthExerciseLine> {
+        return entry.exercises.mapNotNull { ex ->
+            val sets = ex.sets.map { s ->
+                val sid = -(ex.workoutExerciseId * 1000 + s.setNumber)
+                ActiveStrengthSetLine(
+                    setId = sid,
+                    configId = sid,
+                    setNumber = s.setNumber,
+                    reps = s.reps,
+                    weightKg = s.weightKg,
+                    rpe = s.rpe,
+                    restSec = s.restSec
+                )
+            }
+            if (sets.isEmpty()) return@mapNotNull null
+            ActiveStrengthExerciseLine(
+                workoutExerciseId = ex.workoutExerciseId,
+                displayName = ex.displayName,
+                sets = sets
+            )
+        }
+    }
+
     fun load() {
         viewModelScope.launch {
-            _ui.value = _ui.value.copy(loading = true, error = null, completedEntirely = false)
+            val ctx = LiftrSupabase.appContext
+            val cachedLines = ctx?.let { c ->
+                WorkoutProgramCache.entry(c, workoutId)?.let { hydrateFromProgramCache(it) }
+            }.orEmpty()
+            val hydratedFromCache = cachedLines.isNotEmpty()
+            _ui.value = _ui.value.copy(
+                loading = !hydratedFromCache,
+                error = null,
+                completedEntirely = false,
+                exercises = if (hydratedFromCache) cachedLines else _ui.value.exercises,
+                startSyncStatus = WorkoutStartSync.status(workoutId)
+            )
             runCatching {
                 supabase.auth.currentUserOrNull()?.id ?: error("No session")
-                patchWorkoutStartedAtNow(supabase, workoutId)
+                if (!WorkoutStartSync.isPending(workoutId)) {
+                    patchWorkoutStartedAtNow(supabase, workoutId)
+                }
 
                 val wRes = supabase
                     .from(BackendContracts.Tables.WORKOUT_EXERCISES)
                     .select(
-                        columns = Columns.raw("id, exercise_id, order_index, notes, custom_name")
+                        columns = Columns.raw(
+                            "id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name"
+                        )
                     ) {
                         filter { eq("workout_id", workoutId) }
                         order("order_index", Order.ASCENDING)
@@ -249,7 +308,10 @@ class ActiveStrengthWorkoutViewModel(
                     ActiveStrengthExerciseLine(
                         workoutExerciseId = we.id,
                         displayName = name,
-                        sets = setLines
+                        sets = setLines,
+                        orderIndex = we.orderIndex,
+                        supersetGroupId = we.supersetGroupId,
+                        supersetPosition = we.supersetPosition
                     )
                 }
                 if (lines.isEmpty()) {
@@ -309,9 +371,10 @@ class ActiveStrengthWorkoutViewModel(
                 Log.e(TAG, "load failed", e)
                 accumulatedPausedSeconds = 0
                 pauseBeganEpochMs = null
+                val keepCached = _ui.value.exercises.isNotEmpty()
                 _ui.value = _ui.value.copy(
                     loading = false,
-                    error = e.message?.take(280) ?: e::class.java.simpleName,
+                    error = if (keepCached) null else e.message?.take(280) ?: e::class.java.simpleName,
                     isSessionPaused = false
                 )
             }
@@ -348,7 +411,10 @@ class ActiveStrengthWorkoutViewModel(
                 ActiveStrengthExerciseLine(
                     workoutExerciseId = ex.id,
                     displayName = name,
-                    sets = setLines
+                    sets = setLines,
+                    orderIndex = ex.orderIndex,
+                    supersetGroupId = ex.supersetGroupId,
+                    supersetPosition = ex.supersetPosition
                 )
             }
     }
@@ -413,16 +479,68 @@ class ActiveStrengthWorkoutViewModel(
         _ui.value = _ui.value.copy(editRestText = value)
     }
 
-    fun applyCurrentSetEdits(expandedIndexOverride: Int? = null) {
+    fun applyCurrentSetEdits(
+        expandedIndexOverride: Int? = null,
+        workoutExerciseIdOverride: Int? = null
+    ) {
         val s = _ui.value
-        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val exIdx = exerciseIndexForEdits(s, workoutExerciseIdOverride)
+        val ex = s.exercises.getOrNull(exIdx) ?: return
         val setIndex = expandedIndexOverride
             ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
             ?: s.currentSetIndex
-        val reps = s.editRepsText.trim().toIntOrNull()
-        val weight = s.editWeightText.trim().replace(',', '.').toDoubleOrNull()
-        val rpe = s.editRpeText.trim().replace(',', '.').toDoubleOrNull()
-        val rest = s.editRestText.trim().toIntOrNull()?.coerceAtLeast(0)
+        applySetEditsFromDraft(
+            workoutExerciseId = ex.workoutExerciseId,
+            setIndex = setIndex,
+            repsText = s.editRepsText,
+            weightText = s.editWeightText,
+            rpeText = s.editRpeText,
+            restText = s.editRestText,
+            applyRest = isLastSupersetMemberForRestEdit(ex, s.exercises, setIndex)
+        )
+    }
+
+    fun applyAllSetEditDrafts(
+        setIndex: Int,
+        drafts: Map<Int, SetEditDraft>
+    ) {
+        for ((workoutExerciseId, draft) in drafts) {
+            val s = _ui.value
+            val ex = s.exercises.firstOrNull { it.workoutExerciseId == workoutExerciseId } ?: continue
+            applySetEditsFromDraft(
+                workoutExerciseId = workoutExerciseId,
+                setIndex = setIndex,
+                repsText = draft.repsText,
+                weightText = draft.weightText,
+                rpeText = draft.rpeText,
+                restText = draft.restText,
+                applyRest = isLastSupersetMemberForRestEdit(ex, s.exercises, setIndex)
+            )
+        }
+    }
+
+    fun applySetEditsFromDraft(
+        workoutExerciseId: Int,
+        setIndex: Int,
+        repsText: String,
+        weightText: String,
+        rpeText: String,
+        restText: String,
+        applyRest: Boolean
+    ) {
+        val s = _ui.value
+        val exIdx = s.exercises.indexOfFirst { it.workoutExerciseId == workoutExerciseId }
+        if (exIdx < 0) return
+        val ex = s.exercises[exIdx]
+        val reps = repsText.trim().toIntOrNull()
+        val weight = weightText.trim().replace(',', '.').toDoubleOrNull()
+        val rpe = rpeText.trim().replace(',', '.').toDoubleOrNull()
+        val oldSet = ex.sets.getOrNull(setIndex)
+        val rest = if (applyRest) {
+            restText.trim().toIntOrNull()?.coerceAtLeast(0)
+        } else {
+            oldSet?.restSec
+        }
         val nextSets = updateBlockForExpandedIndex(
             sets = ex.sets,
             expandedIndex = setIndex,
@@ -432,21 +550,74 @@ class ActiveStrengthWorkoutViewModel(
             restSec = rest
         )
         val nextEx = ex.copy(sets = nextSets)
-        val nextExercises = s.exercises.mapIndexed { idx, line ->
-            if (idx == s.currentExerciseIndex) nextEx else line
+        var nextExercises = s.exercises.mapIndexed { idx, line ->
+            if (idx == exIdx) nextEx else line
         }
-        _ui.value = withSyncedEditFields(
-            s.copy(
-                exercises = nextExercises,
-                completedEntirely = false
-            )
-        )
+        if (applyRest && rest != null) {
+            nextExercises = syncSupersetRestAcrossMembers(nextExercises, nextEx, setIndex, rest)
+        }
+        _ui.value = s.copy(exercises = nextExercises, completedEntirely = false)
     }
 
-    fun convertCurrentSetToDropSet(expandedIndexOverride: Int? = null) {
+    private fun isLastSupersetMemberForRestEdit(
+        ex: ActiveStrengthExerciseLine,
+        exercises: List<ActiveStrengthExerciseLine>,
+        setIndex: Int
+    ): Boolean {
+        val members = supersetMembers(ex, exercises)
+        if (members.size <= 1) return true
+        val available = members.filter { it.sets.size > setIndex }
+        val last = available.lastOrNull() ?: return true
+        return last.workoutExerciseId == ex.workoutExerciseId
+    }
+
+    private fun exerciseIndexForEdits(
+        s: ActiveStrengthUiState,
+        workoutExerciseIdOverride: Int?
+    ): Int {
+        if (workoutExerciseIdOverride != null) {
+            val idx = s.exercises.indexOfFirst { it.workoutExerciseId == workoutExerciseIdOverride }
+            if (idx >= 0) return idx
+        }
+        return s.currentExerciseIndex
+    }
+
+    private fun syncSupersetRestAcrossMembers(
+        exercises: List<ActiveStrengthExerciseLine>,
+        edited: ActiveStrengthExerciseLine,
+        setIndex: Int,
+        restSec: Int
+    ): List<ActiveStrengthExerciseLine> {
+        val members = supersetMembers(edited, exercises)
+        if (members.size <= 1) return exercises
+        var result = exercises
+        for (member in members) {
+            if (member.workoutExerciseId == edited.workoutExerciseId) continue
+            val idx = result.indexOfFirst { it.workoutExerciseId == member.workoutExerciseId }
+            if (idx < 0) continue
+            val m = result[idx]
+            val old = m.sets.getOrNull(setIndex) ?: continue
+            val nextSets = updateBlockForExpandedIndex(
+                sets = m.sets,
+                expandedIndex = setIndex,
+                reps = old.reps,
+                weightKg = old.weightKg,
+                rpe = old.rpe,
+                restSec = restSec
+            )
+            result = result.mapIndexed { i, line -> if (i == idx) m.copy(sets = nextSets) else line }
+        }
+        return result
+    }
+
+    fun convertCurrentSetToDropSet(
+        expandedIndexOverride: Int? = null,
+        workoutExerciseIdOverride: Int? = null
+    ) {
         val s = _ui.value
         if (s.loading || s.finishing || s.isResting) return
-        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val exIdx = exerciseIndexForEdits(s, workoutExerciseIdOverride)
+        val ex = s.exercises.getOrNull(exIdx) ?: return
         val setIndex = expandedIndexOverride
             ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
             ?: s.currentSetIndex
@@ -473,18 +644,20 @@ class ActiveStrengthWorkoutViewModel(
         }
         val nextEx = ex.copy(sets = renumberExpandedSets(nextSets))
         val nextExercises = s.exercises.mapIndexed { idx, line ->
-            if (idx == s.currentExerciseIndex) nextEx else line
+            if (idx == exIdx) nextEx else line
         }
         _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
     }
 
     fun applyCurrentDropSetEdits(
         segments: List<StrengthSegmentPayload>,
-        expandedIndexOverride: Int? = null
+        expandedIndexOverride: Int? = null,
+        workoutExerciseIdOverride: Int? = null
     ) {
         val s = _ui.value
         if (s.loading || s.finishing) return
-        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val exIdx = exerciseIndexForEdits(s, workoutExerciseIdOverride)
+        val ex = s.exercises.getOrNull(exIdx) ?: return
         val setIndex = expandedIndexOverride
             ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
             ?: s.currentSetIndex
@@ -508,7 +681,7 @@ class ActiveStrengthWorkoutViewModel(
         }
         val nextEx = ex.copy(sets = renumberExpandedSets(nextSets))
         val nextExercises = s.exercises.mapIndexed { idx, line ->
-            if (idx == s.currentExerciseIndex) nextEx else line
+            if (idx == exIdx) nextEx else line
         }
         _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
     }
@@ -516,11 +689,13 @@ class ActiveStrengthWorkoutViewModel(
     fun convertCurrentSetToNormalSet(
         reps: Int,
         weightKg: Double,
-        expandedIndexOverride: Int? = null
+        expandedIndexOverride: Int? = null,
+        workoutExerciseIdOverride: Int? = null
     ) {
         val s = _ui.value
         if (s.loading || s.finishing) return
-        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val exIdx = exerciseIndexForEdits(s, workoutExerciseIdOverride)
+        val ex = s.exercises.getOrNull(exIdx) ?: return
         val setIndex = expandedIndexOverride
             ?: s.currentSetIndexByExerciseId[ex.workoutExerciseId]
             ?: s.currentSetIndex
@@ -539,7 +714,7 @@ class ActiveStrengthWorkoutViewModel(
         }
         val nextEx = ex.copy(sets = renumberExpandedSets(nextSets))
         val nextExercises = s.exercises.mapIndexed { idx, line ->
-            if (idx == s.currentExerciseIndex) nextEx else line
+            if (idx == exIdx) nextEx else line
         }
         _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
     }
@@ -548,12 +723,37 @@ class ActiveStrengthWorkoutViewModel(
         val s = _ui.value
         if (s.loading || s.finishing || s.isResting) return
         val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
-        val nextSets = appendOneSetToExpandedSets(ex.sets)
-        val nextEx = ex.copy(sets = nextSets)
-        val nextExercises = s.exercises.mapIndexed { idx, line ->
-            if (idx == s.currentExerciseIndex) nextEx else line
+        val members = supersetMembers(ex, s.exercises)
+        val focusTargets = if (members.size > 1) members else listOf(ex)
+        val nextMap = s.currentSetIndexByExerciseId.toMutableMap()
+        var nextExercises = s.exercises
+        for (target in focusTargets) {
+            val idx = nextExercises.indexOfFirst { it.workoutExerciseId == target.workoutExerciseId }
+            if (idx < 0) continue
+            val line = nextExercises[idx]
+            val nextSets = appendOneSetToExpandedSets(line.sets)
+            val oldIdx = s.currentSetIndexByExerciseId[target.workoutExerciseId]
+                ?: if (target.workoutExerciseId == ex.workoutExerciseId) s.currentSetIndex else 0
+            val newIndex = oldIdx.coerceIn(0, nextSets.lastIndex.coerceAtLeast(0))
+            nextMap[target.workoutExerciseId] = newIndex
+            nextExercises = nextExercises.mapIndexed { i, row ->
+                if (i == idx) row.copy(sets = nextSets) else row
+            }
         }
-        _ui.value = withSyncedEditFields(s.copy(exercises = nextExercises, completedEntirely = false))
+        val syncedSetIndex = nextMap[ex.workoutExerciseId]
+            ?: ex.let { s.currentSetIndexByExerciseId[it.workoutExerciseId] ?: s.currentSetIndex }
+        _ui.value = withSyncedEditFields(
+            s.copy(
+                exercises = nextExercises,
+                currentExerciseIndex = s.currentExerciseIndex,
+                currentSetIndex = syncedSetIndex.coerceIn(
+                    0,
+                    nextExercises.getOrNull(s.currentExerciseIndex)?.sets?.lastIndex?.coerceAtLeast(0) ?: 0
+                ),
+                currentSetIndexByExerciseId = nextMap,
+                completedEntirely = false
+            )
+        )
     }
 
     fun removeSetFromCurrentExercise() {
@@ -595,11 +795,80 @@ class ActiveStrengthWorkoutViewModel(
     /**
      * Marca la serie actual como hecha; si hay descanso, entra en cuenta atrás; si no, avanza.
      */
+    fun completeSupersetRound() {
+        val s = _ui.value
+        if (s.isResting || s.loading || s.finishing) return
+        val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val members = supersetMembers(ex, s.exercises)
+        if (members.size <= 1) {
+            onSetDone()
+            return
+        }
+        val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
+        val available = members.filter { it.sets.size > setIndex }
+        if (available.isEmpty()) return
+        val lastMember = available.last()
+        val nextMap = s.currentSetIndexByExerciseId.toMutableMap()
+        val nextCompletedMap = s.completedSetsByExerciseId.toMutableMap()
+        for (member in available) {
+            val memberSet = member.sets.getOrNull(setIndex) ?: continue
+            val completedLine = CompletedSetLine(
+                workoutExerciseId = member.workoutExerciseId,
+                configId = memberSet.configId,
+                segmentsInRow = memberSet.segmentsInRow,
+                reps = memberSet.reps,
+                weightKg = memberSet.weightKg,
+                rpe = memberSet.rpe,
+                restSec = memberSet.restSec,
+                weightSegments = memberSet.weightSegments
+            )
+            completedSetLines.add(completedLine)
+            val prior = nextCompletedMap[member.workoutExerciseId].orEmpty()
+            nextCompletedMap[member.workoutExerciseId] = prior + completedLine
+        }
+        members.forEach { member ->
+            nextMap[member.workoutExerciseId] =
+                (setIndex + 1).coerceAtMost(member.sets.size)
+        }
+        val allDone = areAllExercisesCompleted(s.exercises, nextMap)
+        val firstMemberIdx = members.firstOrNull()?.let { first ->
+            s.exercises.indexOfFirst { it.workoutExerciseId == first.workoutExerciseId }
+        }?.takeIf { it >= 0 } ?: s.currentExerciseIndex
+        val firstMember = s.exercises.getOrNull(firstMemberIdx) ?: ex
+        val syncedSetIndex = nextMap[firstMember.workoutExerciseId] ?: 0
+        val newEmphasisLock = s.navEmphasisLockWorkoutExerciseId ?: firstMember.workoutExerciseId
+        val rest = supersetRoundRestSec(members, setIndex)
+        val baseState = withSyncedEditFields(
+            s.copy(
+                currentExerciseIndex = firstMemberIdx,
+                currentSetIndex = syncedSetIndex,
+                currentSetIndexByExerciseId = nextMap,
+                completedSetsByExerciseId = nextCompletedMap,
+                completedEntirely = allDone,
+                navEmphasisLockWorkoutExerciseId = newEmphasisLock
+            )
+        )
+        if (rest > 0) {
+            val end = System.currentTimeMillis() + rest * 1000L
+            restDeadlineMsByExerciseId[lastMember.workoutExerciseId] = end
+            restPlannedTotalSecByExerciseIdMutable[lastMember.workoutExerciseId] = rest
+            _ui.value = withSyncedEditFields(syncRestDeadlinesToUi(baseState))
+            startRestTicker()
+        } else {
+            _ui.value = baseState
+        }
+    }
+
     fun onSetDone() {
         val s = _ui.value
         if (s.isResting || s.loading || s.finishing) return
         if (s.exercises.isEmpty()) return
         val ex = s.exercises.getOrNull(s.currentExerciseIndex) ?: return
+        val members = supersetMembers(ex, s.exercises)
+        if (members.size > 1) {
+            completeSupersetRound()
+            return
+        }
         val setIndex = s.currentSetIndexByExerciseId[ex.workoutExerciseId] ?: s.currentSetIndex
         val set = ex.sets.getOrNull(setIndex) ?: return
         val reps = s.editRepsText.trim().toIntOrNull() ?: set.reps
@@ -618,9 +887,22 @@ class ActiveStrengthWorkoutViewModel(
             weightSegments = set.weightSegments
         )
         completedSetLines.add(completedLine)
-        val nextSetIndex = (setIndex + 1).coerceAtMost(ex.sets.size)
-        val nextMap = s.currentSetIndexByExerciseId.toMutableMap().apply {
-            put(ex.workoutExerciseId, nextSetIndex)
+        val completesRound = members.size <= 1 ||
+            shouldStartRestAfterCompletingSet(ex, s.exercises, setIndex)
+        val nextMap = s.currentSetIndexByExerciseId.toMutableMap()
+        when {
+            members.size > 1 && !completesRound -> {
+                nextMap[ex.workoutExerciseId] = setIndex
+            }
+            members.size > 1 && completesRound -> {
+                members.forEach { member ->
+                    nextMap[member.workoutExerciseId] =
+                        (setIndex + 1).coerceAtMost(member.sets.size)
+                }
+            }
+            else -> {
+                nextMap[ex.workoutExerciseId] = (setIndex + 1).coerceAtMost(ex.sets.size)
+            }
         }
         val nextCompletedMap = s.completedSetsByExerciseId.toMutableMap().apply {
             val prior = this[ex.workoutExerciseId].orEmpty()
@@ -628,16 +910,27 @@ class ActiveStrengthWorkoutViewModel(
         }
         val allDone = areAllExercisesCompleted(s.exercises, nextMap)
         val newEmphasisLock = s.navEmphasisLockWorkoutExerciseId ?: ex.workoutExerciseId
+        val shouldRest = shouldStartRestAfterCompletingSet(ex, s.exercises, setIndex)
+        val nextMemberIdx = if (!shouldRest) {
+            nextSupersetMemberExerciseIndex(ex, s.exercises, setIndex, nextMap)
+        } else {
+            null
+        }
+        val nextExerciseIndex = nextMemberIdx ?: s.currentExerciseIndex
+        val nextMember = s.exercises.getOrNull(nextExerciseIndex)
+        val syncedSetIndex = nextMember?.let { nextMap[it.workoutExerciseId] ?: 0 }
+            ?: (nextMap[ex.workoutExerciseId] ?: 0)
         val baseState = withSyncedEditFields(
             s.copy(
-                currentSetIndex = nextSetIndex,
+                currentExerciseIndex = nextExerciseIndex,
+                currentSetIndex = syncedSetIndex,
                 currentSetIndexByExerciseId = nextMap,
                 completedSetsByExerciseId = nextCompletedMap,
                 completedEntirely = allDone,
                 navEmphasisLockWorkoutExerciseId = newEmphasisLock
             )
         )
-        val rest = set.restSec?.takeIf { it > 0 } ?: 0
+        val rest = if (shouldRest) set.restSec?.takeIf { it > 0 } ?: 0 else 0
         if (rest > 0) {
             val end = System.currentTimeMillis() + rest * 1000L
             restDeadlineMsByExerciseId[ex.workoutExerciseId] = end
@@ -668,10 +961,12 @@ class ActiveStrengthWorkoutViewModel(
 
     fun goToNextExercise() {
         val s = _ui.value
-        if (s.currentExerciseIndex < s.exercises.lastIndex) {
-            _ui.value = _ui.value.copy(navEmphasisLockWorkoutExerciseId = null)
-            goToExercise(s.currentExerciseIndex + 1)
-        }
+        val groups = strengthDisplayGroups(s.exercises)
+        val gi = displayGroupIndexForExerciseIndex(s.currentExerciseIndex, s.exercises) ?: return
+        if (gi + 1 >= groups.size) return
+        val nextIdx = groups[gi + 1].exerciseIndices.firstOrNull() ?: return
+        _ui.value = _ui.value.copy(navEmphasisLockWorkoutExerciseId = null)
+        goToExercise(nextIdx)
     }
 
     fun goToPreviousExercise() {
@@ -804,7 +1099,7 @@ class ActiveStrengthWorkoutViewModel(
         }
     }
 
-    fun finishWorkout(onDone: () -> Unit) {
+    fun finishWorkout(onDone: (offlineQueued: Boolean) -> Unit) {
         if (_ui.value.finishing) return
         viewModelScope.launch {
             val uid = supabase.auth.currentUserOrNull()?.id
@@ -834,57 +1129,23 @@ class ActiveStrengthWorkoutViewModel(
     }
 
     private suspend fun runFinishPersistence(
-        onDone: () -> Unit,
+        onDone: (offlineQueued: Boolean) -> Unit,
         routineUpdate: Pair<Long, List<StrengthExerciseDraft>>?
     ) {
         _ui.value = _ui.value.copy(finishing = true, error = null)
+        val openPauseSec = pauseBeganEpochMs?.let {
+            ((System.currentTimeMillis() - it).coerceAtLeast(0L) / 1000L).toInt()
+        } ?: 0
+        val pausedSecSnapshot = accumulatedPausedSeconds
         val res = runCatching {
             val userId = supabase.auth.currentUserOrNull()?.id ?: error("No session")
-            val openPauseSec = pauseBeganEpochMs?.let {
-                ((System.currentTimeMillis() - it).coerceAtLeast(0L) / 1000L).toInt()
-            } ?: 0
-            val pausedSec = (accumulatedPausedSeconds + openPauseSec).coerceAtLeast(0)
-            var effectiveEnded = Instant.now()
-            if (completedSetLines.isNotEmpty()) {
-                val byWe = completedSetLines.groupBy { it.workoutExerciseId }
-                for ((weId, lines) in byWe) {
-                    supabase.from(BackendContracts.Tables.EXERCISE_SETS).delete {
-                        filter { eq("workout_exercise_id", weId) }
-                    }
-                    val persistRows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
-                    persistRows.forEach { block ->
-                        val payload = buildJsonObject {
-                            put("workout_exercise_id", weId)
-                            put("set_number", block.count)
-                            if (block.reps != null) put("reps", block.reps)
-                            if (block.weightKg != null) put("weight_kg", block.weightKg)
-                            if (block.rpe != null) put("rpe", block.rpe)
-                            if (block.restSec != null) put("rest_sec", block.restSec)
-                            block.weightSegments?.let { put("weight_segments", it) }
-                        }
-                        supabase.from(BackendContracts.Tables.EXERCISE_SETS).insert(payload) { }
-                    }
-                }
-            }
-            val nRes = supabase
-                .from(BackendContracts.Tables.WORKOUTS)
-                .select(columns = Columns.raw("notes, state, started_at")) {
-                    filter { eq("id", workoutId) }
-                    limit(1)
-                }
-            val wRow = decodeFlexibleList<WorkoutNotesStateRow>(nRes.data).firstOrNull()
-            wRow?.started_at?.let { raw ->
-                runCatching { Instant.parse(raw) }.getOrNull()?.let { st ->
-                    if (effectiveEnded.isBefore(st)) effectiveEnded = st
-                }
-            }
-            val ended = effectiveEnded.toString()
-            val mergedNotes = mergeWorkoutNotesForFinish(wRow?.notes, null)
-            supabase.from(BackendContracts.Tables.WORKOUTS).update(
-                workoutFinishUpdateJson(ended, mergedNotes, wRow?.state, pausedSec)
-            ) {
-                filter { eq("id", workoutId) }
-            }
+            StrengthFinishPersistence.persist(
+                supabase = supabase,
+                workoutId = workoutId,
+                completedSetLines = completedSetLines.toList(),
+                accumulatedPausedSeconds = pausedSecSnapshot,
+                openPauseSec = openPauseSec
+            )
             if (routineUpdate != null) {
                 applyStrengthRoutinePrescriptionUpdate(
                     supabase,
@@ -897,6 +1158,20 @@ class ActiveStrengthWorkoutViewModel(
         if (res.isFailure) {
             val e = res.exceptionOrNull()!!
             Log.e(TAG, "finish failed", e)
+            if (WorkoutFinishSync.isRetriable(e)) {
+                LiftrSupabase.appContext?.let { ctx ->
+                    WorkoutFinishSync.enqueue(
+                        ctx,
+                        workoutId,
+                        pausedSecSnapshot,
+                        openPauseSec,
+                        completedSetLines.toList()
+                    )
+                }
+                _ui.value = _ui.value.copy(finishing = false, error = null)
+                onDone(true)
+                return
+            }
             _ui.value = _ui.value.copy(
                 finishing = false,
                 error = e.message?.take(280) ?: e::class.java.simpleName
@@ -909,7 +1184,7 @@ class ActiveStrengthWorkoutViewModel(
             showElborblaCelebration = celebrate
         )
         if (!celebrate) {
-            onDone()
+            onDone(false)
         }
     }
 
@@ -960,6 +1235,8 @@ class ActiveStrengthWorkoutViewModel(
                 customName = custom,
                 exerciseName = "",
                 notes = we.notes.orEmpty(),
+                supersetGroupId = we.supersetGroupId,
+                supersetPosition = we.supersetPosition,
                 sets = rows.map { row -> strengthSetDraftFromPersistRow(row) }
             )
         }
@@ -1140,6 +1417,8 @@ private data class DualExWire(
     val id: Int,
     @SerialName("exercise_id") val exerciseId: Long,
     @SerialName("order_index") val orderIndex: Int,
+    @SerialName("superset_group_id") val supersetGroupId: String? = null,
+    @SerialName("superset_position") val supersetPosition: Int? = null,
     val notes: String? = null,
     @SerialName("custom_name") val customName: String? = null,
     @SerialName("target_sets") val targetSets: Int? = null,
@@ -1156,6 +1435,8 @@ private data class WeWire(
     val id: Int,
     @SerialName("exercise_id") val exerciseId: Long,
     @SerialName("order_index") val orderIndex: Int,
+    @SerialName("superset_group_id") val supersetGroupId: String? = null,
+    @SerialName("superset_position") val supersetPosition: Int? = null,
     val notes: String? = null,
     @SerialName("custom_name") val customName: String? = null
 )
