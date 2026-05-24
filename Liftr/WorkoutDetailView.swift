@@ -82,6 +82,7 @@ struct WorkoutDetailView: View {
     private struct LikeRow: Decodable { let user_id: UUID }
     @State private var isLiked = false
     @State private var likeCount = 0
+    @State private var commentCount = 0
     @State private var likeBusy = false
     @State private var showLikesSheet = false
     @State private var likers: [ProfileRow] = []
@@ -156,6 +157,7 @@ struct WorkoutDetailView: View {
             await load()
             await loadParticipants()
             await loadLikes()
+            await loadCommentCount()
             await loadLikers()
             await loadCompareCandidates()
         }
@@ -218,7 +220,10 @@ struct WorkoutDetailView: View {
             CommentsSheet(
                 workoutId: workoutId,
                 ownerId: ownerId,
-                onDidChange: { await load() }
+                onDidChange: {
+                    await load()
+                    await loadCommentCount()
+                }
             )
             .environmentObject(app)
             .presentationDetents(Set([.large]))
@@ -980,8 +985,13 @@ struct WorkoutDetailView: View {
     private var commentButton: some View {
         Button { showCommentsSheet = true } label: {
             HStack(spacing: 6) {
-                Image(systemName: "bubble.right").foregroundStyle(.secondary)
-                Text("Comments").font(.subheadline.weight(.semibold))
+                Image(systemName: "bubble.right")
+                    .foregroundStyle(.secondary)
+                Text("Comments")
+                    .font(.subheadline.weight(.semibold))
+                Text("\(commentCount)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
             }
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
@@ -1142,6 +1152,21 @@ struct WorkoutDetailView: View {
         return String(format: "%d:%02d /km", m, sec)
     }
     
+    private func loadCommentCount() async {
+        do {
+            let countRes = try await SupabaseManager.shared.client
+                .from("workout_comments")
+                .select("id", head: true, count: .exact)
+                .eq("workout_id", value: workoutId)
+                .is("deleted_at", value: nil)
+                .execute()
+            let total = countRes.count ?? 0
+            await MainActor.run { self.commentCount = total }
+        } catch {
+            print("loadCommentCount error:", error)
+        }
+    }
+
     private func loadLikes() async {
         let reqId = loadLikesRequestId + 1
         await MainActor.run { loadLikesRequestId = reqId }

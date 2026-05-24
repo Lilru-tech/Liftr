@@ -214,6 +214,20 @@ class TerritoryCaptureClientTest {
     }
 
     @Test
+    fun citySummaryLabelUsesMunicipalityScaleForMajorCities() {
+        val city = TerritoryCityRegionRowWire(
+            cityKey = "osm:relation:347950",
+            displayName = "Barcelona",
+            centerLat = 41.39,
+            centerLon = 2.14,
+            capturedCells = 48,
+            totalCaptureCells = 52_480
+        )
+        assertEquals("Barcelona · 48 / 52480 cells", TerritoryCaptureClient.citySummaryLabel(city))
+        assertTrue((city.totalCaptureCells ?: 0) > 10_000)
+    }
+
+    @Test
     fun nearestCityKeyPrefersClosestRegion() {
         val cities = listOf(
             TerritoryCityRegionRowWire(

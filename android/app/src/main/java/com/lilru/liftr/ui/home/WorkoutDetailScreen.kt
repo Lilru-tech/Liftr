@@ -109,7 +109,10 @@ fun WorkoutDetailScreen(
     val scope = rememberCoroutineScope()
     var duplicateBusy by rememberSaveable(workoutId) { mutableStateOf(false) }
     var duplicateError by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
-    var commentDraft by rememberSaveable(workoutId) { mutableStateOf("") }
+    var commentDraft by rememberSaveable(workoutId, saver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
+    }
+    var trackedMentions by remember(workoutId) { mutableStateOf(listOf<TrackedMention>()) }
     var replyToCommentId by rememberSaveable(workoutId) { mutableStateOf<Int?>(null) }
     var selectedProfileUserId by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
     var showActiveStrength by rememberSaveable(workoutId) { mutableStateOf(false) }
@@ -627,6 +630,7 @@ fun WorkoutDetailScreen(
             WorkoutDetailFeedbackRow(
                 isLiked = ui.isLikedByMe,
                 likeCount = ui.likeCount,
+                commentCount = ui.commentCount,
                 likeBusy = ui.likeBusy,
                 onToggleLike = { vm.toggleLike() },
                 onShowLikers = { showLikersSheet = true },
@@ -1027,17 +1031,25 @@ fun WorkoutDetailScreen(
         )
     }
     if (showCommentsSheet) {
+        LaunchedEffect(Unit) { vm.loadCommentFolloweesIfNeeded() }
         ModalBottomSheet(onDismissRequest = { showCommentsSheet = false }) {
             WorkoutDetailCommentsSheetContent(
                 comments = ui.comments,
                 commentDraft = commentDraft,
                 onCommentDraftChange = { commentDraft = it },
+                trackedMentions = trackedMentions,
+                onTrackedMentionsChange = { trackedMentions = it },
+                followees = ui.commentFollowees,
+                onRequestFollowees = { vm.loadCommentFolloweesIfNeeded() },
                 replyToCommentId = replyToCommentId,
                 onCancelReply = { replyToCommentId = null },
                 commentBusy = ui.commentBusy,
                 onSendComment = {
-                    vm.sendComment(commentDraft, parentId = replyToCommentId) {
-                        commentDraft = ""
+                    val body = commentDraft.text
+                    val mentionIds = CommentMentionSupport.resolvedMentionIds(body, trackedMentions)
+                    vm.sendComment(body, parentId = replyToCommentId, mentionedUserIds = mentionIds) {
+                        commentDraft = androidx.compose.ui.text.input.TextFieldValue("")
+                        trackedMentions = emptyList()
                         replyToCommentId = null
                     }
                 },

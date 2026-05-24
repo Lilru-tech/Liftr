@@ -51,6 +51,7 @@ private data class NotificationSettingsRow(
     @SerialName("push_workout_comment") val pushWorkoutComment: Boolean,
     @SerialName("push_comment_like") val pushCommentLike: Boolean,
     @SerialName("push_comment_reply") val pushCommentReply: Boolean,
+    @SerialName("push_comment_mention") val pushCommentMention: Boolean = true,
     @SerialName("push_added_as_participant") val pushAddedAsParticipant: Boolean,
     @SerialName("push_achievement_unlocked") val pushAchievementUnlocked: Boolean,
     @SerialName("push_goal_completed") val pushGoalCompleted: Boolean,
@@ -224,6 +225,13 @@ fun NotificationSettingsScreen(
                     checked = r.pushCommentReply,
                     enabled = enabled,
                     onToggle = { v -> save(mapOf("push_comment_reply" to v)) }
+                )
+                SettingsCard(
+                    title = stringResource(R.string.notifications_settings_comment_mentions),
+                    subtitle = null,
+                    checked = r.pushCommentMention,
+                    enabled = enabled,
+                    onToggle = { v -> save(mapOf("push_comment_mention" to v)) }
                 )
                 SettingsCard(
                     title = stringResource(R.string.notifications_settings_added_participant),

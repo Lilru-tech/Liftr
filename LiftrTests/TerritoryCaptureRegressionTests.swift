@@ -106,6 +106,21 @@ struct TerritoryCaptureRegressionTests {
         #expect(TerritoryCaptureClient.citySummaryLabel(for: city) == "Tarragona · 571 / 65309 cells")
     }
 
+    @Test func citySummaryLabelUsesMunicipalityScaleForMajorCities() {
+        let city = TerritoryCityRegionRow(
+            city_key: "osm:relation:347950",
+            display_name: "Barcelona",
+            center_lat: 41.39,
+            center_lon: 2.14,
+            captured_cells: 48,
+            total_capture_cells: 52_480,
+            my_owned_cells: 48,
+            owned_cells: 48
+        )
+        #expect(TerritoryCaptureClient.citySummaryLabel(for: city) == "Barcelona · 48 / 52480 cells")
+        #expect((city.total_capture_cells ?? 0) > 10_000)
+    }
+
     @Test func nearestCityKeyPrefersClosestRegion() {
         let cities = [
             TerritoryCityRegionRow(

@@ -49,7 +49,7 @@ Tablas:
 - `weekly_goals`
 - `weekly_goal_results`
 - `workouts`
-- `workout_comments`
+- `workout_comments` (`mentioned_user_ids uuid[]`, followee-validated; notification type `comment_mention`)
 - `workout_comment_likes`
 - `workout_exercises`
 - `workout_likes`

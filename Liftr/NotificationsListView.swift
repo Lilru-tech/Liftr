@@ -220,6 +220,7 @@ struct NotificationsListView: View {
              "workout_comment",
              "comment_reply",
              "comment_like",
+             "comment_mention",
              "added_as_participant":
             if let workoutIdStr = n.data?["workout_id"]?.stringValue,
                let workoutId = Int(workoutIdStr) {
@@ -543,6 +544,7 @@ struct NotificationsListView: View {
         case "workout_comment":       return "Workout comment"
         case "comment_like":          return "Comment like"
         case "comment_reply":         return "Reply"
+        case "comment_mention":       return "Mention"
         case "added_as_participant":  return "Participant"
         case "achievement_unlocked":  return "Achievement"
         case "goal_completed":        return "Goal"

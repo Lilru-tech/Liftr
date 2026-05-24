@@ -384,7 +384,8 @@ final class AppState: ObservableObject {
              "workout_like",
              "workout_comment",
              "comment_reply",
-             "comment_like":
+             "comment_like",
+             "comment_mention":
             print("📩 [AppState] routing to workout")
             if let workoutIdStr = data["workout_id"] as? String,
                let workoutId = Int(workoutIdStr) {

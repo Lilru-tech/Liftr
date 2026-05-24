@@ -372,6 +372,7 @@ fun WorkoutDetailStrengthReadonlySection(
 fun WorkoutDetailFeedbackRow(
     isLiked: Boolean,
     likeCount: Int,
+    commentCount: Int,
     likeBusy: Boolean,
     onToggleLike: () -> Unit,
     onShowLikers: () -> Unit,
@@ -458,6 +459,12 @@ fun WorkoutDetailFeedbackRow(
                         stringResource(R.string.workout_detail_open_comments),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "$commentCount",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

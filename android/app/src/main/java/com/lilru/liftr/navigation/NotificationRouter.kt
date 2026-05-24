@@ -94,7 +94,8 @@ object NotificationRouter {
             "workout_like",
             "workout_comment",
             "comment_reply",
-            "comment_like" -> {
+            "comment_like",
+            "comment_mention" -> {
                 val w = map["workout_id"]?.toIntOrNull() ?: return null
                 val oid = map["owner_id"]?.trim()?.takeIf { it.isNotEmpty() && looksLikeUuid(it) }
                 MainOverlay.WorkoutDetail(workoutId = w, ownerId = oid)

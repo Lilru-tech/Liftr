@@ -512,6 +512,7 @@
     <string name="notifications_settings_workout_comments">Workout comments</string>
     <string name="notifications_settings_comment_likes">Comment likes</string>
     <string name="notifications_settings_comment_replies">Comment replies</string>
+    <string name="notifications_settings_comment_mentions">Comment mentions</string>
     <string name="notifications_settings_added_participant">Added as participant</string>
     <string name="notifications_settings_ach_goals">Achievements &amp; goals</string>
     <string name="notifications_settings_achievements">Achievements</string>
@@ -1091,6 +1092,7 @@
     <string name="home_detail_comments_load_more">Load more comments</string>
     <string name="home_detail_comments_loading_more">Loading…</string>
     <string name="home_detail_comment_hint">Add a comment…</string>
+    <string name="home_detail_comment_mention_empty">No users found</string>
     <string name="home_detail_comment_replying_to">Replying to #%1$d</string>
     <string name="home_detail_comment_cancel_reply">Cancel reply</string>
     <string name="home_detail_comment_send">Send</string>
