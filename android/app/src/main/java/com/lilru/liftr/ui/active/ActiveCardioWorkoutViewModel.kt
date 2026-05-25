@@ -172,10 +172,12 @@ class ActiveCardioWorkoutViewModel(
         val routeJson = routeGeoJsonLineString() ?: return
         territoryPreviewJob?.cancel()
         territoryPreviewJob = viewModelScope.launch {
-            val preview = TerritoryCaptureClient.previewCapture(supabase, routeJson) ?: return@launch
-            val rings = preview.cells.mapNotNull { cell ->
-                cell.cellGeojson?.ringLatLng()?.takeIf { it.size >= 3 }
-            }
+            val display = TerritoryCaptureClient.fetchTerritoryPreviewDisplay(
+                supabase,
+                routeJson,
+                maxCells = 200
+            ) ?: return@launch
+            val rings = display.fillRings + display.sampleCellRings
             _ui.value = _ui.value.copy(territoryPreviewRings = rings)
         }
     }

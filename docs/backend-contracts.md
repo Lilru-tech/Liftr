@@ -45,6 +45,9 @@ Tablas:
 - `strength_routine_folders`
 - `strength_routine_sets`
 - `user_favorite_exercises`
+- `user_subscriptions` (Premium entitlement; one row per `user_id`; written only via `service_role` / edge webhook — ver [`Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql`](../Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql))
+  - Columns: `id` (uuid PK), `user_id` (uuid, unique, FK `auth.users`), `status` (`active` | `trialing` | `canceled` | `expired`), `provider` (`apple` | `google`), `original_transaction_id` (text, unique), `expires_at` (timestamptz), `created_at`, `updated_at`
+  - RLS: `authenticated` may **SELECT** own row only; **INSERT/UPDATE/DELETE** revoked for `anon` and `authenticated` (writes via webhook + `service_role` only)
 - `volleyball_session_stats`
 - `weekly_goals`
 - `weekly_goal_results`
@@ -105,6 +108,7 @@ Vistas:
 - `get_hyrox_best_official_time_leaderboard_v1`, `get_football_goals_leaderboard_v1`, `get_ski_distance_leaderboard_v1`
 - `get_user_achievements`
 - `get_user_prs` (`p_user_id`, optional `p_kind`, optional `p_search`) — profile/compare PR lists; bypasses own-only RLS via `SECURITY DEFINER` + authenticated read policies on PR tables
+- `get_user_premium_status_v1` () → `boolean`; `auth.uid()` required; `true` iff a `user_subscriptions` row exists for the caller with `status in ('active','trialing')` and `expires_at > now()` (see migration above)
 - `get_user_level`
 - `get_weekly_goal_recommendation`
 - `list_comparable_workouts_v1`
@@ -130,6 +134,7 @@ Vistas:
 - `list_my_segments_v1` (`p_limit` opcional) → segmentos creados por `auth.uid()` (`id`, `name`, `buffer_m`, `status`, `created_at`); solo `authenticated`
 - `list_segments_popularity_leaderboard_v1` (`p_period` como otros rankings: `day`/`week`/`month`/`all`, `p_limit` opcional) → `rank`, `segment_id`, `name`, `efforts_count`, `buffer_m` (conteo de `segment_efforts` con workout publicado en la ventana por `matched_at`)
 - `match_segment_efforts_for_workout_v1` (`p_workout_id`) → reprocesa matching para el dueño (misma lógica que el trigger al publicar)
+- `get_recommended_expansion_cells_v1` (`p_user_id`, `p_current_lat`, `p_current_lng`, `p_radius_meters` opcional) → hasta 10 celdas sugeridas para expansión de territorio (`cell_id`, `cell_geojson`, `weight_priority`); ver sección **Territory (map game)**
 - Tras [`segments_mvp_v7_segment_rank_notifications.sql`](migrations/segments_mvp_v7_segment_rank_notifications.sql): el matching interno llama a **`create_notification`** existente (`_user_id`, `_type`, `_title`, `_body`, `_data`) para insertar en **`notifications`** (mismo pipeline `send-notifications` + FCM). Tipos: **`segment_you_are_first`**, **`segment_lost_first`** (solo pérdida del 1º cuando el nuevo líder es el effort del `workout_id` recién matcheado). `data` incluye al menos `segment_id`, `segment_name`; en `segment_lost_first` también `overtaker_user_id`, `overtaker_username` (y `notification_id` si lo añade vuestra `create_notification`).
 - `list_active_challenges_v1` () → retos con instancia activa (`instance_id`, `template_code`, `title`, `description`, `cadence` = `week` | `month` | `once`, `period_start`, `period_end`, `max_winners`, `claims_count`, `metric_kind`, `threshold_numeric`, `threshold_secondary`, `challenge_category` = `cardio` | `strength` | `sport`, `scope_activity_code`, `scope_sport`, `scope_muscle_primary` opcionales, más `viewer_rank` y `viewer_claimed` para `auth.uid()` en esa instancia). **VOLATILE** como arriba.
 - `get_challenge_instance_detail_v1` (`p_instance_id` uuid) → una fila con meta del reto + `viewer_rank`, `viewer_claimed`, `viewer_workout_id` para `auth.uid()`. Misma nota **VOLATILE** que la lista.
@@ -206,6 +211,154 @@ Implementadas en:
 - iOS: al pulsar **Finish workout**, si la red falla de forma recuperable, el cliente encola el payload de `finish_strength_workout_v1`, muestra un toast y cierra la pantalla activa (sin pantalla de error bloqueante).
 - Android: misma semántica con cola local (`WorkoutFinishSync`) que reejecuta la persistencia de series + cierre del workout cuando vuelve la conexión.
 - Los errores de **carga** del programa siguen bloqueando solo cuando no hay caché local; los errores de **finish** no reemplazan la UI del entreno en curso.
+
+## Premium subscriptions
+
+Migración: [`Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql`](../Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql).
+
+### Client entitlement
+
+- iOS y Android **no** persisten `isPremium` localmente para gating de anuncios/UI.
+- Tras login o refresh de sesión, llamar al RPC `get_user_premium_status_v1` (sin parámetros) y cachear el boolean en estado global (`AppState` / `PremiumStatusStore`).
+- StoreKit (iOS) y Play Billing (Android) siguen gestionando compra/restauración en UI; el acceso premium efectivo depende de la fila en `user_subscriptions`.
+
+### Edge function `process-billing-webhook`
+
+- Ruta: `Liftr/supabase/functions/process-billing-webhook/`
+- Config local: `[functions.process-billing-webhook] verify_jwt = false` en `Liftr/supabase/config.toml` (los webhooks de tienda no envían JWT de Supabase).
+- Secreto: variable de entorno `BILLING_WEBHOOK_SECRET` en el proyecto Supabase (Edge secrets).
+- Autenticación del request: header `X-Billing-Signature: <secret>` **o** `Authorization: Bearer <secret>` (comparación constant-time).
+- Cuerpo JSON normalizado (adaptadores Apple ASSN v2 / Google RTDN pueden transformar al formato interno antes de POST):
+
+```json
+{
+  "user_id": "<uuid>",
+  "status": "active",
+  "provider": "apple",
+  "original_transaction_id": "<store original transaction id>",
+  "expires_at": "2026-06-24T12:00:00.000Z"
+}
+```
+
+- `status`: `active` | `trialing` | `canceled` | `expired`
+- `provider`: `apple` | `google`
+- Upsert en `user_subscriptions` con `onConflict: user_id` (service role); actualiza `status`, `provider`, `original_transaction_id`, `expires_at`, `updated_at`.
+
+### Apple App Store Server Notifications (V2)
+
+- Función dedicada: `process-apple-app-store-notification` (no usar `process-billing-webhook` en App Store Connect).
+- URL de ejemplo (proyecto `rjzhaafvkxmvlnpsikbi`):  
+  `https://rjzhaafvkxmvlnpsikbi.supabase.co/functions/v1/process-apple-app-store-notification`
+- Apple envía `{ "signedPayload": "<JWS>" }`. El handler decodifica la transacción y usa `appAccountToken` como `user_id` (UUID de Supabase Auth, fijado en iOS con `Product.PurchaseOption.appAccountToken` al comprar).
+- Guía paso a paso en App Store Connect: [`docs/apple-premium-webhook-setup.md`](apple-premium-webhook-setup.md).
+
+### Operación en producción
+
+1. Configurar **App Store Server Notifications v2** (URL anterior) y **Google Play Real-time developer notifications** (adaptador → `process-billing-webhook` con secreto compartido).
+2. Definir `BILLING_WEBHOOK_SECRET` y usar el mismo valor en el verificador de la tienda o en el proxy que reenvía eventos.
+3. Tras desplegar la migración, verificar con `curl` en staging:
+
+```bash
+curl -sS -X POST "$SUPABASE_URL/functions/v1/process-billing-webhook" \
+  -H "Content-Type: application/json" \
+  -H "X-Billing-Signature: $BILLING_WEBHOOK_SECRET" \
+  -d '{
+    "user_id": "<auth-users-uuid>",
+    "status": "active",
+    "provider": "apple",
+    "original_transaction_id": "test-txn-001",
+    "expires_at": "2099-01-01T00:00:00.000Z"
+  }'
+```
+
+Luego, con sesión de ese usuario, `get_user_premium_status_v1` debe devolver `true`.
+
+## Territory (map game)
+
+Migraciones: `Liftr/supabase/migrations/20260513140000_territory_capture_v1.sql` y sucesivas (hex capture, municipios, map RPC).
+
+### Tablas principales
+
+- `territory_cells` — hexágonos capturados (`cell_id`, `cell_geog`, `owner_user_id`, `city_key`, …). Solo lectura para clientes; escritura vía RPC `apply_territory_capture_v1`.
+- `territory_municipalities` — límites municipales (`city_key`, `boundary_geom`, `total_capture_cells`, …).
+- `territory_capture_events`, `territory_capture_takeovers` — historial y eventos sociales.
+
+### RPC `get_recommended_expansion_cells_v1`
+
+Sugiere hasta **10** celdas hex prioritarias cerca de la posición del atleta para ampliar territorio (zonas calientes).
+
+| Parámetro | Tipo | Default | Notas |
+|-----------|------|---------|-------|
+| `p_user_id` | uuid | — | Debe coincidir con `auth.uid()` |
+| `p_current_lat` | double | — | WGS84 |
+| `p_current_lng` | double | — | WGS84 |
+| `p_radius_meters` | double | `12000` | Acotado en servidor a 500–25000 m; clientes deben enviar ~radio del viewport del mapa |
+
+**Filas de respuesta:**
+
+```json
+{
+  "cell_id": "12345:67890",
+  "cell_geojson": { "type": "Polygon", "coordinates": [[[lon, lat], ...]] },
+  "weight_priority": 1
+}
+```
+
+- `weight_priority` **1**: celdas en municipios donde el usuario ya tiene capturas pero **no** es líder de ciudad (celdas enemigas; prioriza las del líder actual).
+- `weight_priority` **2**: frontera adyacente (`st_touches`) a celdas del usuario — sin capturar (no existen en `territory_cells`) o propiedad de otro jugador.
+- Orden final: prioridad ascendente, distancia al punto de consulta, `cell_id`.
+- `SECURITY DEFINER`; `GRANT EXECUTE` a `authenticated`.
+
+Migración: [`Liftr/supabase/migrations/20260524150000_territory_expansion_recommendations_v1.sql`](../Liftr/supabase/migrations/20260524150000_territory_expansion_recommendations_v1.sql).
+
+### Captura de rutas circulares (loop interior)
+
+Migración: [`Liftr/supabase/migrations/20260524200000_territory_large_loop_capture_v2.sql`](../Liftr/supabase/migrations/20260524200000_territory_large_loop_capture_v2.sql).
+
+La geometría de captura (`_liftr_territory_capture_geom`) combina:
+
+1. **Corredor** — `ST_Buffer` de media anchura de celda (12,5 m con hex de 25 m); siempre aplicado.
+2. **Interior de bucle** — polígono por cierre inicio/fin (`_liftr_territory_start_end_loop_polygon`) y/o caras de `ST_Polygonize` en rutas que se cruzan (`_liftr_territory_polygonize_loop_faces`).
+
+| Regla | Valor |
+|-------|-------|
+| Cierre dinámico inicio/fin | `least(250 m, greatest(50 m, longitud_ruta × 0,025))` — p. ej. ~225 m en una ruta de 9 km |
+| Área mínima de bucle | ~1 celda hex (`_liftr_territory_min_loop_area_m2`) |
+| Área máxima de interior (por cara) | **10 km²** — caras mayores se ignoran |
+| Ruta mínima | 500 m |
+| `route_kind` | `closed` si hay interior válido; si no, `open` (solo corredor) |
+
+**Importante:** ya no se descarta el interior cuando el área unida (corredor + polígono) supera 2 km² (límite anterior que dejaba solo el corredor en bucles grandes).
+
+Si `ST_MakePolygon` falla en rutas ≥ 3 km con inicio/fin dentro del umbral dinámico, se reintenta con `ST_Snap` de extremos (5 m en Web Mercator).
+
+`apply_territory_capture_v1` es idempotente por `workout_id`; cambios de geometría en producción requieren `_liftr_reexpand_territory_capture_for_workout` (la migración v2 re-expande automáticamente workouts 1987/1988 y bucles largos previamente `open` elegibles).
+
+Verificación SQL: [`Liftr/supabase/verify/territory_capture_baseline.sql`](../Liftr/supabase/verify/territory_capture_baseline.sql).
+
+### Rendimiento del mapa de territorio
+
+Migración: [`Liftr/supabase/migrations/20260524220000_territory_map_load_performance_v1.sql`](../Liftr/supabase/migrations/20260524220000_territory_map_load_performance_v1.sql).
+
+- `get_territory_map_v1` simplifica `cell_geojson` según el tamaño del viewport (menos bytes por celda).
+- `get_territory_map_v1` (migración `20260524230000`): si el reparto por rutas de otros jugadores no cabe en `p_limit`, hace fallback por celdas recientes en lugar de devolver 0 celdas ajenas.
+- Clientes iOS/Android: paginación secuencial en páginas de **1000** filas (tope PostgREST), hasta `p_limit` (5000 en zoom ciudad), una sola carga al abrir (sin doble fetch), y menos hexágonos dibujados solo en zoom continental (span > 0.30). En el mapa, las celdas propias se dibujan siempre; las ajenas se recortan solo si hace falta por rendimiento.
+
+### Visualización rápida de territorio (workout detail)
+
+Migración: [`Liftr/supabase/migrations/20260524210000_territory_display_performance_v1.sql`](../Liftr/supabase/migrations/20260524210000_territory_display_performance_v1.sql).
+
+| RPC | Uso |
+|-----|-----|
+| `get_workout_territory_display_v1(p_workout_id)` | Detalle de entreno: devuelve `capture_fill_geojson` (polígono simplificado) y `cells_count` desde `territory_capture_events`; **no** devuelve miles de hexágonos |
+| `preview_territory_capture_v1(p_route_geojson, p_max_cells)` | Preview en vivo: `p_max_cells = 0` solo fill; `null` = todas las celdas (legacy); `200` = muestra + fill si hay más |
+
+### Otros RPC de territorio (referencia)
+
+- `get_territory_map_v1` — viewport de celdas para el mapa
+- `preview_territory_capture_v1`, `apply_territory_capture_v1` — preview y aplicación de captura
+- `get_my_territory_summary_v1`, `get_territory_summary_v1`
+- `list_territory_city_regions_v1`, `get_territory_city_share_leaderboard_v1`, `get_territory_total_cells_leaderboard_v1`
 
 ## Política de cambios de contrato
 

@@ -45,6 +45,7 @@ object BackendContracts {
         const val BODY_WEIGHT_ENTRIES = "body_weight_entries"
         const val PROFILES = "profiles"
         const val USER_NOTIFICATION_SETTINGS = "user_notification_settings"
+        const val USER_SUBSCRIPTIONS = "user_subscriptions"
         const val RACKET_SESSION_STATS = "racket_session_stats"
         const val RUGBY_SESSION_STATS = "rugby_session_stats"
         const val SKI_SESSION_STATS = "ski_session_stats"
@@ -122,6 +123,7 @@ object BackendContracts {
         const val GET_SKI_DISTANCE_LEADERBOARD_V1 = "get_ski_distance_leaderboard_v1"
         const val GET_USER_ACHIEVEMENTS = "get_user_achievements"
         const val GET_USER_PRS = "get_user_prs"
+        const val GET_USER_PREMIUM_STATUS_V1 = "get_user_premium_status_v1"
         const val GET_USER_LEVEL = "get_user_level"
         const val GET_WEEKLY_GOAL_RECOMMENDATION = "get_weekly_goal_recommendation"
         const val LIST_COMPARABLE_WORKOUTS_V1 = "list_comparable_workouts_v1"
@@ -148,7 +150,9 @@ object BackendContracts {
         const val MATCH_SEGMENT_EFFORTS_FOR_WORKOUT_V1 = "match_segment_efforts_for_workout_v1"
         const val APPLY_TERRITORY_CAPTURE_V1 = "apply_territory_capture_v1"
         const val PREVIEW_TERRITORY_CAPTURE_V1 = "preview_territory_capture_v1"
+        const val GET_WORKOUT_TERRITORY_DISPLAY_V1 = "get_workout_territory_display_v1"
         const val GET_TERRITORY_MAP_V1 = "get_territory_map_v1"
+        const val GET_RECOMMENDED_EXPANSION_CELLS_V1 = "get_recommended_expansion_cells_v1"
         const val GET_HOME_FEED_PAGE_V1 = "get_home_feed_page_v1"
         const val GET_MY_TERRITORY_SUMMARY_V1 = "get_my_territory_summary_v1"
         const val GET_TERRITORY_SHARE_LEADERBOARD_V1 = "get_territory_share_leaderboard_v1"
@@ -182,6 +186,8 @@ object BackendContracts {
     /** Supabase Edge Functions (invoke con JWT de sesión), alineado con [Liftr/ProfileView.swift]. */
     object EdgeFunctions {
         const val DELETE_AUTH_USER = "delete-auth-user"
+        const val PROCESS_BILLING_WEBHOOK = "process-billing-webhook"
+        const val PROCESS_APPLE_APP_STORE_NOTIFICATION = "process-apple-app-store-notification"
         const val RESOLVE_TERRITORY_MUNICIPALITY = "resolve-territory-municipality"
     }
 }

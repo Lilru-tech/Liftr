@@ -22,7 +22,6 @@ final class AppState: ObservableObject {
         case competitionReviews
         case challengeWeekly(instanceId: UUID)
         case directMessage(conversationId: Int64, senderUserId: UUID?)
-        case territoryMap
     }
     
     @Published var notificationDestination: NotificationDestination = .none
@@ -37,6 +36,7 @@ final class AppState: ObservableObject {
     static let shared = AppState()
     
     @Published var isAuthenticated: Bool = false
+    @Published private(set) var isPremium: Bool = false
     @Published var userId: UUID?
     @Published var passwordRecoveryPending: Bool = false
     @Published var authCallbackError: String?
@@ -482,7 +482,25 @@ final class AppState: ObservableObject {
             }
 
         case "territory_capture_from_user", "territory_lost_to_user":
-            notificationDestination = .territoryMap
+            let workoutId: Int? = {
+                if let s = data["workout_id"] as? String { return Int(s) }
+                if let i = data["workout_id"] as? Int { return i }
+                if let n = data["workout_id"] as? NSNumber { return n.intValue }
+                return nil
+            }()
+            if let workoutId {
+                let ownerId: UUID?
+                if type == "territory_lost_to_user",
+                   let other = data["other_user_id"] as? String {
+                    ownerId = UUID(uuidString: other)
+                } else {
+                    ownerId = self.userId
+                }
+                notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+            } else {
+                print("⚠️ [AppState] workout_id missing/invalid for territory notification:", data)
+                notificationDestination = .none
+            }
 
         case "challenge_won", "challenge_won_weekly":
             if let raw = data["challenge_instance_id"] as? String, let iid = UUID(uuidString: raw) {
@@ -574,6 +592,15 @@ final class AppState: ObservableObject {
         chatInboxRealtimeUserId = nil
         unreadChatMessagesCount = 0
     }
+
+    @MainActor
+    func refreshPremiumStatus() async {
+        guard userId != nil, isAuthenticated, !passwordRecoveryPending else {
+            isPremium = false
+            return
+        }
+        isPremium = await PremiumStatusClient.fetchIsPremium()
+    }
     
     private func listenAuth() {
         authTask?.cancel()
@@ -593,6 +620,7 @@ final class AppState: ObservableObject {
                 if !recoveryPending {
                     await self.refreshTabBarProfileAvatarFromServer()
                     await self.refreshUnreadNotificationsCount()
+                    await self.refreshPremiumStatus()
                     await self.startChatUnreadRealtimeIfNeeded(for: session.user.id)
                 } else {
                     await self.stopChatUnreadRealtime()
@@ -601,6 +629,7 @@ final class AppState: ObservableObject {
                 await MainActor.run {
                     self.isAuthenticated = false
                     self.userId = nil
+                    self.isPremium = false
                     self.clearTabBarProfileAvatar()
                     self.unreadNotificationsCount = 0
                 }
@@ -627,6 +656,7 @@ final class AppState: ObservableObject {
                     case .signedOut, .userDeleted:
                         self.isAuthenticated = false
                         self.userId = nil
+                        self.isPremium = false
                         self.passwordRecoveryPending = false
                         self.authCallbackError = nil
                         self.clearTabBarProfileAvatar()
@@ -643,6 +673,7 @@ final class AppState: ObservableObject {
                     if session != nil, !self.passwordRecoveryPending {
                         await self.refreshTabBarProfileAvatarFromServer()
                         await self.refreshUnreadNotificationsCount()
+                        await self.refreshPremiumStatus()
                         if let userId = session?.user.id {
                             await self.startChatUnreadRealtimeIfNeeded(for: userId)
                         }
@@ -650,6 +681,7 @@ final class AppState: ObservableObject {
                         await MainActor.run {
                             self.clearTabBarProfileAvatar()
                             self.unreadNotificationsCount = 0
+                            self.isPremium = false
                         }
                         await self.stopChatUnreadRealtime()
                     } else {

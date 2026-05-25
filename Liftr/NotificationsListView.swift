@@ -348,6 +348,58 @@ struct NotificationsListView: View {
                 Text("Conversation not found")
             }
 
+        case "territory_capture_from_user", "territory_lost_to_user":
+            if let workoutIdStr = n.data?["workout_id"]?.stringValue,
+               let workoutId = Int(workoutIdStr) {
+                let knownOwnerId: UUID? = {
+                    if n.type == "territory_lost_to_user",
+                       let other = n.data?["other_user_id"]?.stringValue {
+                        return UUID(uuidString: other)
+                    }
+                    if n.type == "territory_capture_from_user" {
+                        return app.userId
+                    }
+                    return nil
+                }()
+
+                if let knownOwnerId {
+                    WorkoutDetailView(workoutId: workoutId, ownerId: knownOwnerId)
+                } else if let resolvedOwnerId {
+                    WorkoutDetailView(workoutId: workoutId, ownerId: resolvedOwnerId)
+                } else {
+                    VStack(spacing: 12) {
+                        if resolvingOwner {
+                            ProgressView("Opening workout…")
+                        } else {
+                            Text("Opening workout…")
+                        }
+                    }
+                    .task {
+                        guard !resolvingOwner else { return }
+                        resolvingOwner = true
+                        defer { resolvingOwner = false }
+
+                        struct Row: Decodable { let user_id: UUID }
+
+                        do {
+                            let res = try await SupabaseManager.shared.client
+                                .from("workouts")
+                                .select("user_id")
+                                .eq("id", value: workoutId)
+                                .limit(1)
+                                .execute()
+
+                            let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+                            resolvedOwnerId = rows.first?.user_id
+                        } catch {
+                            print("❌ [Notifications] resolve owner error:", error)
+                        }
+                    }
+                }
+            } else {
+                Text("Workout not found")
+            }
+
         default:
             VStack(spacing: 12) {
                 Text(n.title)
@@ -564,6 +616,8 @@ struct NotificationsListView: View {
         case "segment_you_are_first":             return "Segment"
         case "segment_lost_first":                return "Segment"
         case "challenge_won", "challenge_won_weekly": return "Challenge"
+        case "territory_capture_from_user": return "Territory captured"
+        case "territory_lost_to_user":      return "Territory lost"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

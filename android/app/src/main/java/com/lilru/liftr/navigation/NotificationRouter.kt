@@ -133,7 +133,14 @@ object NotificationRouter {
                 MainOverlay.SegmentDetail(u)
             }
             "territory_capture_from_user",
-            "territory_lost_to_user" -> MainOverlay.TerritoryMap
+            "territory_lost_to_user" -> {
+                val w = map["workout_id"]?.toIntOrNull() ?: return null
+                val oid = when (t) {
+                    "territory_lost_to_user" -> map["other_user_id"]?.trim()?.takeIf { looksLikeUuid(it) }
+                    else -> myUserId?.takeIf { looksLikeUuid(it) }
+                }
+                MainOverlay.WorkoutDetail(workoutId = w, ownerId = oid)
+            }
             "challenge_won",
             "challenge_won_weekly" -> {
                 val cid = map["challenge_instance_id"]?.trim()?.takeIf { it.isNotEmpty() }

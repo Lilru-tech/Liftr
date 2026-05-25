@@ -52,7 +52,13 @@ struct RootView: View {
             guard let userId = app.userId else { return }
             guard territoryBackfillStartedForUserId != userId else { return }
             territoryBackfillStartedForUserId = userId
-            await TerritoryCaptureClient.backfillHistoricalCaptures()
+            Task.detached(priority: .utility) {
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                await TerritoryCaptureClient.backfillHistoricalCaptures(
+                    batchSize: 5,
+                    maxBatchesPerVisit: 12
+                )
+            }
         }
         .overlay(alignment: .top) {
             if let message = app.territoryCaptureToast {
@@ -132,8 +138,6 @@ struct RootView: View {
 
             case .directMessage:
                 app.selectedTab = .home
-            case .territoryMap:
-                app.selectedTab = .search
             }
         }
         .sheet(
@@ -224,19 +228,6 @@ struct RootView: View {
                         .environmentObject(app)
                 }
                 .gradientBG()
-
-            case .territoryMap:
-                NavigationStack {
-                    TerritoryMapView()
-                        .gradientBG()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("Close") {
-                                    app.notificationDestination = .none
-                                }
-                            }
-                        }
-                }
             }
         }
         .alert("You need to log in", isPresented: $showAuthAlert) {

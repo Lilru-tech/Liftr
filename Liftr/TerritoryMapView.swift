@@ -41,6 +41,13 @@ struct TerritoryMapView: View {
     @State private var cellBoundingBoxes: [String: TerritoryMapGeometry.GeographicBoundingBox] = [:]
     @State private var refreshTask: Task<Void, Never>?
     @State private var loadedSnapshotRegion: MKCoordinateRegion?
+    @State private var expansionRecommendations: [TerritoryExpansionRecommendationRow] = []
+    @State private var loadingExpansion = false
+    @State private var expansionError: String?
+    @State private var lastUserLocation: CLLocationCoordinate2D?
+    @State private var expansionFetchTask: Task<Void, Never>?
+    @State private var cellsFetchTask: Task<[TerritoryMapCellRow], Never>?
+    @State private var isBootstrappingMap = true
 
     private static let mapCellFetchLimit = 5_000
     private static let maxRenderedHexCells = 5_000
@@ -50,7 +57,7 @@ struct TerritoryMapView: View {
     private static let pruneCacheMaxEntries = 6_000
     private static let pruneRegionSpanMultiplier = 1.75
     private static let snapshotFetchRegionMultiplier = 1.4
-    private static let mapFetchDebounceNanoseconds: UInt64 = 450_000_000
+    private static let mapFetchDebounceNanoseconds: UInt64 = 550_000_000
 
     private static func log(_ message: String) {
         print("[TerritoryMap][View] \(message)")
@@ -70,13 +77,39 @@ struct TerritoryMapView: View {
         Self.log("recompute cache=\(cellCache.count) visible=\(drawableCellsInView.count) render=\(cellsToRender.count) region=\(Self.regionLog(visibleRegion))")
     }
 
+    private func dynamicFetchLimit(for region: MKCoordinateRegion) -> Int {
+        let span = max(region.span.latitudeDelta, region.span.longitudeDelta)
+        if span > 0.45 { return 1_200 }
+        if span > 0.30 { return 2_500 }
+        return Self.mapCellFetchLimit
+    }
+
+    private func dynamicRenderCap(for region: MKCoordinateRegion) -> Int {
+        let span = max(region.span.latitudeDelta, region.span.longitudeDelta)
+        if span > 0.45 { return 900 }
+        if span > 0.30 { return 2_000 }
+        return Self.maxRenderedHexCells
+    }
+
     private func updateCellsToRender() {
-        let base = showMineOnly ? drawableCellsInView.filter { $0.is_mine == true } : drawableCellsInView
-        cellsToRender = TerritoryMapGeometry.ownerBalancedCells(
-            base,
-            maxCount: Self.maxRenderedHexCells,
-            otherTarget: showMineOnly ? 0 : Self.otherRenderedHexCellsTarget
+        if showMineOnly {
+            cellsToRender = drawableCellsInView.filter { $0.is_mine == true }
+            return
+        }
+        let mine = drawableCellsInView.filter { $0.is_mine == true }
+        let others = drawableCellsInView.filter { !($0.is_mine == true) }
+        let cap = dynamicRenderCap(for: visibleRegion)
+        if drawableCellsInView.count <= cap {
+            cellsToRender = drawableCellsInView
+            return
+        }
+        let othersCap = max(0, cap - mine.count)
+        let selectedOthers = TerritoryMapGeometry.ownerBalancedCells(
+            others,
+            maxCount: othersCap,
+            otherTarget: othersCap
         )
+        cellsToRender = mine + selectedOthers
     }
 
     private var visibleCells: [TerritoryMapCellRow] {
@@ -95,8 +128,10 @@ struct TerritoryMapView: View {
             TerritoryMapRepresentable(
                 region: visibleRegion,
                 cells: cellsToRender,
+                suggestionCells: expansionRecommendations,
                 onRegionChange: handleMapRegionChange,
-                onSelectCell: { selectedCell = $0 }
+                onSelectCell: { selectedCell = $0 },
+                onUserLocationUpdate: { lastUserLocation = $0 }
             )
             .ignoresSafeArea(edges: .bottom)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -129,8 +164,8 @@ struct TerritoryMapView: View {
                         Text("\(visibleCells.count) cells in view belong to other players")
                             .font(.caption)
                     }
-                    if visibleCells.count > Self.maxRenderedHexCells {
-                        Text("Showing up to \(Self.maxRenderedHexCells) cells in view for performance.")
+                    if visibleCells.count > dynamicRenderCap(for: visibleRegion) {
+                        Text("Showing a simplified view in this area for performance.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -170,6 +205,44 @@ struct TerritoryMapView: View {
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             }
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        toggleExpansionSuggestions()
+                    } label: {
+                        HStack(spacing: 8) {
+                            if loadingExpansion {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Text("Suggest Expansion Zone")
+                                .font(.subheadline.weight(.semibold))
+                                .multilineTextAlignment(.trailing)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.orange)
+                    .disabled(loadingExpansion)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 72)
+                }
+            }
+
+            if let expansionError {
+                Text(expansionError)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                    .padding(.leading, 8)
+                    .padding(.bottom, 140)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
@@ -180,6 +253,7 @@ struct TerritoryMapView: View {
                 cellsToRender = []
                 cellBoundingBoxes = [:]
                 loadedSnapshotRegion = nil
+                isBootstrappingMap = true
             }
             let center = Self.coordinate(
                 latitude: initialLatitude,
@@ -196,10 +270,17 @@ struct TerritoryMapView: View {
             async let cellsLoad: Void = performSnapshotFetch(for: initialRegion)
             _ = await summaryLoad
             _ = await cellsLoad
+            await MainActor.run {
+                isBootstrappingMap = false
+            }
         }
         .onDisappear {
             refreshTask?.cancel()
             refreshTask = nil
+            cellsFetchTask?.cancel()
+            cellsFetchTask = nil
+            expansionFetchTask?.cancel()
+            expansionFetchTask = nil
         }
         .onChange(of: showMineOnly) { _, _ in
             updateCellsToRender()
@@ -271,6 +352,21 @@ struct TerritoryMapView: View {
                 longitudeDelta: region.span.longitudeDelta * longitudeFactor
             )
         )
+    }
+
+    private static func computeCellBoundingBoxes(
+        for rows: [TerritoryMapCellRow]
+    ) async -> [String: TerritoryMapGeometry.GeographicBoundingBox] {
+        await Task.detached(priority: .userInitiated) {
+            var boxes: [String: TerritoryMapGeometry.GeographicBoundingBox] = [:]
+            boxes.reserveCapacity(rows.count)
+            for row in rows {
+                if let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: row.ring) {
+                    boxes[row.cell_id] = bbox
+                }
+            }
+            return boxes
+        }.value
     }
 
     private static func regionLog(_ region: MKCoordinateRegion) -> String {
@@ -353,6 +449,10 @@ struct TerritoryMapView: View {
         AppState.shared.territoryReferenceCoordinate = region.center
         recomputeDrawableCells()
         Self.log("regionChanged \(Self.regionLog(region))")
+        guard !isBootstrappingMap else {
+            Self.log("skip viewport fetch during bootstrap")
+            return
+        }
         enqueueSnapshotFetchIfNeeded(for: region)
     }
 
@@ -373,6 +473,7 @@ struct TerritoryMapView: View {
 
     private func performSnapshotFetch(for visibleRegion: MKCoordinateRegion) async {
         let fetchRegion = Self.paddedFetchRegion(for: visibleRegion)
+        let fetchLimit = dynamicFetchLimit(for: visibleRegion)
         await fetchCells(
             minLat: fetchRegion.center.latitude - fetchRegion.span.latitudeDelta / 2.0,
             minLon: fetchRegion.center.longitude - fetchRegion.span.longitudeDelta / 2.0,
@@ -385,7 +486,8 @@ struct TerritoryMapView: View {
                 fetchRegion.center.latitude + fetchRegion.span.latitudeDelta / 2.0,
                 fetchRegion.center.longitude + fetchRegion.span.longitudeDelta / 2.0
             ),
-            loadedRegion: fetchRegion
+            loadedRegion: fetchRegion,
+            fetchLimit: fetchLimit
         )
     }
 
@@ -395,7 +497,8 @@ struct TerritoryMapView: View {
         maxLat: Double,
         maxLon: Double,
         fetchKey key: String,
-        loadedRegion: MKCoordinateRegion?
+        loadedRegion: MKCoordinateRegion?,
+        fetchLimit: Int
     ) async {
         let skipFetch = await MainActor.run {
             key == lastFetchKey && loadedSnapshotRegion != nil
@@ -405,19 +508,28 @@ struct TerritoryMapView: View {
             return
         }
 
-        await MainActor.run {
-            lastFetchKey = key
-            loading = true
-        }
-        Self.log("fetch start key=\(key) bounds=(\(minLat),\(minLon),\(maxLat),\(maxLon))")
+        Self.log("fetch start key=\(key) bounds=(\(minLat),\(minLon),\(maxLat),\(maxLon)) limit=\(fetchLimit)")
 
-        let rows = await TerritoryCaptureClient.fetchMapCells(
-            minLat: minLat,
-            minLon: minLon,
-            maxLat: maxLat,
-            maxLon: maxLon,
-            limit: Self.mapCellFetchLimit
-        )
+        await MainActor.run {
+            cellsFetchTask?.cancel()
+            lastFetchKey = key
+            loading = cellCache.isEmpty
+        }
+
+        let task = Task {
+            await TerritoryCaptureClient.fetchMapCells(
+                minLat: minLat,
+                minLon: minLon,
+                maxLat: maxLat,
+                maxLon: maxLon,
+                limit: fetchLimit
+            )
+        }
+        await MainActor.run {
+            cellsFetchTask = task
+        }
+
+        let rows = await task.value
 
         guard !Task.isCancelled else {
             await MainActor.run {
@@ -427,30 +539,101 @@ struct TerritoryMapView: View {
             return
         }
 
+        let boundingBoxes = await Self.computeCellBoundingBoxes(for: rows)
+
         await MainActor.run {
             let previousCount = cellCache.count
             for row in rows {
                 cellCache[row.cell_id] = row
-                if let bbox = TerritoryMapGeometry.geographicBoundingBox(ring: row.ring) {
-                    cellBoundingBoxes[row.cell_id] = bbox
-                } else {
-                    cellBoundingBoxes.removeValue(forKey: row.cell_id)
-                }
+            }
+            for (cellId, bbox) in boundingBoxes {
+                cellBoundingBoxes[cellId] = bbox
             }
             loadedSnapshotRegion = loadedRegion
             pruneCellCacheIfNeeded()
             recomputeDrawableCells()
             let mineCount = rows.filter { $0.is_mine == true }.count
             let othersCount = rows.count - mineCount
-            mineFetchLikelyCapped = rows.count >= Self.mapCellFetchLimit && mineCount > 0
-            othersMayBeTruncated = !showMineOnly
-                && othersCount > 0
-                && rows.count >= Self.mapCellFetchLimit
+            let capped = rows.count >= fetchLimit
+            mineFetchLikelyCapped = capped && mineCount > 0
+            othersMayBeTruncated = !showMineOnly && othersCount > 0 && capped
             if summary != nil {
                 loadError = nil
             }
             loading = false
             Self.log("fetch finish key=\(key) rows=\(rows.count) cacheBefore=\(previousCount) cacheAfter=\(cellCache.count) mine=\(mineCount) others=\(othersCount)")
+        }
+    }
+
+    private func toggleExpansionSuggestions() {
+        if !expansionRecommendations.isEmpty {
+            expansionRecommendations = []
+            expansionError = nil
+            return
+        }
+        expansionFetchTask?.cancel()
+        expansionFetchTask = Task {
+            await loadExpansionSuggestions()
+        }
+    }
+
+    private func expansionQueryCoordinate() -> CLLocationCoordinate2D {
+        let center = visibleRegion.center
+        guard let gps = lastUserLocation else { return center }
+        let gpsLocation = CLLocation(latitude: gps.latitude, longitude: gps.longitude)
+        let centerLocation = CLLocation(latitude: center.latitude, longitude: center.longitude)
+        if gpsLocation.distance(from: centerLocation) <= 2_000 {
+            return gps
+        }
+        return center
+    }
+
+    private func loadExpansionSuggestions() async {
+        guard let userId = SupabaseManager.shared.client.auth.currentUser?.id else {
+            await MainActor.run {
+                expansionError = "Sign in to see expansion suggestions."
+                expansionRecommendations = []
+            }
+            return
+        }
+
+        if (summary?.total_cells ?? 0) == 0 {
+            await MainActor.run {
+                expansionError = "Capture territory with an outdoor workout first."
+                expansionRecommendations = []
+            }
+            return
+        }
+
+        let query = expansionQueryCoordinate()
+        let radiusMeters = TerritoryMapGeometry.expansionSearchRadiusMeters(for: visibleRegion)
+        await MainActor.run {
+            loadingExpansion = true
+            expansionError = nil
+        }
+
+        let result = await TerritoryCaptureClient.fetchRecommendedExpansionCells(
+            userId: userId,
+            lat: query.latitude,
+            lng: query.longitude,
+            radiusMeters: radiusMeters
+        )
+
+        guard !Task.isCancelled else { return }
+
+        await MainActor.run {
+            loadingExpansion = false
+            if let message = result.errorMessage {
+                expansionRecommendations = []
+                expansionError = message
+                return
+            }
+            expansionRecommendations = result.cells
+            if result.cells.isEmpty {
+                expansionError = "No expansion zones found near this map view. Pan closer to your cells and try again."
+            } else {
+                expansionError = nil
+            }
         }
     }
 }

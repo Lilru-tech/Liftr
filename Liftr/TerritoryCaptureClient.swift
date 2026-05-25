@@ -43,8 +43,17 @@ struct TerritoryPreviewResponse: Decodable {
     let route_kind: String?
     let cells_count: Int?
     let cells: [TerritoryPreviewCell]?
+    let capture_fill_geojson: TerritoryGeoJSONPolygon?
+    let cells_truncated: Bool?
     let bbox: TerritoryBBox?
     let reason: String?
+}
+
+struct TerritoryWorkoutDisplay {
+    let fillRings: [[CLLocationCoordinate2D]]
+    let sampleCells: [TerritoryPreviewCell]
+    let cellsCount: Int
+    let cellsTruncated: Bool
 }
 
 struct TerritoryGeoJSONPolygon: Decodable, Hashable {
@@ -69,6 +78,15 @@ struct TerritoryMapCellRow: Decodable, Identifiable, Hashable {
     let last_workout_id: Int64?
     let captured_at: Date?
     let is_mine: Bool?
+    var id: String { cell_id }
+
+    var ring: [CLLocationCoordinate2D] { cell_geojson?.ring ?? [] }
+}
+
+struct TerritoryExpansionRecommendationRow: Decodable, Identifiable, Hashable {
+    let cell_id: String
+    let cell_geojson: TerritoryGeoJSONPolygon?
+    let weight_priority: Int?
     var id: String { cell_id }
 
     var ring: [CLLocationCoordinate2D] { cell_geojson?.ring ?? [] }
@@ -151,6 +169,11 @@ enum TerritoryCaptureClient {
 
     private struct RouteGeoJSONParams: Encodable {
         let p_route_geojson: String
+        let p_max_cells: Int?
+    }
+
+    private struct WorkoutTerritoryDisplayParams: Encodable {
+        let p_workout_id: Int64
     }
 
     private struct MapParams: Encodable {
@@ -183,6 +206,13 @@ enum TerritoryCaptureClient {
         let p_city_key: String
         let p_scope: String
         let p_limit: Int
+    }
+
+    private struct RecommendedExpansionParams: Encodable {
+        let p_user_id: UUID
+        let p_current_lat: Double
+        let p_current_lng: Double
+        let p_radius_meters: Double
     }
 
     static func applyCapture(workoutId: Int) async -> TerritoryCaptureSummary? {
@@ -229,22 +259,58 @@ enum TerritoryCaptureClient {
         }
     }
 
-    static func fetchTerritoryPreviewCells(routeGeoJSON: String) async -> [TerritoryPreviewCell] {
-        let params = RouteGeoJSONParams(p_route_geojson: routeGeoJSON)
+    static func fetchWorkoutTerritoryDisplay(workoutId: Int) async -> TerritoryWorkoutDisplay? {
+        let params = WorkoutTerritoryDisplayParams(p_workout_id: Int64(workoutId))
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_workout_territory_display_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode(TerritoryPreviewResponse.self, from: res.data)
+            guard decoded.ok != false else { return nil }
+            let ring = decoded.capture_fill_geojson?.ring ?? []
+            let rings = ring.count >= 3 ? [ring] : []
+            return TerritoryWorkoutDisplay(
+                fillRings: rings,
+                sampleCells: [],
+                cellsCount: decoded.cells_count ?? 0,
+                cellsTruncated: decoded.cells_truncated == true
+            )
+        } catch {
+            return nil
+        }
+    }
+
+    static func fetchTerritoryPreviewCells(routeGeoJSON: String, maxCells: Int? = nil) async -> [TerritoryPreviewCell] {
+        let display = await fetchTerritoryPreview(routeGeoJSON: routeGeoJSON, maxCells: maxCells)
+        return display?.sampleCells ?? []
+    }
+
+    static func fetchTerritoryPreview(
+        routeGeoJSON: String,
+        maxCells: Int? = nil
+    ) async -> TerritoryWorkoutDisplay? {
+        let params = RouteGeoJSONParams(p_route_geojson: routeGeoJSON, p_max_cells: maxCells)
         do {
             let res = try await SupabaseManager.shared.client
                 .rpc("preview_territory_capture_v1", params: params)
                 .execute()
             let decoded = try JSONDecoder.supabase().decode(TerritoryPreviewResponse.self, from: res.data)
-            guard decoded.ok != false else { return [] }
-            return decoded.cells ?? []
+            guard decoded.ok != false else { return nil }
+            let ring = decoded.capture_fill_geojson?.ring ?? []
+            let fillRings = ring.count >= 3 ? [ring] : []
+            return TerritoryWorkoutDisplay(
+                fillRings: fillRings,
+                sampleCells: decoded.cells ?? [],
+                cellsCount: decoded.cells_count ?? (decoded.cells?.count ?? 0),
+                cellsTruncated: decoded.cells_truncated == true
+            )
         } catch {
-            return []
+            return nil
         }
     }
 
-    static func previewCapture(routeGeoJSON: String) async -> TerritoryPreviewResponse? {
-        let params = RouteGeoJSONParams(p_route_geojson: routeGeoJSON)
+    static func previewCapture(routeGeoJSON: String, maxCells: Int? = nil) async -> TerritoryPreviewResponse? {
+        let params = RouteGeoJSONParams(p_route_geojson: routeGeoJSON, p_max_cells: maxCells)
         do {
             let res = try await SupabaseManager.shared.client
                 .rpc("preview_territory_capture_v1", params: params)
@@ -345,6 +411,58 @@ enum TerritoryCaptureClient {
         }
     }
 
+    struct RecommendedExpansionFetchResult {
+        let cells: [TerritoryExpansionRecommendationRow]
+        let errorMessage: String?
+    }
+
+    static func fetchRecommendedExpansionCells(
+        userId: UUID,
+        lat: Double,
+        lng: Double,
+        radiusMeters: Double = 12_000
+    ) async -> RecommendedExpansionFetchResult {
+        let params = RecommendedExpansionParams(
+            p_user_id: userId,
+            p_current_lat: lat,
+            p_current_lng: lng,
+            p_radius_meters: radiusMeters
+        )
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_recommended_expansion_cells_v1", params: params)
+                .execute()
+            let cells = try JSONDecoder.supabase().decode(
+                [TerritoryExpansionRecommendationRow].self,
+                from: res.data
+            )
+            return RecommendedExpansionFetchResult(cells: cells, errorMessage: nil)
+        } catch {
+            guard !shouldIgnoreCancelledError(error) else {
+                return RecommendedExpansionFetchResult(cells: [], errorMessage: nil)
+            }
+            return RecommendedExpansionFetchResult(
+                cells: [],
+                errorMessage: TerritoryCapturePresentation.failureMessage(for: error)
+            )
+        }
+    }
+
+    private static func fetchMapCellsPage(
+        params: MapParams,
+        offset: Int,
+        pageLimit: Int
+    ) async throws -> (offset: Int, rows: [TerritoryMapCellRow], bytes: Int) {
+        let res = try await SupabaseManager.shared.client
+            .rpc("get_territory_map_v1", params: params)
+            .range(from: offset, to: offset + pageLimit - 1)
+            .execute()
+        let pageRows = try JSONDecoder.supabase().decode([TerritoryMapCellRow].self, from: res.data)
+        return (offset, pageRows, res.data.count)
+    }
+
+    private static let postgrestMaxRowsPerRequest = 1_000
+
     static func fetchMapCells(
         minLat: Double,
         minLon: Double,
@@ -354,7 +472,7 @@ enum TerritoryCaptureClient {
     ) async -> [TerritoryMapCellRow] {
         let effectiveLimit = min(5_000, max(limit, 1))
         print("[TerritoryMap][RPC] start minLat=\(minLat) minLon=\(minLon) maxLat=\(maxLat) maxLon=\(maxLon) limit=\(effectiveLimit)")
-        let pageSize = min(500, effectiveLimit)
+        let pageSize = Self.postgrestMaxRowsPerRequest
         let params = MapParams(
             p_min_lat: minLat,
             p_min_lon: minLon,
@@ -364,28 +482,33 @@ enum TerritoryCaptureClient {
         )
         do {
             var allRows: [TerritoryMapCellRow] = []
-            var offset = 0
+            allRows.reserveCapacity(effectiveLimit)
             var totalBytes = 0
+            var offset = 0
             while offset < effectiveLimit {
                 let pageLimit = min(pageSize, effectiveLimit - offset)
-                let res = try await SupabaseManager.shared.client
-                    .rpc("get_territory_map_v1", params: params)
-                    .range(from: offset, to: offset + pageLimit - 1)
-                    .execute()
-                totalBytes += res.data.count
-                let pageRows = try JSONDecoder.supabase().decode([TerritoryMapCellRow].self, from: res.data)
-                print("[TerritoryMap][RPC] page offset=\(offset) rows=\(pageRows.count) bytes=\(res.data.count)")
+                let (_, pageRows, bytes) = try await fetchMapCellsPage(
+                    params: params,
+                    offset: offset,
+                    pageLimit: pageLimit
+                )
+                totalBytes += bytes
+                print("[TerritoryMap][RPC] page offset=\(offset) rows=\(pageRows.count) bytes=\(bytes)")
                 allRows.append(contentsOf: pageRows)
-                guard pageRows.count == pageLimit else {
+                if pageRows.isEmpty || pageRows.count < pageLimit {
                     break
                 }
-                offset += pageLimit
+                offset += pageRows.count
             }
             let owners = Set(allRows.compactMap(\.owner_user_id)).count
             let mine = allRows.filter { $0.is_mine == true }.count
             print("[TerritoryMap][RPC] success rows=\(allRows.count) owners=\(owners) mine=\(mine) bytes=\(totalBytes)")
             return allRows
         } catch {
+            if shouldIgnoreCancelledError(error) {
+                print("[TerritoryMap][RPC] cancelled")
+                return []
+            }
             print("[TerritoryMap][RPC] failed error=\(error.localizedDescription)")
             return []
         }

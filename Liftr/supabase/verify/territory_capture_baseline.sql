@@ -151,6 +151,72 @@ select
   ) is null as tiny_noise_loop_ignored;
 
 select
+  round(public._liftr_territory_loop_close_m(9000.0)::numeric, 1) as loop_close_m_for_9km_route;
+
+select
+  public._liftr_territory_route_kind(
+    public._liftr_territory_route_geog_from_geojson(
+      '{"type":"LineString","coordinates":[[1.200,41.100],[1.239,41.100],[1.239,41.127],[1.200,41.127],[1.200,41.100]]}'
+    )
+  ) = 'closed' as large_loop_route_kind_closed;
+
+select
+  st_area(
+    public._liftr_territory_capture_geom(
+      public._liftr_territory_route_geog_from_geojson(
+        '{"type":"LineString","coordinates":[[1.200,41.100],[1.239,41.100],[1.239,41.127],[1.200,41.127],[1.200,41.100]]}'
+      )
+    )
+  ) > 2000000.0 as large_loop_capture_area_exceeds_legacy_cap;
+
+select
+  (
+    select count(*)::integer
+    from public._liftr_territory_hex_cells_from_geog(
+      public._liftr_territory_capture_geom(
+        public._liftr_territory_route_geog_from_geojson(
+          '{"type":"LineString","coordinates":[[1.200,41.100],[1.239,41.100],[1.239,41.127],[1.200,41.127],[1.200,41.100]]}'
+        )
+      )
+    )
+  ) > (
+    select count(*)::integer
+    from public._liftr_territory_hex_cells_from_geog(
+      public._liftr_territory_capture_geom(
+        public._liftr_territory_route_geog_from_geojson(
+          '{"type":"LineString","coordinates":[[1.200,41.100],[1.239,41.100]]}'
+        )
+      )
+    )
+  ) as large_loop_more_cells_than_open_line;
+
+select
+  e.workout_id,
+  e.route_kind as stored_route_kind,
+  e.cells_gained as stored_cells_gained,
+  public._liftr_territory_route_kind(r.route_geog) as computed_route_kind,
+  round(st_distance(
+    st_startpoint(r.route_geog::geometry)::geography,
+    st_endpoint(r.route_geog::geometry)::geography
+  )::numeric, 1) as start_end_m,
+  round(public._liftr_territory_loop_close_m(st_length(r.route_geog))::numeric, 1) as loop_close_m,
+  (
+    select count(*)::integer
+    from public._liftr_territory_hex_cells_from_geog(
+      public._liftr_territory_capture_geom(r.route_geog)
+    )
+  ) as computed_cell_count,
+  round(st_area(public._liftr_territory_capture_geom(r.route_geog))::numeric, 0) as capture_area_m2
+from public.territory_capture_events e
+  cross join lateral (
+    select public._liftr_territory_route_geog_from_geojson(
+      public._liftr_workout_route_geojson_text(e.workout_id)
+    ) as route_geog
+  ) r
+where e.workout_id in (1987, 1988)
+  and r.route_geog is not null;
+
+select
   e.workout_id,
   e.route_kind,
   e.cells_gained,

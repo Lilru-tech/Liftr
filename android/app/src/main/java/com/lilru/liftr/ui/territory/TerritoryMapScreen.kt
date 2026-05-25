@@ -26,8 +26,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.jan.supabase.auth.auth
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -45,8 +47,10 @@ import com.lilru.liftr.territory.TerritoryMapCellWire
 import com.lilru.liftr.territory.TerritoryMapGeometry
 import com.lilru.liftr.territory.TerritoryOwnerColors
 import com.lilru.liftr.territory.TerritorySummaryWire
+import com.lilru.liftr.ui.AppSnackbar
 import com.lilru.liftr.ui.map.TerritoryCellsMapPreview
 import io.github.jan.supabase.SupabaseClient
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -72,6 +76,11 @@ fun TerritoryMapScreen(
     var showMineOnly by remember { mutableStateOf(false) }
     var summaryError by remember { mutableStateOf<String?>(null) }
     var hasFramedCells by remember { mutableStateOf(false) }
+    var expansionRings by remember { mutableStateOf<List<List<Pair<Double, Double>>>>(emptyList()) }
+    var loadingExpansion by remember { mutableStateOf(false) }
+    var expansionError by remember { mutableStateOf<String?>(null) }
+    var isBootstrapping by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
     val cellSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val context = LocalContext.current
     val referenceCoordinate = remember(context, initialLatitude, initialLongitude) {
@@ -90,6 +99,15 @@ fun TerritoryMapScreen(
         val center = referenceCoordinate?.let { (lat, lon) -> LatLng(lat, lon) } ?: return@LaunchedEffect
         LiftrPreferences.setTerritoryReferenceCoordinate(context, center.latitude, center.longitude)
         cameraPositionState.move(CameraUpdateFactory.newLatLngZoom(center, 12f))
+    }
+
+    fun dynamicFetchLimit(zoom: Float): Int {
+        val spanDeg = 360.0 / (1 shl zoom.toInt().coerceAtLeast(1)).toDouble()
+        return when {
+            spanDeg > 0.45 -> 1_200
+            spanDeg > 0.30 -> 2_500
+            else -> 5_000
+        }
     }
 
     suspend fun refreshForCamera() {
@@ -116,14 +134,14 @@ fun TerritoryMapScreen(
         val key = "%.4f|%.4f|%.4f|%.4f".format(minLat, minLon, maxLat, maxLon)
         if (key == lastFetchKey) return
         lastFetchKey = key
-        loading = true
+        loading = cells.isEmpty()
         cells = TerritoryCaptureClient.fetchMapCells(
             supabase = supabase,
             minLat = minLat,
             minLon = minLon,
             maxLat = maxLat,
             maxLon = maxLon,
-            limit = 5_000
+            limit = dynamicFetchLimit(zoom)
         )
         loadedSnapshotBounds = LatLngBounds.Builder()
             .include(LatLng(minLat, minLon))
@@ -141,22 +159,42 @@ fun TerritoryMapScreen(
     }
 
     LaunchedEffect(supabase) {
+        isBootstrapping = true
         launch {
             summary = TerritoryCaptureClient.fetchMySummary(supabase)
             summaryError = if (summary == null) "Territory summary could not be loaded." else null
         }
         refreshForCamera()
+        isBootstrapping = false
         launch {
+            delay(12_000)
             TerritoryCaptureClient.backfillHistoricalCaptures(supabase, context)
             summary = TerritoryCaptureClient.fetchMySummary(supabase)
         }
-        lastFetchKey = ""
-        refreshForCamera()
     }
 
     LaunchedEffect(cameraPositionState.position) {
-        delay(450)
+        if (isBootstrapping) return@LaunchedEffect
+        delay(550)
         refreshForCamera()
+    }
+
+    val renderCap = when {
+        cameraPositionState.position.zoom < 9f -> 900
+        cameraPositionState.position.zoom < 10.5f -> 2_000
+        else -> 5_000
+    }
+    val cellsToDraw = if (showMineOnly) {
+        visibleCells.take(renderCap)
+    } else {
+        val mine = visibleCells.filter { it.isMine == true }
+        val others = visibleCells.filter { it.isMine != true }
+        if (visibleCells.size <= renderCap) {
+            visibleCells
+        } else {
+            val othersCap = (renderCap - mine.size).coerceAtLeast(0)
+            mine + others.take(othersCap)
+        }
     }
 
     LaunchedEffect(visibleCells) {
@@ -192,7 +230,7 @@ fun TerritoryMapScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            val previewCells = visibleCells.filter {
+            val previewCells = cellsToDraw.filter {
                 (it.cellGeojson?.ringLatLng()?.size ?: 0) >= 3
             }
             if (previewCells.isNotEmpty()) {
@@ -212,7 +250,7 @@ fun TerritoryMapScreen(
                 properties = mapProperties,
                 uiSettings = MapUiSettings(myLocationButtonEnabled = true, zoomControlsEnabled = false),
                 onMapClick = { latLng ->
-                    selectedCell = TerritoryMapGeometry.selectedCell(latLng.latitude, latLng.longitude, visibleCells)
+                    selectedCell = TerritoryMapGeometry.selectedCell(latLng.latitude, latLng.longitude, cellsToDraw)
                 }
             ) {
                 MapEffect(Unit) { map ->
@@ -220,7 +258,7 @@ fun TerritoryMapScreen(
                         TerritoryMapDiagnostics.logMapLoaded()
                     }
                 }
-                visibleCells.forEach { cell ->
+                cellsToDraw.forEach { cell ->
                     val ring = cell.cellGeojson?.ringLatLng().orEmpty()
                     if (ring.size < 3) return@forEach
                     val ownerKey = cell.ownerUserId?.takeIf { it.isNotBlank() } ?: cell.cellId
@@ -230,6 +268,16 @@ fun TerritoryMapScreen(
                         fillColor = TerritoryOwnerColors.fill(ownerKey, isMine),
                         strokeColor = TerritoryOwnerColors.stroke(ownerKey, isMine),
                         strokeWidth = TerritoryOwnerColors.strokeWidth(isMine)
+                    )
+                }
+                expansionRings.forEach { ring ->
+                    if (ring.size < 3) return@forEach
+                    Polygon(
+                        points = ring.map { (lat, lon) -> LatLng(lat, lon) },
+                        fillColor = Color(0x66FF9800),
+                        strokeColor = Color(0xFFFFB300),
+                        strokeWidth = 3f,
+                        zIndex = 2f
                     )
                 }
             }
@@ -314,6 +362,87 @@ fun TerritoryMapScreen(
 
         if (loading) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        }
+
+        Button(
+            onClick = {
+                if (expansionRings.isNotEmpty()) {
+                    expansionRings = emptyList()
+                    expansionError = null
+                    return@Button
+                }
+                val userId = supabase.auth.currentUserOrNull()?.id
+                if (userId == null) {
+                    expansionError = "Sign in to see expansion suggestions."
+                    return@Button
+                }
+                if ((summary?.totalCells ?: 0) == 0) {
+                    expansionError = "Capture territory with an outdoor workout first."
+                    return@Button
+                }
+                val target = cameraPositionState.position.target
+                val zoom = cameraPositionState.position.zoom
+                val latDelta = 360.0 / (1 shl zoom.toInt().coerceAtLeast(1)).toDouble()
+                val lonDelta = latDelta
+                val radiusMeters = TerritoryMapGeometry.expansionSearchRadiusMeters(
+                    latitude = target.latitude,
+                    latSpanDeg = latDelta,
+                    lonSpanDeg = lonDelta
+                )
+                scope.launch {
+                    loadingExpansion = true
+                    expansionError = null
+                    val result = TerritoryCaptureClient.fetchRecommendedExpansionCells(
+                        supabase = supabase,
+                        userId = userId,
+                        lat = target.latitude,
+                        lon = target.longitude,
+                        radiusMeters = radiusMeters
+                    )
+                    loadingExpansion = false
+                    result.errorMessage?.let { message ->
+                        expansionRings = emptyList()
+                        expansionError = message
+                        AppSnackbar.showError(message)
+                        return@launch
+                    }
+                    expansionRings = result.cells.mapNotNull { row ->
+                        row.cellGeojson?.ringLatLng()?.takeIf { it.size >= 3 }
+                    }
+                    if (expansionRings.isEmpty()) {
+                        expansionError =
+                            "No expansion zones found near this map view. Pan closer to your cells and try again."
+                    } else {
+                        expansionError = null
+                    }
+                }
+            },
+            enabled = !loadingExpansion,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 12.dp, bottom = 72.dp),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (loadingExpansion) {
+                    CircularProgressIndicator(strokeWidth = 2.dp)
+                }
+                Text("Suggest Expansion Zone")
+            }
+        }
+
+        expansionError?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = 12.dp, bottom = 140.dp)
+            )
         }
     }
 

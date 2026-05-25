@@ -103,6 +103,7 @@ import com.lilru.liftr.LiftrApplication
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.SupabaseResponseDecoding
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -935,10 +936,7 @@ fun ProfileTabScreen(
     val selectedMainTab = tabEntries[safeTabIndex]
 
     Box(modifier = modifier.fillMaxSize()) {
-        var profileNoAds by remember { mutableStateOf(LiftrPreferences.isPremium(context)) }
-        LaunchedEffect(ui.isRefreshing) {
-            if (!ui.isRefreshing) profileNoAds = LiftrPreferences.isPremium(context)
-        }
+        val profileNoAds by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1223,7 +1221,7 @@ fun ProfileTabScreen(
                     ProfileMainTab.Settings -> {
                         val settingsScroll = rememberScrollState()
                         val billing = (context.applicationContext as? LiftrApplication)?.playBilling
-                        var isPrem by remember { mutableStateOf(LiftrPreferences.isPremium(context)) }
+                        val isPrem by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -1261,7 +1259,8 @@ fun ProfileTabScreen(
                                                     }
                                                     scope.launch {
                                                         delay(2000L)
-                                                        isPrem = LiftrPreferences.isPremium(context)
+                                                        billing.refreshPremiumFromPlay()
+                                                        PremiumStatusStore.refresh(supabase)
                                                     }
                                                 } else {
                                                     Toast.makeText(
@@ -1278,10 +1277,10 @@ fun ProfileTabScreen(
                                                 billing?.refreshPremiumFromPlay()
                                                 scope.launch {
                                                     delay(1500L)
-                                                    isPrem = LiftrPreferences.isPremium(context)
+                                                    PremiumStatusStore.refresh(supabase)
                                                     Toast.makeText(
                                                         context,
-                                                        if (isPrem) {
+                                                        if (PremiumStatusStore.isPremium.value) {
                                                             context.getString(R.string.profile_premium_active)
                                                         } else {
                                                             context.getString(R.string.profile_premium_restore_done)

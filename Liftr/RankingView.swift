@@ -1370,6 +1370,7 @@ struct RankingView: View {
     var presetMetric: LBMetric? = nil
     var presetScope: LBScope? = nil
 
+    @EnvironmentObject private var app: AppState
     @StateObject private var vm = RankingVM()
     @StateObject private var weeklyChallengesLoader = WeeklyChallengesLoader()
     @State private var challengesHubPresented = false
@@ -1378,15 +1379,13 @@ struct RankingView: View {
     @State private var metricSearchText = ""
     @State private var territoryCityPickerOpen = false
     @State private var showTerritoryMap = false
-    @AppStorage("isPremium") private var isPremium: Bool = false
-
     var body: some View {
         GradientBackground {
             ZStack(alignment: .bottomTrailing) {
                 VStack(spacing: 12) {
                     headerBars
                     listContent
-                    if !isPremium {
+                    if !app.isPremium {
                         BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                             .frame(height: 50)
                             .padding(.horizontal)
@@ -1418,7 +1417,7 @@ struct RankingView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Challenges")
                 .padding(.trailing, 4)
-                .padding(.bottom, isPremium ? 12 : 64)
+                .padding(.bottom, app.isPremium ? 12 : 64)
             }
         }
         .sheet(isPresented: $challengesHubPresented) {

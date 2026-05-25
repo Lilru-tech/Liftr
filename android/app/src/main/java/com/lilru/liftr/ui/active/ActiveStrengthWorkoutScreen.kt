@@ -78,6 +78,7 @@ import com.google.android.gms.ads.AdView
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.AppSnackbar
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.workout.WorkoutStartSync
 import com.lilru.liftr.ongoing.OngoingWorkoutService
@@ -140,11 +141,10 @@ fun ActiveStrengthWorkoutScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val appCtx = ctx.applicationContext
-    var isPremium by remember { mutableStateOf(LiftrPreferences.isPremium(appCtx)) }
+    val isPremium by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
     var showNavHint by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         showNavHint = !LiftrPreferences.activeStrengthNavHintSeen(appCtx)
-        isPremium = LiftrPreferences.isPremium(appCtx)
         vm.updateStartSyncStatus(WorkoutStartSync.status(workoutId))
     }
     val syncListener: (Int, WorkoutStartSync.Status) -> Unit = remember(workoutId) {

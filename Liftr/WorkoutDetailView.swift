@@ -2872,18 +2872,25 @@ private enum CardioRouteGeoJSONParser {
 
 private struct CardioRouteMapMini: View {
     let coordinates: [CLLocationCoordinate2D]
-    let territoryCells: [TerritoryPreviewCell]
+    let territoryFillRings: [[CLLocationCoordinate2D]]
+    let territorySampleCells: [TerritoryPreviewCell]
     @State private var position: MapCameraPosition = .automatic
     @State private var showExpanded = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Map(position: $position) {
-                ForEach(territoryCells) { cell in
-                    let ring = cell.cell_geojson?.ring ?? []
+                ForEach(Array(territoryFillRings.enumerated()), id: \.offset) { _, ring in
                     if ring.count >= 3 {
                         MapPolygon(coordinates: ring)
                             .foregroundStyle(Color.green.opacity(0.22))
+                    }
+                }
+                ForEach(territorySampleCells) { cell in
+                    let ring = cell.cell_geojson?.ring ?? []
+                    if ring.count >= 3 {
+                        MapPolygon(coordinates: ring)
+                            .foregroundStyle(Color.green.opacity(0.18))
                     }
                 }
                 MapPolyline(coordinates: coordinates)
@@ -2912,11 +2919,17 @@ private struct CardioRouteMapMini: View {
             NavigationStack {
                 ZStack {
                     Map(position: $position) {
-                        ForEach(territoryCells) { cell in
-                            let ring = cell.cell_geojson?.ring ?? []
+                        ForEach(Array(territoryFillRings.enumerated()), id: \.offset) { _, ring in
                             if ring.count >= 3 {
                                 MapPolygon(coordinates: ring)
                                     .foregroundStyle(Color.green.opacity(0.22))
+                            }
+                        }
+                        ForEach(territorySampleCells) { cell in
+                            let ring = cell.cell_geojson?.ring ?? []
+                            if ring.count >= 3 {
+                                MapPolygon(coordinates: ring)
+                                    .foregroundStyle(Color.green.opacity(0.18))
                             }
                         }
                         MapPolyline(coordinates: coordinates)
@@ -3006,7 +3019,8 @@ private struct CardioDetailBlock: View {
     @State private var extras: CardioExtras?
     @State private var kmPaceSplitsExpanded = false
     @State private var captureEvent: TerritoryCaptureEventRow?
-    @State private var territoryPreviewCells: [TerritoryPreviewCell] = []
+    @State private var territoryFillRings: [[CLLocationCoordinate2D]] = []
+    @State private var territorySampleCells: [TerritoryPreviewCell] = []
     @State private var workoutTakeovers: [TerritoryWorkoutTakeoverRow] = []
     @State private var showTerritoryTakeoversSheet = false
 
@@ -3065,7 +3079,8 @@ private struct CardioDetailBlock: View {
                             .font(.subheadline.weight(.semibold))
                         CardioRouteMapMini(
                             coordinates: routeCoordinates,
-                            territoryCells: territoryPreviewCells
+                            territoryFillRings: territoryFillRings,
+                            territorySampleCells: territorySampleCells
                         )
                     }
                     if let territoryDetailValue {
@@ -3098,7 +3113,8 @@ private struct CardioDetailBlock: View {
         .onChange(of: reloadKey) { _, _ in
             kmPaceSplitsExpanded = false
             captureEvent = nil
-            territoryPreviewCells = []
+            territoryFillRings = []
+            territorySampleCells = []
             workoutTakeovers = []
             Task { await load() }
         }
@@ -3234,25 +3250,25 @@ private struct CardioDetailBlock: View {
             async let takeovers = TerritoryCaptureClient.fetchWorkoutTakeovers(workoutId: workoutId)
             let captureEvent = await capture
             let takeoverRows = await takeovers
-            let previewCells: [TerritoryPreviewCell]
-            if (captureEvent?.cells_gained ?? 0) > 0,
-               let routeGeoJSON = r.route_geojson,
-               !routeGeoJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                previewCells = await TerritoryCaptureClient.fetchTerritoryPreviewCells(routeGeoJSON: routeGeoJSON)
+            let territoryDisplay: TerritoryWorkoutDisplay?
+            if (captureEvent?.cells_gained ?? 0) > 0 {
+                territoryDisplay = await TerritoryCaptureClient.fetchWorkoutTerritoryDisplay(workoutId: workoutId)
             } else {
-                previewCells = []
+                territoryDisplay = nil
             }
             await MainActor.run {
                 self.captureEvent = captureEvent
                 self.workoutTakeovers = takeoverRows
-                self.territoryPreviewCells = previewCells
+                self.territoryFillRings = territoryDisplay?.fillRings ?? []
+                self.territorySampleCells = territoryDisplay?.sampleCells ?? []
             }
         } catch {
             await MainActor.run {
                 self.row = nil
                 self.captureEvent = nil
                 self.workoutTakeovers = []
-                self.territoryPreviewCells = []
+                self.territoryFillRings = []
+                self.territorySampleCells = []
                 self.error = error.localizedDescription
             }
         }

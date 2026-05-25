@@ -288,7 +288,6 @@ struct ActiveStrengthWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var app: AppState
-    @AppStorage("isPremium") private var isPremium = false
     @AppStorage("activeStrengthNavHintSeen") private var activeStrengthNavHintSeen = false
 
     @State private var restEndDate: Date? = nil
@@ -714,7 +713,7 @@ struct ActiveStrengthWorkoutView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !isPremium, !showElborblaCelebration {
+                if !app.isPremium, !showElborblaCelebration {
                     BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                         .frame(height: 50)
                         .padding(.horizontal)

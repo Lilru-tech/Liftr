@@ -13,6 +13,9 @@ import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -22,6 +25,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.util.UUID
 
 @Serializable
 data class TerritoryBBoxWire(
@@ -71,8 +75,17 @@ data class TerritoryPreviewResponseWire(
     @SerialName("route_kind") val routeKind: String? = null,
     @SerialName("cells_count") val cellsCount: Int? = null,
     val cells: List<TerritoryPreviewCellWire> = emptyList(),
+    @SerialName("capture_fill_geojson") val captureFillGeojson: TerritoryGeoJsonPolygonWire? = null,
+    @SerialName("cells_truncated") val cellsTruncated: Boolean? = null,
     val bbox: TerritoryBBoxWire? = null,
     val reason: String? = null
+)
+
+data class TerritoryWorkoutDisplayWire(
+    val fillRings: List<List<Pair<Double, Double>>>,
+    val sampleCellRings: List<List<Pair<Double, Double>>>,
+    val cellsCount: Int,
+    val cellsTruncated: Boolean
 )
 
 @Serializable
@@ -84,6 +97,13 @@ data class TerritoryMapCellWire(
     @SerialName("owner_avatar_url") val ownerAvatarUrl: String? = null,
     @SerialName("captured_at") val capturedAt: String? = null,
     @SerialName("is_mine") val isMine: Boolean? = null
+)
+
+@Serializable
+data class TerritoryExpansionRecommendationWire(
+    @SerialName("cell_id") val cellId: String,
+    @SerialName("cell_geojson") val cellGeojson: TerritoryGeoJsonPolygonWire? = null,
+    @SerialName("weight_priority") val weightPriority: Int? = null
 )
 
 @Serializable
@@ -198,31 +218,74 @@ object TerritoryCaptureClient {
         }.getOrDefault(emptyList())
     }
 
-    suspend fun fetchTerritoryPreviewRings(
-        supabase: SupabaseClient,
-        routeGeoJson: String
-    ): List<List<Pair<Double, Double>>> {
-        return runCatching {
-            val res = supabase.postgrest.rpc(
-                BackendContracts.Rpc.PREVIEW_TERRITORY_CAPTURE_V1,
-                buildJsonObject { put("p_route_geojson", routeGeoJson) }
-            )
-            val decoded = json.decodeFromString<TerritoryPreviewResponseWire>(res.data)
-            if (!decoded.ok) {
-                emptyList()
-            } else {
-                decoded.cells.mapNotNull { cell ->
-                    cell.cellGeojson?.ringLatLng()?.takeIf { it.size >= 3 }
-                }
-            }
-        }.getOrDefault(emptyList())
+    private fun territoryRingsFromPreview(decoded: TerritoryPreviewResponseWire): TerritoryWorkoutDisplayWire {
+        val fillRing = decoded.captureFillGeojson?.ringLatLng().orEmpty()
+        val fillRings = if (fillRing.size >= 3) listOf(fillRing) else emptyList()
+        val sampleRings = decoded.cells.mapNotNull { cell ->
+            cell.cellGeojson?.ringLatLng()?.takeIf { it.size >= 3 }
+        }
+        return TerritoryWorkoutDisplayWire(
+            fillRings = fillRings,
+            sampleCellRings = sampleRings,
+            cellsCount = decoded.cellsCount ?: decoded.cells.size,
+            cellsTruncated = decoded.cellsTruncated == true
+        )
     }
 
-    suspend fun previewCapture(supabase: SupabaseClient, routeGeoJson: String): TerritoryPreviewResponseWire? {
+    suspend fun fetchWorkoutTerritoryDisplay(
+        supabase: SupabaseClient,
+        workoutId: Int
+    ): TerritoryWorkoutDisplayWire? {
+        return runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.GET_WORKOUT_TERRITORY_DISPLAY_V1,
+                buildJsonObject { put("p_workout_id", workoutId) }
+            )
+            val decoded = json.decodeFromString<TerritoryPreviewResponseWire>(res.data)
+            if (!decoded.ok) null else territoryRingsFromPreview(decoded)
+        }.getOrNull()
+    }
+
+    suspend fun fetchTerritoryPreviewRings(
+        supabase: SupabaseClient,
+        routeGeoJson: String,
+        maxCells: Int? = null
+    ): List<List<Pair<Double, Double>>> {
+        return fetchTerritoryPreviewDisplay(supabase, routeGeoJson, maxCells)?.let { display ->
+            display.fillRings + display.sampleCellRings
+        }.orEmpty()
+    }
+
+    suspend fun fetchTerritoryPreviewDisplay(
+        supabase: SupabaseClient,
+        routeGeoJson: String,
+        maxCells: Int? = null
+    ): TerritoryWorkoutDisplayWire? {
         return runCatching {
             val res = supabase.postgrest.rpc(
                 BackendContracts.Rpc.PREVIEW_TERRITORY_CAPTURE_V1,
-                buildJsonObject { put("p_route_geojson", routeGeoJson) }
+                buildJsonObject {
+                    put("p_route_geojson", routeGeoJson)
+                    if (maxCells != null) put("p_max_cells", maxCells)
+                }
+            )
+            val decoded = json.decodeFromString<TerritoryPreviewResponseWire>(res.data)
+            if (!decoded.ok) null else territoryRingsFromPreview(decoded)
+        }.getOrNull()
+    }
+
+    suspend fun previewCapture(
+        supabase: SupabaseClient,
+        routeGeoJson: String,
+        maxCells: Int? = null
+    ): TerritoryPreviewResponseWire? {
+        return runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.PREVIEW_TERRITORY_CAPTURE_V1,
+                buildJsonObject {
+                    put("p_route_geojson", routeGeoJson)
+                    if (maxCells != null) put("p_max_cells", maxCells)
+                }
             )
             val decoded = json.decodeFromString<TerritoryPreviewResponseWire>(res.data)
             if (!decoded.ok) {
@@ -309,6 +372,42 @@ object TerritoryCaptureClient {
         )
     }
 
+    data class RecommendedExpansionFetchResult(
+        val cells: List<TerritoryExpansionRecommendationWire>,
+        val errorMessage: String?
+    )
+
+    suspend fun fetchRecommendedExpansionCells(
+        supabase: SupabaseClient,
+        userId: UUID,
+        lat: Double,
+        lon: Double,
+        radiusMeters: Double = 12_000.0
+    ): RecommendedExpansionFetchResult {
+        return runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.GET_RECOMMENDED_EXPANSION_CELLS_V1,
+                buildJsonObject {
+                    put("p_user_id", userId.toString())
+                    put("p_current_lat", lat)
+                    put("p_current_lng", lon)
+                    put("p_radius_meters", radiusMeters)
+                }
+            )
+            RecommendedExpansionFetchResult(
+                cells = json.decodeFromString<List<TerritoryExpansionRecommendationWire>>(res.data),
+                errorMessage = null
+            )
+        }.getOrElse { error ->
+            RecommendedExpansionFetchResult(
+                cells = emptyList(),
+                errorMessage = captureFailureMessage(error)
+            )
+        }
+    }
+
+    private const val POSTGREST_MAX_ROWS_PER_REQUEST = 1_000
+
     suspend fun fetchMapCells(
         supabase: SupabaseClient,
         minLat: Double,
@@ -318,18 +417,31 @@ object TerritoryCaptureClient {
         limit: Int = 5_000
     ): List<TerritoryMapCellWire> {
         val effectiveLimit = minOf(5_000, maxOf(limit, 1))
+        val pageSize = POSTGREST_MAX_ROWS_PER_REQUEST
+        val params = buildJsonObject {
+            put("p_min_lat", minLat)
+            put("p_min_lon", minLon)
+            put("p_max_lat", maxLat)
+            put("p_max_lon", maxLon)
+            put("p_limit", effectiveLimit)
+        }
         return runCatching {
-            val res = supabase.postgrest.rpc(
-                BackendContracts.Rpc.GET_TERRITORY_MAP_V1,
-                buildJsonObject {
-                    put("p_min_lat", minLat)
-                    put("p_min_lon", minLon)
-                    put("p_max_lat", maxLat)
-                    put("p_max_lon", maxLon)
-                    put("p_limit", effectiveLimit)
+            buildList {
+                var offset = 0
+                while (offset < effectiveLimit) {
+                    val pageLimit = minOf(pageSize, effectiveLimit - offset)
+                    val res = supabase.postgrest.rpc(
+                        BackendContracts.Rpc.GET_TERRITORY_MAP_V1,
+                        params
+                    ) {
+                        range(offset.toLong()..(offset + pageLimit - 1).toLong())
+                    }
+                    val pageRows = json.decodeFromString<List<TerritoryMapCellWire>>(res.data)
+                    addAll(pageRows)
+                    if (pageRows.isEmpty() || pageRows.size < pageLimit) break
+                    offset += pageRows.size
                 }
-            )
-            json.decodeFromString<List<TerritoryMapCellWire>>(res.data)
+            }
         }.onFailure { error ->
             AppSnackbar.showError(captureFailureMessage(error))
         }.getOrDefault(emptyList())

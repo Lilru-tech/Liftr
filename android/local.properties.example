@@ -4,7 +4,7 @@ sdk.dir=/path/to/Android/sdk
 
 # Supabase (misma URL y anon key pública que el cliente iOS: Liftr/SupabaseManager o variables de entorno de build).
 # Sin estas claves, la app compila pero el cliente Supabase queda inactivo hasta recompilar.
-supabase.url=
+supabase.url=https://rjzhaafvkxmvlnpsikbi.supabase.co
 supabase.anonKey=
 
 # Google Play: la suscripción premium debe existir con el id de strings.xml (billing_premium_sku).

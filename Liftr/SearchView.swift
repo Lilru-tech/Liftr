@@ -3,7 +3,6 @@ import Supabase
 
 struct SearchView: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium: Bool = false
 
     private enum SearchTab: String, CaseIterable, Identifiable {
         case users
@@ -136,7 +135,7 @@ struct SearchView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-            if !isPremium && tab != .map {
+            if !app.isPremium && tab != .map {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)

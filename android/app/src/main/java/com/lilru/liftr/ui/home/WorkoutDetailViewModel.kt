@@ -917,8 +917,10 @@ class WorkoutDetailViewModel(
         val capture = TerritoryCaptureClient.fetchCaptureEvent(supabase, workoutId)
         val territoryTakeovers = TerritoryCaptureClient.fetchWorkoutTakeovers(supabase, workoutId)
         val territoryPreviewRings =
-            if ((capture?.cellsGained ?: 0) > 0 && !w.routeGeojson.isNullOrBlank()) {
-                TerritoryCaptureClient.fetchTerritoryPreviewRings(supabase, w.routeGeojson)
+            if ((capture?.cellsGained ?: 0) > 0) {
+                TerritoryCaptureClient.fetchWorkoutTerritoryDisplay(supabase, workoutId)
+                    ?.let { display -> display.fillRings + display.sampleCellRings }
+                    .orEmpty()
             } else {
                 emptyList()
             }

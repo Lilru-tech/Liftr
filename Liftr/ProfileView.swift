@@ -126,7 +126,6 @@ private func fetchParticipantWorkoutIds(for userId: UUID) async throws -> [Int] 
 
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium: Bool = false
     @AppStorage("backgroundTheme") private var backgroundTheme: String = "mintBlue"
     let userId: UUID?
     private var viewingUserId: UUID? { userId ?? app.userId }
@@ -323,7 +322,7 @@ struct ProfileView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
 
-            if !isPremium {
+            if !app.isPremium {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)
@@ -1716,22 +1715,22 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: "star.circle.fill")
-                            Text(isPremium ? "You are Premium" : "Remove ads")
+                            Text(app.isPremium ? "You are Premium" : "Remove ads")
                                 .font(.body.weight(.semibold))
                             Spacer()
                         }
                         
-                        if let product = premiumProduct, !isPremium {
+                        if let product = premiumProduct, !app.isPremium {
                             Text("Subscribe for \(product.displayPrice) per month to remove ads.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                        } else if isPremium {
+                        } else if app.isPremium {
                             Text("Ads are disabled on this account.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                         
-                        if !isPremium {
+                        if !app.isPremium {
                             Button {
                                 Task { await purchasePremium() }
                             } label: {
@@ -3132,6 +3131,12 @@ struct ProfileView: View {
     
     private func purchasePremium() async {
         guard let product = premiumProduct else { return }
+        guard let userId = app.userId else {
+            await MainActor.run {
+                premiumError = "Sign in to subscribe."
+            }
+            return
+        }
         await MainActor.run {
             isPurchasingPremium = true
             premiumError = nil
@@ -3141,14 +3146,14 @@ struct ProfileView: View {
         }
         
         do {
-            let result = try await product.purchase()
+            let result = try await product.purchase(options: [
+                .appAccountToken(userId)
+            ])
             switch result {
             case .success(let verification):
                 if let transaction = verifiedTransaction(from: verification) {
-                    await MainActor.run {
-                        self.isPremium = true
-                    }
                     await transaction.finish()
+                    await app.refreshPremiumStatus()
                 } else {
                     await MainActor.run {
                         self.premiumError = "Purchase verification failed."
@@ -3182,9 +3187,7 @@ struct ProfileView: View {
             if let transaction = verifiedTransaction(from: result),
                transaction.productID == premiumProductID {
                 found = true
-                await MainActor.run {
-                    self.isPremium = true
-                }
+                await app.refreshPremiumStatus()
                 break
             }
         }
