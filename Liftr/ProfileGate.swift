@@ -10,5 +10,12 @@ struct ProfileGate: View {
         LoginView()
       }
     }
+    .onAppear {
+      let branch = app.isAuthenticated ? "ProfileView" : "LoginView"
+      AuthCallbackLogger.log(
+        "ProfileGate showing \(branch) tab=\(app.selectedTab) pending=\(app.passwordRecoveryPending) authenticated=\(app.isAuthenticated)",
+        source: "ProfileGate"
+      )
+    }
   }
 }

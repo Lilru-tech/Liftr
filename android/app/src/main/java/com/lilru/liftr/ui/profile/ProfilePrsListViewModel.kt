@@ -6,9 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.postgrest.from
-import io.github.jan.supabase.postgrest.query.Columns
-import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -19,6 +17,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 private data class PrListWire(
@@ -78,28 +78,11 @@ class ProfilePrsListViewModel(
             _uiState.update { it.copy(loading = true, error = null) } // mantiene filas hasta nueva carga
             val f = _uiState.value.filter
             val result = runCatching {
-                val res = if (f == PrKindFilter.ALL) {
-                    supabase
-                        .from(BackendContracts.Views.VW_USER_PRS)
-                        .select(
-                            columns = Columns.raw("kind, user_id, label, metric, value, achieved_at")
-                        ) {
-                            filter { eq("user_id", userId) }
-                            order("achieved_at", Order.DESCENDING)
-                        }
-                } else {
-                    supabase
-                        .from(BackendContracts.Views.VW_USER_PRS)
-                        .select(
-                            columns = Columns.raw("kind, user_id, label, metric, value, achieved_at")
-                        ) {
-                            filter {
-                                eq("user_id", userId)
-                                eq("kind", kindWire(f))
-                            }
-                            order("achieved_at", Order.DESCENDING)
-                        }
+                val params = buildJsonObject {
+                    put("p_user_id", userId)
+                    if (f != PrKindFilter.ALL) put("p_kind", kindWire(f))
                 }
+                val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_USER_PRS, params) { }
                 decodeFlexibleList<PrListWire>(res.data).map { it.toRow() }
             }
             result.onSuccess { rows ->

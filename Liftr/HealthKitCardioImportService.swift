@@ -6,8 +6,27 @@ import Supabase
 struct HealthKitImportSummary: Sendable {
     var imported: Int = 0
     var skippedDuplicate: Int = 0
+    var mergedDuplicate: Int = 0
     var failed: Int = 0
     var errorMessages: [String] = []
+}
+
+enum HealthKitCardioImportMode: Sendable {
+    case manual
+    case automatic
+}
+
+enum HealthKitCardioImportNotificationPolicy {
+    static let recentImportWindow: TimeInterval = 48 * 3600
+    static let mergedWorkoutAgeThreshold: TimeInterval = 120
+
+    static func shouldNotifyAutoImport(workoutEndedAt: Date, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(workoutEndedAt) <= recentImportWindow
+    }
+
+    static func wasExistingWorkoutBeforeImport(createdAt: Date, now: Date = Date()) -> Bool {
+        now.timeIntervalSince(createdAt) > mergedWorkoutAgeThreshold
+    }
 }
 
 enum HealthKitCardioImportError: LocalizedError {
@@ -31,6 +50,7 @@ final class HealthKitCardioImportService {
         if let d = HKQuantityType.quantityType(forIdentifier: .distanceWalkingRunning) { s.insert(d) }
         if let d = HKQuantityType.quantityType(forIdentifier: .distanceCycling) { s.insert(d) }
         if let d = HKQuantityType.quantityType(forIdentifier: .distanceSwimming) { s.insert(d) }
+        if let e = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) { s.insert(e) }
         if let hr = HKQuantityType.quantityType(forIdentifier: .heartRate) { s.insert(hr) }
         return s
     }
@@ -51,7 +71,12 @@ final class HealthKitCardioImportService {
         }
     }
 
-    func importCardioWorkouts(from fromDate: Date, to toDate: Date, userId: UUID) async -> HealthKitImportSummary {
+    func importCardioWorkouts(
+        from fromDate: Date,
+        to toDate: Date,
+        userId: UUID,
+        mode: HealthKitCardioImportMode = .manual
+    ) async -> HealthKitImportSummary {
         var summary = HealthKitImportSummary()
         guard isHealthDataAvailable else {
             summary.errorMessages.append(HealthKitCardioImportError.healthDataNotAvailable.localizedDescription)
@@ -90,6 +115,7 @@ final class HealthKitCardioImportService {
 
             let (avgHR, maxHR) = await heartRateStats(for: w)
             let elevationM = elevationGainMeters(workout: w)
+            let activeEnergyKcal = await activeEnergyKilocalories(for: w)
 
             var routeGeoJSON: String?
             var routeLocations: [CLLocation] = []
@@ -149,7 +175,9 @@ final class HealthKitCardioImportService {
                 p_state: "published",
                 p_stats: statsJSON,
                 p_healthkit_uuid: hkUUID,
-                p_route_geojson: isTreadmill ? nil : routeGeoJSON
+                p_route_geojson: isTreadmill ? nil : routeGeoJSON,
+                p_calories_kcal: activeEnergyKcal,
+                p_calories_method: activeEnergyKcal == nil ? nil : "healthkit_active_energy"
             )
 
             do {
@@ -162,11 +190,32 @@ final class HealthKitCardioImportService {
                     wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID)
                 }
                 if let wid {
+                    let merged = await wasMergedIntoExistingWorkout(workoutId: wid)
+                    if merged {
+                        summary.mergedDuplicate += 1
+                    } else {
+                        summary.imported += 1
+                    }
+                    if !isTreadmill, routeGeoJSON != nil {
+                        if let summary = await TerritoryCaptureClient.applyCapture(workoutId: wid),
+                           let message = TerritoryCapturePresentation.message(for: summary) {
+                            TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: summary)
+                            await MainActor.run {
+                                AppState.shared.territoryCaptureToast = message
+                            }
+                        }
+                    }
                     await MainActor.run {
                         NotificationCenter.default.post(name: .workoutDidChange, object: wid)
                     }
+                    if !merged,
+                       mode == .automatic,
+                       HealthKitCardioImportNotificationPolicy.shouldNotifyAutoImport(workoutEndedAt: w.endDate) {
+                        await notifyAutoImportedWorkout(workoutId: wid, title: title)
+                    }
+                } else {
+                    summary.imported += 1
                 }
-                summary.imported += 1
             } catch {
                 summary.failed += 1
                 summary.errorMessages.append("\(mapped.label): \(error.localizedDescription)")
@@ -384,6 +433,26 @@ final class HealthKitCardioImportService {
         }
     }
 
+    private func activeEnergyKilocalories(for workout: HKWorkout) async -> Double? {
+        guard let energyType = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) else { return nil }
+        let pred = HKQuery.predicateForObjects(from: workout)
+        return await withCheckedContinuation { cont in
+            let q = HKStatisticsQuery(
+                quantityType: energyType,
+                quantitySamplePredicate: pred,
+                options: .cumulativeSum
+            ) { _, result, _ in
+                cont.resume(returning: Self.validKilocalories(result?.sumQuantity()?.doubleValue(for: .kilocalorie())))
+            }
+            store.execute(q)
+        }
+    }
+
+    private static func validKilocalories(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0, value < 100_000 else { return nil }
+        return (value * 10).rounded() / 10
+    }
+
     private func fetchRouteLocations(for workout: HKWorkout) async throws -> [CLLocation] {
         let routeType = HKSeriesType.workoutRoute()
         let pred = HKQuery.predicateForObjects(from: workout)
@@ -430,8 +499,41 @@ final class HealthKitCardioImportService {
         }
     }
 
+    private func notifyAutoImportedWorkout(workoutId: Int, title: String) async {
+        struct Params: Encodable {
+            let p_workout_id: Int
+            let p_title: String?
+        }
+        do {
+            _ = try await SupabaseManager.shared.client
+                .rpc(
+                    "notify_apple_health_cardio_imported",
+                    params: Params(p_workout_id: workoutId, p_title: title)
+                )
+                .execute()
+            await AppState.shared.refreshUnreadNotificationsCount()
+        } catch {
+            print("[HealthKitCardioImport] notify auto-import error:", error.localizedDescription)
+        }
+    }
+
     private func isDuplicateHealthKitUUID(_ uuid: String) async -> Bool {
         await (try? fetchWorkoutIdByHealthKitUUID(uuid)) != nil
+    }
+
+    private func wasMergedIntoExistingWorkout(workoutId: Int) async -> Bool {
+        struct Row: Decodable {
+            let created_at: Date
+        }
+        guard let res = try? await SupabaseManager.shared.client
+            .from("workouts")
+            .select("created_at")
+            .eq("id", value: workoutId)
+            .limit(1)
+            .execute(),
+              let row = try? JSONDecoder.supabase().decode([Row].self, from: res.data).first
+        else { return false }
+        return HealthKitCardioImportNotificationPolicy.wasExistingWorkoutBeforeImport(createdAt: row.created_at)
     }
 
     private func fetchWorkoutIdByHealthKitUUID(_ uuid: String) async throws -> Int? {

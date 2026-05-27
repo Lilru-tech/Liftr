@@ -5,7 +5,6 @@ struct ActiveSportWorkoutView: View {
     let workoutId: Int
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium = false
     @State private var showCountdown = true
     @State private var isRunning = false
     @State private var elapsedSec: Int = 0
@@ -21,11 +20,35 @@ struct ActiveSportWorkoutView: View {
     @State private var detailsTab: DetailsTab = .summary
     @State private var hyroxExercises: [ActiveHyroxExercise] = []
     @State private var currentHyroxExerciseIndex: Int = 0
+    @State private var activeHyroxExerciseId: Int?
+    @State private var completedHyroxExerciseIds: Set<Int> = []
+    @State private var hyroxDragOffsetY: CGFloat = 0
+    @State private var hyroxZoneScrollContentBottom: CGFloat = 0
+    @State private var hyroxZoneScrollViewportHeight: CGFloat = 0
+    @State private var hyroxZoneScrollCanScrollDown = false
+    @State private var showEditHyroxExerciseSheet = false
+    @State private var isAddingHyroxExercise = false
+    @State private var showDeleteHyroxExerciseConfirm = false
+    @State private var deleteHyroxExerciseId: Int?
+    @State private var nextTempHyroxExerciseId = -1
+    @State private var editHyroxExerciseId: Int?
+    @State private var editHyroxExerciseCode = HyroxExerciseCode.run.rawValue
+    @State private var editHyroxCustomDisplayName = ""
+    @State private var editHyroxDistanceM = ""
+    @State private var editHyroxReps = ""
+    @State private var editHyroxWeightKg = ""
+    @State private var editHyroxDurationSec = ""
+    @State private var editHyroxHeightCm = ""
+    @State private var editHyroxImplementCount = ""
+    @State private var editHyroxNotes = ""
+    @State private var didLoadEditHyroxCustomDisplayNameSuggestions = false
+    @State private var editHyroxCustomDisplayNameSuggestionsFromDB: [String] = []
+    @FocusState private var editHyroxNameFocused: Bool
     
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     
     private struct SportRow: Decodable {
-        let id: Int
+        var id: Int
         let sport: String
         let duration_sec: Int?
         let score_for: Int?
@@ -47,16 +70,17 @@ struct ActiveSportWorkoutView: View {
     
     private struct ActiveHyroxExercise: Identifiable, Decodable {
         let id: Int
-        let exercise_code: String
-        let exercise_order: Int
-        let distance_m: Int?
-        let reps: Int?
-        let weight_kg: Decimal?
-        let duration_sec: Int?
-        let height_cm: Int?
-        let implement_count: Int?
-        let notes: String?
-        let exercise_display_name: String?
+        var exercise_code: String
+        var exercise_order: Int
+        var zone_order: Int?
+        var distance_m: Int?
+        var reps: Int?
+        var weight_kg: Decimal?
+        var duration_sec: Int?
+        var height_cm: Int?
+        var implement_count: Int?
+        var notes: String?
+        var exercise_display_name: String?
 
         var displayName: String {
             HyroxExerciseFormatting.label(code: exercise_code, displayName: exercise_display_name, notes: notes)
@@ -81,29 +105,118 @@ struct ActiveSportWorkoutView: View {
             }
         }
     }
+
+    private struct ActiveHyroxDisplayGroup: Identifiable {
+        let id: String
+        let zoneOrder: Int?
+        let exercises: [ActiveHyroxExercise]
+
+        var isZone: Bool {
+            zoneOrder != nil && exercises.count > 1
+        }
+    }
+
+    private struct HyroxZoneScrollContentBottomPreferenceKey: PreferenceKey {
+        static var defaultValue: CGFloat = 0
+
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = nextValue()
+        }
+    }
+
+    private struct HyroxZoneScrollViewportHeightPreferenceKey: PreferenceKey {
+        static var defaultValue: CGFloat = 0
+
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = nextValue()
+        }
+    }
     
     private var orderedHyroxExercises: [ActiveHyroxExercise] {
         hyroxExercises.sorted { $0.exercise_order < $1.exercise_order }
     }
 
+    private var hyroxDisplayGroups: [ActiveHyroxDisplayGroup] {
+        var groups: [ActiveHyroxDisplayGroup] = []
+        let ordered = orderedHyroxExercises
+        var index = 0
+        while ordered.indices.contains(index) {
+            let ex = ordered[index]
+            guard let zoneOrder = ex.zone_order else {
+                groups.append(ActiveHyroxDisplayGroup(id: "exercise-\(ex.id)", zoneOrder: nil, exercises: [ex]))
+                index += 1
+                continue
+            }
+
+            var zoneExercises: [ActiveHyroxExercise] = [ex]
+            var nextIndex = index + 1
+            while ordered.indices.contains(nextIndex), ordered[nextIndex].zone_order == zoneOrder {
+                zoneExercises.append(ordered[nextIndex])
+                nextIndex += 1
+            }
+
+            groups.append(
+                ActiveHyroxDisplayGroup(
+                    id: "zone-\(zoneOrder)-\(zoneExercises.map(\.id).map(String.init).joined(separator: "-"))",
+                    zoneOrder: zoneOrder,
+                    exercises: zoneExercises
+                )
+            )
+            index = nextIndex
+        }
+        return groups
+    }
+
+    private var currentHyroxDisplayGroup: ActiveHyroxDisplayGroup? {
+        guard hyroxDisplayGroups.indices.contains(currentHyroxExerciseIndex) else { return nil }
+        return hyroxDisplayGroups[currentHyroxExerciseIndex]
+    }
+
     private var currentHyroxExercise: ActiveHyroxExercise? {
-        guard !orderedHyroxExercises.isEmpty,
-              currentHyroxExerciseIndex >= 0,
-              currentHyroxExerciseIndex < orderedHyroxExercises.count
-        else { return nil }
-        return orderedHyroxExercises[currentHyroxExerciseIndex]
+        guard let group = currentHyroxDisplayGroup else { return nil }
+        if let activeHyroxExerciseId,
+           let selected = group.exercises.first(where: { $0.id == activeHyroxExerciseId }) {
+            return selected
+        }
+        return group.exercises.first
     }
 
-    private var nextHyroxExercise: ActiveHyroxExercise? {
+    private var nextHyroxDisplayGroup: ActiveHyroxDisplayGroup? {
         let nextIndex = currentHyroxExerciseIndex + 1
-        guard nextIndex < orderedHyroxExercises.count else { return nil }
-        return orderedHyroxExercises[nextIndex]
+        guard hyroxDisplayGroups.indices.contains(nextIndex) else { return nil }
+        return hyroxDisplayGroups[nextIndex]
     }
 
-    private var previousHyroxExercise: ActiveHyroxExercise? {
+    private var previousHyroxDisplayGroup: ActiveHyroxDisplayGroup? {
         let prevIndex = currentHyroxExerciseIndex - 1
-        guard prevIndex >= 0 else { return nil }
-        return orderedHyroxExercises[prevIndex]
+        guard hyroxDisplayGroups.indices.contains(prevIndex) else { return nil }
+        return hyroxDisplayGroups[prevIndex]
+    }
+
+    private var orderedHyroxExercisePairs: [(offset: Int, element: ActiveHyroxExercise)] {
+        Array(orderedHyroxExercises.enumerated())
+    }
+
+    private var canShowHyroxNextCTA: Bool {
+        currentHyroxDisplayGroup != nil && nextHyroxDisplayGroup != nil
+    }
+
+    private var canShowHyroxFinishCTA: Bool {
+        guard nextHyroxDisplayGroup == nil, let group = currentHyroxDisplayGroup else { return false }
+        return group.isZone || isCurrentHyroxExerciseLastInGroup
+    }
+
+    private var isCurrentHyroxExerciseLastInGroup: Bool {
+        guard let group = currentHyroxDisplayGroup,
+              let currentHyroxExercise,
+              let last = group.exercises.last
+        else { return false }
+        return currentHyroxExercise.id == last.id
+    }
+
+    private var currentHyroxExerciseGlobalIndex: Int? {
+        guard let currentHyroxExercise else { return nil }
+        return orderedHyroxExercises.firstIndex(where: { $0.id == currentHyroxExercise.id })
     }
     
     var body: some View {
@@ -112,71 +225,74 @@ struct ActiveSportWorkoutView: View {
                 Color.clear
                     .gradientBG()
                     .ignoresSafeArea()
-                ScrollView {
-                VStack(spacing: 24) {
-                    if let row = sportRow {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(sportType.label)
-                                .font(.title2.weight(.bold))
-                            
-                            if let secs = row.duration_sec, secs > 0 {
-                                let mins = max(1, secs / 60)
-                                Text("Target \(mins) min")
+                if sportType == .hyrox {
+                    hyroxExercisePagerSection
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, app.isPremium ? 140 : 200)
+                } else {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            if let row = sportRow {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(sportType.label)
+                                        .font(.title2.weight(.bold))
+
+                                    if let secs = row.duration_sec, secs > 0 {
+                                        let mins = max(1, secs / 60)
+                                        Text("Target \(mins) min")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Text("Active sport session")
+                                    .font(.title2.weight(.bold))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            if hasTargetTime {
+                                Picker("", selection: $mode) {
+                                    Text("Target time").tag(TimerMode.countdown)
+                                    Text("Free timer").tag(TimerMode.stopwatch)
+                                }
+                                .pickerStyle(.segmented)
+                                .onChange(of: mode) { _, newMode in
+                                    isRunning = false
+                                    elapsedSec = 0
+                                    if newMode == .countdown && hasTargetTime {
+                                        remainingSec = initialTargetSec
+                                    }
+                                }
+                            }
+
+                            VStack(spacing: 8) {
+                                Text(formatTime(mode == .countdown ? remainingSec : elapsedSec))
+                                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                Text(mode == .countdown ? "Time left" : "Elapsed time")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text("Active sport session")
-                            .font(.title2.weight(.bold))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    
-                    if hasTargetTime {
-                        Picker("", selection: $mode) {
-                            Text("Target time").tag(TimerMode.countdown)
-                            Text("Free timer").tag(TimerMode.stopwatch)
-                        }
-                        .pickerStyle(.segmented)
-                        .onChange(of: mode) { _, newMode in
-                            isRunning = false
-                            elapsedSec = 0
-                            if newMode == .countdown && hasTargetTime {
-                                remainingSec = initialTargetSec
-                            }
-                        }
-                    }
-                    
-                    VStack(spacing: 8) {
-                        Text(formatTime(mode == .countdown ? remainingSec : elapsedSec))
-                            .font(.system(size: 40, weight: .bold, design: .rounded))
-                            .monospacedDigit()
-                        Text(mode == .countdown ? "Time left" : "Elapsed time")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(24)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.15)))
+                            .frame(maxWidth: .infinity)
+                            .padding(24)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.15)))
 
-                    if sportType == .hyrox {
-                        hyroxExercisePagerSection
-                    } else {
-                        statsOrSummarySection
+                            statsOrSummarySection
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, app.isPremium ? 140 : 200)
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, isPremium ? 140 : 200)
-            }
                 VStack {
                     Spacer()
-                    if !showCountdown {
+                    if !showCountdown, sportType != .hyrox {
                         VStack(spacing: 8) {
                             bottomControls
-                            if !isPremium {
+                            if !app.isPremium {
                                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                                     .frame(height: 50)
                                     .padding(.horizontal)
@@ -211,7 +327,43 @@ struct ActiveSportWorkoutView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
                 }
+                if sportType == .hyrox, !showCountdown {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        HStack(spacing: 8) {
+                            sportWorkoutSessionElapsedChip()
+                            Button {
+                                isRunning.toggle()
+                            } label: {
+                                Image(systemName: isRunning ? "pause.fill" : "play.fill")
+                                    .font(.body.weight(.semibold))
+                                    .frame(width: 36, height: 36)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(isRunning ? "Pause workout" : "Resume workout")
+                        }
+                    }
+                }
             }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !app.isPremium, !showCountdown, !isSaving, sportType == .hyrox {
+                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                    .frame(height: 50)
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+            }
+        }
+        .sheet(isPresented: $showEditHyroxExerciseSheet) {
+            editHyroxExerciseSheet
+        }
+        .alert("Delete exercise?", isPresented: $showDeleteHyroxExerciseConfirm) {
+            Button("Delete", role: .destructive) {
+                deleteSelectedHyroxExercise()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the exercise from this active workout.")
         }
         .onReceive(timer) { _ in
             guard isRunning else { return }
@@ -276,44 +428,46 @@ struct ActiveSportWorkoutView: View {
     
     private var bottomControls: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 16) {
-                Button {
-                    isRunning.toggle()
-                } label: {
-                    Text(isRunning
-                         ? "Pause"
-                         : (elapsedSec == 0 ? "Start" : "Resume"))
-                        .font(.headline.weight(.semibold))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 42)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(Color.accentColor)
-                        )
-                        .foregroundColor(.white)
-                }
-                .buttonStyle(.plain)
-                
-                Button {
-                    isRunning = false
-                    elapsedSec = 0
-                    if mode == .countdown && hasTargetTime {
-                        remainingSec = initialTargetSec
-                    } else {
-                        remainingSec = 0
+            if sportType != .hyrox {
+                HStack(spacing: 16) {
+                    Button {
+                        isRunning.toggle()
+                    } label: {
+                        Text(isRunning
+                             ? "Pause"
+                             : (elapsedSec == 0 ? "Start" : "Resume"))
+                            .font(.headline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 42)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Color.accentColor)
+                            )
+                            .foregroundColor(.white)
                     }
-                } label: {
-                    Text("Reset")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(width: 90, height: 40)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.gray.opacity(0.40))
-                        )
-                        .foregroundColor(.primary)
+                    .buttonStyle(.plain)
+
+                    Button {
+                        isRunning = false
+                        elapsedSec = 0
+                        if mode == .countdown && hasTargetTime {
+                            remainingSec = initialTargetSec
+                        } else {
+                            remainingSec = 0
+                        }
+                    } label: {
+                        Text("Reset")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(width: 90, height: 40)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color.gray.opacity(0.40))
+                            )
+                            .foregroundColor(.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isRunning || elapsedSec == 0)
                 }
-                .buttonStyle(.plain)
-                .disabled(isRunning || elapsedSec == 0)
             }
             
             Button {
@@ -344,6 +498,24 @@ struct ActiveSportWorkoutView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 12)
+    }
+
+    @ViewBuilder
+    private func sportWorkoutSessionElapsedChip() -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "stopwatch")
+                .font(.caption.weight(.semibold))
+                .accessibilityHidden(true)
+            Text(formatTime(elapsedSec))
+                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background(.ultraThinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(.white.opacity(0.18), lineWidth: 0.5))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Workout time, \(formatTime(elapsedSec))")
     }
         
     private var summaryCard: some View {
@@ -413,100 +585,567 @@ struct ActiveSportWorkoutView: View {
     }
 
     private var hyroxExercisePagerSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Planned exercises")
-                .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            hyroxExerciseBubbleNavigation
+                .zIndex(2)
 
-            if let ex = currentHyroxExercise {
-                VStack(spacing: 14) {
-                    Text(ex.displayName)
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity)
-
-                    Text("Exercise \(currentHyroxExerciseIndex + 1) of \(orderedHyroxExercises.count)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-
-                    VStack(spacing: 10) {
-                        if let distance = ex.distance_m {
-                            hyroxExerciseMainValue(title: "Distance", value: "\(distance) m")
-                        }
-                        if let reps = ex.reps {
-                            hyroxExerciseMainValue(title: "Reps", value: "\(reps)")
-                        }
-                        if let weight = ex.weight_kg {
-                            hyroxExerciseMainValue(
-                                title: "Weight",
-                                value: String(format: "%.1f kg", NSDecimalNumber(decimal: weight).doubleValue)
-                            )
-                        }
-                        if let duration = ex.duration_sec {
-                            hyroxExerciseMainValue(title: "Duration", value: formatTime(duration))
-                        }
-                        if let height = ex.height_cm {
-                            hyroxExerciseMainValue(title: "Height", value: "\(height) cm")
-                        }
-                        if let implements = ex.implement_count {
-                            hyroxExerciseMainValue(title: "Implements", value: "\(implements)")
-                        }
-                        if let notes = ex.notes, !notes.isEmpty {
-                            hyroxExerciseMainValue(title: "Notes", value: notes)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(20)
-                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18))
-
-                    HStack(spacing: 12) {
-                        Button {
-                            if currentHyroxExerciseIndex > 0 {
-                                currentHyroxExerciseIndex -= 1
-                            }
-                        } label: {
-                            Text("Previous")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .stroke(Color.accentColor, lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(previousHyroxExercise == nil)
-                        .opacity(previousHyroxExercise == nil ? 0.45 : 1)
-
-                        Button {
-                            if currentHyroxExerciseIndex < orderedHyroxExercises.count - 1 {
-                                currentHyroxExerciseIndex += 1
-                            }
-                        } label: {
-                            Text("Next")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 44)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .fill(Color.accentColor)
-                                )
-                                .foregroundColor(.white)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(nextHyroxExercise == nil)
-                        .opacity(nextHyroxExercise == nil ? 0.45 : 1)
-                    }
-                }
+            if orderedHyroxExercises.isEmpty {
+                hyroxEmptyActiveExerciseState
             } else {
-                Text("No exercises planned")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                GeometryReader { geo in
+                    let height = geo.size.height
+                    let cardHeight = min(
+                        max(hyroxCurrentCardEstimatedHeight, 240),
+                        max(300, height * 0.88) + hyroxCurrentCardCTAExtraHeight
+                    )
+                    let peekHeight: CGFloat = 82
+                    let peekGap: CGFloat = 12
+                    let neededHeight = cardHeight + 2 * (peekHeight + peekGap)
+                    let step = cardHeight * 0.82
+                    hyroxExerciseCardStack(
+                        cardHeight: cardHeight,
+                        peekHeight: peekHeight,
+                        peekOffset: (cardHeight / 2) + (peekHeight / 2) + peekGap,
+                        step: step,
+                        threshold: max(70, step * 0.35),
+                        neededHeight: neededHeight
+                    )
+                    .frame(height: neededHeight)
+                    .frame(maxWidth: .infinity)
+                    .position(x: geo.size.width / 2, y: height / 2)
+                }
+                .zIndex(1)
             }
         }
+    }
+
+    private var hyroxEmptyActiveExerciseState: some View {
+        VStack(spacing: 14) {
+            Text("No exercises planned")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button {
+                beginAddingHyroxExercise()
+            } label: {
+                Label("Add exercise", systemImage: "plus.circle.fill")
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+            }
+            .buttonStyle(.borderedProminent)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(20)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.14), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private func hyroxExerciseCardStack(
+        cardHeight: CGFloat,
+        peekHeight: CGFloat,
+        peekOffset: CGFloat,
+        step: CGFloat,
+        threshold: CGFloat,
+        neededHeight: CGFloat
+    ) -> some View {
+        let canSwipeCards = currentHyroxDisplayGroup?.isZone != true
+        ZStack {
+            if let prev = previousHyroxDisplayGroup {
+                hyroxExercisePeekCard(prev, label: "Previous exercise")
+                    .frame(height: peekHeight)
+                    .offset(y: -peekOffset + hyroxDragOffsetY * 0.25)
+                    .opacity(0.55)
+                    .blur(radius: 6)
+                    .scaleEffect(0.96)
+                    .allowsHitTesting(false)
+            }
+
+            if let group = currentHyroxDisplayGroup {
+                hyroxExerciseCard(group)
+                    .frame(height: cardHeight)
+                    .offset(y: hyroxDragOffsetY)
+            }
+
+            if let next = nextHyroxDisplayGroup {
+                hyroxExercisePeekCard(next, label: "Next exercise")
+                    .frame(height: peekHeight)
+                    .offset(y: peekOffset + hyroxDragOffsetY * 0.25)
+                    .opacity(0.55)
+                    .blur(radius: 6)
+                    .scaleEffect(0.96)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(height: neededHeight)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture()
+                .onChanged { value in
+                    guard canSwipeCards, orderedHyroxExercises.count > 1 else { return }
+                    hyroxDragOffsetY = max(-step, min(step, value.translation.height))
+                }
+                .onEnded { value in
+                    guard canSwipeCards, orderedHyroxExercises.count > 1 else {
+                        hyroxDragOffsetY = 0
+                        return
+                    }
+                    if value.translation.height <= -threshold, nextHyroxDisplayGroup != nil {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                            hyroxDragOffsetY = -step
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                            shiftHyroxExercise(by: 1)
+                            hyroxDragOffsetY = 0
+                        }
+                    } else if value.translation.height >= threshold, previousHyroxDisplayGroup != nil {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                            hyroxDragOffsetY = step
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                            shiftHyroxExercise(by: -1)
+                            hyroxDragOffsetY = 0
+                        }
+                    } else {
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.88)) {
+                            hyroxDragOffsetY = 0
+                        }
+                    }
+                }
+        )
+    }
+
+    private var hyroxCurrentCardEstimatedHeight: CGFloat {
+        guard let group = currentHyroxDisplayGroup else { return 280 }
+        let metricsRows = group.exercises.reduce(0) { partial, ex in
+            partial + max(1, hyroxMetricCount(for: ex) / 2 + hyroxMetricCount(for: ex) % 2)
+        }
+        if group.isZone {
+            return CGFloat(210 + group.exercises.count * 92 + metricsRows * 48) + hyroxCurrentCardCTAExtraHeight
+        }
+        return CGFloat(154 + metricsRows * 56) + hyroxCurrentCardCTAExtraHeight
+    }
+
+    private var hyroxCurrentCardCTAExtraHeight: CGFloat {
+        (canShowHyroxNextCTA || canShowHyroxFinishCTA) ? 66 : 0
+    }
+
+    private func hyroxExercisePeekCard(_ group: ActiveHyroxDisplayGroup, label: String) -> some View {
+        VStack(spacing: 8) {
+            Text(hyroxGroupTitle(group))
+                .font(.headline.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
         .padding(16)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12)))
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.10), lineWidth: 1))
+    }
+
+    private func hyroxGroupTitle(_ group: ActiveHyroxDisplayGroup) -> String {
+        if group.isZone, let zoneOrder = group.zoneOrder {
+            return "Zone \(max(1, zoneOrder))"
+        }
+        return group.exercises.first?.displayName ?? "Exercise"
+    }
+
+    private func hyroxGroupSubtitle(_ group: ActiveHyroxDisplayGroup) -> String {
+        guard group.exercises.count > 1 else {
+            let current = (currentHyroxExerciseGlobalIndex ?? 0) + 1
+            return "Exercise \(current) of \(max(1, orderedHyroxExercises.count))"
+        }
+        return "\(group.exercises.count) exercises"
+    }
+
+    private func hyroxMetricCount(for ex: ActiveHyroxExercise) -> Int {
+        var count = 0
+        if ex.distance_m != nil { count += 1 }
+        if ex.reps != nil { count += 1 }
+        if ex.weight_kg != nil { count += 1 }
+        if ex.duration_sec != nil { count += 1 }
+        if ex.height_cm != nil { count += 1 }
+        if ex.implement_count != nil { count += 1 }
+        if ex.notes?.trimmedOrNil != nil { count += 1 }
+        return count
+    }
+
+    @ViewBuilder
+    private func hyroxMetricGridValues(_ ex: ActiveHyroxExercise) -> some View {
+        if let distance = ex.distance_m {
+            hyroxExerciseMainValue(title: "Distance", value: "\(distance) m")
+        }
+        if let reps = ex.reps {
+            hyroxExerciseMainValue(title: "Reps", value: "\(reps)")
+        }
+        if let weight = ex.weight_kg {
+            hyroxExerciseMainValue(
+                title: "Weight",
+                value: String(format: "%.1f kg", NSDecimalNumber(decimal: weight).doubleValue)
+            )
+        }
+        if let duration = ex.duration_sec {
+            hyroxExerciseMainValue(title: "Duration", value: formatTime(duration))
+        }
+        if let height = ex.height_cm {
+            hyroxExerciseMainValue(title: "Height", value: "\(height) cm")
+        }
+        if let implements = ex.implement_count {
+            hyroxExerciseMainValue(title: "Implements", value: "\(implements)")
+        }
+        if let notes = ex.notes, !notes.isEmpty {
+            hyroxExerciseMainValue(title: "Notes", value: notes)
+        }
+    }
+
+    private func hyroxExerciseCard(_ group: ActiveHyroxDisplayGroup) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let zoneOrder = group.zoneOrder {
+                        Text("Zone \(max(1, zoneOrder))")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(hyroxGroupTitle(group))
+                        .font(.system(size: 27, weight: .bold, design: .rounded))
+                        .multilineTextAlignment(.leading)
+
+                    Text(hyroxGroupSubtitle(group))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 0)
+
+                if group.exercises.count == 1, let ex = group.exercises.first {
+                    hyroxExerciseActionMenu(for: ex)
+                }
+            }
+
+            if group.isZone {
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(Array(group.exercises.enumerated()), id: \.element.id) { offset, ex in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack(alignment: .top, spacing: 10) {
+                                        Text("\(offset + 1). \(ex.displayName)")
+                                            .font(.headline.weight(.semibold))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        hyroxExerciseActionMenu(for: ex)
+                                    }
+                                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                        hyroxMetricGridValues(ex)
+                                    }
+                                }
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 8)
+                                .contentShape(RoundedRectangle(cornerRadius: 14))
+                                .onTapGesture {
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        activeHyroxExerciseId = ex.id
+                                    }
+                                }
+                                .id(ex.id)
+
+                                if offset < group.exercises.count - 1 {
+                                    Divider().padding(.top, 2)
+                                }
+                            }
+                        }
+                        .padding(.bottom, 18)
+                        .background(alignment: .bottom) {
+                            GeometryReader { contentProxy in
+                                Color.clear.preference(
+                                    key: HyroxZoneScrollContentBottomPreferenceKey.self,
+                                    value: contentProxy.frame(in: .named("hyrox-zone-scroll")).maxY
+                                )
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 340)
+                    .coordinateSpace(name: "hyrox-zone-scroll")
+                    .background {
+                        GeometryReader { viewportProxy in
+                            Color.clear.preference(
+                                key: HyroxZoneScrollViewportHeightPreferenceKey.self,
+                                value: viewportProxy.size.height
+                            )
+                        }
+                    }
+                    .overlay(alignment: .bottom) {
+                        if hyroxZoneScrollCanScrollDown {
+                            LinearGradient(
+                                colors: [.clear, Color.black.opacity(0.16)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(height: 26)
+                            .allowsHitTesting(false)
+                        }
+                    }
+                    .onAppear {
+                        if let activeHyroxExerciseId {
+                            proxy.scrollTo(activeHyroxExerciseId, anchor: .center)
+                        }
+                        updateHyroxZoneScrollFade()
+                    }
+                    .onChange(of: activeHyroxExerciseId) { _, newValue in
+                        guard let newValue else { return }
+                        withAnimation(.easeInOut(duration: 0.24)) {
+                            proxy.scrollTo(newValue, anchor: .center)
+                        }
+                    }
+                    .onPreferenceChange(HyroxZoneScrollContentBottomPreferenceKey.self) { value in
+                        hyroxZoneScrollContentBottom = value
+                        updateHyroxZoneScrollFade()
+                    }
+                    .onPreferenceChange(HyroxZoneScrollViewportHeightPreferenceKey.self) { value in
+                        hyroxZoneScrollViewportHeight = value
+                        updateHyroxZoneScrollFade()
+                    }
+                }
+            } else if let ex = group.exercises.first {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    hyroxMetricGridValues(ex)
+                }
+            }
+
+            if canShowHyroxNextCTA {
+                Button {
+                    advanceHyroxFromNextCTA()
+                } label: {
+                    Text("Next")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(Color.accentColor))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+            } else if canShowHyroxFinishCTA {
+                Button {
+                    if let currentHyroxDisplayGroup {
+                        markHyroxGroupCompleted(currentHyroxDisplayGroup)
+                    }
+                    Task { await saveAndFinishWorkout() }
+                } label: {
+                    Text("Finish workout")
+                        .font(.headline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(RoundedRectangle(cornerRadius: 16).fill(Color.green.gradient))
+                        .foregroundColor(.white)
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaving)
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(.white.opacity(0.18), lineWidth: 1))
+    }
+
+    private func hyroxExerciseActionMenu(for ex: ActiveHyroxExercise) -> some View {
+        Menu {
+            Button {
+                beginEditingHyroxExercise(ex)
+            } label: {
+                Label("Edit exercise", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                deleteHyroxExerciseId = ex.id
+                showDeleteHyroxExerciseConfirm = true
+            } label: {
+                Label("Remove exercise", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3.weight(.semibold))
+                .frame(width: 36, height: 36)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("Exercise actions")
+    }
+
+    private var hyroxExerciseBubbleNavigation: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(orderedHyroxExercisePairs, id: \.element.id) { pair in
+                        if let zoneOrder = pair.element.zone_order {
+                            if isFirstHyroxExerciseInZone(position: pair.offset, zoneOrder: zoneOrder) {
+                                HStack(spacing: 6) {
+                                    ForEach(hyroxZoneExercisePairs(zoneOrder), id: \.element.id) { zonePair in
+                                        hyroxExerciseBubble(index: zonePair.offset)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 18)
+                                        .fill(Color.accentColor.opacity(0.10))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 18)
+                                        .stroke(Color.accentColor.opacity(0.45), lineWidth: 1.2)
+                                )
+                                .accessibilityLabel("Zone \(max(1, zoneOrder))")
+                            }
+                        } else {
+                            hyroxExerciseBubble(index: pair.offset)
+                        }
+                    }
+
+                    hyroxAddExerciseBubble()
+                        .id("hyrox-add-bubble")
+                }
+                .padding(.horizontal, 2)
+                .padding(.vertical, 4)
+            }
+            .onAppear {
+                if let activeHyroxExerciseId {
+                    proxy.scrollTo("hyrox-bubble-\(activeHyroxExerciseId)", anchor: .center)
+                }
+            }
+            .onChange(of: activeHyroxExerciseId) { _, newValue in
+                guard let newValue else { return }
+                withAnimation(.easeInOut(duration: 0.28)) {
+                    proxy.scrollTo("hyrox-bubble-\(newValue)", anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func hyroxAddExerciseBubble() -> some View {
+        Button {
+            beginAddingHyroxExercise()
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: "plus")
+                    .font(.system(size: 15, weight: .bold))
+                    .frame(width: 34, height: 34)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(Color.accentColor.opacity(0.65), lineWidth: 1))
+                Text("Add")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Add exercise")
+    }
+
+    private func hyroxZoneExercisePairs(_ zoneOrder: Int) -> [(offset: Int, element: ActiveHyroxExercise)] {
+        orderedHyroxExercisePairs.filter { $0.element.zone_order == zoneOrder }
+    }
+
+    private func isFirstHyroxExerciseInZone(position: Int, zoneOrder: Int) -> Bool {
+        guard orderedHyroxExercisePairs.indices.contains(position) else { return false }
+        guard position > 0 else { return true }
+        return orderedHyroxExercisePairs[position - 1].element.zone_order != zoneOrder
+    }
+
+    @ViewBuilder
+    private func hyroxExerciseBubble(index: Int) -> some View {
+        if orderedHyroxExercises.indices.contains(index) {
+            let ex = orderedHyroxExercises[index]
+            let isCurrent = currentHyroxExercise?.id == ex.id
+            let isCompleted = completedHyroxExerciseIds.contains(ex.id)
+            let isFinalExercise = index == orderedHyroxExercises.count - 1
+            let isFinishBubble = isFinalExercise
+            Button {
+                if let groupIndex = hyroxDisplayGroups.firstIndex(where: { group in
+                    group.exercises.contains { $0.id == ex.id }
+                }) {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+                        currentHyroxExerciseIndex = groupIndex
+                        activeHyroxExerciseId = ex.id
+                    }
+                }
+            } label: {
+                Text("\(index + 1)")
+                    .font(isCurrent ? .callout.weight(.bold) : .caption.weight(.bold))
+                    .frame(width: isCurrent ? 40 : 32, height: isCurrent ? 40 : 32)
+                    .background(
+                        Circle()
+                            .fill(isFinishBubble ? Color.green : (isCurrent || isCompleted ? Color.accentColor : Color.primary.opacity(0.10)))
+                    )
+                    .foregroundStyle(isFinishBubble || isCurrent || isCompleted ? .white : .primary)
+                    .overlay(
+                        Circle()
+                            .stroke(isCurrent ? Color.white : Color.primary.opacity(0.15), lineWidth: isCurrent ? 2 : 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .id("hyrox-bubble-\(ex.id)")
+            .accessibilityLabel("Exercise \(index + 1)")
+        } else {
+            EmptyView()
+        }
+    }
+
+    private func shiftHyroxExercise(by delta: Int) {
+        let nextIndex = currentHyroxExerciseIndex + delta
+        guard hyroxDisplayGroups.indices.contains(nextIndex) else { return }
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+            currentHyroxExerciseIndex = nextIndex
+            activeHyroxExerciseId = hyroxDisplayGroups[nextIndex].exercises.first?.id
+        }
+    }
+
+    private func advanceHyroxFromNextCTA() {
+        guard let currentHyroxDisplayGroup else { return }
+        guard hyroxDisplayGroups.indices.contains(currentHyroxExerciseIndex + 1) else { return }
+
+        markHyroxGroupCompleted(currentHyroxDisplayGroup)
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+            currentHyroxExerciseIndex += 1
+            activeHyroxExerciseId = hyroxDisplayGroups[currentHyroxExerciseIndex].exercises.first?.id
+        }
+    }
+
+    private func markHyroxGroupCompleted(_ group: ActiveHyroxDisplayGroup) {
+        for ex in group.exercises {
+            completedHyroxExerciseIds.insert(ex.id)
+        }
+    }
+
+    private func updateHyroxZoneScrollFade() {
+        let canScrollDown = hyroxZoneScrollContentBottom > hyroxZoneScrollViewportHeight + 2
+        if hyroxZoneScrollCanScrollDown != canScrollDown {
+            hyroxZoneScrollCanScrollDown = canScrollDown
+        }
+    }
+
+    private func normalizeActiveHyroxExerciseOrdering() {
+        let ordered = orderedHyroxExercises
+        for (idx, ex) in ordered.enumerated() {
+            guard let originalIndex = hyroxExercises.firstIndex(where: { $0.id == ex.id }) else { continue }
+            hyroxExercises[originalIndex].exercise_order = idx + 1
+            hyroxExercises[originalIndex].zone_order = hyroxExercises[originalIndex].zone_order.map { max(1, $0) }
+        }
+        currentHyroxExerciseIndex = min(max(0, currentHyroxExerciseIndex), max(0, hyroxDisplayGroups.count - 1))
+        if let activeHyroxExerciseId,
+           let groupIndex = hyroxDisplayGroups.firstIndex(where: { group in
+               group.exercises.contains { $0.id == activeHyroxExerciseId }
+           }) {
+            currentHyroxExerciseIndex = groupIndex
+        } else {
+            activeHyroxExerciseId = currentHyroxDisplayGroup?.exercises.first?.id
+        }
+        completedHyroxExerciseIds = completedHyroxExerciseIds.filter { id in
+            hyroxExercises.contains { $0.id == id }
+        }
     }
     
     @ViewBuilder
@@ -548,6 +1187,302 @@ struct ActiveSportWorkoutView: View {
         }
         .frame(maxWidth: .infinity)
     }
+
+    private var editHyroxExerciseSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Picker("Exercise", selection: $editHyroxExerciseCode) {
+                        ForEach(HyroxExerciseCode.allCases) { ex in
+                            Text(ex.label).tag(ex.rawValue)
+                        }
+                        Text("Other").tag(HyroxExerciseFormatting.customExerciseCode)
+                    }
+                    .pickerStyle(.menu)
+
+                    if HyroxExerciseCode(rawValue: editHyroxExerciseCode) == nil
+                        || editHyroxExerciseCode == HyroxExerciseFormatting.customExerciseCode {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Exercise name")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            TextField("Exercise name", text: $editHyroxCustomDisplayName)
+                                .textFieldStyle(.roundedBorder)
+                                .focused($editHyroxNameFocused)
+                            if editHyroxNameFocused {
+                                editHyroxExerciseNameSuggestionsList
+                            }
+                        }
+                    }
+
+                    HStack {
+                        sportCardField("Distance (m)", text: $editHyroxDistanceM, keyboard: .numberPad)
+                        sportCardField("Reps", text: $editHyroxReps, keyboard: .numberPad)
+                    }
+
+                    HStack {
+                        sportCardField("Weight (kg)", text: $editHyroxWeightKg, keyboard: .decimalPad)
+                        sportCardField("Duration (sec)", text: $editHyroxDurationSec, keyboard: .numberPad)
+                    }
+
+                    HStack {
+                        sportCardField("Height (cm)", text: $editHyroxHeightCm, keyboard: .numberPad)
+                        sportCardField("Implements", text: $editHyroxImplementCount, keyboard: .numberPad)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Notes")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField("Notes", text: $editHyroxNotes, axis: .vertical)
+                            .lineLimit(2...6)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle(isAddingHyroxExercise ? "Add exercise" : "Edit exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        isAddingHyroxExercise = false
+                        showEditHyroxExerciseSheet = false
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isAddingHyroxExercise ? "Add" : "Save") {
+                        applyHyroxExerciseEdits()
+                        isAddingHyroxExercise = false
+                        showEditHyroxExerciseSheet = false
+                    }
+                }
+            }
+            .background(Color.clear.gradientBG().ignoresSafeArea())
+            .task {
+                await loadEditHyroxCustomDisplayNameSuggestionsFromServer()
+            }
+        }
+        .presentationDetents(isAddingHyroxExercise ? [.large] : [.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private var editHyroxExerciseNameSuggestionsList: some View {
+        let rows = filteredEditHyroxExerciseNameSuggestions()
+        if !rows.isEmpty {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows, id: \.self) { name in
+                        Button {
+                            editHyroxCustomDisplayName = name
+                            editHyroxNameFocused = false
+                        } label: {
+                            Text(name)
+                                .font(.subheadline)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 8)
+                                .padding(.horizontal, 10)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                }
+            }
+            .frame(maxHeight: 160)
+            .fixedSize(horizontal: false, vertical: true)
+            .scrollClipDisabled()
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(.secondary.opacity(0.22), lineWidth: 0.8)
+            )
+        }
+    }
+
+    private func loadEditHyroxCustomDisplayNameSuggestionsFromServer() async {
+        await MainActor.run {
+            guard !didLoadEditHyroxCustomDisplayNameSuggestions else { return }
+            didLoadEditHyroxCustomDisplayNameSuggestions = true
+        }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("hyrox_session_exercises")
+                .select("exercise_display_name")
+                .eq("exercise_code", value: HyroxExerciseFormatting.customExerciseCode)
+                .limit(800)
+                .execute()
+            struct Row: Decodable { let exercise_display_name: String? }
+            let rows = try JSONDecoder().decode([Row].self, from: res.data)
+            let raw = rows
+                .compactMap { $0.exercise_display_name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let deduped = canonicalSortedEditHyroxDisplayNames(from: raw)
+            await MainActor.run { editHyroxCustomDisplayNameSuggestionsFromDB = deduped }
+        } catch {
+            await MainActor.run { didLoadEditHyroxCustomDisplayNameSuggestions = false }
+        }
+    }
+
+    private func filteredEditHyroxExerciseNameSuggestions() -> [String] {
+        var raw = editHyroxCustomDisplayNameSuggestionsFromDB
+        for ex in hyroxExercises {
+            let t = (ex.exercise_display_name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty, HyroxExerciseCode(rawValue: ex.exercise_code) == nil else { continue }
+            raw.append(t)
+        }
+        let deduped = canonicalSortedEditHyroxDisplayNames(from: raw)
+        let q = editHyroxCustomDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if q.isEmpty {
+            return Array(deduped.prefix(8))
+        }
+        let qn = normalizedEditHyroxDisplayNameKey(q)
+        let filtered = deduped.filter {
+            normalizedEditHyroxDisplayNameKey($0).contains(qn) || $0.localizedStandardContains(q)
+        }
+        return Array(filtered.prefix(8))
+    }
+
+    private func normalizedEditHyroxDisplayNameKey(_ s: String) -> String {
+        s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
+    }
+
+    private func canonicalSortedEditHyroxDisplayNames(from raw: [String]) -> [String] {
+        var bestByNorm: [String: String] = [:]
+        for r in raw {
+            let t = r.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !t.isEmpty else { continue }
+            let k = normalizedEditHyroxDisplayNameKey(t)
+            if let existing = bestByNorm[k] {
+                if t.count > existing.count { bestByNorm[k] = t }
+            } else {
+                bestByNorm[k] = t
+            }
+        }
+        return bestByNorm.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func beginEditingHyroxExercise(_ ex: ActiveHyroxExercise) {
+        let fields = HyroxExerciseFormatting.formFields(
+            exerciseCode: ex.exercise_code,
+            exerciseDisplayName: ex.exercise_display_name
+        )
+        isAddingHyroxExercise = false
+        editHyroxExerciseId = ex.id
+        editHyroxExerciseCode = fields.code
+        editHyroxCustomDisplayName = fields.customDisplayName
+        editHyroxDistanceM = ex.distance_m.map(String.init) ?? ""
+        editHyroxReps = ex.reps.map(String.init) ?? ""
+        editHyroxWeightKg = hyroxDecimalText(ex.weight_kg)
+        editHyroxDurationSec = ex.duration_sec.map(String.init) ?? ""
+        editHyroxHeightCm = ex.height_cm.map(String.init) ?? ""
+        editHyroxImplementCount = ex.implement_count.map(String.init) ?? ""
+        editHyroxNotes = ex.notes ?? ""
+        showEditHyroxExerciseSheet = true
+    }
+
+    private func beginAddingHyroxExercise() {
+        isAddingHyroxExercise = true
+        editHyroxExerciseId = nil
+        editHyroxExerciseCode = HyroxExerciseCode.run.rawValue
+        editHyroxCustomDisplayName = ""
+        editHyroxDistanceM = ""
+        editHyroxReps = ""
+        editHyroxWeightKg = ""
+        editHyroxDurationSec = ""
+        editHyroxHeightCm = ""
+        editHyroxImplementCount = ""
+        editHyroxNotes = ""
+        showEditHyroxExerciseSheet = true
+    }
+
+    private func applyHyroxExerciseEdits() {
+        let persisted = HyroxExerciseFormatting.persistedPayload(
+            exerciseCode: editHyroxExerciseCode,
+            customDisplayName: editHyroxCustomDisplayName,
+            notes: editHyroxNotes
+        )
+        if isAddingHyroxExercise {
+            let newId = nextTempHyroxExerciseId
+            nextTempHyroxExerciseId -= 1
+            let insertionOrder = hyroxDisplayGroups.indices.contains(currentHyroxExerciseIndex)
+                ? (hyroxDisplayGroups[currentHyroxExerciseIndex].exercises.map(\.exercise_order).max() ?? hyroxExercises.count) + 1
+                : hyroxExercises.count + 1
+            for idx in hyroxExercises.indices where hyroxExercises[idx].exercise_order >= insertionOrder {
+                hyroxExercises[idx].exercise_order += 1
+            }
+            hyroxExercises.append(
+                ActiveHyroxExercise(
+                    id: newId,
+                    exercise_code: persisted.code,
+                    exercise_order: insertionOrder,
+                    zone_order: nil,
+                    distance_m: parseIntField(editHyroxDistanceM),
+                    reps: parseIntField(editHyroxReps),
+                    weight_kg: parseDecimalField(editHyroxWeightKg),
+                    duration_sec: parseIntField(editHyroxDurationSec),
+                    height_cm: parseIntField(editHyroxHeightCm),
+                    implement_count: parseIntField(editHyroxImplementCount),
+                    notes: editHyroxNotes.trimmedOrNil,
+                    exercise_display_name: persisted.displayName
+                )
+            )
+            normalizeActiveHyroxExerciseOrdering()
+            if let newIndex = hyroxDisplayGroups.firstIndex(where: { group in
+                group.exercises.contains { $0.id == newId }
+            }) {
+                currentHyroxExerciseIndex = newIndex
+                activeHyroxExerciseId = newId
+            }
+            return
+        }
+
+        guard let editHyroxExerciseId,
+              let index = hyroxExercises.firstIndex(where: { $0.id == editHyroxExerciseId })
+        else { return }
+
+        hyroxExercises[index].exercise_code = persisted.code
+        hyroxExercises[index].exercise_display_name = persisted.displayName
+        hyroxExercises[index].distance_m = parseIntField(editHyroxDistanceM)
+        hyroxExercises[index].reps = parseIntField(editHyroxReps)
+        hyroxExercises[index].weight_kg = parseDecimalField(editHyroxWeightKg)
+        hyroxExercises[index].duration_sec = parseIntField(editHyroxDurationSec)
+        hyroxExercises[index].height_cm = parseIntField(editHyroxHeightCm)
+        hyroxExercises[index].implement_count = parseIntField(editHyroxImplementCount)
+        hyroxExercises[index].notes = editHyroxNotes.trimmedOrNil
+    }
+
+    private func deleteSelectedHyroxExercise() {
+        let targetId = deleteHyroxExerciseId ?? currentHyroxExercise?.id
+        guard let targetId else { return }
+        let oldIndex = currentHyroxExerciseIndex
+        hyroxExercises.removeAll { $0.id == targetId }
+        completedHyroxExerciseIds.remove(targetId)
+        deleteHyroxExerciseId = nil
+        normalizeActiveHyroxExerciseOrdering()
+        currentHyroxExerciseIndex = min(oldIndex, max(0, hyroxDisplayGroups.count - 1))
+        let activeExerciseStillInCurrentGroup = activeHyroxExerciseId.map { id in
+            currentHyroxDisplayGroup?.exercises.contains { $0.id == id } == true
+        } == true
+        if activeHyroxExerciseId == targetId || !activeExerciseStillInCurrentGroup {
+            activeHyroxExerciseId = currentHyroxDisplayGroup?.exercises.first?.id
+        }
+    }
+
+    private func hyroxDecimalText(_ value: Decimal?) -> String {
+        guard let value else { return "" }
+        let doubleValue = NSDecimalNumber(decimal: value).doubleValue
+        if doubleValue == floor(doubleValue) { return String(Int(doubleValue)) }
+        return String(format: "%.1f", doubleValue)
+    }
+
+    private func parseDecimalField(_ text: String) -> Decimal? {
+        let trimmed = text.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX"))
+    }
     
     private func loadSport() async {
         do {
@@ -560,12 +1495,14 @@ struct ActiveSportWorkoutView: View {
             
             let row = try JSONDecoder.supabase().decode(SportRow.self, from: res.data)
             
+            let loadedSportType = SportType(rawValue: row.sport) ?? .padel
+
             await MainActor.run {
                 self.sportRow = row
-                self.sportType = SportType(rawValue: row.sport) ?? .padel
+                self.sportType = loadedSportType
                 self.sportForm.sport = self.sportType
                 
-                if let secs = row.duration_sec, secs > 0 {
+                if loadedSportType != .hyrox, let secs = row.duration_sec, secs > 0 {
                     self.hasTargetTime = true
                     self.initialTargetSec = secs
                     self.remainingSec = self.initialTargetSec
@@ -1029,7 +1966,7 @@ struct ActiveSportWorkoutView: View {
                 }
                 let exRes = try await client
                     .from("hyrox_session_exercises")
-                    .select("id, exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, notes")
+                    .select("id, exercise_code, exercise_order, zone_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, notes, exercise_display_name")
                     .eq("session_id", value: sessionId)
                     .order("exercise_order", ascending: true)
                     .execute()
@@ -1039,6 +1976,9 @@ struct ActiveSportWorkoutView: View {
                 await MainActor.run {
                     self.hyroxExercises = exRows
                     self.currentHyroxExerciseIndex = 0
+                    self.activeHyroxExerciseId = exRows.first?.id
+                    self.completedHyroxExerciseIds = []
+                    self.nextTempHyroxExerciseId = -1
                 }
             } catch {
                 print("Error loading hyrox stats: \(error)")
@@ -1384,6 +2324,7 @@ struct ActiveSportWorkoutView: View {
                 let session_id: Int
                 let exercise_code: String
                 let exercise_order: Int
+                let zone_order: Int?
                 let distance_m: Int?
                 let reps: Int?
                 let weight_kg: Decimal?
@@ -1399,6 +2340,7 @@ struct ActiveSportWorkoutView: View {
                     session_id: sessionId,
                     exercise_code: ex.exercise_code,
                     exercise_order: ex.exercise_order,
+                    zone_order: ex.zone_order.map { max(1, $0) },
                     distance_m: ex.distance_m,
                     reps: ex.reps,
                     weight_kg: ex.weight_kg,

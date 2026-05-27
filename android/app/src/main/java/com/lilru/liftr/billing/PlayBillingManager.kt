@@ -14,12 +14,19 @@ import com.android.billingclient.api.PurchasesUpdatedListener
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
 import com.lilru.liftr.R
-import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.data.LiftrSupabase
+import com.lilru.liftr.data.PremiumStatusStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
- * Paridad aprox. con StoreKit: suscripción [R.string.billing_premium_sku] y [LiftrPreferences].
+ * Paridad aprox. con StoreKit: suscripción [R.string.billing_premium_sku]; entitlement vía servidor.
  */
 class PlayBillingManager(private val app: Application) : PurchasesUpdatedListener {
+    private val billingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     var client: BillingClient? = null
         private set
     @Volatile
@@ -80,11 +87,6 @@ class PlayBillingManager(private val app: Application) : PurchasesUpdatedListene
             if (result.responseCode != BillingClient.BillingResponseCode.OK) {
                 return@queryPurchasesAsync
             }
-            val pid = app.getString(R.string.billing_premium_sku)
-            val has = purchases?.any { p ->
-                p.purchaseState == Purchase.PurchaseState.PURCHASED &&
-                    p.products?.contains(pid) == true
-            } == true
             if (purchases != null) {
                 for (p in purchases) {
                     if (!p.isAcknowledged && p.purchaseState == Purchase.PurchaseState.PURCHASED) {
@@ -95,7 +97,14 @@ class PlayBillingManager(private val app: Application) : PurchasesUpdatedListene
                     }
                 }
             }
-            LiftrPreferences.setPremium(app, has)
+            refreshServerPremium()
+        }
+    }
+
+    private fun refreshServerPremium() {
+        val supabase = LiftrSupabase.client ?: return
+        billingScope.launch {
+            PremiumStatusStore.refresh(supabase)
         }
     }
 

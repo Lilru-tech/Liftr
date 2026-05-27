@@ -24,7 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CheckCircle
@@ -98,9 +98,11 @@ import com.lilru.liftr.ui.home.WorkoutDetailFromNotificationOverlay
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.ranking.ChallengeWeeklyDetailScreen
-import com.lilru.liftr.ui.ranking.RankingTabScreen
+import com.lilru.liftr.ui.nutrition.NutritionTabScreen
+import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.search.SearchTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
+import com.lilru.liftr.ui.territory.TerritoryMapScreen
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 
@@ -111,7 +113,7 @@ private enum class MainTab(
     Home(R.string.tab_home, R.string.tab_home_short),
     Search(R.string.tab_search, R.string.tab_search_short),
     Add(R.string.tab_add, R.string.tab_add_short),
-    Ranking(R.string.tab_ranking, R.string.tab_ranking_short),
+    Nutrition(R.string.tab_nutrition, R.string.tab_nutrition_short),
     Profile(R.string.tab_profile, R.string.tab_profile_short)
 }
 
@@ -124,7 +126,8 @@ private enum class MainTab(
 private fun selectTabForRootOverlay(overlay: MainOverlay): MainTab? = when (overlay) {
     is MainOverlay.FollowerProfile -> MainTab.Search
     is MainOverlay.SegmentDetail -> MainTab.Search
-    is MainOverlay.ChallengeWeeklyDetail -> MainTab.Ranking
+    is MainOverlay.TerritoryMap -> MainTab.Search
+    is MainOverlay.ChallengeWeeklyDetail -> MainTab.Home
     else -> null
 }
 
@@ -141,7 +144,7 @@ private fun MainTabIcon(
         MainTab.Home -> Icon(Icons.Filled.Home, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
         MainTab.Search -> Icon(Icons.Filled.Search, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
         MainTab.Add -> Icon(Icons.Filled.Add, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
-        MainTab.Ranking -> Icon(Icons.Filled.EmojiEvents, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
+        MainTab.Nutrition -> Icon(Icons.Filled.Restaurant, contentDescription = contentDescription, modifier = iconMod, tint = vectorTint)
         MainTab.Profile -> {
             val u = myAvatarUrl?.trim()?.takeIf { it.isNotEmpty() }
             if (u == null) {
@@ -428,13 +431,9 @@ fun MainShellScreen(
                     )
                 }
 
-                MainTab.Ranking -> {
-                    RankingTabScreen(
+                MainTab.Nutrition -> {
+                    NutritionTabScreen(
                         supabase = supabase,
-                        onOpenAddWithPendingDuplicate = {
-                            duplicateApplyNonce++
-                            selected = MainTab.Add
-                        },
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(paddingValues)
@@ -560,6 +559,21 @@ fun MainShellScreen(
                     onBack = { clearOverlay() },
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+            is MainOverlay.TerritoryMap -> {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    LiftrBackTopBar(
+                        title = stringResource(R.string.search_scope_map),
+                        onBack = { clearOverlay() }
+                    )
+                    TerritoryMapScreen(
+                        supabase = supabase,
+                        onOpenProfile = { userId ->
+                            overlay = MainOverlay.FollowerProfile(userId.toString())
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
             }
             is MainOverlay.ChallengeWeeklyDetail -> {
                 ChallengeWeeklyDetailScreen(

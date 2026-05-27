@@ -1,8 +1,14 @@
 import SwiftUI
 import Supabase
+import UIKit
+
+private struct CommentProfileRoute: Identifiable, Hashable {
+    let id: UUID
+}
 
 struct CommentsSheet: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.dismiss) private var dismiss
     let workoutId: Int
     let ownerId: UUID
     var onDidChange: (() async -> Void)?
@@ -13,7 +19,22 @@ struct CommentsSheet: View {
     @State private var items: [CommentItem] = []
     @State private var profiles: [UUID: ProfileRow] = [:]
     @State private var newBody = ""
+    @State private var trackedMentions: [MentionUser] = []
+    @State private var followees: [FolloweesService.Profile] = []
     @State private var sending = false
+    @State private var profileRoute: CommentProfileRoute?
+    @FocusState private var inputFocused: Bool
+
+    private var usernameToUserId: [String: UUID] {
+        var map: [String: UUID] = [:]
+        for p in profiles.values {
+            map[p.username] = p.user_id
+        }
+        for f in followees {
+            map[f.username] = f.user_id
+        }
+        return map
+    }
     
     struct ProfileRow: Decodable { let user_id: UUID; let username: String; let avatar_url: String? }
     
@@ -60,8 +81,15 @@ struct CommentsSheet: View {
                             item: it,
                             ownerId: ownerId,
                             profile: profiles[it.userId],
+                            usernameToUserId: usernameToUserId,
+                            followees: followees,
+                            onOpenProfile: { profileRoute = CommentProfileRoute(id: $0) },
+                            onMentionTap: { profileRoute = CommentProfileRoute(id: $0) },
+                            onRequestFollowees: { Task { await loadFolloweesIfNeeded() } },
                             onToggleLike: { Task { await toggleLike(commentId: it.id) } },
-                            onReply: { text in Task { await sendComment(parentId: it.id, bodyOverride: text) } },
+                            onReply: { text, mentionIds in
+                                Task { await sendComment(parentId: it.id, bodyOverride: text, mentionedUserIds: mentionIds) }
+                            },
                             onDelete: { Task { await softDelete(commentId: it.id) } },
                             onExpand: { Task { await loadReplies(for: it.id) } }
                         )
@@ -79,8 +107,15 @@ struct CommentsSheet: View {
                                     ownerId: ownerId,
                                     profile: profiles[r.userId],
                                     isReply: true,
+                                    usernameToUserId: usernameToUserId,
+                                    followees: followees,
+                                    onOpenProfile: { profileRoute = CommentProfileRoute(id: $0) },
+                                    onMentionTap: { profileRoute = CommentProfileRoute(id: $0) },
+                                    onRequestFollowees: { Task { await loadFolloweesIfNeeded() } },
                                     onToggleLike: { Task { await toggleLike(commentId: r.id) } },
-                                    onReply: { text in Task { await sendComment(parentId: it.id, bodyOverride: text) } },
+                                    onReply: { text, mentionIds in
+                                        Task { await sendComment(parentId: it.id, bodyOverride: text, mentionedUserIds: mentionIds) }
+                                    },
                                     onDelete: { Task { await softDelete(commentId: r.id) } },
                                     onExpand: { }
                                 )
@@ -97,34 +132,81 @@ struct CommentsSheet: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
 
-                HStack(alignment: .top, spacing: 10) {
-                    AvatarView(urlString: profiles[app.userId ?? UUID()]?.avatar_url)
-                        .frame(width: 32, height: 32)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-
-                    TextField("Add a comment…", text: $newBody, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...4)
-
-                    Button {
-                        Task { await sendComment(parentId: nil) }
-                    } label: {
-                        if sending {
-                            ProgressView()
-                        } else {
-                            Text("Send")
-                                .font(.callout.weight(.semibold))
-                        }
-                    }
-                    .disabled(sending || newBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
             }
             .padding(.top, 8)
-            .task { await refreshAll() }
+            .safeAreaInset(edge: .bottom) {
+                composer
+            }
+            .navigationDestination(item: $profileRoute) { route in
+                ProfileView(userId: route.id).gradientBG()
+            }
+            .task {
+                await refreshAll()
+                await loadFolloweesIfNeeded()
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 36, height: 36)
+                            .background(.ultraThinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
+                }
+            }
         }
         .gradientBG()
+    }
+
+    private var canSendComment: Bool {
+        !sending && !newBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var currentAvatarURL: String? {
+        guard let userId = app.userId else { return nil }
+        return profiles[userId]?.avatar_url
+    }
+
+    private var composer: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            AvatarView(urlString: currentAvatarURL)
+                .frame(width: 36, height: 36)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            MentionComposerField(
+                text: $newBody,
+                trackedMentions: $trackedMentions,
+                followees: followees,
+                placeholder: "Add a comment...",
+                onRequestFollowees: { Task { await loadFolloweesIfNeeded() } }
+            )
+
+            Button {
+                Task { await sendComment(parentId: nil) }
+            } label: {
+                Group {
+                    if sending {
+                        ProgressView()
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                    }
+                }
+                .font(.body.weight(.semibold))
+                .frame(width: 36, height: 36)
+                .background(Color.accentColor.opacity(canSendComment ? 1 : 0.3), in: Circle())
+                .foregroundStyle(.white)
+            }
+            .disabled(!canSendComment)
+            .accessibilityLabel("Send")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
     }
     
     private func refreshAll() async {
@@ -132,6 +214,14 @@ struct CommentsSheet: View {
         await loadPage(reset: true)
     }
     
+    private func loadFolloweesIfNeeded() async {
+        guard let me = app.userId, followees.isEmpty else { return }
+        do {
+            let rows = try await FolloweesService.loadFollowees(for: me)
+            await MainActor.run { followees = rows }
+        } catch { }
+    }
+
     private func loadMyProfileIfNeeded() async {
         guard let me = app.userId, profiles[me] == nil else { return }
         do {
@@ -288,26 +378,54 @@ struct CommentsSheet: View {
         return c.deleted_at == nil ? c.body : nil
     }
     
-    private func sendComment(parentId: Int?, bodyOverride: String? = nil) async {
+    private func sendComment(parentId: Int?, bodyOverride: String? = nil, mentionedUserIds: [UUID]? = nil) async {
         guard let me = app.userId else { return }
-        let text = (bodyOverride ?? newBody).trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw = bodyOverride ?? newBody
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         print("💬 sendComment parentId:\(parentId?.description ?? "nil") text:'\(text)'")
         guard !text.isEmpty else { return }
+
+        let mentionIds: [UUID]
+        if let mentionedUserIds {
+            mentionIds = mentionedUserIds
+        } else {
+            mentionIds = MentionTextSupport.resolvedMentionIds(body: text, tracked: trackedMentions)
+        }
         
         await MainActor.run { sending = true }
-        defer { Task { await MainActor.run { sending = false } } }
-        
-        struct Insert: Encodable { let workout_id: Int; let parent_id: Int?; let user_id: UUID; let body: String }
+
+        struct Insert: Encodable {
+            let workout_id: Int
+            let parent_id: Int?
+            let user_id: UUID
+            let body: String
+            let mentioned_user_ids: [UUID]
+        }
         do {
             _ = try await SupabaseManager.shared.client
                 .from("workout_comments")
-                .insert(Insert(workout_id: workoutId, parent_id: parentId, user_id: me, body: text))
+                .insert(Insert(
+                    workout_id: workoutId,
+                    parent_id: parentId,
+                    user_id: me,
+                    body: text,
+                    mentioned_user_ids: mentionIds
+                ))
                 .execute()
-            
-            if parentId == nil {
-                await MainActor.run { newBody = "" }
+
+            await MainActor.run {
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil,
+                    from: nil,
+                    for: nil
+                )
+                if parentId == nil {
+                    newBody = ""
+                    trackedMentions = []
+                }
             }
-            
+
             if let pid = parentId {
                 if let idx = items.firstIndex(where: { $0.id == pid }) {
                     if !items[idx].isExpanded {
@@ -317,12 +435,13 @@ struct CommentsSheet: View {
                 await loadReplies(for: pid, forceReload: true)
             } else {
                 await refreshAll()
-                print("💬 root comment inserted → refreshAll()")
             }
-            
+
             await onDidChange?()
+            await MainActor.run { sending = false }
         } catch {
             print("❌ sendComment error:", error)
+            await MainActor.run { sending = false }
         }
     }
     
@@ -482,13 +601,19 @@ private struct CommentRowView: View {
     let ownerId: UUID
     let profile: CommentsSheet.ProfileRow?
     var isReply: Bool = false
+    let usernameToUserId: [String: UUID]
+    let followees: [FolloweesService.Profile]
+    var onOpenProfile: (UUID) -> Void = { _ in }
+    var onMentionTap: (UUID) -> Void = { _ in }
+    var onRequestFollowees: () -> Void = {}
     
     var onToggleLike: () async -> Void
-    var onReply: (_ text: String) async -> Void
+    var onReply: (_ text: String, _ mentionedUserIds: [UUID]) async -> Void
     var onDelete: () async -> Void
     var onExpand: () async -> Void
     
     @State private var replyText = ""
+    @State private var replyTrackedMentions: [MentionUser] = []
     @State private var showReply = false
     
     var canDelete: Bool {
@@ -498,16 +623,14 @@ private struct CommentRowView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                NavigationLink {
-                    ProfileView(userId: profile?.user_id ?? item.userId)
-                        .gradientBG()
+            HStack(alignment: .top, spacing: 10) {
+                Button {
+                    onOpenProfile(profile?.user_id ?? item.userId)
                 } label: {
                     HStack(spacing: 10) {
                         AvatarView(urlString: profile?.avatar_url)
                             .frame(width: 32, height: 32)
                             .clipShape(RoundedRectangle(cornerRadius: 8))
-                        
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) {
                                 Text(profile.map { "@\($0.username)" } ?? "@user")
@@ -516,16 +639,9 @@ private struct CommentRowView: View {
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
-                            
-                            if let body = item.body {
-                                Text(body).font(.subheadline)
-                            } else {
-                                Text("Comment deleted")
-                                    .font(.subheadline.italic())
-                                    .foregroundStyle(.secondary)
-                            }
                         }
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -548,6 +664,20 @@ private struct CommentRowView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
+            }
+
+            if let body = item.body {
+                CommentMentionText(
+                    text: body,
+                    usernameToUserId: usernameToUserId,
+                    onMentionTap: onMentionTap
+                )
+                .padding(.leading, isReply ? 44 : 42)
+            } else if item.deletedAt != nil {
+                Text("Comment deleted")
+                    .font(.subheadline.italic())
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, isReply ? 44 : 42)
             }
             
             HStack(spacing: 10) {
@@ -586,17 +716,23 @@ private struct CommentRowView: View {
             .font(.caption)
             
             if showReply {
-                HStack(spacing: 8) {
-                    TextField("Write a reply…", text: $replyText, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(1...4)
+                VStack(alignment: .leading, spacing: 8) {
+                    MentionComposerField(
+                        text: $replyText,
+                        trackedMentions: $replyTrackedMentions,
+                        followees: followees,
+                        placeholder: "Write a reply…",
+                        onRequestFollowees: onRequestFollowees
+                    )
                     Button("Send") {
                         let t = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !t.isEmpty else { return }
+                        let mentionIds = MentionTextSupport.resolvedMentionIds(body: t, tracked: replyTrackedMentions)
                         print("💬 quick reply send for parent \(item.id) text:'\(t)'")
                         Task {
-                            await onReply(t)
+                            await onReply(t, mentionIds)
                             replyText = ""
+                            replyTrackedMentions = []
                             showReply = false
                         }
                     }

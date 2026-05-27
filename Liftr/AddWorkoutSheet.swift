@@ -217,9 +217,6 @@ struct AddWorkoutSheet: View {
     @State private var hyroxStatsExpanded = false
     @State private var showWorkoutRecommend = false
     @State private var recommendKind: WorkoutKind = .strength
-    @State private var hyroxCustomDisplayNameSuggestionsFromDB: [String] = []
-    @State private var didLoadHyroxCustomDisplayNameSuggestions = false
-    @FocusState private var hyroxExerciseNameFocusedId: UUID?
     @State private var saveNewStrengthRoutine = false
     @State private var newStrengthRoutineName = ""
     @State private var newStrengthRoutineFolderId: Int64? = nil
@@ -242,6 +239,7 @@ struct AddWorkoutSheet: View {
     @State private var loadingHyroxRoutineOnly = false
     @State private var strengthRoutineOverwritePrompt: StrengthRoutineOverwritePrompt?
     @State private var pendingStrengthRoutineOverwriteExercises: [EditableExercise] = []
+    @AppStorage("addWorkoutPlanTooltipSeen") private var addWorkoutPlanTooltipSeen = false
 
     var body: some View { addWorkoutRoot }
 
@@ -265,6 +263,14 @@ struct AddWorkoutSheet: View {
                     Picker("", selection: $publishMode) {
                         ForEach(PublishMode.allCases) { Text($0.label).tag($0) }
                     }.pickerStyle(.segmented)
+                    .onChange(of: publishMode) { _, newValue in
+                        if newValue == .plan, !addWorkoutPlanTooltipSeen {
+                            addWorkoutPlanTooltipSeen = true
+                        }
+                    }
+                }
+                if !addWorkoutPlanTooltipSeen {
+                    planModeFirstHintBubble
                 }
                 Divider()
                 FieldRowPlain("Title") { TextField("Title (optional)", text: $title).textFieldStyle(.plain) }
@@ -334,6 +340,50 @@ struct AddWorkoutSheet: View {
             }
         }
         .listRowBackground(Color.clear)
+    }
+
+    @ViewBuilder
+    private var planModeFirstHintBubble: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Tip: choose Plan to save this workout for later.")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+                Text("When you open the planned workout, you can start it as an Active Workout.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+                Button {
+                    addWorkoutPlanTooltipSeen = true
+                } label: {
+                    Text("Got it")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .padding(.top, 2)
+            }
+            Spacer(minLength: 0)
+            Button {
+                addWorkoutPlanTooltipSeen = true
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.body)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss Plan tip")
+        }
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.white.opacity(0.18), lineWidth: 0.8)
+        )
+        .padding(.vertical, 6)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 
     private var addWorkoutRoot: some View {
@@ -700,8 +750,10 @@ struct AddWorkoutSheet: View {
                        req.lane >= 0, req.lane < strengthLaneItems.count,
                        strengthLaneItems[req.lane].indices.contains(req.index) {
                         strengthLaneItems[req.lane].remove(at: req.index)
+                        strengthLaneItems[req.lane] = compactSupersetMetadata(strengthLaneItems[req.lane])
                     } else if items.indices.contains(req.index) {
                         items.remove(at: req.index)
+                        items = compactSupersetMetadata(items)
                     }
                 }
                 confirmRemoveStrengthExercise = nil
@@ -1346,367 +1398,6 @@ struct AddWorkoutSheet: View {
         return !t.isEmpty
     }
 
-    private func hyroxExercisePickerBinding(index: Int) -> Binding<String> {
-        Binding(
-            get: { HyroxExerciseFormatting.pickerTag(for: sport.hyExercises[index].exerciseCode) },
-            set: { newTag in
-                let prev = sport.hyExercises[index].exerciseCode
-                if newTag != HyroxExerciseFormatting.customExerciseCode {
-                    sport.hyExercises[index].exerciseCode = newTag
-                    sport.hyExercises[index].customDisplayName = ""
-                    return
-                }
-                if HyroxExerciseCode(rawValue: prev) != nil {
-                    sport.hyExercises[index].exerciseCode = HyroxExerciseFormatting.customExerciseCode
-                    sport.hyExercises[index].customDisplayName = ""
-                } else if prev != HyroxExerciseFormatting.customExerciseCode {
-                    sport.hyExercises[index].exerciseCode = HyroxExerciseFormatting.customExerciseCode
-                    let existing = sport.hyExercises[index].customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if existing.isEmpty {
-                        sport.hyExercises[index].customDisplayName = HyroxExerciseFormatting.label(code: prev, displayName: nil)
-                    }
-                }
-            }
-        )
-    }
-
-    private func loadHyroxCustomDisplayNameSuggestionsFromServer() async {
-        await MainActor.run {
-            guard !didLoadHyroxCustomDisplayNameSuggestions else { return }
-            didLoadHyroxCustomDisplayNameSuggestions = true
-        }
-        do {
-            let res = try await SupabaseManager.shared.client
-                .from("hyrox_session_exercises")
-                .select("exercise_display_name")
-                .eq("exercise_code", value: HyroxExerciseFormatting.customExerciseCode)
-                .limit(800)
-                .execute()
-            struct Row: Decodable { let exercise_display_name: String? }
-            let rows = try JSONDecoder().decode([Row].self, from: res.data)
-            let raw = rows
-                .compactMap { $0.exercise_display_name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-            let deduped = Self.canonicalSortedHyroxDisplayNames(from: raw)
-            await MainActor.run { hyroxCustomDisplayNameSuggestionsFromDB = deduped }
-        } catch {
-            await MainActor.run { didLoadHyroxCustomDisplayNameSuggestions = false }
-        }
-    }
-
-    private static func normalizedHyroxDisplayNameKey(_ s: String) -> String {
-        s.folding(options: .diacriticInsensitive, locale: .current).lowercased()
-    }
-
-    private static func canonicalSortedHyroxDisplayNames(from raw: [String]) -> [String] {
-        var bestByNorm: [String: String] = [:]
-        for r in raw {
-            let t = r.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty else { continue }
-            let k = normalizedHyroxDisplayNameKey(t)
-            if let existing = bestByNorm[k] {
-                if t.count > existing.count { bestByNorm[k] = t }
-            } else {
-                bestByNorm[k] = t
-            }
-        }
-        return bestByNorm.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-
-    private func hyroxFilteredExerciseNameSuggestions(exerciseIndex i: Int) -> [String] {
-        guard sport.hyExercises.indices.contains(i) else { return [] }
-        var raw: [String] = hyroxCustomDisplayNameSuggestionsFromDB
-        for (idx, ex) in sport.hyExercises.enumerated() where idx != i {
-            let t = ex.customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty, HyroxExerciseCode(rawValue: ex.exerciseCode) == nil else { continue }
-            raw.append(t)
-        }
-        let deduped = Self.canonicalSortedHyroxDisplayNames(from: raw)
-        let q = sport.hyExercises[i].customDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if q.isEmpty {
-            return Array(deduped.prefix(8))
-        }
-        let qn = Self.normalizedHyroxDisplayNameKey(q)
-        let filtered = deduped.filter {
-            Self.normalizedHyroxDisplayNameKey($0).contains(qn) || $0.localizedStandardContains(q)
-        }
-        return Array(filtered.prefix(8))
-    }
-
-    @ViewBuilder
-    private func hyroxExerciseNameSuggestionsList(exerciseIndex i: Int) -> some View {
-        let rows = hyroxFilteredExerciseNameSuggestions(exerciseIndex: i)
-        if rows.isEmpty {
-            EmptyView()
-        } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows, id: \.self) { name in
-                        Button {
-                            sport.hyExercises[i].customDisplayName = name
-                            hyroxExerciseNameFocusedId = nil
-                        } label: {
-                            Text(name)
-                                .font(.subheadline)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        Divider()
-                    }
-                }
-            }
-            .frame(maxHeight: 160)
-            .fixedSize(horizontal: false, vertical: true)
-            .scrollClipDisabled()
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .strokeBorder(.secondary.opacity(0.22), lineWidth: 0.8)
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func hyroxExerciseNameFieldWithSuggestions(index i: Int) -> some View {
-        let exId = sport.hyExercises[i].id
-        VStack(alignment: .leading, spacing: 6) {
-            TextField("Exercise name", text: $sport.hyExercises[i].customDisplayName)
-                .textFieldStyle(.roundedBorder)
-                .focused($hyroxExerciseNameFocusedId, equals: exId)
-            if hyroxExerciseNameFocusedId == exId {
-                hyroxExerciseNameSuggestionsList(exerciseIndex: i)
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var hyroxOptionalStatsDisclosureBlock: some View {
-        Group {
-            Divider()
-            DisclosureGroup(isExpanded: $hyroxStatsExpanded) {
-                FieldRowPlain {
-                    HStack {
-                        TextField("Division (Open/Pro…)", text: $sport.hyDivision)
-                            .textFieldStyle(.plain)
-                        TextField("Category (Men/Women…)", text: $sport.hyCategory)
-                            .textFieldStyle(.plain)
-                    }
-                }
-                Divider()
-                FieldRowPlain {
-                    TextField("Age group (e.g. 30–34)", text: $sport.hyAgeGroup)
-                        .textFieldStyle(.plain)
-                }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("Official time (sec)", text: $sport.hyOfficialTimeSec).keyboardType(.numberPad)
-                        TextField("Penalty time (sec)", text: $sport.hyPenaltyTimeSec).keyboardType(.numberPad)
-                    }
-                }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("No reps", text: $sport.hyNoReps).keyboardType(.numberPad)
-                        TextField("Rank overall", text: $sport.hyRankOverall).keyboardType(.numberPad)
-                        TextField("Rank category", text: $sport.hyRankCategory).keyboardType(.numberPad)
-                    }
-                }
-                Divider()
-                FieldRowPlain {
-                    HStack {
-                        TextField("Avg HR", text: $sport.hyAvgHR).keyboardType(.numberPad)
-                        TextField("Max HR", text: $sport.hyMaxHR).keyboardType(.numberPad)
-                    }
-                }
-            } label: {
-                Text("Stats (optional)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            Divider()
-        }
-    }
-
-    private var hyroxExerciseProgramEditorStack: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Exercises")
-                .font(.subheadline.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            Text("Use the arrows on each exercise to change order.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, sport.hyExercises.count > 1 ? 2 : 4)
-
-            if sport.hyExercises.count > 1 {
-                HStack {
-                    Spacer(minLength: 0)
-                    Button("Clear all", role: .destructive) {
-                        showClearAllHyroxExercisesConfirm = true
-                    }
-                    .font(.caption.weight(.semibold))
-                    .buttonStyle(.borderless)
-                    .accessibilityLabel("Clear all Hyrox stations")
-                }
-                .padding(.bottom, 2)
-            }
-
-            if sport.hyExercises.isEmpty {
-                Text("No Hyrox exercises added")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-
-            ForEach(sport.hyExercises.indices, id: \.self) { i in
-                Divider()
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        Text("Exercise \(i + 1)")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-
-                    Picker("", selection: hyroxExercisePickerBinding(index: i)) {
-                        ForEach(HyroxExerciseCode.allCases) { ex in
-                            Text(ex.label).tag(ex.rawValue)
-                        }
-                        Text("Other").tag(HyroxExerciseFormatting.customExerciseCode)
-                    }
-                    .pickerStyle(.menu)
-
-                    if HyroxExerciseCode(rawValue: sport.hyExercises[i].exerciseCode) == nil {
-                        hyroxExerciseNameFieldWithSuggestions(index: i)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack(alignment: .top, spacing: 6) {
-                            StrengthStyleMetricField(title: "Distance (m)") {
-                                TextField("—", text: $sport.hyExercises[i].distanceM)
-                                    .keyboardType(.numberPad)
-                            }
-                            StrengthStyleMetricField(title: "Reps") {
-                                TextField("—", text: $sport.hyExercises[i].reps)
-                                    .keyboardType(.numberPad)
-                            }
-                            StrengthStyleMetricField(title: "kg") {
-                                TextField("—", text: $sport.hyExercises[i].weightKg)
-                                    .keyboardType(.decimalPad)
-                            }
-                        }
-                        HStack(alignment: .top, spacing: 6) {
-                            StrengthStyleMetricField(title: "Duration (s)") {
-                                TextField("—", text: $sport.hyExercises[i].durationSec)
-                                    .keyboardType(.numberPad)
-                            }
-                            StrengthStyleMetricField(title: "Height (cm)") {
-                                TextField("—", text: $sport.hyExercises[i].heightCm)
-                                    .keyboardType(.numberPad)
-                            }
-                            StrengthStyleMetricField(title: "Implements") {
-                                TextField("—", text: $sport.hyExercises[i].implementCount)
-                                    .keyboardType(.numberPad)
-                            }
-                        }
-                    }
-
-                    FieldRowNotes(
-                        "Notes",
-                        text: $sport.hyExercises[i].notes,
-                        placeholder: "Notes",
-                        lineRange: 2...8
-                    )
-                    .padding(.top, 2)
-
-                    HStack {
-                        Spacer(minLength: 0)
-
-                        if sport.hyExercises.count > 1 {
-                            HStack(spacing: 2) {
-                                Button {
-                                    moveHyroxExercise(from: i, direction: -1)
-                                } label: {
-                                    Image(systemName: "chevron.up")
-                                        .font(.subheadline.weight(.semibold))
-                                        .frame(width: 36, height: 32)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(i == 0)
-                                .opacity(i == 0 ? 0.35 : 1)
-
-                                Button {
-                                    moveHyroxExercise(from: i, direction: 1)
-                                } label: {
-                                    Image(systemName: "chevron.down")
-                                        .font(.subheadline.weight(.semibold))
-                                        .frame(width: 36, height: 32)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(i == sport.hyExercises.count - 1)
-                                .opacity(i == sport.hyExercises.count - 1 ? 0.35 : 1)
-                            }
-                            .foregroundStyle(.secondary)
-                            .accessibilityElement(children: .combine)
-                            .accessibilityLabel("Reorder exercise")
-                        }
-
-                        if sport.hyExercises.count > 1 {
-                            Button(role: .destructive) {
-                                sport.hyExercises.remove(at: i)
-                                for idx in sport.hyExercises.indices {
-                                    sport.hyExercises[idx].exerciseOrder = idx + 1
-                                }
-                            } label: {
-                                Image(systemName: "trash")
-                                    .font(.body)
-                                    .frame(width: 40, height: 36)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.borderless)
-                            .accessibilityLabel("Remove exercise")
-                        }
-                    }
-                }
-            }
-
-            Divider().padding(.vertical, 6)
-            Button {
-                sport.hyExercises.append(
-                    HyroxExerciseForm(
-                        exerciseCode: HyroxExerciseCode.run.rawValue,
-                        exerciseOrder: sport.hyExercises.count + 1
-                    )
-                )
-            } label: {
-                Label("Add exercise", systemImage: "plus")
-            }
-            .buttonStyle(.borderless)
-            .padding(.top, 2)
-        }
-        .task(id: "\(kind.rawValue)-\(sport.sport.rawValue)") {
-            guard kind == .sport, sport.sport == .hyrox else { return }
-            await loadHyroxCustomDisplayNameSuggestionsFromServer()
-            await loadHyroxFoldersForPicker()
-        }
-        .alert("Clear all Hyrox stations?", isPresented: $showClearAllHyroxExercisesConfirm) {
-            Button("Clear all", role: .destructive) {
-                sport.hyExercises = []
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This removes every station from your Hyrox program.")
-        }
-    }
-
     private var hyroxRoutineTemplateSectionCard: some View {
         SectionCard {
             Text("ROUTINE TEMPLATE")
@@ -1748,8 +1439,11 @@ struct AddWorkoutSheet: View {
 
     @ViewBuilder
     private var hyroxSportFieldsContent: some View {
-        hyroxOptionalStatsDisclosureBlock
-        hyroxExerciseProgramEditorStack
+        HyroxRoutineTemplateProgramEditor(
+            sport: $sport,
+            statsExpanded: $hyroxStatsExpanded,
+            showClearAllConfirm: $showClearAllHyroxExercisesConfirm
+        )
     }
     
     @ViewBuilder
@@ -2054,52 +1748,38 @@ struct AddWorkoutSheet: View {
             }
         }
     }
-    
-    private func moveHyroxExercise(from index: Int, direction: Int) {
-        var list = sport.hyExercises
-        let j = index + direction
-        guard list.indices.contains(index), list.indices.contains(j) else { return }
-        list.swapAt(index, j)
-        for idx in list.indices {
-            list[idx].exerciseOrder = idx + 1
-        }
-        sport.hyExercises = list
-    }
 
     private func patchHyroxExerciseDisplayNames(
         client: SupabaseClient,
         workoutId: Int,
         exercises: [HyroxExerciseForm]
     ) async throws {
-        let rows: [HyroxExerciseFormatting.HyroxExerciseRowInput] = exercises.enumerated().map { idx, ex in
-            HyroxExerciseFormatting.HyroxExerciseRowInput(
-                exerciseOrder: idx + 1,
+        let payload: [AnyJSON] = try exercises.enumerated().map { idx, ex in
+            let persisted = HyroxExerciseFormatting.persistedPayload(
                 exerciseCode: ex.exerciseCode,
                 customDisplayName: ex.customDisplayName,
                 notes: ex.notes
             )
+            var item: [String: AnyJSON] = [:]
+            item["exercise_order"] = try .init(idx + 1)
+            if let displayName = persisted.displayName {
+                item["exercise_display_name"] = try .init(displayName)
+            }
+            if let zoneOrder = ex.zoneOrder {
+                item["zone_order"] = try .init(max(1, zoneOrder))
+            }
+            return try AnyJSON(item)
         }
-        let updates = HyroxExerciseFormatting.hyroxDisplayNameColumnUpdates(rows: rows)
-        guard !updates.isEmpty else { return }
 
-        let sessionRes = try await client
-            .from("sport_sessions")
-            .select("id")
-            .eq("workout_id", value: workoutId)
-            .single()
+        _ = try await client
+            .rpc(
+                "patch_hyrox_session_exercise_metadata",
+                params: HyroxSessionExerciseMetadataPatchParams(
+                    p_workout_id: workoutId,
+                    p_exercises: try AnyJSON(payload)
+                )
+            )
             .execute()
-        struct SessionRow: Decodable { let id: Int }
-        let sessionId = try JSONDecoder().decode(SessionRow.self, from: sessionRes.data).id
-
-        struct Patch: Encodable { let exercise_display_name: String }
-        for u in updates {
-            _ = try await client
-                .from("hyrox_session_exercises")
-                .update(Patch(exercise_display_name: u.displayName))
-                .eq("session_id", value: sessionId)
-                .eq("exercise_order", value: u.exerciseOrder)
-                .execute()
-        }
     }
 
     private func recomputeDurationLabel() {
@@ -2450,18 +2130,23 @@ struct AddWorkoutSheet: View {
             case .strength:
                 if usePerPersonStrengthEditor {
                     var rows: [PlanStrengthSquadProgramRow] = []
+                    var supersetPrograms: [[EditableExercise]] = []
                     guard let me = app.userId else { throw NSError(domain: "AddWorkout", code: 1, userInfo: [NSLocalizedDescriptionKey: "Not signed in"]) }
+                    let hostProgram = normalizedSupersetPrograms(strengthLaneItems[0])
                     let hostItems = strengthLaneItems[0].compactMap { $0.toStrengthItem() }
                     guard !hostItems.isEmpty else { throw NSError(domain: "AddWorkout", code: 2, userInfo: [NSLocalizedDescriptionKey: "Host program is empty"]) }
                     rows.append(.init(owner_user_id: me, items: hostItems))
+                    supersetPrograms.append(hostProgram)
                     for (i, p) in participants.enumerated() {
                         let lane = i + 1
                         guard strengthLaneItems.indices.contains(lane) else { continue }
+                        let laneProgram = normalizedSupersetPrograms(strengthLaneItems[lane])
                         let theirs = strengthLaneItems[lane].compactMap { $0.toStrengthItem() }
                         guard !theirs.isEmpty else {
                             throw NSError(domain: "AddWorkout", code: 3, userInfo: [NSLocalizedDescriptionKey: "Each person needs at least one valid exercise."])
                         }
                         rows.append(.init(owner_user_id: p.user_id, items: theirs))
+                        supersetPrograms.append(laneProgram)
                     }
                     let squadParams = PlanStrengthSquadProgramsRPC(
                         p_programs: rows,
@@ -2475,8 +2160,14 @@ struct AddWorkoutSheet: View {
                     let res = try await client.rpc("plan_strength_squad_programs", params: squadParams).execute()
                     let created = try JSONDecoder().decode([Int64].self, from: res.data)
                     newWorkoutId = created.first
+                    try await patchSupersetsForCreatedWorkouts(
+                        client: client,
+                        workoutIds: created,
+                        programs: supersetPrograms
+                    )
                 } else {
-                    let strengthItems = items.compactMap { $0.toStrengthItem() }
+                    let supersetProgram = normalizedSupersetPrograms(items)
+                    let strengthItems = supersetProgram.compactMap { $0.toStrengthItem() }
                     let params = RPCStrengthParams(
                         p_user_id: userId,
                         p_items: strengthItems,
@@ -2490,6 +2181,13 @@ struct AddWorkoutSheet: View {
                     _ = try await client.rpc("create_strength_workout", params: params).execute()
                     if newWorkoutId == nil {
                         newWorkoutId = try await fetchLastWorkoutId(for: userId, kind: .strength)
+                    }
+                    if let wid = newWorkoutId {
+                        try await patchSupersetsForCreatedWorkouts(
+                            client: client,
+                            workoutIds: [wid],
+                            programs: [supersetProgram]
+                        )
                     }
                 }
                 
@@ -2516,7 +2214,9 @@ struct AddWorkoutSheet: View {
                     p_state: publishMode.stateParam,
                     p_stats: statsJSON,
                     p_healthkit_uuid: nil,
-                    p_route_geojson: nil
+                    p_route_geojson: nil,
+                    p_calories_kcal: nil,
+                    p_calories_method: nil
                 )
 
                 let res = try await client
@@ -2715,6 +2415,18 @@ struct AddWorkoutSheet: View {
             .execute()
         let rows = try JSONDecoder().decode([Row].self, from: res.data)
         return rows.first?.id
+    }
+
+    private func patchSupersetsForCreatedWorkouts(
+        client: SupabaseClient,
+        workoutIds: [Int64],
+        programs: [[EditableExercise]]
+    ) async throws {
+        try await StrengthSupersetPatch.patchSupersetsForCreatedWorkouts(
+            client: client,
+            workoutIds: workoutIds,
+            programs: programs
+        )
     }
 
     private func strengthExercisesForRoutineTemplate() -> [EditableExercise] {
@@ -2937,6 +2649,9 @@ struct AddWorkoutSheet: View {
                     item["exercise_display_name"] = try .init(d)
                 }
                 item["exercise_order"] = try .init(index + 1)
+                if let zoneOrder = ex.zoneOrder {
+                    item["zone_order"] = try .init(max(1, zoneOrder))
+                }
 
                 if let v = parseInt(ex.distanceM)      { item["distance_m"] = try .init(v) }
                 if let v = parseInt(ex.reps)           { item["reps"] = try .init(v) }
@@ -3020,9 +2735,10 @@ struct AddWorkoutSheet: View {
                 blocks.append((1, s))
             }
         }
-        return blocks.map { b in
+        return blocks.enumerated().map { idx, b in
             EditableSet(
                 setNumber: b.count,
+                orderIndex: idx + 1,
                 reps: b.template.reps,
                 weightKg: stringFromRecommendationKg(b.template.weightKg),
                 rpe: b.template.rpe.map { stringFromRecommendationRpe($0) } ?? "",
@@ -3338,6 +3054,8 @@ struct EditableExercise: Identifiable {
     var exerciseId: Int64? = nil
     var exerciseName: String = ""
     var orderIndex: Int = 1
+    var supersetGroupId: UUID? = nil
+    var supersetPosition: Int? = nil
     var notes: String = ""
     var sets: [EditableSet] = [EditableSet(setNumber: 1)]
     
@@ -3349,11 +3067,16 @@ struct EditableExercise: Identifiable {
         guard let exerciseId else { return nil }
         let cleaned = cleanSets()
         guard !cleaned.isEmpty else { return nil }
+        let strengthSets = cleaned.enumerated().compactMap { idx, set -> RPCStrengthParams.StrengthItem.StrengthSet? in
+            var orderedSet = set
+            orderedSet.orderIndex = idx + 1
+            return orderedSet.toStrengthSet()
+        }
         return .init(
             exercise_id: exerciseId,
             order_index: orderIndex,
             notes: notes.isEmpty ? nil : notes,
-            sets: cleaned.compactMap { $0.toStrengthSet() },
+            sets: strengthSets,
             custom_name: exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : exerciseName
         )
     }
@@ -3365,10 +3088,13 @@ extension EditableExercise {
         copy.exerciseId = exerciseId
         copy.exerciseName = exerciseName
         copy.orderIndex = orderIndex
+        copy.supersetGroupId = supersetGroupId
+        copy.supersetPosition = supersetPosition
         copy.notes = notes
         copy.sets = sets.map {
             EditableSet(
                 setNumber: $0.setNumber,
+                orderIndex: $0.orderIndex,
                 reps: $0.reps,
                 weightKg: $0.weightKg,
                 rpe: $0.rpe,
@@ -3381,9 +3107,49 @@ extension EditableExercise {
     }
 }
 
+func compactSupersetMetadata(_ source: [EditableExercise]) -> [EditableExercise] {
+    var next = source
+    for idx in next.indices {
+        next[idx].orderIndex = idx + 1
+    }
+
+    let groupCounts = Dictionary(grouping: next.compactMap(\.supersetGroupId), by: { $0 }).mapValues(\.count)
+    var groupPositions: [UUID: Int] = [:]
+
+    for idx in next.indices {
+        guard let groupId = next[idx].supersetGroupId, (groupCounts[groupId] ?? 0) > 1 else {
+            next[idx].supersetGroupId = nil
+            next[idx].supersetPosition = nil
+            continue
+        }
+        let position = (groupPositions[groupId] ?? 0) + 1
+        groupPositions[groupId] = position
+        next[idx].supersetPosition = position
+    }
+
+    return next
+}
+
+func normalizedSupersetPrograms(_ source: [EditableExercise]) -> [EditableExercise] {
+    let valid = source
+        .filter { $0.toStrengthItem() != nil }
+        .map { $0.deepCopied() }
+    return compactSupersetMetadata(valid)
+}
+
+func supersetGroupDisplayNumber(_ groupId: UUID, in exercises: [EditableExercise]) -> Int {
+    let groups = exercises.compactMap(\.supersetGroupId).reduce(into: [UUID]()) { result, id in
+        if !result.contains(id) {
+            result.append(id)
+        }
+    }
+    return (groups.firstIndex(of: groupId) ?? 0) + 1
+}
+
 struct EditableSet: Identifiable {
     let id = UUID()
     var setNumber: Int
+    var orderIndex: Int = 1
     var reps: Int? = nil
     var weightKg: String = ""
     var rpe: String = ""
@@ -3405,6 +3171,7 @@ struct EditableSet: Identifiable {
             let first = segs[0]
             return .init(
                 set_number: max(1, min(99, setNumber)),
+                order_index: orderIndex,
                 reps: first.reps,
                 weight_kg: first.weight_kg,
                 rpe: rpeD,
@@ -3420,6 +3187,7 @@ struct EditableSet: Identifiable {
         }
         return .init(
             set_number: max(1, min(99, setNumber)),
+            order_index: orderIndex,
             reps: repsV.flatMap { $0 > 0 ? $0 : nil },
             weight_kg: weight,
             rpe: rpeD,
@@ -3464,6 +3232,7 @@ struct HyroxExerciseForm: Identifiable, Hashable {
     var exerciseCode: String = HyroxExerciseCode.run.rawValue
     var customDisplayName: String = ""
     var exerciseOrder: Int = 1
+    var zoneOrder: Int? = nil
     var distanceM: String = ""
     var reps: String = ""
     var weightKg: String = ""
@@ -3601,6 +3370,7 @@ struct RPCStrengthParams: Encodable {
         
         struct StrengthSet: Encodable {
             let set_number: Int
+            let order_index: Int?
             let reps: Int?
             let weight_kg: Double?
             let rpe: Double?
@@ -3727,6 +3497,8 @@ struct RPCCardioV2Params: Encodable {
     let p_stats: AnyJSON
     let p_healthkit_uuid: String?
     let p_route_geojson: String?
+    let p_calories_kcal: Double?
+    let p_calories_method: String?
 }
 struct RPCCardioV2Wrapper: Encodable {
     let p: RPCCardioV2Params
@@ -3758,6 +3530,11 @@ struct RPCSportWrapper: Encodable {
 struct RPCSportV2Wrapper: Encodable {
     let p: AnyJSON
     let p_stats: AnyJSON?
+}
+
+struct HyroxSessionExerciseMetadataPatchParams: Encodable {
+    let p_workout_id: Int
+    let p_exercises: AnyJSON
 }
 
 private func hmsToSeconds(_ h: String, _ m: String, _ s: String) -> Int? {
@@ -4740,13 +4517,7 @@ private struct StrengthRoutinesPickerSheet: View {
                 }
                 return
             }
-            let res = try await client
-                .from("strength_routines")
-                .select(strengthTemplateDetailSelect())
-                .eq("id", value: Int(src.id))
-                .single()
-                .execute()
-            let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+            let detail = try await fetchStrengthRoutineTemplateDetail(client: client, routineId: src.id)
             let built = editableExercisesFromStrengthTemplateDetail(detail, exerciseDisplayName: exerciseDisplayName)
             guard !built.isEmpty else {
                 await MainActor.run { duplicateError = "This routine has no exercises to copy." }
@@ -4815,14 +4586,9 @@ private struct StrengthRoutinesPickerSheet: View {
             .single()
             .execute()
         let prof = try JSONDecoder.supabase().decode(ProfileLite.self, from: pRes.data)
-        let res = try await client
-            .from("strength_routines")
-            .select(strengthTemplateDetailSelect())
-            .eq("id", value: Int(row.id))
-            .single()
-            .execute()
-        let json = String(decoding: res.data, as: UTF8.self)
-        let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+        let data = try await fetchStrengthRoutineTemplateDetailData(client: client, routineId: row.id)
+        let json = String(decoding: data, as: UTF8.self)
+        let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: data)
         let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
         let exerciseCount = exs.count
         var totalSets = 0
@@ -4860,13 +4626,7 @@ private struct StrengthRoutinesPickerSheet: View {
         await MainActor.run { errorMessage = nil }
         do {
             let client = SupabaseManager.shared.client
-            let res = try await client
-                .from("strength_routines")
-                .select(strengthTemplateDetailSelect())
-                .eq("id", value: Int(id))
-                .single()
-                .execute()
-            let detail = try JSONDecoder.supabase().decode(StrengthTemplateDetailWire.self, from: res.data)
+            let detail = try await fetchStrengthRoutineTemplateDetail(client: client, routineId: id)
             let built = editableExercisesFromStrengthTemplateDetail(detail, exerciseDisplayName: exerciseDisplayName)
             guard !built.isEmpty else {
                 await MainActor.run { errorMessage = "This routine has no exercises." }

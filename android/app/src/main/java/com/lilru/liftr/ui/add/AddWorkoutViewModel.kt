@@ -115,13 +115,24 @@ data class AddWorkoutUiState(
     val postPublishHomeNonce: Int = 0,
     val strengthRoutineOverwritePending: StrengthRoutineOverwritePending? = null,
     /** Edición in-place del contenido de una plantilla (menú ⋯ → Edit); el nombre sigue en Rename. */
-    val strengthRoutineTemplateEdit: StrengthRoutineTemplateEdit? = null
+    val strengthRoutineTemplateEdit: StrengthRoutineTemplateEdit? = null,
+    val hyroxRoutineTemplateEdit: HyroxRoutineTemplateEdit? = null
 )
 
 data class StrengthRoutineTemplateEdit(
     val routineId: Long,
     val routineName: String,
     val drafts: List<StrengthExerciseDraft> = emptyList(),
+    val loading: Boolean = true,
+    val saving: Boolean = false,
+    val error: String? = null
+)
+
+data class HyroxRoutineTemplateEdit(
+    val routineId: Long,
+    val routineName: String,
+    val exercisesJson: String = "",
+    val sportStats: Map<String, String> = emptyMap(),
     val loading: Boolean = true,
     val saving: Boolean = false,
     val error: String? = null
@@ -176,6 +187,8 @@ private data class RoutineExerciseRow(
     @SerialName("routine_id") val routineId: Long,
     @SerialName("exercise_id") val exerciseId: Long,
     @SerialName("order_index") val orderIndex: Int = 1,
+    @SerialName("superset_group_id") val supersetGroupId: String? = null,
+    @SerialName("superset_position") val supersetPosition: Int? = null,
     val notes: String? = null,
     @SerialName("custom_name") val customName: String? = null
 )
@@ -232,8 +245,7 @@ private data class HyroxRoutineHeaderDb(
 
 private data class ProfileUsernameRow(val username: String, val avatarUrl: String?)
 
-private const val STRENGTH_DETAIL_SHARE_SELECT =
-    "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
+private const val STRENGTH_DETAIL_SHARE_SELECT = STRENGTH_ROUTINE_DETAIL_SELECT
 
 private const val HYROX_DETAIL_SHARE_SELECT =
     "id,name,updated_at,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
@@ -254,6 +266,8 @@ private data class ShareStrengthSet(
 private data class ShareStrengthEx(
     @SerialName("exercise_id") val exerciseId: Long,
     @SerialName("order_index") val orderIndex: Int,
+    @SerialName("superset_group_id") val supersetGroupId: String? = null,
+    @SerialName("superset_position") val supersetPosition: Int? = null,
     val notes: String? = null,
     @SerialName("custom_name") val customName: String? = null,
     @SerialName("strength_routine_sets") val strengthRoutineSets: List<ShareStrengthSet>? = null
@@ -310,6 +324,8 @@ data class StrengthExerciseDraft(
     val exerciseName: String = "",
     val customName: String = "",
     val notes: String = "",
+    val supersetGroupId: String? = null,
+    val supersetPosition: Int? = null,
     val sets: List<StrengthSetDraft> = listOf(StrengthSetDraft())
 )
 
@@ -515,23 +531,59 @@ class AddWorkoutViewModel(
 
     fun moveExerciseUp(exerciseDraftId: String) {
         updateActiveExercises { current ->
-            val mutable = current.toMutableList()
-            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
+            val index = current.indexOfFirst { it.id == exerciseDraftId }
             if (index <= 0) return@updateActiveExercises current
-            val item = mutable.removeAt(index)
-            mutable.add(index - 1, item)
-            mutable
+            swapExercisesWithSupersetCompact(current, index, index - 1)
         }
     }
 
     fun moveExerciseDown(exerciseDraftId: String) {
         updateActiveExercises { current ->
-            val mutable = current.toMutableList()
-            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
-            if (index == -1 || index >= mutable.lastIndex) return@updateActiveExercises current
-            val item = mutable.removeAt(index)
-            mutable.add(index + 1, item)
-            mutable
+            val index = current.indexOfFirst { it.id == exerciseDraftId }
+            if (index == -1 || index >= current.lastIndex) return@updateActiveExercises current
+            swapExercisesWithSupersetCompact(current, index, index + 1)
+        }
+    }
+
+    fun startSuperset(exerciseDraftId: String) {
+        updateActiveExercises { list ->
+            val index = list.indexOfFirst { it.id == exerciseDraftId }
+            startSupersetAt(list, index)
+        }
+    }
+
+    fun addNextToSuperset(exerciseDraftId: String) {
+        updateActiveExercises { list ->
+            val groupId = list.firstOrNull { it.id == exerciseDraftId }?.supersetGroupId ?: return@updateActiveExercises list
+            addNextExerciseToSuperset(list, groupId)
+        }
+    }
+
+    fun removeFromSuperset(exerciseDraftId: String) {
+        updateActiveExercises { list ->
+            val index = list.indexOfFirst { it.id == exerciseDraftId }
+            removeExerciseFromSuperset(list, index)
+        }
+    }
+
+    fun templateEditStartSuperset(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            val index = list.indexOfFirst { it.id == exerciseDraftId }
+            startSupersetAt(list, index)
+        }
+    }
+
+    fun templateEditAddNextToSuperset(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            val groupId = list.firstOrNull { it.id == exerciseDraftId }?.supersetGroupId ?: return@mutateTemplateEditDrafts list
+            addNextExerciseToSuperset(list, groupId)
+        }
+    }
+
+    fun templateEditRemoveFromSuperset(exerciseDraftId: String) {
+        mutateTemplateEditDrafts { list ->
+            val index = list.indexOfFirst { it.id == exerciseDraftId }
+            removeExerciseFromSuperset(list, index)
         }
     }
 
@@ -900,6 +952,112 @@ class AddWorkoutViewModel(
         _uiState.value = _uiState.value.copy(strengthRoutineTemplateEdit = null)
     }
 
+    fun dismissHyroxRoutineTemplateEdit() {
+        _uiState.value = _uiState.value.copy(hyroxRoutineTemplateEdit = null)
+    }
+
+    fun patchHyroxRoutineTemplateEdit(mutator: (HyroxRoutineTemplateEdit) -> HyroxRoutineTemplateEdit) {
+        val cur = _uiState.value.hyroxRoutineTemplateEdit ?: return
+        _uiState.value = _uiState.value.copy(
+            hyroxRoutineTemplateEdit = mutator(cur),
+            error = null,
+            message = null
+        )
+    }
+
+    fun loadHyroxRoutineForEdit(routineId: Long) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val displayName = _uiState.value.hyroxRoutines.firstOrNull { it.id == routineId }?.name ?: ""
+            _uiState.value = _uiState.value.copy(
+                hyroxRoutineTemplateEdit = HyroxRoutineTemplateEdit(
+                    routineId = routineId,
+                    routineName = displayName,
+                    loading = true,
+                    error = null
+                ),
+                error = null,
+                message = null
+            )
+            runCatching {
+                val detail = fetchHyroxRoutineDetail(routineId) ?: error("Routine not found.")
+                val exercisesJson = hyroxExercisesJsonFromDetail(detail)
+                if (exercisesJson.isBlank() || exercisesJson == "[]") {
+                    error(app.getString(R.string.add_routine_template_empty_load))
+                }
+                HyroxRoutineTemplateEdit(
+                    routineId = routineId,
+                    routineName = detail.name.ifBlank { displayName },
+                    exercisesJson = exercisesJson,
+                    sportStats = hyroxSportStatsOverlayFromDetail(detail),
+                    loading = false,
+                    error = null
+                )
+            }.onSuccess { edit ->
+                _uiState.value = _uiState.value.copy(hyroxRoutineTemplateEdit = edit)
+            }.onFailure { e ->
+                val msg = e.message?.take(300)?.ifBlank { e::class.java.simpleName }
+                    ?: app.getString(R.string.add_routine_template_load_error)
+                _uiState.value = _uiState.value.copy(
+                    hyroxRoutineTemplateEdit = HyroxRoutineTemplateEdit(
+                        routineId = routineId,
+                        routineName = displayName,
+                        loading = false,
+                        error = msg
+                    )
+                )
+            }
+        }
+    }
+
+    fun saveEditedHyroxRoutine() {
+        val edit = _uiState.value.hyroxRoutineTemplateEdit ?: return
+        if (edit.loading || edit.saving) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(
+                hyroxRoutineTemplateEdit = edit.copy(saving = true, error = null)
+            )
+            val uid = supabase.auth.currentUserOrNull()?.id
+            if (uid == null) {
+                _uiState.value = _uiState.value.copy(
+                    hyroxRoutineTemplateEdit = edit.copy(
+                        saving = false,
+                        error = "Sign in required."
+                    )
+                )
+                return@launch
+            }
+            runCatching {
+                val stats = SportStatsPayloadBuilder.build(
+                    sport = AddSportType.HYROX,
+                    durationMinText = "",
+                    footballPosition = AddFootballPosition.GOALKEEPER,
+                    racketMode = AddRacketMode.SINGLES,
+                    racketFormat = AddRacketFormat.BEST_OF_3,
+                    sportStats = edit.sportStats,
+                    hyroxExercisesText = edit.exercisesJson
+                )
+                updateHyroxRoutineFromStats(uid, edit.routineId, stats)
+            }.onSuccess {
+                val msg = getApplication<Application>().getString(R.string.add_routine_template_updated)
+                _uiState.value = _uiState.value.copy(
+                    hyroxRoutineTemplateEdit = null,
+                    message = msg,
+                    error = null
+                )
+                loadHyroxRoutines()
+            }.onFailure { e ->
+                val cur = _uiState.value.hyroxRoutineTemplateEdit
+                val err = e.message?.take(300)?.ifBlank { e::class.java.simpleName }.orEmpty()
+                if (cur != null) {
+                    _uiState.value = _uiState.value.copy(
+                        hyroxRoutineTemplateEdit = cur.copy(saving = false, error = err)
+                    )
+                }
+            }
+        }
+    }
+
     fun saveEditedRoutine() {
         val edit = _uiState.value.strengthRoutineTemplateEdit ?: return
         if (edit.loading || edit.saving) return
@@ -973,23 +1131,17 @@ class AddWorkoutViewModel(
 
     fun templateEditMoveExerciseUp(exerciseDraftId: String) {
         mutateTemplateEditDrafts { current ->
-            val mutable = current.toMutableList()
-            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
+            val index = current.indexOfFirst { it.id == exerciseDraftId }
             if (index <= 0) return@mutateTemplateEditDrafts current
-            val item = mutable.removeAt(index)
-            mutable.add(index - 1, item)
-            mutable
+            swapExercisesWithSupersetCompact(current, index, index - 1)
         }
     }
 
     fun templateEditMoveExerciseDown(exerciseDraftId: String) {
         mutateTemplateEditDrafts { current ->
-            val mutable = current.toMutableList()
-            val index = mutable.indexOfFirst { it.id == exerciseDraftId }
-            if (index == -1 || index >= mutable.lastIndex) return@mutateTemplateEditDrafts current
-            val item = mutable.removeAt(index)
-            mutable.add(index + 1, item)
-            mutable
+            val index = current.indexOfFirst { it.id == exerciseDraftId }
+            if (index == -1 || index >= current.lastIndex) return@mutateTemplateEditDrafts current
+            swapExercisesWithSupersetCompact(current, index, index + 1)
         }
     }
 
@@ -1307,11 +1459,20 @@ class AddWorkoutViewModel(
 
     private suspend fun buildDraftsForRoutine(routineId: Long): List<StrengthExerciseDraft> {
         val st = _uiState.value
-        val exRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES)
-            .select(columns = Columns.raw("id, routine_id, exercise_id, order_index, notes, custom_name")) {
-                filter { eq("routine_id", routineId) }
-                order("order_index", Order.ASCENDING)
-            }
+        val exRes = runCatching {
+            supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES)
+                .select(columns = Columns.raw("id, routine_id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name")) {
+                    filter { eq("routine_id", routineId) }
+                    order("order_index", Order.ASCENDING)
+                }
+        }.getOrElse { err ->
+            if (!strengthRoutineSupersetColumnsUnavailable(err)) throw err
+            supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES)
+                .select(columns = Columns.raw("id, routine_id, exercise_id, order_index, notes, custom_name")) {
+                    filter { eq("routine_id", routineId) }
+                    order("order_index", Order.ASCENDING)
+                }
+        }
         val exerciseRows = decodeFlexibleList<RoutineExerciseRow>(exRes.data)
         val exIds = exerciseRows.map { it.id }
         val setRows = if (exIds.isEmpty()) {
@@ -1325,7 +1486,7 @@ class AddWorkoutViewModel(
             decodeFlexibleList<RoutineSetRow>(setRes.data)
         }
         val byExercise = setRows.groupBy { it.routineExerciseId }
-        return exerciseRows.map { ex ->
+        val mapped = exerciseRows.map { ex ->
             val sets = byExercise[ex.id].orEmpty().ifEmpty { listOf(RoutineSetRow(ex.id, 1)) }
             StrengthExerciseDraft(
                 exerciseId = ex.exerciseId,
@@ -1334,6 +1495,8 @@ class AddWorkoutViewModel(
                 } ?: "Exercise ${ex.exerciseId}",
                 customName = ex.customName.orEmpty(),
                 notes = ex.notes.orEmpty(),
+                supersetGroupId = ex.supersetGroupId,
+                supersetPosition = ex.supersetPosition,
                 sets = sets.map { row ->
                     val segs = parseWeightSegmentsColumn(row.weightSegments)
                     val rep0 = segs.firstOrNull()?.repsText ?: row.reps?.toString() ?: ""
@@ -1352,6 +1515,7 @@ class AddWorkoutViewModel(
                 }
             )
         }
+        return compactSupersetMetadata(mapped)
     }
 
     private suspend fun insertNewRoutineWithDrafts(
@@ -1360,7 +1524,8 @@ class AddWorkoutViewModel(
         folderId: Long?,
         selected: List<StrengthExerciseDraft>
     ): Long {
-        val contentHash = strengthRoutineContentFingerprintFromDrafts(selected)
+        val normalized = normalizedSupersetDrafts(selected)
+        val contentHash = strengthRoutineContentFingerprintFromDrafts(normalized)
         val routinePayload = buildJsonObject {
             put("user_id", userId)
             put("name", routineName)
@@ -1387,7 +1552,7 @@ class AddWorkoutViewModel(
             }
             ?: error("Could not resolve routine id after insert.")
 
-        selected.forEachIndexed { exIndex, exercise ->
+        normalized.forEachIndexed { exIndex, exercise ->
             val eid = exercise.exerciseId ?: error("Missing exercise on draft")
             val routineExPayload = buildJsonObject {
                 put("routine_id", newRoutineId)
@@ -1395,18 +1560,19 @@ class AddWorkoutViewModel(
                 put("order_index", exIndex + 1)
                 if (exercise.notes.isNotBlank()) put("notes", exercise.notes.trim())
                 if (exercise.customName.isNotBlank()) put("custom_name", exercise.customName.trim())
+                applyRoutineExerciseSupersetFields(exercise)
             }
             supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES)
                 .insert(routineExPayload) { }
         }
         val insertedExRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES)
-            .select(columns = Columns.raw("id, routine_id, exercise_id, order_index, notes, custom_name")) {
+            .select(columns = Columns.raw("id, routine_id, exercise_id, order_index, superset_group_id, superset_position, notes, custom_name")) {
                 filter { eq("routine_id", newRoutineId) }
                 order("order_index", Order.ASCENDING)
             }
         val insertedRows = decodeFlexibleList<RoutineExerciseRow>(insertedExRes.data)
         insertedRows.forEachIndexed { index, row ->
-            val src = selected.getOrNull(index) ?: return@forEachIndexed
+            val src = normalized.getOrNull(index) ?: return@forEachIndexed
             src.sets.forEachIndexed { _, set ->
                 val p = draftSetToStrengthPayload(set) ?: return@forEachIndexed
                 val setPayload = buildJsonObject {
@@ -2137,6 +2303,58 @@ class AddWorkoutViewModel(
         return newRoutineId
     }
 
+    private suspend fun updateHyroxRoutineFromStats(
+        userId: String,
+        routineId: Long,
+        stats: JsonObject
+    ) {
+        val exercises = stats["exercises"]?.jsonArray ?: error("Missing Hyrox exercises.")
+        if (exercises.isEmpty()) error("Hyrox exercises empty.")
+        val hash = hyroxStatsFingerprint(stats)
+        val headerUpdate = buildJsonObject {
+            put("content_hash", hash)
+            stats["division"]?.let { put("division", it) }
+            stats["category"]?.let { put("category", it) }
+            stats["age_group"]?.let { put("age_group", it) }
+            stats["official_time_sec"]?.let { put("official_time_sec", it) }
+            stats["penalty_time_sec"]?.let { put("penalty_time_sec", it) }
+            stats["no_reps"]?.let { put("no_reps", it) }
+            stats["rank_overall"]?.let { put("rank_overall", it) }
+            stats["rank_category"]?.let { put("rank_category", it) }
+            stats["avg_hr"]?.let { put("avg_hr", it) }
+            stats["max_hr"]?.let { put("max_hr", it) }
+        }
+        supabase.from(BackendContracts.Tables.HYROX_ROUTINES).update(headerUpdate) {
+            filter {
+                eq("id", routineId)
+                eq("user_id", userId)
+            }
+        }
+        supabase.from(BackendContracts.Tables.HYROX_ROUTINE_EXERCISES).delete {
+            filter { eq("routine_id", routineId) }
+        }
+        var idx = 0
+        for (el in exercises) {
+            val o = el.jsonObject
+            idx += 1
+            val order = o["exercise_order"]?.jsonPrimitive?.content?.toIntOrNull() ?: idx
+            val exIns = buildJsonObject {
+                put("routine_id", routineId)
+                put("exercise_code", o["exercise_code"]!!.jsonPrimitive.content)
+                put("exercise_order", order)
+                o["distance_m"]?.let { put("distance_m", it) }
+                o["reps"]?.let { put("reps", it) }
+                o["weight_kg"]?.let { put("weight_kg", it) }
+                o["duration_sec"]?.let { put("duration_sec", it) }
+                o["height_cm"]?.let { put("height_cm", it) }
+                o["implement_count"]?.let { put("implement_count", it) }
+                o["notes"]?.let { put("notes", it) }
+                o["exercise_display_name"]?.let { put("exercise_display_name", it) }
+            }
+            supabase.from(BackendContracts.Tables.HYROX_ROUTINE_EXERCISES).insert(exIns) { }
+        }
+    }
+
     private suspend fun lookupLastHyroxRoutineId(userId: String, routineName: String, folderId: Long?): Long? {
         val res = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(columns = Columns.raw("id")) {
             filter {
@@ -2501,11 +2719,21 @@ class AddWorkoutViewModel(
                 limit(1)
             }
         val prof = profileRowFromSelectData(profileRes.data)
-        val rRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(
-            columns = Columns.raw(STRENGTH_DETAIL_SHARE_SELECT)
-        ) {
-            filter { eq("id", routineId) }
-            limit(1)
+        val rRes = runCatching {
+            supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(
+                columns = Columns.raw(STRENGTH_DETAIL_SHARE_SELECT)
+            ) {
+                filter { eq("id", routineId) }
+                limit(1)
+            }
+        }.getOrElse { err ->
+            if (!strengthRoutineSupersetColumnsUnavailable(err)) throw err
+            supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(
+                columns = Columns.raw(STRENGTH_ROUTINE_DETAIL_SELECT_LEGACY)
+            ) {
+                filter { eq("id", routineId) }
+                limit(1)
+            }
         }
         val root = Json.parseToJsonElement(rRes.data.trim())
         val obj = when (root) {
@@ -2715,9 +2943,11 @@ class AddWorkoutViewModel(
                 exerciseName = display,
                 customName = cust,
                 notes = ex.notes ?: "",
+                supersetGroupId = ex.supersetGroupId,
+                supersetPosition = ex.supersetPosition,
                 sets = fallbackSets
             )
-        }
+        }.let { compactSupersetMetadata(it) }
     }
 
     fun copyHostLaneToActiveLane() {
@@ -3225,9 +3455,14 @@ class AddWorkoutViewModel(
                     val squadIds = parseLongArrayFromRpc(squadRes.data)
                     val firstWid = squadIds.firstOrNull()
                     supabase.submitWorkoutToCompetitionIfActive(firstWid)
+                    val lanePrograms = owners.map { ownerId ->
+                        normalizedSupersetDrafts(snap.laneExercisesByUser[ownerId].orEmpty())
+                    }
+                    patchWorkoutSupersetsForCreatedWorkouts(supabase, squadIds, lanePrograms)
                 } else {
                     val selected = routinePrescriptionOverwrite?.second ?: snap.selectedExercises
                     if (selected.isEmpty()) error("Add at least one exercise first.")
+                    val normalized = normalizedSupersetDrafts(selected)
                     val params = paramsForState(targetState, buildStrengthPayloadItems(selected))
                     val res = supabase.postgrest.rpc(BackendContracts.Rpc.CREATE_STRENGTH_WORKOUT, params) { }
                     val workoutId = parseSingleIdFromRpc(res.data)
@@ -3236,6 +3471,13 @@ class AddWorkoutViewModel(
                         addParticipantsToWorkout(workoutId, participantIds)
                     }
                     supabase.submitWorkoutToCompetitionIfActive(workoutId)
+                    if (workoutId != null) {
+                        patchWorkoutSupersetsForCreatedWorkouts(
+                            supabase,
+                            listOf(workoutId),
+                            listOf(normalized)
+                        )
+                    }
                 }
                 if (routinePrescriptionOverwrite != null) {
                     applyStrengthRoutinePrescriptionUpdate(

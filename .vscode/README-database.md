@@ -1,5 +1,7 @@
 # Conectar Cursor a la base de datos (Supabase / PostgreSQL)
 
+Disk IO performance baseline and monitoring: see [docs/supabase-disk-io-baseline.md](../docs/supabase-disk-io-baseline.md) and [docs/supabase-disk-io-monitoring.md](../docs/supabase-disk-io-monitoring.md).
+
 Puedes ver y consultar la base de datos desde Cursor con una extensión, sin depender de DBVisualizer.
 
 ## 1. Obtener la conexión PostgreSQL de Supabase (Connection Pooler)

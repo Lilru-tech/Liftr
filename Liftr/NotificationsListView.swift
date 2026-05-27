@@ -73,10 +73,19 @@ struct NotificationsListView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var deletingAll = false
+    @State private var markingAllRead = false
     @State private var showDeleteAllConfirm = false
     @State private var achievementsRefreshID = UUID()
     @State private var resolvedOwnerId: UUID?
     @State private var resolvingOwner = false
+
+    private var hasUnreadNotifications: Bool {
+        notifications.contains { !$0.is_read }
+    }
+
+    private var bulkActionBusy: Bool {
+        loading || deletingAll || markingAllRead
+    }
     
     var body: some View {
         Group {
@@ -163,12 +172,24 @@ struct NotificationsListView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if !notifications.isEmpty {
-                    Button(role: .destructive) {
-                        showDeleteAllConfirm = true
+                    Menu {
+                        Button {
+                            Task { await markAllAsRead() }
+                        } label: {
+                            Label("Mark all as read", systemImage: "envelope.open")
+                        }
+                        .disabled(!hasUnreadNotifications || bulkActionBusy)
+
+                        Button(role: .destructive) {
+                            showDeleteAllConfirm = true
+                        } label: {
+                            Label("Delete all", systemImage: "trash")
+                        }
+                        .disabled(bulkActionBusy)
                     } label: {
-                        Text("Delete all")
+                        Image(systemName: "ellipsis.circle")
                     }
-                    .disabled(loading || deletingAll)
+                    .disabled(bulkActionBusy)
                 }
             }
         }
@@ -194,10 +215,12 @@ struct NotificationsListView: View {
                 Text("User not found")
             }
 
-        case "workout_like",
+        case "apple_health_cardio_imported",
+             "workout_like",
              "workout_comment",
              "comment_reply",
              "comment_like",
+             "comment_mention",
              "added_as_participant":
             if let workoutIdStr = n.data?["workout_id"]?.stringValue,
                let workoutId = Int(workoutIdStr) {
@@ -325,6 +348,58 @@ struct NotificationsListView: View {
                 Text("Conversation not found")
             }
 
+        case "territory_capture_from_user", "territory_lost_to_user":
+            if let workoutIdStr = n.data?["workout_id"]?.stringValue,
+               let workoutId = Int(workoutIdStr) {
+                let knownOwnerId: UUID? = {
+                    if n.type == "territory_lost_to_user",
+                       let other = n.data?["other_user_id"]?.stringValue {
+                        return UUID(uuidString: other)
+                    }
+                    if n.type == "territory_capture_from_user" {
+                        return app.userId
+                    }
+                    return nil
+                }()
+
+                if let knownOwnerId {
+                    WorkoutDetailView(workoutId: workoutId, ownerId: knownOwnerId)
+                } else if let resolvedOwnerId {
+                    WorkoutDetailView(workoutId: workoutId, ownerId: resolvedOwnerId)
+                } else {
+                    VStack(spacing: 12) {
+                        if resolvingOwner {
+                            ProgressView("Opening workout…")
+                        } else {
+                            Text("Opening workout…")
+                        }
+                    }
+                    .task {
+                        guard !resolvingOwner else { return }
+                        resolvingOwner = true
+                        defer { resolvingOwner = false }
+
+                        struct Row: Decodable { let user_id: UUID }
+
+                        do {
+                            let res = try await SupabaseManager.shared.client
+                                .from("workouts")
+                                .select("user_id")
+                                .eq("id", value: workoutId)
+                                .limit(1)
+                                .execute()
+
+                            let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
+                            resolvedOwnerId = rows.first?.user_id
+                        } catch {
+                            print("❌ [Notifications] resolve owner error:", error)
+                        }
+                    }
+                }
+            } else {
+                Text("Workout not found")
+            }
+
         default:
             VStack(spacing: 12) {
                 Text(n.title)
@@ -369,6 +444,47 @@ struct NotificationsListView: View {
             
             await MainActor.run {
                 self.notifications = []
+            }
+            await app.refreshUnreadNotificationsCount()
+        } catch {
+            await MainActor.run {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func markAllAsRead() async {
+        guard let uid = app.userId else { return }
+        guard hasUnreadNotifications else { return }
+        await MainActor.run { markingAllRead = true; error = nil }
+        defer { Task { await MainActor.run { markingAllRead = false } } }
+
+        struct UpdatePayload: Encodable {
+            let is_read: Bool
+            let read_at: String
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        let payload = UpdatePayload(
+            is_read: true,
+            read_at: formatter.string(from: Date())
+        )
+
+        do {
+            _ = try await SupabaseManager.shared.client
+                .from("notifications")
+                .update(payload)
+                .eq("user_id", value: uid.uuidString)
+                .eq("is_read", value: false)
+                .execute()
+
+            await MainActor.run {
+                for idx in self.notifications.indices {
+                    self.notifications[idx].is_read = true
+                }
             }
             await app.refreshUnreadNotificationsCount()
         } catch {
@@ -480,6 +596,7 @@ struct NotificationsListView: View {
         case "workout_comment":       return "Workout comment"
         case "comment_like":          return "Comment like"
         case "comment_reply":         return "Reply"
+        case "comment_mention":       return "Mention"
         case "added_as_participant":  return "Participant"
         case "achievement_unlocked":  return "Achievement"
         case "goal_completed":        return "Goal"
@@ -495,9 +612,12 @@ struct NotificationsListView: View {
         case "competition_result_win":            return "Result"
         case "competition_result_lose":           return "Result"
         case "workout_kind_inactive":             return "Reminder"
+        case "apple_health_cardio_imported":      return "Apple Health"
         case "segment_you_are_first":             return "Segment"
         case "segment_lost_first":                return "Segment"
         case "challenge_won", "challenge_won_weekly": return "Challenge"
+        case "territory_capture_from_user": return "Territory captured"
+        case "territory_lost_to_user":      return "Territory lost"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

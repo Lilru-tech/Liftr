@@ -386,6 +386,7 @@ final class ChatThreadModel: ObservableObject {
         guard last.id > 0 else { return }
         do {
             try await ChatService.markRead(conversationId: conversationId, lastMessageId: last.id)
+            await AppState.shared.refreshUnreadChatMessagesCount()
         } catch {
             #if DEBUG
             print("[Chat] markRead error:", error)
@@ -404,7 +405,6 @@ struct ChatThreadView: View {
     @FocusState private var inputFocused: Bool
     @State private var replyingTo: ChatMessage?
     @State private var editingMessage: ChatMessage?
-    @State private var editingDraft: String = ""
     @State private var showClearConfirm = false
     @State private var openSharedWorkout: SharedWorkoutNav?
     @State private var openSharedRoutine: SharedRoutineNav?
@@ -418,60 +418,54 @@ struct ChatThreadView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        if model.hasMore {
-                            ProgressView()
-                                .padding(8)
-                                .onAppear {
-                                    Task { await model.loadOlderIfNeeded() }
-                                }
-                        }
-                        ForEach(Array(messageItems.enumerated()), id: \.offset) { _, item in
-                            switch item {
-                            case .day(let label):
-                                Text(label)
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.vertical, 6)
-                                    .padding(.horizontal, 12)
-                                    .background(Capsule().fill(Color.black.opacity(0.05)))
-                                    .padding(.vertical, 6)
-                            case .message(let msg, let isLastSeenMine):
-                                messageRow(msg, isLastSeenMine: isLastSeenMine, scrollProxy: proxy)
-                                    .id(msg.id)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 8) {
+                    if model.hasMore {
+                        ProgressView()
+                            .padding(8)
+                            .onAppear {
+                                Task { await model.loadOlderIfNeeded() }
                             }
-                        }
-                        if !model.typingUserIds.isEmpty {
-                            HStack {
-                                Text("\(otherUsernamePrefix) is typing…")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 4)
+                    }
+                    ForEach(Array(messageItems.enumerated()), id: \.offset) { _, item in
+                        switch item {
+                        case .day(let label):
+                            Text(label)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 12)
+                                .background(Capsule().fill(Color.black.opacity(0.05)))
+                                .padding(.vertical, 6)
+                        case .message(let msg, let isLastSeenMine):
+                            messageRow(msg, isLastSeenMine: isLastSeenMine, scrollProxy: proxy)
+                                .id(msg.id)
                         }
                     }
-                    .padding(.vertical, 12)
-                }
-                .onChange(of: model.messages.count) { _, _ in
-                    if let last = model.messages.last {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(last.id, anchor: .bottom)
+                    if !model.typingUserIds.isEmpty {
+                        HStack {
+                            Text("\(otherUsernamePrefix) is typing…")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                            Spacer()
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 4)
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+            .onChange(of: model.messages.count) { _, _ in
+                if let last = model.messages.last {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
             }
-
-            if let target = replyingTo {
-                replyBanner(target: target)
-            }
-
-            Divider().opacity(0.3)
-            inputBar
+        }
+        .safeAreaInset(edge: .bottom) {
+            composer
         }
         .navigationTitle(otherProfile.map { "@\($0.username)" } ?? "Conversation")
         .navigationBarTitleDisplayMode(.inline)
@@ -517,16 +511,6 @@ struct ChatThreadView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This will hide all messages so far for you. New messages will still arrive.")
-        }
-        .sheet(item: $editingMessage) { msg in
-            EditMessageSheet(
-                originalBody: msg.body ?? "",
-                onSave: { newBody in
-                    Task { await model.editMessage(msg.id, body: newBody) }
-                    editingMessage = nil
-                },
-                onCancel: { editingMessage = nil }
-            )
         }
         .task {
             await model.loadInitial()
@@ -707,6 +691,7 @@ struct ChatThreadView: View {
                         }
                         Divider()
                         Button {
+                            editingMessage = nil
                             replyingTo = msg
                             inputFocused = true
                         } label: {
@@ -719,8 +704,10 @@ struct ChatThreadView: View {
                         }
                         if mine, msg.messageKind == .text {
                             Button {
+                                replyingTo = nil
                                 editingMessage = msg
-                                editingDraft = msg.body ?? ""
+                                draft = msg.body ?? ""
+                                inputFocused = true
                             } label: {
                                 Label("Edit", systemImage: "pencil")
                             }
@@ -855,69 +842,129 @@ struct ChatThreadView: View {
     }
 
     @ViewBuilder
-    private func replyBanner(target: ChatMessage) -> some View {
+    private var composer: some View {
+        VStack(spacing: 0) {
+            if let target = replyingTo {
+                composerContextBanner(
+                    title: "Replying",
+                    subtitle: replyBannerPreview(for: target),
+                    onCancel: { replyingTo = nil }
+                )
+            } else if let target = editingMessage {
+                composerContextBanner(
+                    title: "Editing",
+                    subtitle: target.body ?? "",
+                    onCancel: cancelEdit
+                )
+            }
+
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Message…", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused($inputFocused)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(.tertiarySystemFill))
+                    )
+                    .onChange(of: draft) { _, newValue in
+                        model.updateTyping(text: newValue)
+                    }
+
+                Button {
+                    Task { await submitCurrent() }
+                } label: {
+                    Group {
+                        if editingMessage != nil {
+                            Image(systemName: "checkmark")
+                        } else {
+                            Image(systemName: "paperplane.fill")
+                        }
+                    }
+                    .font(.body.weight(.semibold))
+                    .frame(width: 36, height: 36)
+                    .background(Color.accentColor.opacity(canSubmit ? 1 : 0.3), in: Circle())
+                    .foregroundStyle(.white)
+                }
+                .disabled(!canSubmit)
+                .accessibilityLabel(editingMessage != nil ? "Save" : "Send")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    @ViewBuilder
+    private func composerContextBanner(title: String,
+                                       subtitle: String,
+                                       onCancel: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 2)
                 .fill(Color.accentColor)
                 .frame(width: 3, height: 32)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Replying")
+                Text(title)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(replyBannerPreview(for: target))
+                Text(subtitle)
                     .font(.caption)
                     .lineLimit(1)
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                replyingTo = nil
-            } label: {
+            Button(action: onCancel) {
                 Image(systemName: "xmark")
                     .font(.caption)
                     .padding(6)
                     .background(Circle().fill(Color(.tertiarySystemFill)))
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Cancel")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(.ultraThinMaterial)
     }
 
-    @ViewBuilder
-    private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Message…", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
-                .focused($inputFocused)
-                .onChange(of: draft) { _, newValue in
-                    model.updateTyping(text: newValue)
-                }
-
-            Button {
-                Task { await sendCurrent() }
-            } label: {
-                Image(systemName: "paperplane.fill")
-                    .padding(8)
-                    .background(Color.accentColor.opacity(canSend ? 1 : 0.3), in: Circle())
-                    .foregroundStyle(.white)
-            }
-            .disabled(!canSend)
+    private var canSubmit: Bool {
+        let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if let editing = editingMessage {
+            let original = editing.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed != original
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        return true
     }
 
-    private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    @MainActor
+    private func submitCurrent() async {
+        if editingMessage != nil {
+            await saveCurrent()
+        } else {
+            await sendCurrent()
+        }
+    }
+
+    @MainActor
+    private func saveCurrent() async {
+        guard let editing = editingMessage, canSubmit else { return }
+        let text = draft
+        editingMessage = nil
+        draft = ""
+        model.updateTyping(text: "")
+        await model.editMessage(editing.id, body: text)
+    }
+
+    private func cancelEdit() {
+        editingMessage = nil
+        draft = ""
+        model.updateTyping(text: "")
     }
 
     @MainActor
     private func sendCurrent() async {
-        guard let me = app.userId, canSend else { return }
+        guard let me = app.userId, canSubmit else { return }
         let text = draft
         let replyId = replyingTo?.id
         draft = ""
@@ -1371,47 +1418,5 @@ private struct ChatThreadWorkoutShareCard: View {
         let r = RelativeDateTimeFormatter()
         r.unitsStyle = .short
         return r.localizedString(for: d, relativeTo: Date())
-    }
-}
-
-private struct EditMessageSheet: View {
-    let originalBody: String
-    var onSave: (String) -> Void
-    var onCancel: () -> Void
-
-    @State private var draft: String
-
-    init(originalBody: String,
-         onSave: @escaping (String) -> Void,
-         onCancel: @escaping () -> Void) {
-        self.originalBody = originalBody
-        self.onSave = onSave
-        self.onCancel = onCancel
-        _draft = State(initialValue: originalBody)
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                TextField("Message", text: $draft, axis: .vertical)
-                    .lineLimit(2...10)
-                    .textFieldStyle(.roundedBorder)
-                Spacer()
-            }
-            .padding()
-            .navigationTitle("Edit message")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { onCancel() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Save") { onSave(draft) }
-                        .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                  || draft == originalBody)
-                }
-            }
-        }
-        .presentationDetents([.medium])
     }
 }

@@ -1,0 +1,52 @@
+name: Supabase territory edge
+
+on:
+  push:
+    branches:
+      - devel
+      - main
+    paths:
+      - Liftr/supabase/functions/resolve-territory-municipality/**
+      - .github/workflows/supabase-edge-territory.yml
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Deploy resolve-territory-municipality
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          supabase functions deploy resolve-territory-municipality \
+            --project-ref "$SUPABASE_PROJECT_ID" \
+            --workdir Liftr
+
+  drain-queue:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Drain territory geocode queue
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          TERRITORY_MAINTENANCE_SECRET: ${{ secrets.TERRITORY_MAINTENANCE_SECRET }}
+        run: |
+          curl -fsS -X POST \
+            "$SUPABASE_URL/functions/v1/resolve-territory-municipality" \
+            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "x-territory-maintenance-secret: $TERRITORY_MAINTENANCE_SECRET" \
+            -d '{"process_queue":true,"max_items":8,"run_assignment_backfill":true}'

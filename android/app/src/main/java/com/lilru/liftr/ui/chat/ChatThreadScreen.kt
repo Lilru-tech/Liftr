@@ -46,7 +46,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -179,19 +182,16 @@ fun ChatThreadScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            Column {
-                state.replyingTo?.let { target ->
-                    ReplyComposerBanner(
-                        subtitle = target.replyComposerSubtitle(),
-                        onCancel = viewModel::cancelReply
-                    )
-                }
-                ChatInputBar(
-                    draft = state.draft,
-                    onDraftChange = viewModel::setDraft,
-                    onSend = viewModel::send
-                )
-            }
+            ChatComposer(
+                draft = state.draft,
+                onDraftChange = viewModel::setDraft,
+                replyingTo = state.replyingTo,
+                editingMessage = state.editingMessage,
+                onCancelReply = viewModel::cancelReply,
+                onCancelEdit = viewModel::cancelEdit,
+                onSend = viewModel::send,
+                onSave = viewModel::submitEdit
+            )
         }
     ) { padding ->
         Box(
@@ -300,14 +300,6 @@ fun ChatThreadScreen(
             },
             onEdit = { viewModel.startEdit(target) },
             onDelete = { viewModel.deleteMessage(target.id) }
-        )
-    }
-
-    state.editingMessage?.let { target ->
-        EditMessageDialog(
-            originalBody = target.body.orEmpty(),
-            onSave = { viewModel.submitEdit(it) },
-            onCancel = viewModel::cancelEdit
         )
     }
 
@@ -1024,108 +1016,151 @@ private fun MessageActionSheet(
 }
 
 @Composable
-private fun EditMessageDialog(
-    originalBody: String,
-    onSave: (String) -> Unit,
-    onCancel: () -> Unit
+private fun ChatComposer(
+    draft: String,
+    onDraftChange: (String) -> Unit,
+    replyingTo: ChatMessageWire?,
+    editingMessage: ChatMessageWire?,
+    onCancelReply: () -> Unit,
+    onCancelEdit: () -> Unit,
+    onSend: () -> Unit,
+    onSave: (String) -> Unit
 ) {
-    var draft by remember { mutableStateOf(originalBody) }
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Edit message") },
-        text = {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 96.dp),
-                maxLines = 8,
-                placeholder = { Text("Message…") }
-            )
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onSave(draft) },
-                enabled = draft.isNotBlank() && draft != originalBody
-            ) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onCancel) { Text("Cancel") } }
-    )
-}
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(replyingTo?.id, editingMessage?.id) {
+        if (replyingTo != null || editingMessage != null) {
+            focusRequester.requestFocus()
+        }
+    }
 
-@Composable
-private fun ReplyComposerBanner(subtitle: String, onCancel: () -> Unit) {
+    val trimmedDraft = draft.trim()
+    val canSubmit = when {
+        trimmedDraft.isEmpty() -> false
+        editingMessage != null -> trimmedDraft != editingMessage.body?.trim().orEmpty()
+        else -> true
+    }
+
     Surface(
-        tonalElevation = 1.dp,
+        tonalElevation = 2.dp,
         color = MaterialTheme.colorScheme.surface
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .imePadding()
         ) {
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .heightIn(min = 32.dp)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
-            )
-            Spacer(Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    "Replying",
-                    style = MaterialTheme.typography.labelSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
+            when {
+                replyingTo != null -> {
+                    ComposerContextBanner(
+                        title = "Replying",
+                        subtitle = replyingTo.replyComposerSubtitle(),
+                        onCancel = onCancelReply,
+                        cancelContentDescription = "Cancel reply"
+                    )
+                }
+                editingMessage != null -> {
+                    ComposerContextBanner(
+                        title = "Editing",
+                        subtitle = editingMessage.body.orEmpty(),
+                        onCancel = onCancelEdit,
+                        cancelContentDescription = "Cancel edit"
+                    )
+                }
             }
-            IconButton(onClick = onCancel) {
-                Icon(Icons.Filled.Close, contentDescription = "Cancel reply")
+
+            Row(
+                verticalAlignment = Alignment.Bottom,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+            ) {
+                BasicTextField(
+                    value = draft,
+                    onValueChange = onDraftChange,
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 40.dp)
+                        .focusRequester(focusRequester)
+                        .background(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    maxLines = 5,
+                    decorationBox = { innerTextField ->
+                        Box {
+                            if (draft.isEmpty()) {
+                                Text(
+                                    "Message…",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            innerTextField()
+                        }
+                    }
+                )
+                Spacer(Modifier.width(8.dp))
+                IconButton(
+                    onClick = {
+                        if (editingMessage != null) {
+                            onSave(draft)
+                        } else {
+                            onSend()
+                        }
+                    },
+                    enabled = canSubmit
+                ) {
+                    Icon(
+                        imageVector = if (editingMessage != null) Icons.Filled.Check else Icons.Filled.Send,
+                        contentDescription = if (editingMessage != null) "Save" else "Send"
+                    )
+                }
             }
         }
     }
 }
 
-// MARK: - Input bar
-
 @Composable
-private fun ChatInputBar(
-    draft: String,
-    onDraftChange: (String) -> Unit,
-    onSend: () -> Unit
+private fun ComposerContextBanner(
+    title: String,
+    subtitle: String,
+    onCancel: () -> Unit,
+    cancelContentDescription: String
 ) {
-    Surface(
-        tonalElevation = 2.dp,
-        color = MaterialTheme.colorScheme.surface
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.Bottom,
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .imePadding()
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-        ) {
-            OutlinedTextField(
-                value = draft,
-                onValueChange = onDraftChange,
-                placeholder = { Text("Message…") },
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 48.dp),
-                maxLines = 5
+                .width(3.dp)
+                .heightIn(min = 32.dp)
+                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = onSend, enabled = draft.isNotBlank()) {
-                Icon(Icons.Filled.Send, contentDescription = "Send")
-            }
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        IconButton(onClick = onCancel) {
+            Icon(Icons.Filled.Close, contentDescription = cancelContentDescription)
         }
     }
 }

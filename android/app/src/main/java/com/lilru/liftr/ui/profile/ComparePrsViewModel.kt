@@ -6,9 +6,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.postgrest.from
-import io.github.jan.supabase.postgrest.query.Columns
-import io.github.jan.supabase.postgrest.query.Order
+import io.github.jan.supabase.postgrest.postgrest
 import java.time.Instant
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -21,6 +19,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 private data class PrRowWire(
@@ -109,14 +109,8 @@ class ComparePrsViewModel(
     }
 
     private suspend fun fetchPrs(userId: String): List<PrRowWire> {
-        val res = supabase
-            .from(BackendContracts.Views.VW_USER_PRS)
-            .select(
-                columns = Columns.raw("kind, user_id, label, metric, value, achieved_at")
-            ) {
-                filter { eq("user_id", userId) }
-                order("achieved_at", Order.DESCENDING)
-            }
+        val params = buildJsonObject { put("p_user_id", userId) }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_USER_PRS, params) { }
         return decodeFlexibleList(res.data)
     }
 

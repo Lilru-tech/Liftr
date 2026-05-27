@@ -2,6 +2,7 @@ package com.lilru.liftr.data
 
 import android.content.Context
 import com.lilru.liftr.BuildConfig
+import com.lilru.liftr.auth.AuthRedirect
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.functions.Functions
@@ -19,11 +20,16 @@ object LiftrSupabase {
     var client: SupabaseClient? = null
         private set
 
+    @Volatile
+    var appContext: Context? = null
+        private set
+
     /**
      * Debe llamarse al arranque (p. ej. desde [com.lilru.liftr.LiftrApplication]).
      * Si faltan URL o clave, [client] permanece nulo: la UI puede mostrar un aviso.
      */
-    fun init(@Suppress("UNUSED_PARAMETER") context: Context) {
+    fun init(context: Context) {
+        appContext = context.applicationContext
         if (client != null) return
         val url = BuildConfig.SUPABASE_URL
         val key = BuildConfig.SUPABASE_ANON_KEY
@@ -37,7 +43,10 @@ object LiftrSupabase {
             ) {
                 install(Postgrest)
                 install(Storage) { }
-                install(Auth) { }
+                install(Auth) {
+                    scheme = AuthRedirect.SCHEME
+                    host = AuthRedirect.HOST
+                }
                 install(Functions) { }
                 install(Realtime) { }
             }

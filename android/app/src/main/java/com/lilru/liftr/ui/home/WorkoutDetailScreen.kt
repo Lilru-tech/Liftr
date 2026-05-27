@@ -20,6 +20,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -73,6 +75,12 @@ import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddSportType
 import com.lilru.liftr.ui.add.duplicate.AddWorkoutDuplicateStore
 import com.lilru.liftr.ui.add.duplicate.loadDuplicateForAdd
+import com.lilru.liftr.ui.compare.CompareAverageScope
+import com.lilru.liftr.ui.compare.CompareWorkoutCandidate
+import com.lilru.liftr.ui.compare.CompareAverageOption
+import com.lilru.liftr.ui.compare.CompareOtherTarget
+import com.lilru.liftr.ui.compare.ComparePickerEntry
+import com.lilru.liftr.ui.compare.ComparePickerState
 import com.lilru.liftr.ui.compare.CompareWorkoutsScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
@@ -97,10 +105,14 @@ fun WorkoutDetailScreen(
         factory = WorkoutDetailViewModelFactory(supabase = supabase, workoutId = workoutId)
     )
     val ui by vm.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var duplicateBusy by rememberSaveable(workoutId) { mutableStateOf(false) }
     var duplicateError by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
-    var commentDraft by rememberSaveable(workoutId) { mutableStateOf("") }
+    var commentDraft by rememberSaveable(workoutId, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
+        mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
+    }
+    var trackedMentions by remember(workoutId) { mutableStateOf(listOf<TrackedMention>()) }
     var replyToCommentId by rememberSaveable(workoutId) { mutableStateOf<Int?>(null) }
     var selectedProfileUserId by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
     var showActiveStrength by rememberSaveable(workoutId) { mutableStateOf(false) }
@@ -114,6 +126,8 @@ fun WorkoutDetailScreen(
     var showComparePicker by rememberSaveable(workoutId) { mutableStateOf(false) }
     var compareSearchQuery by remember { mutableStateOf("") }
     var compareOtherId by rememberSaveable(workoutId) { mutableStateOf<Int?>(null) }
+    var compareAverageScope by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
+    var compareAverageRightLabel by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
     var showDualStart by rememberSaveable(workoutId) { mutableStateOf(false) }
     var dualLinkedGuestWid by rememberSaveable(workoutId) { mutableStateOf<Int?>(null) }
     var dualLinkedGuest2Wid by rememberSaveable(workoutId) { mutableStateOf<Int?>(null) }
@@ -126,6 +140,8 @@ fun WorkoutDetailScreen(
     var showCommentsSheet by rememberSaveable(workoutId) { mutableStateOf(false) }
     var menuExpanded by remember { mutableStateOf(false) }
     var startErrorMessage by remember { mutableStateOf<String?>(null) }
+    var startFailureOffersSolo by remember { mutableStateOf(false) }
+    var startFailureRetryAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     val startCtx = LocalContext.current
     LaunchedEffect(showLikersSheet, ui.likeCount, ui.isLikedByMe, ui.likeBusy) {
         if (showLikersSheet && !ui.likeBusy) {
@@ -222,14 +238,20 @@ fun WorkoutDetailScreen(
         return
     }
 
-    if (showCompare && compareOtherId != null) {
+    val compareTarget = remember(compareOtherId, compareAverageScope, ui.comparePicker) {
+        resolveCompareTarget(compareOtherId, compareAverageScope, ui.comparePicker)
+    }
+    if (showCompare && compareTarget != null) {
         CompareWorkoutsScreen(
             supabase = supabase,
             currentWorkoutId = workoutId,
-            otherWorkoutId = compareOtherId!!,
+            other = compareTarget,
+            averageRightLabel = compareAverageRightLabel,
             onClose = {
                 showCompare = false
                 compareOtherId = null
+                compareAverageScope = null
+                compareAverageRightLabel = null
             },
             modifier = modifier
         )
@@ -380,7 +402,7 @@ fun WorkoutDetailScreen(
                                     DropdownMenuItem(
                                         text = {
                                             Text(
-                                                if (ui.compareCandidates.size > 1) {
+                                                if (shouldShowComparePicker(ui.comparePicker)) {
                                                     stringResource(R.string.home_detail_compare_ellipsis)
                                                 } else {
                                                     stringResource(R.string.home_detail_compare)
@@ -389,12 +411,20 @@ fun WorkoutDetailScreen(
                                         },
                                         onClick = {
                                             menuExpanded = false
-                                            if (ui.compareCandidates.size > 1) {
+                                            if (shouldShowComparePicker(ui.comparePicker)) {
                                                 showComparePicker = true
                                             } else {
-                                                compareOtherId = ui.compareCandidateId
-                                                    ?: ui.compareCandidates.firstOrNull()?.id
-                                                if (compareOtherId != null) showCompare = true
+                                                val only = singleCompareTarget(ui.comparePicker)
+                                                if (only != null) {
+                                                    applyCompareTarget(
+                                                        only,
+                                                        context,
+                                                        onWorkoutId = { compareOtherId = it },
+                                                        onAverageScope = { compareAverageScope = it },
+                                                        onAverageLabel = { compareAverageRightLabel = it }
+                                                    )
+                                                    showCompare = true
+                                                }
                                             }
                                         }
                                     )
@@ -471,6 +501,9 @@ fun WorkoutDetailScreen(
                                 }
                                 showDualStart = true
                                 return@Button
+                            }
+                            if (planned && canStartStrength) {
+                                com.lilru.liftr.workout.WorkoutStartSync.enqueueStart(startCtx, workoutId)
                             }
                             openPreActiveOrActive(
                                 canStartStrength = canStartStrength,
@@ -549,7 +582,8 @@ fun WorkoutDetailScreen(
                             isOwner = isOwner,
                             supabase = supabase,
                             onSegmentCreated = { id -> segmentOverlayUuid = id.toString() },
-                            onDuplicateSegment = { id -> segmentOverlayUuid = id.toString() }
+                            onDuplicateSegment = { id -> segmentOverlayUuid = id.toString() },
+                            onOpenProfile = { selectedProfileUserId = it }
                         )
                     }
                 } else {
@@ -596,6 +630,7 @@ fun WorkoutDetailScreen(
             WorkoutDetailFeedbackRow(
                 isLiked = ui.isLikedByMe,
                 likeCount = ui.likeCount,
+                commentCount = ui.commentCount,
                 likeBusy = ui.likeBusy,
                 onToggleLike = { vm.toggleLike() },
                 onShowLikers = { showLikersSheet = true },
@@ -733,8 +768,34 @@ fun WorkoutDetailScreen(
                                         )
                                     },
                                     onFailure = { e ->
-                                        startErrorMessage = e.message?.take(220)
-                                            ?: e::class.java.simpleName
+                                        startFailureOffersSolo = true
+                                        startFailureRetryAction = {
+                                            dualPrepareBusy = true
+                                            vm.preparePlannedStrengthAndLinkedGuest(null) { r ->
+                                                dualPrepareBusy = false
+                                                r.fold(
+                                                    onSuccess = {
+                                                        showDualStart = false
+                                                        dualLinkedGuestWid = null
+                                                        dualLinkedGuest2Wid = null
+                                                        dualGuestAvatarUrl = null
+                                                        dualGuest2AvatarUrl = null
+                                                        dualHostAvatarUrl = ui.owner?.avatarUrl
+                                                        vm.refresh(showBlockingLoader = false)
+                                                        openStrengthActiveWithCountdownPolicy(
+                                                            startCtx,
+                                                            { showActiveStrength = it },
+                                                            { preActiveCountdown = it }
+                                                        )
+                                                    },
+                                                    onFailure = { err ->
+                                                        startFailureOffersSolo = true
+                                                        startErrorMessage = com.lilru.liftr.workout.WorkoutStartSync.userFacingMessage(err)
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        startErrorMessage = com.lilru.liftr.workout.WorkoutStartSync.userFacingMessage(e)
                                     }
                                 )
                             }
@@ -775,8 +836,36 @@ fun WorkoutDetailScreen(
                                             )
                                         },
                                         onFailure = { e ->
-                                            startErrorMessage = e.message?.take(220)
-                                                ?: e::class.java.simpleName
+                                            startFailureOffersSolo = true
+                                            startFailureRetryAction = {
+                                                dualPrepareBusy = true
+                                                vm.preparePlannedStrengthTrio(a.userId, b.userId) { r2 ->
+                                                    dualPrepareBusy = false
+                                                    r2.fold(
+                                                        onSuccess = { pair ->
+                                                            showDualStart = false
+                                                            dualLinkedGuestWid = pair.first
+                                                            dualLinkedGuest2Wid = pair.second
+                                                            dualGuestAvatarUrl = a.avatarUrl
+                                                            dualGuest2AvatarUrl = b.avatarUrl
+                                                            dualHostAvatarUrl = ui.owner?.avatarUrl
+                                                            vm.refresh(showBlockingLoader = false)
+                                                            openStrengthActiveWithCountdownPolicy(
+                                                                startCtx,
+                                                                { showActiveStrength = it },
+                                                                { preActiveCountdown = it }
+                                                            )
+                                                        },
+                                                        onFailure = { err ->
+                                                            startFailureOffersSolo = true
+                                                            startErrorMessage =
+                                                                com.lilru.liftr.workout.WorkoutStartSync.userFacingMessage(err)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            startErrorMessage =
+                                                com.lilru.liftr.workout.WorkoutStartSync.userFacingMessage(e)
                                         }
                                     )
                                 }
@@ -809,8 +898,36 @@ fun WorkoutDetailScreen(
                                             )
                                         },
                                         onFailure = { e ->
-                                            startErrorMessage = e.message?.take(220)
-                                                ?: e::class.java.simpleName
+                                            startFailureOffersSolo = true
+                                            startFailureRetryAction = {
+                                                dualPrepareBusy = true
+                                                vm.preparePlannedStrengthAndLinkedGuest(pick.userId) { r2 ->
+                                                    dualPrepareBusy = false
+                                                    r2.fold(
+                                                        onSuccess = { guestWid ->
+                                                            showDualStart = false
+                                                            dualLinkedGuestWid = guestWid
+                                                            dualLinkedGuest2Wid = null
+                                                            dualGuestAvatarUrl = pick.avatarUrl
+                                                            dualGuest2AvatarUrl = null
+                                                            dualHostAvatarUrl = ui.owner?.avatarUrl
+                                                            vm.refresh(showBlockingLoader = false)
+                                                            openStrengthActiveWithCountdownPolicy(
+                                                                startCtx,
+                                                                { showActiveStrength = it },
+                                                                { preActiveCountdown = it }
+                                                            )
+                                                        },
+                                                        onFailure = { err ->
+                                                            startFailureOffersSolo = true
+                                                            startErrorMessage =
+                                                                com.lilru.liftr.workout.WorkoutStartSync.userFacingMessage(err)
+                                                        }
+                                                    )
+                                                }
+                                            }
+                                            startErrorMessage =
+                                                com.lilru.liftr.workout.WorkoutStartSync.userFacingMessage(e)
                                         }
                                     )
                                 }
@@ -838,28 +955,101 @@ fun WorkoutDetailScreen(
     }
     if (startErrorMessage != null) {
         AlertDialog(
-            onDismissRequest = { startErrorMessage = null },
+            onDismissRequest = {
+                startErrorMessage = null
+                startFailureOffersSolo = false
+                startFailureRetryAction = null
+            },
             title = { Text(stringResource(R.string.workout_detail_start_failed_title)) },
             text = { Text(startErrorMessage ?: "") },
             confirmButton = {
-                TextButton(onClick = { startErrorMessage = null }) {
+                if (startFailureOffersSolo) {
+                    TextButton(
+                        onClick = {
+                            startErrorMessage = null
+                            startFailureOffersSolo = false
+                            startFailureRetryAction = null
+                            showDualStart = false
+                            dualLinkedGuestWid = null
+                            dualLinkedGuest2Wid = null
+                            dualGuestAvatarUrl = null
+                            dualGuest2AvatarUrl = null
+                            com.lilru.liftr.workout.WorkoutStartSync.enqueueStart(startCtx, workoutId)
+                            openStrengthActiveWithCountdownPolicy(
+                                startCtx,
+                                { showActiveStrength = it },
+                                { preActiveCountdown = it }
+                            )
+                        }
+                    ) {
+                        Text(stringResource(R.string.workout_detail_start_failed_solo))
+                    }
+                }
+                TextButton(
+                    onClick = {
+                        val retry = startFailureRetryAction
+                        startErrorMessage = null
+                        startFailureOffersSolo = false
+                        startFailureRetryAction = null
+                        retry?.invoke()
+                    }
+                ) {
+                    Text(stringResource(R.string.home_retry))
+                }
+                TextButton(
+                    onClick = {
+                        startErrorMessage = null
+                        startFailureOffersSolo = false
+                        startFailureRetryAction = null
+                        showDualStart = false
+                        dualLinkedGuestWid = null
+                        dualLinkedGuest2Wid = null
+                        dualGuestAvatarUrl = null
+                        dualGuest2AvatarUrl = null
+                        com.lilru.liftr.workout.WorkoutStartSync.enqueueStart(startCtx, workoutId)
+                        openStrengthActiveWithCountdownPolicy(
+                            startCtx,
+                            { showActiveStrength = it },
+                            { preActiveCountdown = it }
+                        )
+                    }
+                ) {
+                    Text(stringResource(R.string.workout_detail_start_failed_offline))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        startErrorMessage = null
+                        startFailureOffersSolo = false
+                        startFailureRetryAction = null
+                    }
+                ) {
                     Text(stringResource(R.string.workout_detail_start_failed_ok))
                 }
             }
         )
     }
     if (showCommentsSheet) {
+        LaunchedEffect(Unit) { vm.loadCommentFolloweesIfNeeded() }
         ModalBottomSheet(onDismissRequest = { showCommentsSheet = false }) {
             WorkoutDetailCommentsSheetContent(
                 comments = ui.comments,
                 commentDraft = commentDraft,
                 onCommentDraftChange = { commentDraft = it },
+                trackedMentions = trackedMentions,
+                onTrackedMentionsChange = { trackedMentions = it },
+                followees = ui.commentFollowees,
+                onRequestFollowees = { vm.loadCommentFolloweesIfNeeded() },
                 replyToCommentId = replyToCommentId,
                 onCancelReply = { replyToCommentId = null },
                 commentBusy = ui.commentBusy,
                 onSendComment = {
-                    vm.sendComment(commentDraft, parentId = replyToCommentId) {
-                        commentDraft = ""
+                    val body = commentDraft.text
+                    val mentionIds = CommentMentionSupport.resolvedMentionIds(body, trackedMentions)
+                    vm.sendComment(body, parentId = replyToCommentId, mentionedUserIds = mentionIds) {
+                        commentDraft = androidx.compose.ui.text.input.TextFieldValue("")
+                        trackedMentions = emptyList()
                         replyToCommentId = null
                     }
                 },
@@ -1426,18 +1616,18 @@ fun WorkoutDetailScreen(
         }
     }
     if (showComparePicker) {
-        val filteredCompare = remember(ui.compareCandidates, compareSearchQuery) {
-            val q = compareSearchQuery.trim()
-            if (q.isEmpty()) {
-                ui.compareCandidates
-            } else {
-                ui.compareCandidates.filter { c ->
-                    c.displayTitle.contains(q, ignoreCase = true) ||
-                        c.ownerUsername?.contains(q, ignoreCase = true) == true ||
-                        c.startedAtIso.contains(q, ignoreCase = true)
-                }
-            }
+        val picker = ui.comparePicker
+        val filteredSessions = remember(picker, compareSearchQuery) {
+            filterComparePickerSessions(picker, compareSearchQuery)
         }
+        val visibleMyAverage = remember(picker, compareSearchQuery, context) {
+            picker.myAverage?.takeIf { compareAverageMatchesSearch(it, compareSearchQuery, context) }
+        }
+        val visibleGlobalAverage = remember(picker, compareSearchQuery, context) {
+            picker.globalAverage?.takeIf { compareAverageMatchesSearch(it, compareSearchQuery, context) }
+        }
+        val showAverageCtas = visibleMyAverage != null || visibleGlobalAverage != null
+        val showEmptySearch = compareSearchQuery.isNotBlank() && !showAverageCtas && filteredSessions.isEmpty()
         ModalBottomSheet(
             onDismissRequest = { showComparePicker = false }
         ) {
@@ -1449,8 +1639,65 @@ fun WorkoutDetailScreen(
                 Text(
                     stringResource(R.string.home_detail_compare_picker_title),
                     style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.padding(bottom = 12.dp)
                 )
+                if (showAverageCtas) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        visibleMyAverage?.let { option ->
+                            CompareAverageCtaCard(
+                                option = option,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    applyCompareTarget(
+                                        CompareOtherTarget.Average(
+                                            option.scope,
+                                            option.workoutIds,
+                                            option.sampleCount
+                                        ),
+                                        context,
+                                        onWorkoutId = {
+                                            compareOtherId = it
+                                            compareAverageScope = null
+                                        },
+                                        onAverageScope = { compareAverageScope = it },
+                                        onAverageLabel = { compareAverageRightLabel = it }
+                                    )
+                                    showComparePicker = false
+                                    showCompare = true
+                                }
+                            )
+                        }
+                        visibleGlobalAverage?.let { option ->
+                            CompareAverageCtaCard(
+                                option = option,
+                                modifier = Modifier.weight(1f),
+                                onClick = {
+                                    applyCompareTarget(
+                                        CompareOtherTarget.Average(
+                                            option.scope,
+                                            option.workoutIds,
+                                            option.sampleCount
+                                        ),
+                                        context,
+                                        onWorkoutId = {
+                                            compareOtherId = it
+                                            compareAverageScope = null
+                                        },
+                                        onAverageScope = { compareAverageScope = it },
+                                        onAverageLabel = { compareAverageRightLabel = it }
+                                    )
+                                    showComparePicker = false
+                                    showCompare = true
+                                }
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = compareSearchQuery,
                     onValueChange = { compareSearchQuery = it },
@@ -1464,7 +1711,7 @@ fun WorkoutDetailScreen(
                         imeAction = ImeAction.Search
                     )
                 )
-                if (filteredCompare.isEmpty() && compareSearchQuery.isNotBlank()) {
+                if (showEmptySearch) {
                     Text(
                         stringResource(R.string.home_detail_compare_search_no_matches),
                         style = MaterialTheme.typography.bodyMedium,
@@ -1474,13 +1721,26 @@ fun WorkoutDetailScreen(
                             .padding(vertical = 16.dp)
                     )
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(filteredCompare, key = { it.id }) { c ->
+                    if (filteredSessions.isNotEmpty()) {
+                        Text(
+                            stringResource(R.string.compare_average_picker_sessions),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
+                    LazyColumn(
+                        modifier = Modifier.weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(filteredSessions, key = { it.id }) { c ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
                                         compareOtherId = c.id
+                                        compareAverageScope = null
+                                        compareAverageRightLabel = null
                                         showComparePicker = false
                                         showCompare = true
                                     }
@@ -1508,6 +1768,163 @@ fun WorkoutDetailScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CompareAverageCtaCard(
+    option: CompareAverageOption,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val title = averagePickerTitle(option, context)
+    val icon = when (option.scope) {
+        CompareAverageScope.MINE -> Icons.Filled.Person
+        CompareAverageScope.GLOBAL -> Icons.Filled.Public
+    }
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        tonalElevation = 2.dp
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.padding(top = 1.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1
+                )
+            }
+            Text(
+                option.typeLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1
+            )
+            Text(
+                stringResource(R.string.compare_average_sample_short, option.sampleCount),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            )
+        }
+    }
+}
+
+private fun shouldShowComparePicker(picker: ComparePickerState): Boolean {
+    val avgCount = (if (picker.myAverage != null) 1 else 0) +
+        (if (picker.globalAverage != null) 1 else 0)
+    return picker.sessions.size + avgCount > 1
+}
+
+private fun singleCompareTarget(picker: ComparePickerState): CompareOtherTarget? {
+    val options = buildList {
+        picker.myAverage?.let {
+            add(CompareOtherTarget.Average(it.scope, it.workoutIds, it.sampleCount))
+        }
+        picker.globalAverage?.let {
+            add(CompareOtherTarget.Average(it.scope, it.workoutIds, it.sampleCount))
+        }
+        picker.sessions.forEach { add(CompareOtherTarget.Workout(it.id)) }
+    }
+    return options.singleOrNull()
+}
+
+private fun resolveCompareTarget(
+    workoutId: Int?,
+    averageScope: String?,
+    picker: ComparePickerState
+): CompareOtherTarget? {
+    if (averageScope != null) {
+        val opt = when (averageScope) {
+            "mine" -> picker.myAverage
+            "global" -> picker.globalAverage
+            else -> null
+        }
+        return opt?.let {
+            CompareOtherTarget.Average(it.scope, it.workoutIds, it.sampleCount)
+        }
+    }
+    return workoutId?.let { CompareOtherTarget.Workout(it) }
+}
+
+private fun applyCompareTarget(
+    target: CompareOtherTarget,
+    context: Context,
+    onWorkoutId: (Int) -> Unit,
+    onAverageScope: (String) -> Unit,
+    onAverageLabel: (String) -> Unit
+) {
+    when (target) {
+        is CompareOtherTarget.Workout -> onWorkoutId(target.id)
+        is CompareOtherTarget.Average -> {
+            onAverageScope(
+                when (target.scope) {
+                    CompareAverageScope.MINE -> "mine"
+                    CompareAverageScope.GLOBAL -> "global"
+                }
+            )
+            onAverageLabel(averageCompareRightLabel(context, target))
+        }
+    }
+}
+
+private fun averageCompareRightLabel(
+    context: Context,
+    target: CompareOtherTarget.Average
+): String {
+    val title = when (target.scope) {
+        CompareAverageScope.MINE -> context.getString(R.string.compare_average_mine)
+        CompareAverageScope.GLOBAL -> context.getString(R.string.compare_average_global)
+    }
+    return "$title (${target.sampleCount})"
+}
+
+private fun averagePickerTitle(option: CompareAverageOption, context: Context): String =
+    when (option.scope) {
+        CompareAverageScope.MINE -> context.getString(R.string.compare_average_mine)
+        CompareAverageScope.GLOBAL -> context.getString(R.string.compare_average_global)
+    }
+
+private fun compareAverageMatchesSearch(
+    option: CompareAverageOption,
+    query: String,
+    context: Context
+): Boolean {
+    val q = query.trim()
+    if (q.isEmpty()) return true
+    return averagePickerTitle(option, context).contains(q, ignoreCase = true) ||
+        option.typeLabel.contains(q, ignoreCase = true)
+}
+
+private fun filterComparePickerSessions(
+    picker: ComparePickerState,
+    query: String
+): List<CompareWorkoutCandidate> {
+    val q = query.trim()
+    if (q.isEmpty()) return picker.sessions
+    return picker.sessions.filter { c ->
+        c.displayTitle.contains(q, ignoreCase = true) ||
+            c.ownerUsername?.contains(q, ignoreCase = true) == true ||
+            c.startedAtIso.contains(q, ignoreCase = true)
     }
 }
 

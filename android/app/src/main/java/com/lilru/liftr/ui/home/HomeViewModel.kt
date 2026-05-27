@@ -6,10 +6,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
-import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.data.PremiumStatusStore
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,6 +35,8 @@ import java.time.temporal.WeekFields
 import kotlin.math.roundToInt
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 @Serializable
 data class WorkoutSummary(
@@ -140,6 +143,11 @@ class HomeViewModel(
     private var nextFeedPage: Int = 0
 
     init {
+        viewModelScope.launch {
+            PremiumStatusStore.isPremium.collect { premium ->
+                _uiState.update { it.copy(isPremium = premium) }
+            }
+        }
         refresh()
     }
 
@@ -261,13 +269,11 @@ class HomeViewModel(
             }
             runCatching {
                 val visible = (listOf(me) + cachedFolloweeIds).distinct()
-                fetchWorkoutPage(me, visible, st.kindFilter, from)
+                fetchWorkoutPage(me, visible, emptyList(), st.kindFilter, from)
             }.onSuccess { (parsed, canMore) ->
                 if (parsed.isNotEmpty()) {
-                    val merged = mergeOwnerProfiles(parsed)
-                    val enriched = enrichWithSocial(me, merged)
                     _uiState.update { cur ->
-                        val combined = (cur.workouts + enriched)
+                        val combined = (cur.workouts + parsed)
                             .distinctBy { it.id }
                             .sortedByDescending { it.startedAt.orEmpty() }
                         cur.copy(
@@ -307,7 +313,7 @@ class HomeViewModel(
                     if (canLoadMore) nextFeedPage = 1 else nextFeedPage = 0
                     val merged = mergeOwnerProfiles(pageRows)
                     val enriched = enrichWithSocial(null, merged)
-                    val premium = LiftrPreferences.isPremium(app)
+                    val premium = PremiumStatusStore.isPremium.value
                     val emptyR = RecalcResult()
                     _uiState.value = st.copy(
                         loading = false,
@@ -357,42 +363,22 @@ class HomeViewModel(
                 cachedFolloweeIds = followees
                 val visibleUserIds = (listOf(me) + followees).distinct()
                 nextFeedPage = 0
-                val response = supabase
-                    .from(BackendContracts.Tables.WORKOUTS)
-                    .select(
-                        columns = Columns.raw(
-                            "id, user_id, kind, title, started_at, ended_at, state, calories_kcal, " +
-                                "cardio_sessions(activity_code), sport_sessions(sport)"
-                        )
-                    ) {
-                        filter {
-                            or {
-                                eq("user_id", me)
-                                and {
-                                    isIn("user_id", visibleUserIds)
-                                    neq("state", "planned")
-                                }
-                            }
-                        }
-                        if (st.kindFilter != HomeKindFilter.ALL) {
-                            filter { eq("kind", st.kindFilter.name.lowercase()) }
-                        }
-                        order("started_at", Order.DESCENDING)
-                        range(0L, PAGE_SIZE - 1L)
-                    }
-                val pageRows = parseWorkoutRows(response.data)
-                val canLoadMore = pageRows.size == PAGE_SIZE
+                val (enriched, canLoadMore) = fetchWorkoutPage(
+                    me = me,
+                    visible = visibleUserIds,
+                    participantWorkoutIds = emptyList(),
+                    kind = st.kindFilter,
+                    from = 0
+                )
                 if (canLoadMore) nextFeedPage = 1 else nextFeedPage = 0
-                val merged = mergeOwnerProfiles(pageRows)
-                val enriched = enrichWithSocial(me, merged)
                 val month = runCatching { loadIosMonthDetail(me) }
-                    .getOrNull() ?: buildMonthSummaryFallback(me, merged)
+                    .getOrNull() ?: buildMonthSummaryFallback(me, enriched)
                 val prs = runCatching { loadRecentPrs(me, followees) }
                     .getOrElse { e ->
                         Log.w(TAG, "PRs: ${e.message}")
                         emptyList()
                     }
-                val premium = LiftrPreferences.isPremium(app)
+                val premium = PremiumStatusStore.isPremium.value
                 val r = recalcParallels(me, followees, visibleUserIds)
                 HomeRefreshResult(enriched, month, prs, premium, canLoadMore, r)
             }.onSuccess { h ->
@@ -870,35 +856,67 @@ class HomeViewModel(
     private suspend fun fetchWorkoutPage(
         me: String,
         visible: List<String>,
+        participantWorkoutIds: List<Int>,
         kind: HomeKindFilter,
         from: Int
     ): Pair<List<WorkoutSummary>, Boolean> {
-        val to = from + PAGE_SIZE - 1L
-        val res = supabase
-            .from(BackendContracts.Tables.WORKOUTS)
-            .select(
-                columns = Columns.raw(
-                    "id, user_id, kind, title, started_at, ended_at, state, calories_kcal, " +
-                        "cardio_sessions(activity_code), sport_sessions(sport)"
-                )
-            ) {
-                filter {
-                    or {
-                        eq("user_id", me)
-                        and {
-                            isIn("user_id", visible)
-                            neq("state", "planned")
-                        }
-                    }
-                }
+        val page = from / PAGE_SIZE
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_HOME_FEED_PAGE_V1,
+            buildJsonObject {
+                put("p_page", page)
+                put("p_page_size", PAGE_SIZE)
                 if (kind != HomeKindFilter.ALL) {
-                    filter { eq("kind", kind.name.lowercase()) }
+                    put("p_kind", kind.name.lowercase())
                 }
-                order("started_at", Order.DESCENDING)
-                range(from.toLong(), to)
             }
-        val list = parseWorkoutRows(res.data)
-        return list to (list.size == PAGE_SIZE)
+        )
+        val root = JSONObject(res.data)
+        val workoutsArr = root.optJSONArray("workouts") ?: JSONArray()
+        val list = (0 until workoutsArr.length()).mapNotNull { idx ->
+            workoutsArr.optJSONObject(idx)?.let(::jsonToWorkoutSummary)
+        }
+        val scoreByW = mutableMapOf<Int, Double>()
+        val scoresArr = root.optJSONArray("scores") ?: JSONArray()
+        for (i in 0 until scoresArr.length()) {
+            val o = scoresArr.optJSONObject(i) ?: continue
+            scoreByW[o.optInt("workout_id")] = o.optDouble("score", 0.0)
+        }
+        val likesByW = mutableMapOf<Int, Int>()
+        val likedByMe = mutableSetOf<Int>()
+        val likesArr = root.optJSONArray("likes") ?: JSONArray()
+        for (i in 0 until likesArr.length()) {
+            val o = likesArr.optJSONObject(i) ?: continue
+            val wid = o.optInt("workout_id")
+            likesByW[wid] = (likesByW[wid] ?: 0) + 1
+            if (o.optString("user_id", "") == me) likedByMe.add(wid)
+        }
+        val participantByW = mutableMapOf<Int, MutableList<String>>()
+        val participantsArr = root.optJSONArray("participants") ?: JSONArray()
+        for (i in 0 until participantsArr.length()) {
+            val o = participantsArr.optJSONObject(i) ?: continue
+            val wid = o.optInt("workout_id")
+            val uid = o.optString("user_id", "").takeIf { it.isNotBlank() } ?: continue
+            participantByW.getOrPut(wid) { mutableListOf() }.add(uid)
+        }
+        val profileMap = fetchOwnerProfilesByUserId(
+            (list.map { it.userId } + participantByW.values.flatten()).distinct()
+        )
+        val enriched = list.map { w ->
+            val owner = profileMap[w.userId]
+            val coUrls = participantByW[w.id].orEmpty()
+                .filter { it != w.userId }
+                .mapNotNull { profileMap[it]?.second }
+            w.copy(
+                ownerUsername = owner?.first,
+                ownerAvatarUrl = owner?.second,
+                score = scoreByW[w.id],
+                likeCount = likesByW[w.id] ?: 0,
+                isLikedByMe = likedByMe.contains(w.id),
+                coAvatarUrls = coUrls
+            )
+        }
+        return enriched to (list.size == PAGE_SIZE)
     }
 
     /** Signed-out home: global published workouts only (paridad con iOS `loadGuestFeedPage`). */
@@ -927,6 +945,7 @@ class HomeViewModel(
         val me = supabase.auth.currentUserOrNull()?.id ?: return
         val followees = cachedFolloweeIds
         val visibleUserIds = (listOf(me) + followees).distinct()
+        val participantWorkoutIds = fetchParticipantWorkoutIds(me)
         val st = _uiState.value
         val raw = supabase
             .from(BackendContracts.Tables.WORKOUTS)
@@ -948,7 +967,11 @@ class HomeViewModel(
             return
         }
         val kindFilter = st.kindFilter
-        val shouldList = (w.userId == me || (visibleUserIds.contains(w.userId) && w.state?.lowercase() != "planned")) &&
+        val shouldList = (
+            w.userId == me ||
+                participantWorkoutIds.contains(w.id) ||
+                (visibleUserIds.contains(w.userId) && w.state?.lowercase() != "planned")
+            ) &&
             (kindFilter == HomeKindFilter.ALL || w.kind?.lowercase() == kindFilter.name.lowercase())
         if (!shouldList) {
             _uiState.update { s ->
@@ -978,7 +1001,7 @@ class HomeViewModel(
             .getOrNull() ?: buildMonthSummaryFallback(me, _uiState.value.workouts)
         val prs = runCatching { loadRecentPrs(me, followees) }
             .getOrElse { emptyList() }
-        val premium = LiftrPreferences.isPremium(app)
+        val premium = PremiumStatusStore.isPremium.value
         val r = recalcParallels(me, followees, visibleUserIds)
         _uiState.update { s ->
             s.copy(
@@ -1396,6 +1419,38 @@ class HomeViewModel(
             }
             .data
         return parseLikesList(raw)
+    }
+
+    private suspend fun fetchParticipantWorkoutIds(me: String): List<Int> {
+        val raw = supabase
+            .from(BackendContracts.Tables.WORKOUT_PARTICIPANTS)
+            .select(columns = Columns.raw("workout_id")) {
+                filter { eq("user_id", me) }
+                limit(2000)
+            }
+            .data
+        val t = raw.trim()
+        if (t.isEmpty()) return emptyList()
+        val arr = when {
+            t.startsWith("[") -> JSONArray(t)
+            t.startsWith("{") -> {
+                val o = JSONObject(t)
+                when (val d = o.opt("data")) {
+                    is JSONArray -> d
+                    is JSONObject -> JSONArray().put(d)
+                    else -> return emptyList()
+                }
+            }
+            else -> return emptyList()
+        }
+        val out = ArrayList<Int>()
+        for (i in 0 until arr.length()) {
+            val id = arr.optJSONObject(i)?.optInt("workout_id", Int.MIN_VALUE)
+                ?.takeIf { it != Int.MIN_VALUE }
+                ?: continue
+            out.add(id)
+        }
+        return out.distinct()
     }
 
     private fun parseLikesList(raw: String): List<Pair<Int, String>> {

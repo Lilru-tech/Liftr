@@ -16,6 +16,9 @@ struct AppleHealthImportView: View {
     @State private var applyingQuickRange = false
     @State private var importing = false
     @State private var summary: HealthKitImportSummary?
+    @State private var syncEnabled = HealthKitCardioSyncService.shared.isSyncEnabled
+    @State private var syncPreferenceBusy = false
+    @State private var suppressSyncToggleChange = false
     @State private var banner: String?
     @State private var showImportHelp = false
 
@@ -29,12 +32,23 @@ struct AppleHealthImportView: View {
                             .foregroundStyle(.primary)
 
                         Text(
-                            "Manually imports compatible cardio workouts (run, walk, hike, cycling, swimming, rowing) from Apple Health. "
-                                + "Nothing is written back to Health, and already imported sessions are skipped."
+                            "Imports compatible cardio workouts (run, walk, hike, cycling, swimming, rowing) from Apple Health. "
+                                + "With automatic import on, new sessions sync in the background. Nothing is written back to Health, and already imported sessions are skipped."
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                        Toggle("Automatic import", isOn: $syncEnabled)
+                            .disabled(syncPreferenceBusy)
+                            .onChange(of: syncEnabled) { _, enabled in
+                                guard !suppressSyncToggleChange else { return }
+                                Task { await setSyncEnabled(enabled) }
+                            }
+                        if let lastSync = HealthKitCardioSyncService.shared.lastSyncAt {
+                            Text("Last sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -97,6 +111,10 @@ struct AppleHealthImportView: View {
                             LabeledContent("Imported", value: "\(s.imported)")
                             Divider().opacity(0.15)
                             LabeledContent("Already in Liftr", value: "\(s.skippedDuplicate)")
+                            if s.mergedDuplicate > 0 {
+                                Divider().opacity(0.15)
+                                LabeledContent("Merged with existing", value: "\(s.mergedDuplicate)")
+                            }
                             Divider().opacity(0.15)
                             LabeledContent("Failed", value: "\(s.failed)")
                             if !s.errorMessages.isEmpty {
@@ -253,6 +271,33 @@ struct AppleHealthImportView: View {
         "\(Self.quickRangeDateFormatter.string(from: fromDate)) – \(Self.quickRangeDateFormatter.string(from: toDate))"
     }
 
+    private func setSyncEnabled(_ enabled: Bool) async {
+        syncPreferenceBusy = true
+        defer { syncPreferenceBusy = false }
+        do {
+            if enabled {
+                let result = try await HealthKitCardioSyncService.shared.enableBackgroundSync()
+                summary = result
+                if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
+                    banner = "Automatic import enabled. No compatible cardio workouts found in the last 90 days."
+                } else if result.failed > 0, let firstError = result.errorMessages.first {
+                    banner = "Automatic import enabled, but the initial import reported: \(firstError)"
+                } else {
+                    banner = "Automatic import enabled"
+                }
+            } else {
+                HealthKitCardioSyncService.shared.disableBackgroundSync()
+                banner = "Automatic import disabled"
+                summary = nil
+            }
+        } catch {
+            suppressSyncToggleChange = true
+            syncEnabled = HealthKitCardioSyncService.shared.isSyncEnabled
+            suppressSyncToggleChange = false
+            banner = error.localizedDescription
+        }
+    }
+
     private func runImport() async {
         await MainActor.run {
             importing = true
@@ -285,13 +330,14 @@ struct AppleHealthImportView: View {
         let result = await HealthKitCardioImportService.shared.importCardioWorkouts(
             from: from,
             to: toExclusive,
-            userId: uid
+            userId: uid,
+            mode: .manual
         )
 
         await MainActor.run {
             importing = false
             summary = result
-            if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0 {
+            if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
                 banner = "No compatible cardio workouts found in this date range."
             }
         }

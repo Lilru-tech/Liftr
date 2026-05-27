@@ -36,27 +36,24 @@ internal fun updateBlockForExpandedIndex(
     rpe: Double?,
     restSec: Int?
 ): List<ActiveStrengthSetLine> {
-    val current = sets.getOrNull(expandedIndex) ?: return sets
-    val configId = current.configId
-    val configCount = sets.count { it.configId == configId }
-    val updated = if (current.segmentsInRow <= 1 || configCount <= 1) {
-        sets.map { line ->
-            if (line.configId != configId) line
-            else line.copy(reps = reps, weightKg = weightKg, rpe = rpe, restSec = restSec)
-        }
-    } else {
-        val lastIdxForConfig = sets.indexOfLast { it.configId == configId }
-        sets.mapIndexed { idx, line ->
-            if (idx != expandedIndex && idx != lastIdxForConfig) {
-                line
-            } else if (idx == expandedIndex) {
-                line.copy(reps = reps, weightKg = weightKg, rpe = rpe)
-            } else {
-                line.copy(rpe = rpe, restSec = restSec)
-            }
-        }
+    if (sets.getOrNull(expandedIndex) == null) return sets
+    val newConfigId = nextSyntheticConfigId(sets)
+    val updated = sets.mapIndexed { idx, line ->
+        if (idx != expandedIndex) line
+        else line.copy(
+            configId = newConfigId,
+            reps = reps,
+            weightKg = weightKg,
+            rpe = rpe,
+            restSec = restSec
+        )
     }
     return renumberExpandedSets(updated)
+}
+
+internal fun nextSyntheticConfigId(sets: List<ActiveStrengthSetLine>): Int {
+    val minExisting = sets.minOfOrNull { it.configId } ?: 0
+    return if (minExisting < 0) minExisting - 1 else -1
 }
 
 internal fun renumberExpandedSets(sets: List<ActiveStrengthSetLine>): List<ActiveStrengthSetLine> {

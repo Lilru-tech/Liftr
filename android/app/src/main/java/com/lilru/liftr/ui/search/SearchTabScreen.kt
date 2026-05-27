@@ -55,11 +55,12 @@ import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
-import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
+import com.lilru.liftr.ui.territory.TerritoryMapScreen
 import io.github.jan.supabase.SupabaseClient
 import kotlinx.coroutines.delay
 import java.util.UUID
@@ -71,11 +72,7 @@ fun SearchTabScreen(
     onOpenAddWithPendingDuplicate: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val searchCtx = LocalContext.current
-    var isPremium by remember { mutableStateOf(LiftrPreferences.isPremium(searchCtx)) }
-    LaunchedEffect(searchCtx) {
-        isPremium = LiftrPreferences.isPremium(searchCtx)
-    }
+    val isPremium by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
     val vm: SearchViewModel = viewModel(factory = SearchViewModelFactory(supabase))
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var selectedWorkout by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -121,10 +118,11 @@ fun SearchTabScreen(
         return
     }
 
-    // Búsqueda con debounce al teclear; el scope la dispara ya en [SearchViewModel.setScope].
     LaunchedEffect(ui.query) {
-        delay(400)
-        vm.search()
+        if (ui.scope != SearchScope.MAP) {
+            delay(400)
+            vm.search()
+        }
     }
 
     val pull = rememberPullRefreshState(
@@ -134,40 +132,56 @@ fun SearchTabScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            LazyColumn(
+            Row(
                 modifier = Modifier
-                    .weight(1f, fill = true)
                     .fillMaxWidth()
-                    .pullRefresh(pull)
-                    .padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                item {
-                    Row(
+                FilterChip(
+                    selected = ui.scope == SearchScope.USERS,
+                    onClick = { vm.setScope(SearchScope.USERS) },
+                    label = { Text(stringResource(R.string.search_scope_users)) }
+                )
+                FilterChip(
+                    selected = ui.scope == SearchScope.WORKOUTS,
+                    onClick = { vm.setScope(SearchScope.WORKOUTS) },
+                    label = { Text(stringResource(R.string.search_scope_workouts)) }
+                )
+                FilterChip(
+                    selected = ui.scope == SearchScope.SEGMENTS,
+                    onClick = { vm.setScope(SearchScope.SEGMENTS) },
+                    label = { Text(stringResource(R.string.search_scope_segments)) }
+                )
+                FilterChip(
+                    selected = ui.scope == SearchScope.MAP,
+                    onClick = { vm.setScope(SearchScope.MAP) },
+                    label = { Text(stringResource(R.string.search_scope_map)) }
+                )
+            }
+            if (ui.scope == SearchScope.MAP) {
+                TerritoryMapScreen(
+                    supabase = supabase,
+                    onOpenProfile = { selectedProfileUserId = it.toString() },
+                    modifier = Modifier
+                        .weight(1f, fill = true)
+                        .fillMaxWidth()
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .weight(1f, fill = true)
+                        .fillMaxWidth()
+                ) {
+                    LazyColumn(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            .fillMaxSize()
+                            .pullRefresh(pull)
+                            .padding(horizontal = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        FilterChip(
-                            selected = ui.scope == SearchScope.USERS,
-                            onClick = { vm.setScope(SearchScope.USERS) },
-                            label = { Text(stringResource(R.string.search_scope_users)) }
-                        )
-                        FilterChip(
-                            selected = ui.scope == SearchScope.WORKOUTS,
-                            onClick = { vm.setScope(SearchScope.WORKOUTS) },
-                            label = { Text(stringResource(R.string.search_scope_workouts)) }
-                        )
-                        FilterChip(
-                            selected = ui.scope == SearchScope.SEGMENTS,
-                            onClick = { vm.setScope(SearchScope.SEGMENTS) },
-                            label = { Text(stringResource(R.string.search_scope_segments)) }
-                        )
-                    }
-                }
-                item {
-                    OutlinedTextField(
+                        item {
+                            OutlinedTextField(
                         value = ui.query,
                         onValueChange = vm::onQueryChanged,
                         label = { Text(stringResource(R.string.search_query_label)) },
@@ -195,7 +209,7 @@ fun SearchTabScreen(
                             .fillMaxWidth()
                             .padding(top = 2.dp)
                     )
-                }
+                        }
 
                 if (ui.query.trim().length < 2) {
                     item {
@@ -431,6 +445,13 @@ fun SearchTabScreen(
                         }
                     }
                 }
+                    }
+                    PullRefreshIndicator(
+                        refreshing = ui.isRefreshing,
+                        state = pull,
+                        modifier = Modifier.align(Alignment.TopCenter)
+                    )
+                }
             }
             if (!isPremium) {
                 AndroidView(
@@ -447,10 +468,5 @@ fun SearchTabScreen(
                 )
             }
         }
-        PullRefreshIndicator(
-            refreshing = ui.isRefreshing,
-            state = pull,
-            modifier = Modifier.align(Alignment.TopCenter)
-        )
     }
 }

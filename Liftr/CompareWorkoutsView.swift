@@ -3,18 +3,28 @@ import Supabase
 
 fileprivate let hyroxCustomPairingSeparator = "\u{001E}"
 
-fileprivate func compareStrengthSetMultiplicities(sortedSetNumbers: [Int]) -> [Int] {
-    let r = sortedSetNumbers.count
-    guard r > 0 else { return [] }
-    if sortedSetNumbers == Array(1...r) {
-        return Array(repeating: 1, count: r)
-    }
-    return sortedSetNumbers.map { max($0, 1) }
-}
-
 struct CompareWorkoutsView: View {
     let currentWorkoutId: Int
-    let myOtherWorkoutId: Int
+    let other: CompareOtherTarget
+    let averageRightLabel: String?
+
+    @State private var rightWorkoutIdForBuild: Int = 0
+
+    init(currentWorkoutId: Int, other: CompareOtherTarget, averageRightLabel: String? = nil) {
+        self.currentWorkoutId = currentWorkoutId
+        self.other = other
+        self.averageRightLabel = averageRightLabel
+        if case .workout(let id) = other {
+            _rightWorkoutIdForBuild = State(initialValue: id)
+        }
+    }
+
+    init(currentWorkoutId: Int, myOtherWorkoutId: Int) {
+        self.init(
+            currentWorkoutId: currentWorkoutId,
+            other: .workout(myOtherWorkoutId)
+        )
+    }
 
     struct ComparableMetric: Identifiable, Decodable {
         let metric: String
@@ -582,6 +592,20 @@ struct CompareWorkoutsView: View {
         let client = SupabaseManager.shared.client
         let decoder = JSONDecoder.supabase()
 
+        if case .average(let scope, let poolIds, let sampleCount) = other {
+            await loadAverageMetrics(
+                poolIds: poolIds,
+                scope: scope,
+                sampleCount: sampleCount,
+                decoder: decoder,
+                client: client
+            )
+            return
+        }
+
+        guard case .workout(let otherId) = other else { return }
+        await MainActor.run { rightWorkoutIdForBuild = otherId }
+
         struct URow: Decodable {
             let user_id: UUID
             let username: String?
@@ -606,7 +630,7 @@ struct CompareWorkoutsView: View {
             let rRes = try await client
                 .from("workouts")
                 .select("id, kind, title, user_id, started_at")
-                .eq("id", value: myOtherWorkoutId)
+                .eq("id", value: rightWorkoutIdForBuild)
                 .single()
                 .execute()
             let L = try decoder.decode(WRow.self, from: lRes.data)
@@ -716,6 +740,73 @@ struct CompareWorkoutsView: View {
         }
     }
 
+    private func loadAverageMetrics(
+        poolIds: [Int],
+        scope: CompareAverageScope,
+        sampleCount: Int,
+        decoder: JSONDecoder,
+        client: SupabaseClient
+    ) async {
+        struct WRow: Decodable {
+            let id: Int
+            let kind: String
+            let title: String?
+            let started_at: Date?
+        }
+        guard poolIds.count >= CompareAveragePoolLoader.minSamples else {
+            await MainActor.run { error = "Not enough workouts for average." }
+            return
+        }
+        do {
+            let lRes = try await client
+                .from("workouts")
+                .select("id, kind, title, started_at")
+                .eq("id", value: currentWorkoutId)
+                .single()
+                .execute()
+            let L = try decoder.decode(WRow.self, from: lRes.data)
+            let kind = L.kind.lowercased()
+            var perSession: [[ComparableMetric]] = []
+            for pid in poolIds {
+                await MainActor.run { rightWorkoutIdForBuild = pid }
+                await MainActor.run { metrics = [] }
+                switch kind {
+                case "cardio":
+                    try await buildCardioMetrics(decoder: decoder, client: client)
+                case "sport":
+                    try await buildSportMetrics(decoder: decoder, client: client)
+                case "strength":
+                    try await buildStrengthMetrics(decoder: decoder, client: client)
+                default:
+                    await MainActor.run { error = "Unsupported workout kind." }
+                    return
+                }
+                let snap = await MainActor.run { metrics }
+                if !snap.isEmpty { perSession.append(snap) }
+            }
+            let averaged = averageCompareMetrics(perSession)
+            let t = (L.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let leftBase = t.isEmpty ? "Workout A" : t
+            let leftSuffix: String = {
+                guard let d = L.started_at else { return "" }
+                let f = DateFormatter()
+                f.locale = Locale.current
+                f.dateFormat = "dd/MM/yyyy"
+                return " (\(f.string(from: d)))"
+            }()
+            let right = averageRightLabel ?? compareAverageRightLabel(scope: scope, sampleCount: sampleCount)
+            await MainActor.run {
+                workoutKind = L.kind
+                bothMine = true
+                leftLabel = leftBase + leftSuffix
+                rightLabel = right
+                metrics = averaged
+            }
+        } catch {
+            await MainActor.run { self.error = error.localizedDescription }
+        }
+    }
+
     private struct CardioRow: Decodable {
         let id: Int
         let activity_code: String?
@@ -745,7 +836,7 @@ struct CompareWorkoutsView: View {
 
     private func buildCardioMetrics(decoder: JSONDecoder, client: SupabaseClient) async throws {
         let lQ = try await client.from("cardio_sessions").select("*").eq("workout_id", value: currentWorkoutId).single().execute()
-        let rQ = try await client.from("cardio_sessions").select("*").eq("workout_id", value: myOtherWorkoutId).single().execute()
+        let rQ = try await client.from("cardio_sessions").select("*").eq("workout_id", value: rightWorkoutIdForBuild).single().execute()
         let L = try decoder.decode(CardioRow.self, from: lQ.data)
         let R = try decoder.decode(CardioRow.self, from: rQ.data)
         let la = (L.activity_code ?? L.modality ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -814,13 +905,13 @@ struct CompareWorkoutsView: View {
             .eq("workout_id", value: currentWorkoutId).single().execute()
         async let rS = client.from("sport_sessions")
             .select("id, sport, duration_sec, score_for, score_against")
-            .eq("workout_id", value: myOtherWorkoutId).single().execute()
+            .eq("workout_id", value: rightWorkoutIdForBuild).single().execute()
         async let lW = client.from("workouts")
             .select("duration_min, started_at, ended_at")
             .eq("id", value: currentWorkoutId).single().execute()
         async let rW = client.from("workouts")
             .select("duration_min, started_at, ended_at")
-            .eq("id", value: myOtherWorkoutId).single().execute()
+            .eq("id", value: rightWorkoutIdForBuild).single().execute()
 
         let L = try decoder.decode(SportRow.self, from: try await lS.data)
         let R = try decoder.decode(SportRow.self, from: try await rS.data)
@@ -1280,7 +1371,7 @@ struct CompareWorkoutsView: View {
             for (_, var rows) in setsByExercise {
                 rows.sort { $0.id < $1.id }
                 let nums = rows.map(\.set_number)
-                let mults = compareStrengthSetMultiplicities(sortedSetNumbers: nums)
+                let mults = strengthSetMultiplicities(sortedSetNumbers: nums)
                 for (s, mult) in zip(rows, mults) {
                     setsCount += mult
 
@@ -1360,11 +1451,11 @@ struct CompareWorkoutsView: View {
         async let rMetaRes = client
             .from("workouts")
             .select("duration_min, started_at, ended_at")
-            .eq("id", value: myOtherWorkoutId)
+            .eq("id", value: rightWorkoutIdForBuild)
             .single()
             .execute()
         async let lStatsAsync = stats(for: currentWorkoutId)
-        async let rStatsAsync = stats(for: myOtherWorkoutId)
+        async let rStatsAsync = stats(for: rightWorkoutIdForBuild)
 
         let lMeta = try decoder.decode(WMeta.self, from: try await lMetaRes.data)
         let rMeta = try decoder.decode(WMeta.self, from: try await rMetaRes.data)

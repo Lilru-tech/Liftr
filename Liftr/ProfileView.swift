@@ -20,6 +20,9 @@ private struct ProfileRow: Decodable {
     let height_cm: Int?
     let weight_kg: Double?
     let birth_date: Date?
+    let sex: String?
+    let base_calories_target: Int?
+    let base_calories_target_is_manual: Bool?
 }
 
 private struct DayActivity: Decodable, Identifiable {
@@ -55,6 +58,10 @@ private struct WorkoutScoreRow: Decodable {
 private struct OnlyStartedAt: Decodable {
     let started_at: Date?
     let state: String?
+}
+
+private struct ParticipantWorkoutId: Decodable {
+    let workout_id: Int
 }
 
 private struct GetMonthActivityParams: Encodable {
@@ -108,9 +115,20 @@ extension JSONDecoder {
     }
 }
 
+private func fetchParticipantWorkoutIds(for userId: UUID) async throws -> [Int] {
+    let response = try await SupabaseManager.shared.client
+        .from("workout_participants")
+        .select("workout_id")
+        .eq("user_id", value: userId.uuidString)
+        .execute()
+
+    return try JSONDecoder.supabase()
+        .decode([ParticipantWorkoutId].self, from: response.data)
+        .map(\.workout_id)
+}
+
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium: Bool = false
     @AppStorage("backgroundTheme") private var backgroundTheme: String = "mintBlue"
     let userId: UUID?
     private var viewingUserId: UUID? { userId ?? app.userId }
@@ -179,8 +197,14 @@ struct ProfileView: View {
     @State private var editingProfile = false
     @State private var heightCm: String = ""
     @State private var weightKg: String = ""
+    @State private var baseCaloriesTarget: String = "2000"
+    @State private var baseCaloriesTargetLoadedSnapshot: String = "2000"
+    @State private var baseCaloriesTargetIsManual: Bool = false
+    @State private var profileSex: String?
     @State private var birthDate: Date = Date()
     @State private var hasBirthDate: Bool = false
+    @State private var showBodyWeightHistory = false
+    @State private var showAppleHealthBodyWeightImport = false
     @State private var showAvatarPreview = false
     @State private var showDeleteConfirm = false
     @State private var deletingAccount = false
@@ -286,7 +310,7 @@ struct ProfileView: View {
                 Text("Calendar").tag(Tab.calendar)
                 Text("PRs").tag(Tab.prs)
                 Text("Progress").tag(Tab.progress)
-                Text("Segments").tag(Tab.segments)
+                Text("Explore").tag(Tab.segments)
                 if isOwnProfile {
                     Text("Settings").tag(Tab.settings)
                 }
@@ -305,7 +329,7 @@ struct ProfileView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
 
-            if !isPremium {
+            if !app.isPremium {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)
@@ -341,48 +365,64 @@ struct ProfileView: View {
     }
 
     private var mySegmentsTabContent: some View {
-        Group {
-            if mySegmentsLoading && mySegments.isEmpty {
-                ProgressView()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let err = mySegmentsError {
-                Text(err)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else if mySegments.isEmpty {
-                Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .padding()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-            } else {
-                List(mySegments) { row in
-                    NavigationLink {
-                        SegmentDetailView(segmentId: row.id, onClose: nil)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(row.name)
-                                .font(.body.weight(.semibold))
-                            HStack(spacing: 6) {
-                                Text(row.status.capitalized)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text("·")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                                Text("Buffer \(Int(row.buffer_m)) m")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                if let profileUserId = viewingUserId {
+                    TerritoryProfileHubView(profileUserId: profileUserId, isOwnProfile: isOwnProfile)
+                }
+
+                Text(isOwnProfile ? "Your segments" : "Segments")
+                    .font(.headline)
+                    .padding(.horizontal)
+
+                if mySegmentsLoading && mySegments.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 24)
+                } else if let err = mySegmentsError {
+                    Text(err)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                } else if mySegments.isEmpty {
+                    Text(isOwnProfile ? "You have not created any segments yet." : "This user has not created any segments yet.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(mySegments) { row in
+                            NavigationLink {
+                                SegmentDetailView(segmentId: row.id, onClose: nil)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(row.name)
+                                        .font(.body.weight(.semibold))
+                                    HStack(spacing: 6) {
+                                        Text(row.status.capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        Text("·")
+                                            .font(.caption)
+                                            .foregroundStyle(.tertiary)
+                                        Text("Buffer \(Int(row.buffer_m)) m")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                             }
+                            .buttonStyle(.plain)
                         }
                     }
-                    .listRowBackground(Color.clear)
+                    .padding(.horizontal)
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
             }
+            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: "\(tab.rawValue)-\(viewingUserId?.uuidString ?? "none")") {
@@ -1299,6 +1339,20 @@ struct ProfileView: View {
                 .layoutPriority(1)
             }
 
+            HStack(spacing: 8) {
+                NavigationLink {
+                    RankingView(presetMetric: .level)
+                        .gradientBG()
+                        .navigationTitle("Level Ranking")
+                } label: {
+                    Image(systemName: "trophy.fill")
+                        .font(.subheadline.weight(.bold))
+                        .padding(8)
+                        .background(.thinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ranking")
+
             Menu {
                 if isOwnProfile {
                     NavigationLink {
@@ -1307,14 +1361,6 @@ struct ProfileView: View {
                     } label: {
                         Label(notificationsMenuTitle, systemImage: "bell.fill")
                     }
-                }
-
-                NavigationLink {
-                    RankingView(presetMetric: .level)
-                        .gradientBG()
-                        .navigationTitle("Level Ranking")
-                } label: {
-                    Label("Ranking", systemImage: "trophy")
                 }
 
                 NavigationLink {
@@ -1368,6 +1414,7 @@ struct ProfileView: View {
                 }
             }
             .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
@@ -1386,88 +1433,27 @@ struct ProfileView: View {
     }
     
     private var calendarView: some View {
-        VStack(spacing: 12) {
-            HStack {
-                Button {
-                    monthDate = Calendar.current.date(byAdding: .month, value: -1, to: monthDate)!
-                } label: { Image(systemName: "chevron.left") }
-                
-                Spacer()
-                Text(monthTitle(for: monthDate)).font(.headline)
-                Spacer()
-                
-                Button {
-                    monthDate = Calendar.current.date(byAdding: .month, value: 1, to: monthDate)!
-                } label: { Image(systemName: "chevron.right") }
-            }
-            .padding(.horizontal)
-            
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
-                ForEach(weekdays(), id: \.self) { w in
-                    Text(w).font(.caption2).foregroundStyle(.secondary)
-                }
-                ForEach(monthDays.indices, id: \.self) { idx in
-                    let day = monthDays[idx]
-                    let daySelected = calendarDayIsSelected(day)
+        VStack(spacing: 14) {
+            ProfileCalendarView(
+                monthDate: $monthDate,
+                selectedDay: $selectedDay,
+                monthDays: monthDays,
+                activity: activity,
+                ownActivity: ownActivity,
+                participantActivity: participantActivity,
+                draftActivity: draftActivity,
+                monthTitle: monthTitle(for: monthDate),
+                weekdays: weekdays(),
+                onToday: selectTodayInCalendar
+            )
 
-                    Button {
-                        if let day { selectedDay = day }
-                    } label: {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill({
-                                    if let day {
-                                        let key = day.startOfDay
-                                        let own = ownActivity[key] ?? 0
-                                        let part = participantActivity[key] ?? 0
-                                        let total = (activity[key] ?? (own + part))
-
-                                        if total > 0 {
-                                            if draftActivity[key] == true {
-                                                return Color(red: 0.6, green: 0.1, blue: 0.2)
-                                                    .opacity(min(0.20 + Double(total) * 0.05, 0.45))
-                                            }
-
-                                            if own > 0 {
-                                                return Color.green
-                                                    .opacity(min(0.15 + Double(total) * 0.1, 0.35))
-                                            }
-
-                                            return Color.yellow
-                                                .opacity(min(0.15 + Double(total) * 0.1, 0.35))
-                                        }
-                                    }
-                                    return Color.clear
-                                }())
-
-                            if let day {
-                                Text("\(Calendar.current.component(.day, from: day))")
-                                    .font(.footnote.weight(daySelected ? .semibold : .regular))
-                            } else {
-                                Text("")
-                            }
-                        }
-                        .frame(height: 36)
-                        .overlay {
-                            if daySelected {
-                                RoundedRectangle(cornerRadius: 8)
-                                    .strokeBorder(Color.white.opacity(0.92), lineWidth: 2.5)
-                                    .shadow(color: Color.white.opacity(0.5), radius: 5, x: 0, y: 0)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(day == nil)
-                }
-            }
-            .padding(.horizontal)
-            
             if let selectedDay, let uid = viewingUserId {
-                DayWorkoutsList(userId: uid, selectedDay: selectedDay)
+                DayWorkoutsList(userId: uid, selectedDay: selectedDay, isOwnProfile: isOwnProfile)
                     .frame(maxWidth: .infinity, alignment: .top)
             } else {
-                Text("Select a day to see your workouts")
-                    .font(.subheadline).foregroundStyle(.secondary).padding(.top, 6)
+                ProfileCalendarEmptyMonthView(isOwnProfile: isOwnProfile) {
+                    app.openAdd(with: nil)
+                }
             }
         }
         .padding(.bottom, 12)
@@ -1615,17 +1601,12 @@ struct ProfileView: View {
             loading = true; defer { loading = false }
             
             do {
-                var query: PostgrestFilterBuilder = SupabaseManager.shared.client
-                    .from("vw_user_prs")
-                    .select("*")
-                    .eq("user_id", value: uid.uuidString)
-                
+                var params: [String: String] = ["p_user_id": uid.uuidString]
                 if filter != .all {
-                    query = query.eq("kind", value: filter.rawValue.lowercased())
+                    params["p_kind"] = filter.rawValue.lowercased()
                 }
-                
-                let res = try await query
-                    .order("achieved_at", ascending: false)
+                let res = try await SupabaseManager.shared.client
+                    .rpc("get_user_prs", params: params)
                     .execute()
                 let rows = try JSONDecoder.supabase().decode([PRRow].self, from: res.data)
                 await MainActor.run { prs = rows }
@@ -1748,22 +1729,22 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: "star.circle.fill")
-                            Text(isPremium ? "You are Premium" : "Remove ads")
+                            Text(app.isPremium ? "You are Premium" : "Remove ads")
                                 .font(.body.weight(.semibold))
                             Spacer()
                         }
                         
-                        if let product = premiumProduct, !isPremium {
+                        if let product = premiumProduct, !app.isPremium {
                             Text("Subscribe for \(product.displayPrice) per month to remove ads.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                        } else if isPremium {
+                        } else if app.isPremium {
                             Text("Ads are disabled on this account.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                         
-                        if !isPremium {
+                        if !app.isPremium {
                             Button {
                                 Task { await purchasePremium() }
                             } label: {
@@ -2033,7 +2014,7 @@ struct ProfileView: View {
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
             }
-            Section("Personal information") {
+            Section {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .fill(.ultraThinMaterial)
@@ -2041,23 +2022,8 @@ struct ProfileView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .stroke(.white.opacity(0.18))
                         )
-                    
+
                     VStack(spacing: 10) {
-                        HStack {
-                            Spacer()
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { editingProfile.toggle() }
-                            } label: {
-                                Image(systemName: editingProfile ? "checkmark.circle.fill" : "pencil")
-                                    .font(.subheadline.weight(.semibold))
-                                    .padding(6)
-                                    .background(.thinMaterial, in: Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(editingProfile ? "Done" : "Edit")
-                        }
-                        
-                        Divider().opacity(0.15)
                         HStack {
                             Text("Height (cm)")
                                 .font(.subheadline.weight(.semibold))
@@ -2067,43 +2033,111 @@ struct ProfileView: View {
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(maxWidth: 120)
+                                    .onChange(of: heightCm) { _, _ in
+                                        refreshAutoBmrDraftIfNeeded()
+                                    }
                             } else {
                                 Text(heightCm.isEmpty ? "–" : "\(heightCm) cm")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        
+
                         Divider().opacity(0.15)
                         HStack {
                             Text("Weight (kg)")
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
+                            Text(weightKg.isEmpty ? "–" : weightKg)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        Divider().opacity(0.15)
+                        HStack {
+                            Text("Basal Metabolism / BMR (kcal)")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
                             if editingProfile {
-                                TextField("—", text: $weightKg)
-                                    .keyboardType(.decimalPad)
+                                TextField("2000", text: $baseCaloriesTarget)
+                                    .keyboardType(.numberPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(maxWidth: 120)
                             } else {
-                                Text(weightKg.isEmpty ? "–" : "\(weightKg)")
+                                Text(baseCaloriesTarget.isEmpty ? "2000" : baseCaloriesTarget)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
                         }
-                        
+
                         Divider().opacity(0.15)
-                        Toggle("Show birth date", isOn: $hasBirthDate)
-                            .font(.subheadline.weight(.semibold))
-                        Divider().opacity(0.15)
-                        if editingProfile && hasBirthDate {
-                            HStack {
-                                Text("Birth date")
-                                Spacer()
-                                DatePicker("", selection: $birthDate, displayedComponents: .date)
-                                    .labelsHidden()
+                        Button {
+                            showBodyWeightHistory = true
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "chart.line.uptrend.xyaxis")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Weight history")
+                                        .font(.body.weight(.semibold))
+                                    Text("Track changes over time and log manual entries.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
                             }
                         }
-                        
+                        .buttonStyle(.plain)
+
+                        if HealthKitBodyWeightSyncService.shared.isHealthDataAvailable {
+                            Divider().opacity(0.15)
+                            Button {
+                                showAppleHealthBodyWeightImport = true
+                            } label: {
+                                HStack(alignment: .top, spacing: 10) {
+                                    Image(systemName: "heart.fill")
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Apple Health weight")
+                                            .font(.body.weight(.semibold))
+                                        Text("Sync body-weight samples from Apple Health.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if editingProfile {
+                            Divider().opacity(0.15)
+                            Toggle("Show birth date", isOn: $hasBirthDate)
+                                .font(.subheadline.weight(.semibold))
+                                .onChange(of: hasBirthDate) { _, _ in
+                                    refreshAutoBmrDraftIfNeeded()
+                                }
+                            if hasBirthDate {
+                                Divider().opacity(0.15)
+                                HStack {
+                                    Text("Birth date")
+                                    Spacer()
+                                    DatePicker("", selection: $birthDate, displayedComponents: .date)
+                                        .labelsHidden()
+                                        .onChange(of: birthDate) { _, _ in
+                                            refreshAutoBmrDraftIfNeeded()
+                                        }
+                                }
+                            }
+                        }
+
+                        Divider().opacity(0.15)
                         HStack {
                             Text("Age")
                             Spacer()
@@ -2129,6 +2163,22 @@ struct ProfileView: View {
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
+            } header: {
+                HStack(alignment: .center) {
+                    Text("Personal information")
+                    Spacer()
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.9)) { editingProfile.toggle() }
+                    } label: {
+                        Image(systemName: editingProfile ? "checkmark.circle.fill" : "pencil")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(6)
+                            .background(.thinMaterial, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(editingProfile ? "Done" : "Edit")
+                }
+                .textCase(nil)
             }
             
             Section {
@@ -2182,6 +2232,14 @@ struct ProfileView: View {
         .listRowSeparator(.hidden)
         .listSectionSeparator(.hidden)
         .background(Color.clear)
+        .navigationDestination(isPresented: $showBodyWeightHistory) {
+            BodyWeightHistoryView()
+                .gradientBG()
+        }
+        .navigationDestination(isPresented: $showAppleHealthBodyWeightImport) {
+            AppleHealthBodyWeightImportView()
+                .gradientBG()
+        }
         .alert("Delete account?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 showDeleteConfirm = false
@@ -2200,17 +2258,43 @@ struct ProfileView: View {
         return cal.dateComponents([.year], from: birthDate, to: now).year
     }
     
+    private func refreshAutoBmrDraftIfNeeded() {
+        guard editingProfile, !baseCaloriesTargetIsManual else { return }
+        let resolved = resolvedBaseCaloriesDisplayKcal()
+        baseCaloriesTarget = "\(resolved)"
+    }
+
+    private func resolvedBaseCaloriesDisplayKcal() -> Int {
+        let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
+        let height = Double(Int(hText) ?? 0)
+        let weight = Double(weightKg.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        let birth = hasBirthDate ? birthDate : nil
+        return NutritionMetabolism.resolveDisplayKcal(
+            sex: profileSex,
+            birthDate: birth,
+            heightCm: height > 0 ? height : nil,
+            weightKg: weight > 0 ? weight : nil,
+            storedTarget: Int(baseCaloriesTargetLoadedSnapshot),
+            isManual: baseCaloriesTargetIsManual
+        )
+    }
+
     private func saveProfileMetrics() async {
         guard let uid = app.userId else { return }
         do {
             let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
             let height = Int(hText).flatMap { $0 > 0 ? $0 : nil }
+            let calText = baseCaloriesTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+            let caloriesChanged = calText != baseCaloriesTargetLoadedSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+            var baseCal: Int?
+            if caloriesChanged {
+                guard let parsed = Int(calText), parsed >= NutritionMetabolism.minKcal, parsed <= NutritionMetabolism.maxKcal else {
+                    self.error = "BMR / basal metabolism must be between 800 and 6000 kcal."
+                    return
+                }
+                baseCal = parsed
+            }
 
-            let wText = weightKg
-                .replacingOccurrences(of: ",", with: ".")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let weight = Double(wText).flatMap { $0 > 0 ? $0 : nil }
-            
             let df = DateFormatter()
             df.timeZone = TimeZone(secondsFromGMT: 0)
             df.dateFormat = "yyyy-MM-dd"
@@ -2223,10 +2307,9 @@ struct ProfileView: View {
                 payload["height_cm"] = AnyEncodable(height)
             }
 
-            if wText.isEmpty {
-                payload["weight_kg"] = AnyEncodable(nilValue: ())
-            } else if let weight, weight > 0 {
-                payload["weight_kg"] = AnyEncodable(weight)
+            if let baseCal, caloriesChanged {
+                payload["base_calories_target"] = AnyEncodable(baseCal)
+                payload["base_calories_target_is_manual"] = AnyEncodable(true)
             }
 
             if hasBirthDate {
@@ -2339,14 +2422,7 @@ struct ProfileView: View {
     }
 
     private func fetchParticipantOnlyWorkoutCount(userId: UUID, start: Date, end: Date, iso: ISO8601DateFormatter) async throws -> Int {
-        let pres = try await SupabaseManager.shared.client
-            .from("workout_participants")
-            .select("workout_id")
-            .eq("user_id", value: userId.uuidString)
-            .execute()
-
-        struct PId: Decodable { let workout_id: Int }
-        let pIds = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+        let pIds = try await fetchParticipantWorkoutIds(for: userId)
         guard !pIds.isEmpty else { return 0 }
 
         let wres = try await SupabaseManager.shared.client
@@ -2370,7 +2446,7 @@ struct ProfileView: View {
         do {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
-                .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth")
+                .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth,sex,base_calories_target,base_calories_target_is_manual")
                 .eq("user_id", value: uid.uuidString)
                 .single()
                 .execute()
@@ -2388,6 +2464,18 @@ struct ProfileView: View {
             }
             self.heightCm = profile.height_cm.map { "\($0)" } ?? ""
             self.weightKg = profile.weight_kg.map { String(format: "%.1f", $0) } ?? ""
+            self.profileSex = profile.sex
+            self.baseCaloriesTargetIsManual = profile.base_calories_target_is_manual ?? false
+            let displayKcal = NutritionMetabolism.resolveDisplayKcal(
+                sex: profile.sex,
+                birthDate: profile.birth_date,
+                heightCm: profile.height_cm.map { Double($0) },
+                weightKg: profile.weight_kg,
+                storedTarget: profile.base_calories_target,
+                isManual: profile.base_calories_target_is_manual ?? false
+            )
+            self.baseCaloriesTarget = "\(displayKcal)"
+            self.baseCaloriesTargetLoadedSnapshot = "\(displayKcal)"
             self.hasBirthDate = profile.birth_date != nil
             self.birthDate = profile.birth_date ?? Date()
             let res2 = try await SupabaseManager.shared.client
@@ -2444,14 +2532,7 @@ struct ProfileView: View {
                 }
             }
             
-            let pres = try await SupabaseManager.shared.client
-                .from("workout_participants")
-                .select("workout_id")
-                .eq("user_id", value: uid.uuidString)
-                .execute()
-            
-            struct PId: Decodable { let workout_id: Int }
-            let pIds = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+            let pIds = try await fetchParticipantWorkoutIds(for: uid)
             
             var dictPart: [Date: Int] = [:]
             if !pIds.isEmpty {
@@ -2483,6 +2564,7 @@ struct ProfileView: View {
                 self.participantActivity = dictPart
                 self.activity = dictTotal
                 self.draftActivity = dictDraft
+                self.applyDefaultCalendarSelection(from: dictTotal)
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
@@ -2951,6 +3033,28 @@ struct ProfileView: View {
         guard let day, let sel = selectedDay else { return false }
         return Calendar.current.isDate(day, inSameDayAs: sel)
     }
+
+    private func selectTodayInCalendar() {
+        let today = Date().startOfDay
+        monthDate = today
+        selectedDay = today
+    }
+
+    private func applyDefaultCalendarSelection(from activity: [Date: Int]) {
+        guard selectedDay == nil else { return }
+        let cal = Calendar.current
+
+        if cal.isDate(monthDate, equalTo: Date(), toGranularity: .month) {
+            selectedDay = Date().startOfDay
+            return
+        }
+
+        selectedDay = activity
+            .filter { $0.value > 0 && cal.isDate($0.key, equalTo: monthDate, toGranularity: .month) }
+            .map(\.key)
+            .sorted()
+            .first
+    }
     private let WEEK_START = 2
     
     private func weekdays() -> [String] {
@@ -3115,6 +3219,12 @@ struct ProfileView: View {
     
     private func purchasePremium() async {
         guard let product = premiumProduct else { return }
+        guard let userId = app.userId else {
+            await MainActor.run {
+                premiumError = "Sign in to subscribe."
+            }
+            return
+        }
         await MainActor.run {
             isPurchasingPremium = true
             premiumError = nil
@@ -3124,14 +3234,14 @@ struct ProfileView: View {
         }
         
         do {
-            let result = try await product.purchase()
+            let result = try await product.purchase(options: [
+                .appAccountToken(userId)
+            ])
             switch result {
             case .success(let verification):
                 if let transaction = verifiedTransaction(from: verification) {
-                    await MainActor.run {
-                        self.isPremium = true
-                    }
                     await transaction.finish()
+                    await app.refreshPremiumStatus()
                 } else {
                     await MainActor.run {
                         self.premiumError = "Purchase verification failed."
@@ -3165,9 +3275,7 @@ struct ProfileView: View {
             if let transaction = verifiedTransaction(from: result),
                transaction.productID == premiumProductID {
                 found = true
-                await MainActor.run {
-                    self.isPremium = true
-                }
+                await app.refreshPremiumStatus()
                 break
             }
         }
@@ -3318,9 +3426,317 @@ struct AvatarZoomPreview: View {
     }
 }
 
+private enum ProfileCalendarActivityPalette {
+    static let own = WorkoutTint.strength
+    static let joined = WorkoutTint.cardio
+    static let planned = WorkoutTint.sport
+}
+
+private struct ProfileCalendarDayActivity {
+    let own: Int
+    let joined: Int
+    let total: Int
+    let planned: Bool
+
+    var hasActivity: Bool { total > 0 }
+    var markerColors: [Color] {
+        var colors: [Color] = []
+        if own > 0 { colors.append(ProfileCalendarActivityPalette.own) }
+        if joined > 0 { colors.append(ProfileCalendarActivityPalette.joined) }
+        if planned { colors.append(ProfileCalendarActivityPalette.planned) }
+        return colors
+    }
+}
+
+private struct ProfileCalendarView: View {
+    @Binding var monthDate: Date
+    @Binding var selectedDay: Date?
+    let monthDays: [Date?]
+    let activity: [Date: Int]
+    let ownActivity: [Date: Int]
+    let participantActivity: [Date: Int]
+    let draftActivity: [Date: Bool]
+    let monthTitle: String
+    let weekdays: [String]
+    let onToday: () -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    monthDate = Calendar.current.date(byAdding: .month, value: -1, to: monthDate) ?? monthDate
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Previous month")
+
+                Spacer(minLength: 4)
+
+                VStack(spacing: 3) {
+                    Text(monthTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+
+                    ProfileCalendarLegend()
+                }
+
+                Spacer(minLength: 4)
+
+                Button("Today", action: onToday)
+                    .font(.caption.weight(.semibold))
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 9)
+                    .background(Capsule().fill(Color(.systemBackground).opacity(0.28)))
+                    .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 0.8))
+
+                Button {
+                    monthDate = Calendar.current.date(byAdding: .month, value: 1, to: monthDate) ?? monthDate
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 30, height: 30)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Next month")
+            }
+
+            LazyVGrid(columns: columns, spacing: 5) {
+                ForEach(weekdays, id: \.self) { weekday in
+                    Text(weekday)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+
+                ForEach(monthDays.indices, id: \.self) { index in
+                    let day = monthDays[index]
+                    ProfileCalendarDayCell(
+                        day: day,
+                        activity: activityState(for: day),
+                        isSelected: isSelected(day),
+                        isToday: isToday(day)
+                    ) {
+                        if let day {
+                            selectedDay = day
+                        }
+                    }
+                    .disabled(day == nil)
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8)
+        )
+        .padding(.horizontal)
+    }
+
+    private func activityState(for day: Date?) -> ProfileCalendarDayActivity {
+        guard let day else {
+            return ProfileCalendarDayActivity(own: 0, joined: 0, total: 0, planned: false)
+        }
+
+        let key = day.startOfDay
+        let own = ownActivity[key] ?? 0
+        let joined = participantActivity[key] ?? 0
+        let total = activity[key] ?? own + joined
+        return ProfileCalendarDayActivity(
+            own: own,
+            joined: joined,
+            total: total,
+            planned: draftActivity[key] == true
+        )
+    }
+
+    private func isSelected(_ day: Date?) -> Bool {
+        guard let day, let selectedDay else { return false }
+        return Calendar.current.isDate(day, inSameDayAs: selectedDay)
+    }
+
+    private func isToday(_ day: Date?) -> Bool {
+        guard let day else { return false }
+        return Calendar.current.isDateInToday(day)
+    }
+}
+
+private struct ProfileCalendarDayCell: View {
+    let day: Date?
+    let activity: ProfileCalendarDayActivity
+    let isSelected: Bool
+    let isToday: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(backgroundStyle)
+
+                if let day {
+                    Text("\(Calendar.current.component(.day, from: day))")
+                        .font(.footnote.weight(isSelected ? .bold : .semibold))
+                        .foregroundStyle(Color.primary.opacity(isSelected ? 1.0 : 0.88))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.horizontal, 4)
+
+                    if activity.total > 1 {
+                        Text("\(activity.total)")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.primary)
+                            .padding(.vertical, 2)
+                            .padding(.horizontal, 5)
+                            .background(Capsule().fill(Color(.systemBackground).opacity(0.72)))
+                            .padding(4)
+                    }
+                }
+            }
+            .frame(height: 36)
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.72), lineWidth: 2)
+                } else if isToday {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .strokeBorder(ProfileCalendarActivityPalette.own.opacity(0.85), lineWidth: 1.5)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var backgroundStyle: AnyShapeStyle {
+        if day == nil {
+            return AnyShapeStyle(Color.clear)
+        }
+
+        if !activity.markerColors.isEmpty {
+            let opacity = isSelected ? 0.58 : min(0.30 + Double(activity.total) * 0.06, 0.62)
+            let colors = activity.markerColors.map { $0.opacity(opacity) }
+            if colors.count == 1, let color = colors.first {
+                return AnyShapeStyle(color)
+            }
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: colors,
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+        }
+
+        if isToday {
+            return AnyShapeStyle(Color(.systemBackground).opacity(0.22))
+        }
+
+        return AnyShapeStyle(Color(.systemBackground).opacity(isSelected ? 0.76 : 0.10))
+    }
+
+    private var accessibilityText: String {
+        guard let day else { return "Empty calendar day" }
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        var parts = [formatter.string(from: day)]
+
+        if isToday {
+            parts.append("today")
+        }
+        if isSelected {
+            parts.append("selected")
+        }
+        if activity.total == 1 {
+            parts.append("1 workout")
+        } else {
+            parts.append("\(activity.total) workouts")
+        }
+        if activity.own > 0 {
+            parts.append("\(activity.own) own")
+        }
+        if activity.joined > 0 {
+            parts.append("\(activity.joined) joined")
+        }
+        if activity.planned {
+            parts.append("planned")
+        }
+
+        return parts.joined(separator: ", ")
+    }
+}
+
+private struct ProfileCalendarLegend: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            legendItem("Own", color: ProfileCalendarActivityPalette.own)
+            legendItem("Joined", color: ProfileCalendarActivityPalette.joined)
+            legendItem("Planned", color: ProfileCalendarActivityPalette.planned)
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+
+    private func legendItem(_ title: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(color)
+                .frame(width: 6, height: 6)
+            Text(title)
+        }
+    }
+}
+
+private struct ProfileCalendarEmptyMonthView: View {
+    let isOwnProfile: Bool
+    let startWorkout: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Text("Select a day to see workouts")
+                .font(.subheadline.weight(.semibold))
+            Text("Active days are now marked by workout type, joined sessions, and planned workouts.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            if isOwnProfile {
+                Button {
+                    startWorkout()
+                } label: {
+                    Label("Start workout", systemImage: "plus.circle.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8)
+        )
+        .padding(.horizontal)
+    }
+}
+
 private struct DayWorkoutsList: View {
     let userId: UUID
     let selectedDay: Date
+    let isOwnProfile: Bool
     @EnvironmentObject var app: AppState
     @State private var workouts: [WorkoutRow] = []
     @State private var scores: [Int: Double] = [:]
@@ -3332,17 +3748,48 @@ private struct DayWorkoutsList: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(dateTitle(selectedDay))
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal)
-            
             if workouts.isEmpty && participated.isEmpty {
-                Text("No workouts this day")
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
+                VStack(spacing: 8) {
+                    Text(dateTitle(selectedDay))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Text("No workouts on this day")
+                        .font(.subheadline.weight(.semibold))
+                    Text(isOwnProfile ? "Start a new workout from here or choose another active day." : "Choose another active day to see workouts.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    if isOwnProfile {
+                        Button {
+                            app.openAdd(with: nil)
+                        } label: {
+                            Label("Start workout", systemImage: "plus.circle.fill")
+                                .font(.caption.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.14), lineWidth: 0.8)
+                )
+                .padding(.horizontal)
             } else {
                 LazyVStack(spacing: 12) {
+                    Text(dateTitle(selectedDay))
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+
                             ForEach(workouts) { w in
                                 NavigationLink {
                                     WorkoutDetailView(workoutId: w.id, ownerId: w.user_id)
@@ -3532,13 +3979,7 @@ private struct DayWorkoutsList: View {
                 .order("started_at", ascending: false)
                 .execute()
             let rowsOwn = try JSONDecoder.supabase().decode([WorkoutRow].self, from: resOwn.data)
-            let pres = try await SupabaseManager.shared.client
-                .from("workout_participants")
-                .select("workout_id")
-                .eq("user_id", value: uid.uuidString)
-                .execute()
-            struct PId: Decodable { let workout_id: Int }
-            let partIdsAll = try JSONDecoder.supabase().decode([PId].self, from: pres.data).map { $0.workout_id }
+            let partIdsAll = try await fetchParticipantWorkoutIds(for: uid)
             var rowsPart: [WorkoutRow] = []
             if !partIdsAll.isEmpty {
                 let resPart = try await SupabaseManager.shared.client

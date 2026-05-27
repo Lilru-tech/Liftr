@@ -2,6 +2,7 @@ package com.lilru.liftr.ui.health
 
 import androidx.health.connect.client.records.ExerciseSessionRecord
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.territory.TerritoryCaptureClient
 import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddWorkoutIntensity
 import com.lilru.liftr.ui.add.AddWorkoutState
@@ -26,6 +27,17 @@ fun exerciseTypeToActivityWire(exerciseType: Int): String = when (exerciseType) 
     else -> AddCardioActivity.RUN.wire
 }
 
+internal fun healthConnectWorkoutExternalId(metadataId: String): String? {
+    val trimmed = metadataId.trim()
+    return trimmed.takeIf { it.isNotEmpty() }?.let { "hc:$it" }
+}
+
+private fun isOutdoorTerritoryEligible(exerciseType: Int): Boolean = when (exerciseType) {
+    ExerciseSessionRecord.EXERCISE_TYPE_BIKING_STATIONARY,
+    ExerciseSessionRecord.EXERCISE_TYPE_RUNNING_TREADMILL -> false
+    else -> true
+}
+
 suspend fun importHealthConnectSessionToCardio(
     supabase: SupabaseClient,
     rec: ExerciseSessionRecord
@@ -39,19 +51,25 @@ suspend fun importHealthConnectSessionToCardio(
     val code = exerciseTypeToActivityWire(rec.exerciseType)
     val title = (rec.title ?: "Import Health").trim().ifEmpty { "Import Health" }
     val stats = buildJsonObject { }
+    val healthConnectUuid = healthConnectWorkoutExternalId(rec.metadata.id)
     val p = buildJsonObject {
         put("p_user_id", userId)
         put("p_activity_code", code)
         put("p_started_at", started)
+        put("p_ended_at", end.atZone(ZoneId.systemDefault()).toInstant().toString())
         put("p_perceived_intensity", AddWorkoutIntensity.MODERATE.wire)
         put("p_state", AddWorkoutState.PUBLISHED.name.lowercase())
         put("p_title", title)
         put("p_duration_sec", durationSec)
         put("p_stats", stats)
+        healthConnectUuid?.let { put("p_healthkit_uuid", it) }
     }
     val wrapper = buildJsonObject { put("p", p) }
     val res = supabase.postgrest.rpc(BackendContracts.Rpc.CREATE_CARDIO_WORKOUT_V2, wrapper) { }
     val id = parseWorkoutIdFromCreateCardioResponse(res.data) ?: error("No se pudo leer el id del entreno.")
+    if (isOutdoorTerritoryEligible(rec.exerciseType)) {
+        TerritoryCaptureClient.applyCapture(supabase, id.toInt())
+    }
     id.toInt()
 }
 

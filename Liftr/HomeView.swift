@@ -12,9 +12,154 @@ private struct ShareItem: Identifiable {
     let image: UIImage
 }
 
+private enum QuickWorkoutStarter {
+    private struct CreatedWorkoutRow: Decodable {
+        let id: Int64
+    }
+
+    static func create(
+        kind: WorkoutKind,
+        userId: UUID,
+        cardioActivity: CardioActivityType? = nil,
+        sportType: SportType? = nil
+    ) async throws -> Int {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let startedAt = iso.string(from: Date())
+
+        switch kind {
+        case .strength:
+            return try await createStrength(userId: userId, startedAt: startedAt)
+        case .cardio:
+            return try await createCardio(
+                userId: userId,
+                startedAt: startedAt,
+                activity: cardioActivity ?? .run
+            )
+        case .sport:
+            return try await createSport(
+                userId: userId,
+                startedAt: startedAt,
+                sport: sportType ?? .padel
+            )
+        }
+    }
+
+    private static func createStrength(userId: UUID, startedAt: String) async throws -> Int {
+        let client = SupabaseManager.shared.client
+        let params = RPCStrengthParams(
+            p_user_id: userId,
+            p_items: [],
+            p_title: nil,
+            p_started_at: startedAt,
+            p_ended_at: nil,
+            p_notes: nil,
+            p_perceived_intensity: WorkoutIntensity.moderate.rawValue,
+            p_state: PublishMode.plan.stateParam
+        )
+        _ = try await client.rpc("create_strength_workout", params: params).execute()
+        return try await fetchLastWorkoutId(userId: userId, kind: .strength)
+    }
+
+    private static func createCardio(
+        userId: UUID,
+        startedAt: String,
+        activity: CardioActivityType
+    ) async throws -> Int {
+        let client = SupabaseManager.shared.client
+        let params = RPCCardioV2Params(
+            p_user_id: userId,
+            p_activity_code: activity.rawValue,
+            p_title: nil,
+            p_started_at: startedAt,
+            p_ended_at: nil,
+            p_notes: nil,
+            p_distance_km: nil,
+            p_duration_sec: nil,
+            p_avg_hr: nil,
+            p_max_hr: nil,
+            p_avg_pace_sec_per_km: nil,
+            p_elevation_gain_m: nil,
+            p_perceived_intensity: WorkoutIntensity.moderate.rawValue,
+            p_state: PublishMode.plan.stateParam,
+            p_stats: try AnyJSON([String: AnyJSON]()),
+            p_healthkit_uuid: nil,
+            p_route_geojson: nil,
+            p_calories_kcal: nil,
+            p_calories_method: nil
+        )
+        let res = try await client
+            .rpc("create_cardio_workout_v2", params: RPCCardioV2Wrapper(p: params))
+            .execute()
+        if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
+            return created
+        }
+        return try await fetchLastWorkoutId(userId: userId, kind: .cardio)
+    }
+
+    private static func createSport(
+        userId: UUID,
+        startedAt: String,
+        sport: SportType
+    ) async throws -> Int {
+        let client = SupabaseManager.shared.client
+        let payload: [String: AnyJSON] = [
+            "p_user_id": try AnyJSON(userId.uuidString),
+            "p_sport": try AnyJSON(sport.rawValue),
+            "p_started_at": try AnyJSON(startedAt),
+            "p_match_result": try AnyJSON(MatchResult.unfinished.rawValue),
+            "p_perceived_intensity": try AnyJSON(WorkoutIntensity.moderate.rawValue),
+            "p_state": try AnyJSON(PublishMode.plan.stateParam)
+        ]
+        let res = try await client
+            .rpc(
+                "create_sport_workout_v2",
+                params: RPCSportV2Wrapper(
+                    p: try AnyJSON(payload),
+                    p_stats: try AnyJSON([String: AnyJSON]())
+                )
+            )
+            .execute()
+        if let created = try? JSONDecoder().decode(Int.self, from: res.data) {
+            return created
+        }
+        return try await fetchLastWorkoutId(userId: userId, kind: .sport)
+    }
+
+    private static func fetchLastWorkoutId(userId: UUID, kind: WorkoutKind) async throws -> Int {
+        let res = try await SupabaseManager.shared.client
+            .from("workouts")
+            .select("id")
+            .eq("user_id", value: userId.uuidString)
+            .eq("kind", value: kind.rawValue)
+            .order("id", ascending: false)
+            .limit(1)
+            .execute()
+        let rows = try JSONDecoder.supabase().decode([CreatedWorkoutRow].self, from: res.data)
+        guard let id = rows.first?.id else {
+            throw NSError(
+                domain: "QuickWorkoutStarter",
+                code: 0,
+                userInfo: [NSLocalizedDescriptionKey: "Could not find the created workout."]
+            )
+        }
+        return Int(id)
+    }
+}
+
+private struct QuickActiveWorkout: Identifiable, Hashable {
+    enum Kind: Hashable {
+        case strength
+        case cardio
+        case sport
+    }
+
+    let id: Int
+    let kind: Kind
+}
+
 struct HomeView: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium = false
     
     enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
     @State private var filter: KindFilter = .all
@@ -49,6 +194,24 @@ struct HomeView: View {
     private struct WorkoutScoreRow: Decodable { let workout_id: Int; let score: Decimal }
     private struct LikeRow: Decodable { let workout_id: Int; let user_id: UUID }
     private struct ParticipantRow: Decodable { let workout_id: Int; let user_id: UUID }
+
+    private struct HomeFeedPageResponse: Decodable {
+        let workouts: [WorkoutRow]?
+        let scores: [HomeFeedScoreTotal]?
+        let likes: [LikeRow]?
+        let participants: [ParticipantRow]?
+    }
+
+    private struct HomeFeedScoreTotal: Decodable {
+        let workout_id: Int
+        let score: Decimal
+    }
+
+    private struct HomeFeedParams: Encodable {
+        let p_page: Int
+        let p_page_size: Int
+        let p_kind: String?
+    }
     
     struct PRRow: Decodable, Identifiable {
         let kind: String
@@ -151,6 +314,7 @@ struct HomeView: View {
     private let pageSize = 30
     @State private var canLoadMore = true
     @State private var isLoadingPage = false
+    @State private var feedLoadGeneration = UUID()
     @State private var selectedItem: FeedItem?
     @State private var _selToken = UUID()
     @State private var initialLoading = false
@@ -179,12 +343,24 @@ struct HomeView: View {
     @AppStorage("homeCollapseStreak") private var collapseStreak = false
     @AppStorage("homeCollapseInsights") private var collapseInsights = false
     @AppStorage("homeCollapseMonthly") private var collapseMonthly = false
-    
     @State private var showScrollToTopButton = false
     @State private var showGuestSignInAlert = false
+    @State private var showQuickStartSignInAlert = false
+    @State private var showQuickCardioPicker = false
+    @State private var showQuickSportPicker = false
+    @State private var quickStartBusyKind: WorkoutKind?
+    @State private var quickStartError: String?
+    @State private var quickActiveWorkout: QuickActiveWorkout?
+    @State private var lastQuickActiveWorkoutId: Int?
     
     private let highlightsInsertIndex = 5
     private let scrollToTopThreshold: CGFloat = 120
+
+    private struct FeedPageRequest {
+        let page: Int
+        let generation: UUID
+        let filter: KindFilter
+    }
     
     private func metricChip(_ text: String) -> some View {
         Text(text)
@@ -391,8 +567,7 @@ struct HomeView: View {
                             .listRowBackground(Color.clear)
                     }
                     
-                    ForEach(feed.indices, id: \.self) { i in
-                        let item = feed[i]
+                    ForEach(Array(feed.enumerated()), id: \.element.id) { i, item in
                         let firstOfDay = i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at)
                         
                         WorkoutFeedCard(
@@ -479,7 +654,7 @@ struct HomeView: View {
                     .animation(.easeInOut(duration: 0.2), value: showScrollToTopButton)
                 }
             }
-            if !isPremium {
+            if !app.isPremium {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)
@@ -491,11 +666,24 @@ struct HomeView: View {
         }
         .background(.clear)
         .overlay {
-            if app.isAuthenticated {
-                MessagesFloatingButton()
-                    .environmentObject(app)
-                    .allowsHitTesting(true)
-                    .zIndex(99)
+            HomeFloatingDockOverlay(
+                bottomSafeInset: app.isPremium ? 18 : 70,
+                showChat: app.isAuthenticated,
+                quickStartBusyKind: quickStartBusyKind,
+                onQuickStrength: { startQuickWorkout(.strength) },
+                onQuickCardio: { showQuickCardioPicker = true },
+                onQuickSport: { showQuickSportPicker = true },
+                onQuickSignInRequired: { showQuickStartSignInAlert = true }
+            )
+            .environmentObject(app)
+            .allowsHitTesting(true)
+            .zIndex(99)
+        }
+        .overlay {
+            if quickStartBusyKind != nil {
+                quickStartLoadingOverlay
+                    .transition(.opacity)
+                    .zIndex(200)
             }
         }
         .task { await reloadAll() }
@@ -508,11 +696,58 @@ struct HomeView: View {
         } message: {
             Text("Sign in or create an account to view other people's workouts.")
         }
+        .alert("Sign in required", isPresented: $showQuickStartSignInAlert) {
+            Button("Go to Profile") { app.selectedTab = .profile }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Sign in or create an account to start a workout.")
+        }
+        .alert("Could not start workout", isPresented: Binding(
+            get: { quickStartError != nil },
+            set: { if !$0 { quickStartError = nil } }
+        )) {
+            Button("OK", role: .cancel) { quickStartError = nil }
+        } message: {
+            Text(quickStartError ?? "Unknown error")
+        }
         .navigationDestination(item: $selectedItem) { it in
             WorkoutDetailView(workoutId: it.id, ownerId: it.workout.user_id)
                 .onAppear {
                     print("[Home.navDest.onAppear] showing WorkoutDetailView id=\(it.id) main=\(Thread.isMainThread)")
                 }
+        }
+        .sheet(isPresented: $showQuickCardioPicker) {
+            quickCardioPicker
+        }
+        .sheet(isPresented: $showQuickSportPicker) {
+            quickSportPicker
+        }
+        .fullScreenCover(item: $quickActiveWorkout, onDismiss: {
+            if let lastQuickActiveWorkoutId {
+                Task { await refreshOne(id: lastQuickActiveWorkoutId) }
+            }
+        }) { active in
+            switch active.kind {
+            case .strength:
+                ActiveStrengthWorkoutView(
+                    workoutId: active.id,
+                    dualGuestWorkoutId: nil,
+                    dualGuestAvatarURL: nil,
+                    dualGuest2WorkoutId: nil,
+                    dualGuest2AvatarURL: nil,
+                    dualHostAvatarURL: nil
+                )
+                .environmentObject(app)
+                .gradientBG()
+            case .cardio:
+                ActiveCardioWorkoutView(workoutId: active.id)
+                    .environmentObject(app)
+                    .gradientBG()
+            case .sport:
+                ActiveSportWorkoutView(workoutId: active.id)
+                    .environmentObject(app)
+                    .gradientBG()
+            }
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .workoutUpdated).receive(on: RunLoop.main)
@@ -622,69 +857,149 @@ struct HomeView: View {
                 .gradientBG()
         }
     }
-    
-    private func reloadAll() async {
-        print("[Home.reloadAll] start filter=\(filter.rawValue)")
-        if let session = try? await SupabaseManager.shared.client.auth.session {
-            if app.userId != session.user.id {
-                await MainActor.run { app.userId = session.user.id }
+
+    private var quickStartLoadingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.34)
+                .ignoresSafeArea()
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.primary)
+                Text("Starting workout...")
+                    .font(.headline)
+                Text("Creating your workout and opening Active Workout.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.vertical, 24)
+            .padding(.horizontal, 22)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .stroke(.white.opacity(0.22), lineWidth: 0.8)
+            )
+            .shadow(color: .black.opacity(0.22), radius: 18, x: 0, y: 8)
+        }
+        .contentShape(Rectangle())
+    }
+
+    private var quickCardioPicker: some View {
+        NavigationStack {
+            ZStack {
+                GradientBackground().ignoresSafeArea()
+                List(CardioActivityType.allCases) { activity in
+                    Button {
+                        showQuickCardioPicker = false
+                        startQuickWorkout(.cardio, cardioActivity: activity)
+                    } label: {
+                        Text(activity.label)
+                            .foregroundStyle(.primary)
+                    }
+                    .listRowBackground(Color.white.opacity(0.16))
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Choose cardio")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showQuickCardioPicker = false }
+                }
             }
         }
-        
-        guard let me = app.userId else {
-            await reloadGuestHome()
+        .presentationDetents([.medium, .large])
+        .presentationBackground(.clear)
+    }
+
+    private var quickSportPicker: some View {
+        NavigationStack {
+            ZStack {
+                GradientBackground().ignoresSafeArea()
+                List(SportType.allCases) { sport in
+                    Button {
+                        showQuickSportPicker = false
+                        startQuickWorkout(.sport, sportType: sport)
+                    } label: {
+                        Text(sport.label)
+                            .foregroundStyle(.primary)
+                    }
+                    .listRowBackground(Color.white.opacity(0.16))
+                }
+                .scrollContentBackground(.hidden)
+            }
+            .navigationTitle("Choose sport")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showQuickSportPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationBackground(.clear)
+    }
+
+    private func startQuickWorkout(
+        _ kind: WorkoutKind,
+        cardioActivity: CardioActivityType? = nil,
+        sportType: SportType? = nil
+    ) {
+        guard let userId = app.userId else {
+            showQuickStartSignInAlert = true
             return
         }
-        
-        await MainActor.run {
-            initialLoading = true
-            error = nil
-            page = 0
-            canLoadMore = true
-            isLoadingPage = false
-            feed.removeAll()
-        }
-        
-        do {
-            let fRes = try await SupabaseManager.shared.client
-                .from("follows")
-                .select("followee_id")
-                .eq("follower_id", value: me.uuidString)
-                .limit(500)
-                .execute()
-            let fRows = try JSONDecoder.supabase().decode([FollowRow].self, from: fRes.data)
-            let ids = fRows.map { $0.followee_id }
-            await MainActor.run { self.followees = ids }
-            await loadPage(reset: true)
-            try await ensureProfilesAvailable(for: ([me] + ids))
-            async let t: Void = loadTodaySummary()
-            async let w: Void = loadWeekSummaryAndLeaderboard()
-            async let s: Void = loadStreak()
-            async let r: Void = loadRecentPRs()
-            async let m: Void = loadMonthlySummary()
-            async let i: Void = loadInsights()
-            _ = await (t, w, s, r, m, i)
-            
-        } catch {
-            await MainActor.run {
-                self.error = error.localizedDescription
-                self.feed = []
+        guard quickStartBusyKind == nil else { return }
+        quickStartBusyKind = kind
+        quickStartError = nil
+        Task {
+            do {
+                let workoutId = try await QuickWorkoutStarter.create(
+                    kind: kind,
+                    userId: userId,
+                    cardioActivity: cardioActivity,
+                    sportType: sportType
+                )
+                await MainActor.run {
+                    lastQuickActiveWorkoutId = workoutId
+                    quickActiveWorkout = QuickActiveWorkout(
+                        id: workoutId,
+                        kind: quickActiveKind(for: kind)
+                    )
+                    quickStartBusyKind = nil
+                }
+            } catch {
+                await MainActor.run {
+                    quickStartBusyKind = nil
+                    quickStartError = error.localizedDescription
+                }
             }
         }
-        
-        await MainActor.run { initialLoading = false }
+    }
+
+    private func quickActiveKind(for kind: WorkoutKind) -> QuickActiveWorkout.Kind {
+        switch kind {
+        case .strength: return .strength
+        case .cardio: return .cardio
+        case .sport: return .sport
+        }
     }
     
-    private func reloadGuestHome() async {
-        await MainActor.run {
+    @MainActor
+    private func beginFeedReload(clearGuestHome: Bool) -> UUID {
+        let generation = UUID()
+        feedLoadGeneration = generation
+        initialLoading = true
+        error = nil
+        page = 0
+        canLoadMore = true
+        isLoadingPage = false
+        feed.removeAll()
+
+        if clearGuestHome {
             followees = []
-            initialLoading = true
-            error = nil
             showGuestSignInAlert = false
-            page = 0
-            canLoadMore = true
-            isLoadingPage = false
-            feed.removeAll()
             todayCount = 0
             todayMinutes = 0
             todayPoints = 0
@@ -701,46 +1016,191 @@ struct HomeView: View {
             bestSportScore = 0
             bestSportLabel = ""
         }
-        await loadGuestFeedPage(reset: true)
-        await MainActor.run { initialLoading = false }
+
+        return generation
     }
-    
-    private func loadGuestFeedPage(reset: Bool) async {
+
+    @MainActor
+    private func beginFeedPageLoad(reset: Bool, generation requestedGeneration: UUID?) -> FeedPageRequest? {
         if reset {
-            await MainActor.run {
-                page = 0
-                canLoadMore = true
-                feed.removeAll()
+            feedLoadGeneration = requestedGeneration ?? UUID()
+            page = 0
+            canLoadMore = true
+            isLoadingPage = false
+            feed.removeAll()
+        } else if let requestedGeneration, !HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: requestedGeneration
+        ) {
+            return nil
+        }
+
+        guard canLoadMore, !isLoadingPage else { return nil }
+
+        let request = FeedPageRequest(
+            page: page,
+            generation: requestedGeneration ?? feedLoadGeneration,
+            filter: filter
+        )
+        isLoadingPage = true
+        return request
+    }
+
+    @MainActor
+    private func finishFeedPageLoad(_ request: FeedPageRequest) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: request.generation
+        ) else { return }
+
+        isLoadingPage = false
+    }
+
+    @MainActor
+    private func applyFeedPage(items: [FeedItem], fetchedCount: Int, request: FeedPageRequest) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: request.generation
+        ) else {
+            return
+        }
+
+        feed = HomeFeedMerge.merge(
+            existing: feed,
+            incoming: items,
+            id: { $0.id },
+            startedAt: { $0.workout.started_at }
+        )
+        canLoadMore = fetchedCount == pageSize
+        if canLoadMore {
+            page = request.page + 1
+        }
+    }
+
+    @MainActor
+    private func failFeedPageLoad(_ error: Error, request: FeedPageRequest, clearFeed: Bool) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: request.generation
+        ) else { return }
+
+        if clearFeed {
+            self.error = error.localizedDescription
+            feed = []
+        }
+        canLoadMore = false
+    }
+
+    @MainActor
+    private func completeFeedReload(_ generation: UUID) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: generation
+        ) else { return }
+
+        initialLoading = false
+    }
+
+    @MainActor
+    private func failFeedReload(_ error: Error, generation: UUID) {
+        guard HomeFeedMerge.shouldApplyResult(
+            currentGeneration: feedLoadGeneration,
+            resultGeneration: generation
+        ) else { return }
+
+        self.error = error.localizedDescription
+        feed = []
+        initialLoading = false
+    }
+
+    private func reloadAll() async {
+        print("[Home.reloadAll] start filter=\(filter.rawValue)")
+        if let session = try? await SupabaseManager.shared.client.auth.session {
+            if app.userId != session.user.id {
+                await MainActor.run { app.userId = session.user.id }
             }
         }
         
-        guard canLoadMore, !isLoadingPage else { return }
-        
-        await MainActor.run {
-            isLoadingPage = true
-            print("[Home.loadGuestFeedPage] isLoadingPage=true reset=\(reset) page=\(page)")
+        guard let me = app.userId else {
+            await reloadGuestHome()
+            return
         }
+        
+        let generation = await MainActor.run {
+            beginFeedReload(clearGuestHome: false)
+        }
+        
+        do {
+            let fRes = try await SupabaseManager.shared.client
+                .from("follows")
+                .select("followee_id")
+                .eq("follower_id", value: me.uuidString)
+                .limit(500)
+                .execute()
+            let fRows = try JSONDecoder.supabase().decode([FollowRow].self, from: fRes.data)
+            let ids = fRows.map { $0.followee_id }
+            await MainActor.run {
+                if HomeFeedMerge.shouldApplyResult(
+                    currentGeneration: feedLoadGeneration,
+                    resultGeneration: generation
+                ) {
+                    self.followees = ids
+                }
+            }
+            await loadPage(reset: false, generation: generation)
+            try await ensureProfilesAvailable(for: ([me] + ids))
+            async let t: Void = loadTodaySummary()
+            async let w: Void = loadWeekSummaryAndLeaderboard()
+            async let s: Void = loadStreak()
+            async let r: Void = loadRecentPRs()
+            async let m: Void = loadMonthlySummary()
+            async let i: Void = loadInsights()
+            _ = await (t, w, s, r, m, i)
+            
+        } catch {
+            await MainActor.run { failFeedReload(error, generation: generation) }
+        }
+        
+        await MainActor.run { completeFeedReload(generation) }
+    }
+    
+    private func reloadGuestHome() async {
+        let generation = await MainActor.run {
+            beginFeedReload(clearGuestHome: true)
+        }
+        await loadGuestFeedPage(reset: false, generation: generation)
+        await MainActor.run { completeFeedReload(generation) }
+    }
+    
+    private func loadGuestFeedPage(reset: Bool, generation: UUID? = nil) async {
+        let request = await MainActor.run {
+            beginFeedPageLoad(reset: reset, generation: generation)
+        }
+        guard let request else {
+            return
+        }
+        print("[Home.loadGuestFeedPage] isLoadingPage=true reset=\(reset) page=\(request.page)")
         
         defer {
             Task { await MainActor.run {
-                isLoadingPage = false
+                finishFeedPageLoad(request)
                 print("[Home.loadGuestFeedPage] isLoadingPage=false")
             }}
         }
         
         do {
-            print("[Home.loadGuestFeedPage] fetching page=\(page) pageSize=\(pageSize)")
+            print("[Home.loadGuestFeedPage] fetching page=\(request.page) pageSize=\(pageSize)")
             
             var q: PostgrestFilterBuilder = SupabaseManager.shared.client
                 .from("workouts")
                 .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
                 .eq("state", value: "published")
             
-            if filter != .all {
-                q = q.eq("kind", value: filter.rawValue.lowercased())
+            if request.filter != KindFilter.all {
+                q = q.eq("kind", value: request.filter.rawValue.lowercased())
             }
             
-            let from = page * pageSize
+            let from = request.page * pageSize
             let to = from + pageSize - 1
             
             let wRes = try await q
@@ -819,125 +1279,77 @@ struct HomeView: View {
             }
             
             await MainActor.run {
-                self.feed.append(contentsOf: items)
-                self.feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
-                self.canLoadMore = workouts.count == pageSize
-                if self.canLoadMore { self.page += 1 }
+                applyFeedPage(items: items, fetchedCount: workouts.count, request: request)
                 print("[Home.loadGuestFeedPage] appended items=\(items.count) newFeedCount=\(self.feed.count) canLoadMore=\(self.canLoadMore) nextPage=\(self.page)")
             }
         } catch {
             await MainActor.run {
-                self.error = error.localizedDescription
-                self.feed = []
-                self.canLoadMore = false
+                failFeedPageLoad(error, request: request, clearFeed: true)
                 print("[Home.loadGuestFeedPage] error=\(error)")
             }
         }
     }
     
-    private func loadPage(reset: Bool) async {
+    private func loadPage(reset: Bool, generation: UUID? = nil) async {
         guard let me = app.userId else { return }
         
-        if reset {
-            await MainActor.run {
-                page = 0
-                canLoadMore = true
-                feed.removeAll()
-            }
+        let request = await MainActor.run {
+            beginFeedPageLoad(reset: reset, generation: generation)
         }
-        
-        guard canLoadMore, !isLoadingPage else { return }
-        
-        await MainActor.run {
-            isLoadingPage = true
-            print("[Home.loadPage] isLoadingPage=true reset=\(reset) page=\(page) canLoadMore=\(canLoadMore)")
+        guard let request else {
+            return
         }
+        print("[Home.loadPage] isLoadingPage=true reset=\(reset) page=\(request.page) canLoadMore=\(canLoadMore)")
         
         defer {
             Task { await MainActor.run {
-                isLoadingPage = false
+                finishFeedPageLoad(request)
                 print("[Home.loadPage] isLoadingPage=false")
             }}
         }
         
         do {
-            let allIds = [me] + followees
-            print("[Home.loadPage] fetching page=\(page) pageSize=\(pageSize) userIds=\(allIds.count)")
-            
-            let idsCSV = allIds.map { $0.uuidString }.joined(separator: ",")
-            var q: PostgrestFilterBuilder = SupabaseManager.shared.client
-                .from("workouts")
-                .select("id, user_id, kind, title, started_at, ended_at, state, calories_kcal, sport_sessions!sport_sessions_workout_id_fk(sport), cardio_sessions(activity_code)")
-                .or("user_id.eq.\(me.uuidString),and(user_id.in.(\(idsCSV)),state.neq.planned)")
-            
-            if filter != .all {
-                q = q.eq("kind", value: filter.rawValue.lowercased())
-                print("[Home.loadPage] filter=\(filter.rawValue.lowercased())")
-            }
-            
-            let from = page * pageSize
-            let to   = from + pageSize - 1
-            
-            let wRes = try await q
-                .order("started_at", ascending: false)
-                .range(from: from, to: to)
+            print("[Home.loadPage] fetching page=\(request.page) pageSize=\(pageSize) via get_home_feed_page_v1")
+
+            let kindParam: String? = request.filter == .all
+                ? nil
+                : request.filter.rawValue.lowercased()
+
+            let feedRes = try await SupabaseManager.shared.client
+                .rpc(
+                    "get_home_feed_page_v1",
+                    params: HomeFeedParams(
+                        p_page: request.page,
+                        p_page_size: pageSize,
+                        p_kind: kindParam
+                    )
+                )
                 .execute()
-            
-            let workouts = try JSONDecoder.supabase().decode([WorkoutRow].self, from: wRes.data)
-            print("[Home.loadPage] fetched workouts=\(workouts.count) from=\(from) to=\(to)")
-            
-            let ids = workouts.map { $0.id }
-            let uniqueUserIds = Array(Set(workouts.map { $0.user_id }))
-            try await ensureProfilesAvailable(for: uniqueUserIds)
-            
-            var scoresDict: [Int: Double] = [:]
-            if !ids.isEmpty {
-                let sRes = try await SupabaseManager.shared.client
-                    .from("workout_scores")
-                    .select("workout_id, score")
-                    .in("workout_id", values: ids)
-                    .execute()
-                
-                let sRows = try JSONDecoder.supabase().decode([WorkoutScoreRow].self, from: sRes.data)
-                print("[Home.loadPage] fetched scores rows=\(sRows.count)")
-                var tmp: [Int: Double] = [:]
-                for row in sRows {
-                    let value = NSDecimalNumber(decimal: row.score).doubleValue
-                    tmp[row.workout_id, default: 0] += value
-                }
-                scoresDict = tmp
+
+            let page = try JSONDecoder.supabase().decode(HomeFeedPageResponse.self, from: feedRes.data)
+            let workouts = page.workouts ?? []
+            print("[Home.loadPage] fetched workouts=\(workouts.count)")
+
+            let uniqueUserIds = Array(Set(workouts.map(\.user_id)))
+            var participantIdsByWorkout: [Int: [UUID]] = [:]
+            for p in page.participants ?? [] {
+                participantIdsByWorkout[p.workout_id, default: []].append(p.user_id)
             }
-            
+            let allParticipantUids = Array(Set((page.participants ?? []).map(\.user_id)))
+            try await ensureProfilesAvailable(for: uniqueUserIds + allParticipantUids)
+
+            var scoresDict: [Int: Double] = [:]
+            for row in page.scores ?? [] {
+                scoresDict[row.workout_id] = NSDecimalNumber(decimal: row.score).doubleValue
+            }
+
             var likeCountByWorkout: [Int: Int] = [:]
             var likedByMe: Set<Int> = []
-            if !ids.isEmpty {
-                let lRes = try await SupabaseManager.shared.client
-                    .from("workout_likes")
-                    .select("workout_id,user_id")
-                    .in("workout_id", values: ids)
-                    .execute()
-                let lRows = try JSONDecoder.supabase().decode([LikeRow].self, from: lRes.data)
-                for row in lRows {
-                    likeCountByWorkout[row.workout_id, default: 0] += 1
-                    if row.user_id == me { likedByMe.insert(row.workout_id) }
-                }
+            for row in page.likes ?? [] {
+                likeCountByWorkout[row.workout_id, default: 0] += 1
+                if row.user_id == me { likedByMe.insert(row.workout_id) }
             }
-            
-            var participantIdsByWorkout: [Int: [UUID]] = [:]
-            if !ids.isEmpty {
-                let pRes = try await SupabaseManager.shared.client
-                    .from("workout_participants")
-                    .select("workout_id,user_id")
-                    .in("workout_id", values: ids)
-                    .execute()
-                let pRows = try JSONDecoder.supabase().decode([ParticipantRow].self, from: pRes.data)
-                for p in pRows {
-                    participantIdsByWorkout[p.workout_id, default: []].append(p.user_id)
-                }
-                let allParticipantUids = Array(Set(pRows.map { $0.user_id }))
-                try await ensureProfilesAvailable(for: allParticipantUids)
-            }
-            
+
             let items: [FeedItem] = workouts.map { w in
                 let ownerProf = profiles[w.user_id]
                 let pIds = participantIdsByWorkout[w.id] ?? []
@@ -959,15 +1371,12 @@ struct HomeView: View {
             }
             
             await MainActor.run {
-                self.feed.append(contentsOf: items)
-                self.feed.sort { ($0.workout.started_at ?? .distantPast) > ($1.workout.started_at ?? .distantPast) }
-                self.canLoadMore = workouts.count == pageSize
-                if canLoadMore { page += 1 }
+                applyFeedPage(items: items, fetchedCount: workouts.count, request: request)
                 print("[Home.loadPage] appended items=\(items.count) newFeedCount=\(feed.count) canLoadMore=\(canLoadMore) nextPage=\(page)")
             }
         } catch {
             await MainActor.run {
-                self.canLoadMore = false
+                failFeedPageLoad(error, request: request, clearFeed: false)
                 print("[Home.loadPage] error=\(error) → canLoadMore=false")
             }
         }

@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.territory.TerritoryCaptureClient
+import com.lilru.liftr.territory.TerritoryCityRegionRowWire
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,7 +47,9 @@ enum class RankingMetric {
     HYROX_BEST_TIME,
     FOOTBALL_GOALS,
     SKI_DISTANCE_KPI,
-    SEGMENT_POPULARITY
+    SEGMENT_POPULARITY,
+    TERRITORY_SHARE,
+    TERRITORY_CELLS
 }
 
 private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this) {
@@ -56,7 +60,9 @@ private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this)
     RankingMetric.CARDIO_DISTANCE,
     RankingMetric.CARDIO_ELEVATION,
     RankingMetric.CARDIO_DURATION,
-    RankingMetric.CARDIO_BEST_PACE -> kind == RankingKind.ALL || kind == RankingKind.CARDIO
+    RankingMetric.CARDIO_BEST_PACE,
+    RankingMetric.TERRITORY_SHARE,
+    RankingMetric.TERRITORY_CELLS -> kind == RankingKind.ALL || kind == RankingKind.CARDIO
     RankingMetric.SPORT_MATCH_WINS,
     RankingMetric.SPORT_WIN_RATE,
     RankingMetric.SPORT_DURATION,
@@ -97,7 +103,8 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetric.CARDIO_DISTANCE,
         RankingMetric.CARDIO_ELEVATION,
         RankingMetric.CARDIO_DURATION,
-        RankingMetric.CARDIO_BEST_PACE
+        RankingMetric.CARDIO_BEST_PACE,
+        RankingMetric.TERRITORY_SHARE
     ).filter { it.isVisibleFor(kind) }
     val social = listOf(
         RankingMetric.LIKES_RECEIVED,
@@ -169,7 +176,9 @@ data class RankingUiState(
     val kind: RankingKind = RankingKind.ALL,
     val userRows: List<RankingUserRow> = emptyList(),
     val workoutRows: List<RankingWorkoutRow> = emptyList(),
-    val segmentRows: List<RankingSegmentRow> = emptyList()
+    val segmentRows: List<RankingSegmentRow> = emptyList(),
+    val territoryCities: List<TerritoryCityRegionRowWire> = emptyList(),
+    val territoryCityKey: String? = null
 )
 
 class RankingViewModel(
@@ -196,6 +205,11 @@ class RankingViewModel(
             st.period
         }
         _uiState.value = st.copy(metric = v, period = period)
+        refresh()
+    }
+
+    fun setTerritoryCityKey(v: String) {
+        _uiState.value = _uiState.value.copy(territoryCityKey = v)
         refresh()
     }
 
@@ -263,6 +277,8 @@ class RankingViewModel(
                         segmentRowsBuffer = fetchSegmentPopularity(st)
                         emptyList<RankingUserRow>() to emptyList()
                     }
+                    RankingMetric.TERRITORY_SHARE -> fetchTerritoryShare(st) to emptyList()
+                    RankingMetric.TERRITORY_CELLS -> fetchTerritoryTotalCells(st) to emptyList()
                 }
             }.onSuccess { (users, workouts) ->
                 _uiState.value = _uiState.value.copy(
@@ -307,6 +323,79 @@ class RankingViewModel(
                     bufferM = if (o.has("buffer_m") && !o.isNull("buffer_m")) o.optDouble("buffer_m") else null
                 )
             }
+        }
+    }
+
+    private suspend fun fetchTerritoryShare(st: RankingUiState): List<RankingUserRow> {
+        val citiesStarted = System.currentTimeMillis()
+        val cities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+        val pendingCount = cities.count { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }
+        TerritoryCaptureClient.logTerritoryShare(
+            "ranking cities count=${cities.size} pending=$pendingCount elapsedMs=${System.currentTimeMillis() - citiesStarted}"
+        )
+        val cityKey = st.territoryCityKey
+            ?: TerritoryCaptureClient.preferredCityKey(null, null, cities)
+        if (cityKey.isNullOrBlank()) {
+            _uiState.value = _uiState.value.copy(
+                territoryCities = cities,
+                territoryCityKey = null
+            )
+            return emptyList()
+        }
+        _uiState.value = _uiState.value.copy(
+            territoryCities = cities,
+            territoryCityKey = cityKey
+        )
+        val leaderboardStarted = System.currentTimeMillis()
+        val rows = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+            supabase = supabase,
+            cityKey = cityKey,
+            scope = mapScope(st.scope)
+        ).map { row ->
+            RankingUserRow(
+                rank = row.rank,
+                userId = row.userId,
+                username = row.username,
+                avatarUrl = row.avatarUrl,
+                primary = String.format("%.2f%%", row.territorySharePct ?: 0.0),
+                secondary = "Cells: ${row.ownedCells ?: 0}"
+            )
+        }
+        TerritoryCaptureClient.logTerritoryShare(
+            "ranking leaderboard cityKey=$cityKey scope=${mapScope(st.scope)} rows=${rows.size} elapsedMs=${System.currentTimeMillis() - leaderboardStarted}"
+        )
+        if (pendingCount > 0) {
+            TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground(
+                supabase = supabase,
+                scope = viewModelScope
+            ) { updated ->
+                val remainingPending = updated.count { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }
+                TerritoryCaptureClient.logTerritoryShare(
+                    "ranking background cities count=${updated.size} pending=$remainingPending"
+                )
+                _uiState.value = _uiState.value.copy(territoryCities = updated)
+            }
+        }
+        return rows
+    }
+
+    private suspend fun fetchTerritoryTotalCells(st: RankingUiState): List<RankingUserRow> {
+        _uiState.value = _uiState.value.copy(
+            territoryCities = emptyList(),
+            territoryCityKey = null
+        )
+        return TerritoryCaptureClient.fetchTerritoryTotalCellsLeaderboard(
+            supabase = supabase,
+            scope = mapScope(st.scope)
+        ).map { row ->
+            RankingUserRow(
+                rank = row.rank,
+                userId = row.userId,
+                username = row.username,
+                avatarUrl = row.avatarUrl,
+                primary = "${row.ownedCells ?: 0}",
+                secondary = String.format("%.2f%% global share", row.territorySharePct ?: 0.0)
+            )
         }
     }
 

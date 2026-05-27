@@ -51,6 +51,7 @@ private data class NotificationSettingsRow(
     @SerialName("push_workout_comment") val pushWorkoutComment: Boolean,
     @SerialName("push_comment_like") val pushCommentLike: Boolean,
     @SerialName("push_comment_reply") val pushCommentReply: Boolean,
+    @SerialName("push_comment_mention") val pushCommentMention: Boolean = true,
     @SerialName("push_added_as_participant") val pushAddedAsParticipant: Boolean,
     @SerialName("push_achievement_unlocked") val pushAchievementUnlocked: Boolean,
     @SerialName("push_goal_completed") val pushGoalCompleted: Boolean,
@@ -67,6 +68,8 @@ private data class NotificationSettingsRow(
     @SerialName("push_competition_workout_rejected") val pushCompetitionWorkoutRejected: Boolean,
     @SerialName("push_segment_you_are_first") val pushSegmentYouAreFirst: Boolean,
     @SerialName("push_segment_lost_first") val pushSegmentLostFirst: Boolean,
+    @SerialName("push_territory_capture_from_user") val pushTerritoryCaptureFromUser: Boolean,
+    @SerialName("push_territory_lost_to_user") val pushTerritoryLostToUser: Boolean,
     @SerialName("push_challenge_won") val pushChallengeWon: Boolean,
     @SerialName("push_challenge_won_weekly") val pushChallengeWonWeekly: Boolean,
     @SerialName("push_workout_kind_inactive") val pushWorkoutKindInactive: Boolean
@@ -224,6 +227,13 @@ fun NotificationSettingsScreen(
                     onToggle = { v -> save(mapOf("push_comment_reply" to v)) }
                 )
                 SettingsCard(
+                    title = stringResource(R.string.notifications_settings_comment_mentions),
+                    subtitle = null,
+                    checked = r.pushCommentMention,
+                    enabled = enabled,
+                    onToggle = { v -> save(mapOf("push_comment_mention" to v)) }
+                )
+                SettingsCard(
                     title = stringResource(R.string.notifications_settings_added_participant),
                     subtitle = null,
                     checked = r.pushAddedAsParticipant,
@@ -340,6 +350,20 @@ fun NotificationSettingsScreen(
                     checked = r.pushSegmentLostFirst,
                     enabled = enabled,
                     onToggle = { v -> save(mapOf("push_segment_lost_first" to v)) }
+                )
+                SettingsCard(
+                    title = stringResource(R.string.notifications_settings_territory_capture),
+                    subtitle = null,
+                    checked = r.pushTerritoryCaptureFromUser,
+                    enabled = enabled,
+                    onToggle = { v -> save(mapOf("push_territory_capture_from_user" to v)) }
+                )
+                SettingsCard(
+                    title = stringResource(R.string.notifications_settings_territory_lost),
+                    subtitle = null,
+                    checked = r.pushTerritoryLostToUser,
+                    enabled = enabled,
+                    onToggle = { v -> save(mapOf("push_territory_lost_to_user" to v)) }
                 )
                 SettingsCard(
                     title = stringResource(R.string.notifications_settings_challenge_won),

@@ -26,7 +26,7 @@ struct AppleHealthImportHelpSheet: View {
                     Text(
                         "You choose a date range (or a quick preset), then tap Import workouts. "
                             + "Liftr looks in the Health app—including data from your Apple Watch if you use one—and "
-                            + "creates matching sessions here as cardio workouts. Import is manual (not automatic), and nothing is removed or changed in Health."
+                            + "creates matching sessions here as cardio workouts. Automatic import is on by default; you can also import a date range manually. Nothing is removed or changed in Health."
                     )
                     .font(.body)
                     .foregroundStyle(.secondary)

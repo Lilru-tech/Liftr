@@ -18,6 +18,8 @@ internal data class RoutineShareStrengthSet(
 internal data class RoutineShareStrengthEx(
     @SerialName("exercise_id") val exerciseId: Long,
     @SerialName("order_index") val orderIndex: Int,
+    @SerialName("superset_group_id") val supersetGroupId: String? = null,
+    @SerialName("superset_position") val supersetPosition: Int? = null,
     val notes: String? = null,
     @SerialName("custom_name") val customName: String? = null,
     @SerialName("strength_routine_sets") val strengthRoutineSets: List<RoutineShareStrengthSet>? = null

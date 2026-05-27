@@ -1,7 +1,9 @@
 import Foundation
 import Combine
+import SwiftUI
 import Supabase
 import UIKit
+import CoreLocation
 
 final class AppState: ObservableObject {
     @Published var selectedTab: Tab = .home
@@ -34,15 +36,26 @@ final class AppState: ObservableObject {
     static let shared = AppState()
     
     @Published var isAuthenticated: Bool = false
+    @Published private(set) var isPremium: Bool = false
     @Published var userId: UUID?
+    @Published var passwordRecoveryPending: Bool = false
+    @Published var authCallbackError: String?
     
     @Published private(set) var tabBarProfileAvatar: UIImage?
     private var tabBarAvatarURLString: String?
     private static let tabBarAvatarPointDiameter: CGFloat = 26
     @Published private(set) var unreadNotificationsCount: Int = 0
+    @Published private(set) var unreadChatMessagesCount: Int = 0
+    @Published var territoryCaptureToast: String?
+    @Published var territoryReferenceCoordinate: CLLocationCoordinate2D?
     
     private var authTask: Task<Void, Never>?
-    
+    private let chatInboxRealtime = ChatInboxRealtime()
+    private var chatInboxRealtimeUserId: UUID?
+    private var lastHandledAuthCallbackKey: String?
+    private var lastHandledAuthCallbackAt: Date?
+    private var isHandlingAuthCallback = false
+
     private init() {
         listenAuth()
     }
@@ -52,6 +65,90 @@ final class AppState: ObservableObject {
     }
     
     @MainActor
+    func preparePasswordRecoveryFromAuthCallback() {
+        passwordRecoveryPending = true
+        isAuthenticated = false
+        Task { @MainActor in
+            await stopChatUnreadRealtime()
+        }
+        withAnimation {
+            selectedTab = .profile
+        }
+        authCallbackError = nil
+        AuthCallbackLogger.log(
+            "preparePasswordRecovery pending=\(passwordRecoveryPending) tab=\(selectedTab) authenticated=\(isAuthenticated)",
+            source: "AppState"
+        )
+    }
+
+    @MainActor
+    func clearAuthCallbackError() {
+        authCallbackError = nil
+    }
+
+    @MainActor
+    func handleAuthCallbackURL(_ url: URL) async {
+        AuthCallbackLogger.log("handleAuthCallbackURL entered \(AuthCallbackLogger.describeMatch(url))", url: url, source: "AppState")
+        guard AuthRedirect.isAuthCallback(url) else {
+            AuthCallbackLogger.log("ignored: URL did not match auth callback", url: url, source: "AppState")
+            return
+        }
+        if isHandlingAuthCallback {
+            AuthCallbackLogger.log("skipped: already handling auth callback", url: url, source: "AppState")
+            return
+        }
+        let dedupeKey = url.absoluteString
+        if lastHandledAuthCallbackKey == dedupeKey,
+           let lastHandledAuthCallbackAt,
+           Date().timeIntervalSince(lastHandledAuthCallbackAt) < 3 {
+            AuthCallbackLogger.log("skipped duplicate within 3s", url: url, source: "AppState")
+            return
+        }
+        isHandlingAuthCallback = true
+        lastHandledAuthCallbackKey = dedupeKey
+        lastHandledAuthCallbackAt = Date()
+        defer { isHandlingAuthCallback = false }
+        preparePasswordRecoveryFromAuthCallback()
+        do {
+            AuthCallbackLogger.log("exchanging PKCE code via session(from:)", source: "AppState")
+            let session = try await SupabaseManager.shared.client.auth.session(from: url)
+            userId = session.user.id
+            passwordRecoveryPending = true
+            isAuthenticated = false
+            AuthCallbackLogger.log(
+                "exchange succeeded userId=\(session.user.id.uuidString) pending=\(passwordRecoveryPending) tab=\(selectedTab)",
+                source: "AppState"
+            )
+        } catch {
+            authCallbackError = error.localizedDescription
+            passwordRecoveryPending = false
+            isAuthenticated = false
+            userId = nil
+            AuthCallbackLogger.log("exchange failed: \(error.localizedDescription)", source: "AppState")
+        }
+    }
+
+    @MainActor
+    func completePasswordRecovery() {
+        passwordRecoveryPending = false
+        authCallbackError = nil
+        withAnimation {
+            selectedTab = .home
+        }
+        Task { @MainActor in
+            if let session = try? await SupabaseManager.shared.client.auth.session {
+                userId = session.user.id
+                isAuthenticated = true
+            }
+            await refreshTabBarProfileAvatarFromServer()
+            await refreshUnreadNotificationsCount()
+            if let userId {
+                await startChatUnreadRealtimeIfNeeded(for: userId)
+            }
+        }
+    }
+
+    @MainActor
     func refreshSession() async {
         do {
             let session = try await SupabaseManager.shared.client.auth.session
@@ -59,11 +156,13 @@ final class AppState: ObservableObject {
             self.isAuthenticated = true
             await refreshTabBarProfileAvatarFromServer()
             await refreshUnreadNotificationsCount()
+            await startChatUnreadRealtimeIfNeeded(for: session.user.id)
         } catch {
             self.userId = nil
             self.isAuthenticated = false
             clearTabBarProfileAvatar()
             unreadNotificationsCount = 0
+            await stopChatUnreadRealtime()
         }
     }
     
@@ -83,6 +182,20 @@ final class AppState: ObservableObject {
             unreadNotificationsCount = res.count ?? 0
         } catch {
             unreadNotificationsCount = 0
+        }
+    }
+
+    @MainActor
+    func refreshUnreadChatMessagesCount() async {
+        guard userId != nil else {
+            unreadChatMessagesCount = 0
+            return
+        }
+        do {
+            let list = try await ChatService.fetchConversations(limit: 100)
+            unreadChatMessagesCount = list.reduce(0) { $0 + $1.unread_count }
+        } catch {
+            unreadChatMessagesCount = 0
         }
     }
     
@@ -267,10 +380,12 @@ final class AppState: ObservableObject {
                 notificationDestination = .none
             }
             
-        case "workout_like",
+        case "apple_health_cardio_imported",
+             "workout_like",
              "workout_comment",
              "comment_reply",
-             "comment_like":
+             "comment_like",
+             "comment_mention":
             print("📩 [AppState] routing to workout")
             if let workoutIdStr = data["workout_id"] as? String,
                let workoutId = Int(workoutIdStr) {
@@ -366,6 +481,27 @@ final class AppState: ObservableObject {
                 notificationDestination = .none
             }
 
+        case "territory_capture_from_user", "territory_lost_to_user":
+            let workoutId: Int? = {
+                if let s = data["workout_id"] as? String { return Int(s) }
+                if let i = data["workout_id"] as? Int { return i }
+                if let n = data["workout_id"] as? NSNumber { return n.intValue }
+                return nil
+            }()
+            if let workoutId {
+                let ownerId: UUID?
+                if type == "territory_lost_to_user",
+                   let other = data["other_user_id"] as? String {
+                    ownerId = UUID(uuidString: other)
+                } else {
+                    ownerId = self.userId
+                }
+                notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+            } else {
+                print("⚠️ [AppState] workout_id missing/invalid for territory notification:", data)
+                notificationDestination = .none
+            }
+
         case "challenge_won", "challenge_won_weekly":
             if let raw = data["challenge_instance_id"] as? String, let iid = UUID(uuidString: raw) {
                 notificationDestination = .challengeWeekly(instanceId: iid)
@@ -431,6 +567,40 @@ final class AppState: ObservableObject {
             return nil
         }
     }
+
+    @MainActor
+    private func startChatUnreadRealtimeIfNeeded(for userId: UUID) async {
+        guard chatInboxRealtimeUserId != userId else {
+            await refreshUnreadChatMessagesCount()
+            return
+        }
+        if chatInboxRealtimeUserId != nil {
+            await chatInboxRealtime.stop()
+        }
+        chatInboxRealtimeUserId = userId
+        await chatInboxRealtime.start(myUserId: userId) { [weak self] in
+            Task { @MainActor [weak self] in
+                await self?.refreshUnreadChatMessagesCount()
+            }
+        }
+        await refreshUnreadChatMessagesCount()
+    }
+
+    @MainActor
+    private func stopChatUnreadRealtime() async {
+        await chatInboxRealtime.stop()
+        chatInboxRealtimeUserId = nil
+        unreadChatMessagesCount = 0
+    }
+
+    @MainActor
+    func refreshPremiumStatus() async {
+        guard userId != nil, isAuthenticated, !passwordRecoveryPending else {
+            isPremium = false
+            return
+        }
+        isPremium = await PremiumStatusClient.fetchIsPremium()
+    }
     
     private func listenAuth() {
         authTask?.cancel()
@@ -439,18 +609,31 @@ final class AppState: ObservableObject {
             
             if let session = try? await SupabaseManager.shared.client.auth.session {
                 await MainActor.run {
-                    self.isAuthenticated = true
                     self.userId = session.user.id
+                    if !self.passwordRecoveryPending {
+                        self.isAuthenticated = true
+                    } else {
+                        self.isAuthenticated = false
+                    }
                 }
-                await self.refreshTabBarProfileAvatarFromServer()
-                await self.refreshUnreadNotificationsCount()
+                let recoveryPending = await MainActor.run { self.passwordRecoveryPending }
+                if !recoveryPending {
+                    await self.refreshTabBarProfileAvatarFromServer()
+                    await self.refreshUnreadNotificationsCount()
+                    await self.refreshPremiumStatus()
+                    await self.startChatUnreadRealtimeIfNeeded(for: session.user.id)
+                } else {
+                    await self.stopChatUnreadRealtime()
+                }
             } else {
                 await MainActor.run {
                     self.isAuthenticated = false
                     self.userId = nil
+                    self.isPremium = false
                     self.clearTabBarProfileAvatar()
                     self.unreadNotificationsCount = 0
                 }
+                await self.stopChatUnreadRealtime()
             }
             
             for await state in SupabaseManager.shared.client.auth.authStateChanges {
@@ -460,33 +643,54 @@ final class AppState: ObservableObject {
                 await MainActor.run {
                     switch event {
                     case .initialSession, .signedIn, .userUpdated, .tokenRefreshed:
-                        self.isAuthenticated = (session != nil)
+                        if !self.passwordRecoveryPending {
+                            self.isAuthenticated = (session != nil)
+                            self.userId = session?.user.id
+                        }
+
+                    case .passwordRecovery:
+                        self.passwordRecoveryPending = true
                         self.userId = session?.user.id
-                        
-                    case .signedOut, .passwordRecovery, .userDeleted:
+                        self.isAuthenticated = false
+
+                    case .signedOut, .userDeleted:
                         self.isAuthenticated = false
                         self.userId = nil
+                        self.isPremium = false
+                        self.passwordRecoveryPending = false
+                        self.authCallbackError = nil
                         self.clearTabBarProfileAvatar()
                         self.unreadNotificationsCount = 0
-                        
+                        self.unreadChatMessagesCount = 0
+
                     default:
                         break
                     }
                 }
-                
+
                 switch event {
                 case .initialSession, .signedIn, .userUpdated, .tokenRefreshed:
-                    if session != nil {
+                    if session != nil, !self.passwordRecoveryPending {
                         await self.refreshTabBarProfileAvatarFromServer()
                         await self.refreshUnreadNotificationsCount()
-                    } else {
+                        await self.refreshPremiumStatus()
+                        if let userId = session?.user.id {
+                            await self.startChatUnreadRealtimeIfNeeded(for: userId)
+                        }
+                    } else if session == nil {
                         await MainActor.run {
                             self.clearTabBarProfileAvatar()
                             self.unreadNotificationsCount = 0
+                            self.isPremium = false
                         }
+                        await self.stopChatUnreadRealtime()
+                    } else {
+                        await self.stopChatUnreadRealtime()
                     }
-                case .signedOut, .passwordRecovery, .userDeleted:
-                    break
+                case .signedOut, .userDeleted:
+                    await self.stopChatUnreadRealtime()
+                case .passwordRecovery:
+                    await self.stopChatUnreadRealtime()
                 default:
                     break
                 }

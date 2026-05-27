@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -143,7 +144,9 @@ internal fun AddWorkoutGeneralCard(
     notes: String,
     onNotesChange: (String) -> Unit,
     selectedIntensity: AddWorkoutIntensity,
-    onIntensityChange: (AddWorkoutIntensity) -> Unit
+    onIntensityChange: (AddWorkoutIntensity) -> Unit,
+    showPlanTooltip: Boolean = false,
+    onDismissPlanTooltip: () -> Unit = {}
 ) {
     var typeMenuExpanded by remember { mutableStateOf(false) }
     var intensityMenuExpanded by remember { mutableStateOf(false) }
@@ -227,6 +230,9 @@ internal fun AddWorkoutGeneralCard(
                     ) {
                         Text(stringResource(R.string.add_mode_plan))
                     }
+                }
+                if (showPlanTooltip) {
+                    PlanModeFirstHintBubble(onDismiss = onDismissPlanTooltip)
                 }
                 Text(
                     text = if (selectedState == AddWorkoutState.PUBLISHED) {
@@ -347,6 +353,42 @@ internal fun AddWorkoutGeneralCard(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlanModeFirstHintBubble(onDismiss: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        )
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = stringResource(R.string.add_mode_plan_tooltip_title),
+                    style = MaterialTheme.typography.labelLarge
+                )
+                Text(
+                    text = stringResource(R.string.add_mode_plan_tooltip_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.add_mode_plan_tooltip_ok))
             }
         }
     }

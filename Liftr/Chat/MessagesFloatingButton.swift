@@ -1,30 +1,31 @@
 import SwiftUI
 
-enum FabCorner: String, CaseIterable {
+private enum ChatFabDockEdge: String {
+    case left, right, top, bottom
+}
+
+private enum LegacyFabCorner: String {
     case bottomLeading
     case bottomTrailing
     case topLeading
     case topTrailing
-
-    var alignment: Alignment {
-        switch self {
-        case .bottomLeading:  return .bottomLeading
-        case .bottomTrailing: return .bottomTrailing
-        case .topLeading:     return .topLeading
-        case .topTrailing:    return .topTrailing
-        }
-    }
 }
 
 struct MessagesFloatingButton: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("chatFabCorner") private var storedCorner: String = FabCorner.bottomLeading.rawValue
+    var bottomSafeInset: CGFloat = 0
+
+    @AppStorage("chatFabEdge") private var storedEdge: String = ""
+    @AppStorage("chatFabPosition") private var storedPosition: Double = -1
+    @AppStorage("chatFabCorner") private var storedCorner: String = LegacyFabCorner.bottomLeading.rawValue
     @AppStorage("chatFabDragHintSeen") private var chatFabDragHintSeen = false
-    @State private var dragOffset: CGSize = .zero
-    @State private var dragging: Bool = false
+
+    @State private var dragLocation: CGPoint?
+    @State private var fabDidDrag = false
     @State private var presentInbox: Bool = false
-    @State private var unreadTotal: Int = 0
     @State private var deepLinkConversation: DeepLinkPayload?
+
+    private let fabSize = CGSize(width: 56, height: 56)
 
     private struct DeepLinkPayload: Identifiable, Hashable {
         let id: Int64
@@ -33,39 +34,44 @@ struct MessagesFloatingButton: View {
 
     var body: some View {
         GeometryReader { geo in
-            let corner = FabCorner(rawValue: storedCorner) ?? .bottomLeading
-            ZStack {
-                ZStack(alignment: cornerAlignment) {
-                    Color.clear
-                    button
-                        .offset(x: dragging ? dragOffset.width : 0,
-                                y: dragging ? dragOffset.height : 0)
-                        .gesture(
-                            DragGesture(minimumDistance: 1)
-                                .onChanged { value in
-                                    if !chatFabDragHintSeen { chatFabDragHintSeen = true }
-                                    dragging = true
-                                    dragOffset = value.translation
-                                }
-                                .onEnded { value in
-                                    let dropped = currentDropPoint(geo: geo, drag: value.translation)
-                                    let nearest = nearestCorner(for: dropped, in: geo.size)
-                                    storedCorner = nearest.rawValue
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.78)) {
-                                        dragging = false
-                                        dragOffset = .zero
-                                    }
-                                }
-                        )
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
+            let size = geo.size
+            let insets = geo.safeAreaInsets
+            let maxBubbleW = min(280, max(120, size.width - insets.leading - insets.trailing - 24))
+            let edge = fabEdge
+            let point = dragLocation ?? fabAnchorPoint(edge: edge, position: fabPosition, in: size)
+
+            ZStack(alignment: .topLeading) {
+                Color.clear
+
                 if !chatFabDragHintSeen {
-                    fabDragHintBubble(fabCenter: fabAnchorPoint(in: geo.size, corner: corner), containerSize: geo.size)
+                    fabDragHintBubbleContent(maxWidth: maxBubbleW)
+                        .position(fabDragHintPoint(anchor: point, edge: edge, in: size))
+                        .zIndex(1)
                 }
+
+                button
+                    .position(point)
+                    .zIndex(2)
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 10, coordinateSpace: .named("chatFabOverlay"))
+                            .onChanged { value in
+                                fabDidDrag = true
+                                if !chatFabDragHintSeen { chatFabDragHintSeen = true }
+                                dragLocation = value.location
+                            }
+                            .onEnded { value in
+                                let dock = fabDock(for: value.location, in: size)
+                                storedEdge = dock.edge.rawValue
+                                storedPosition = dock.position
+                                dragLocation = nil
+                                chatFabDragHintSeen = true
+                            }
+                    )
             }
+            .coordinateSpace(name: "chatFabOverlay")
         }
         .ignoresSafeArea(edges: [])
+        .onAppear { migrateFromCornerIfNeeded() }
         .fullScreenCover(isPresented: $presentInbox) {
             MessagesInboxView()
                 .gradientBG()
@@ -79,63 +85,134 @@ struct MessagesFloatingButton: View {
             }
             .gradientBG()
         }
-        .task { await refreshUnread() }
         .onChange(of: presentInbox) { _, isShown in
             if isShown { chatFabDragHintSeen = true }
-            if !isShown { Task { await refreshUnread() } }
+            if !isShown { Task { await app.refreshUnreadChatMessagesCount() } }
         }
     }
 
-    private var cornerAlignment: Alignment {
-        FabCorner(rawValue: storedCorner)?.alignment ?? .bottomLeading
+    private var fabEdge: ChatFabDockEdge {
+        if let edge = ChatFabDockEdge(rawValue: storedEdge) {
+            return edge
+        }
+        return migratedEdgeFromCorner()
     }
 
-    private func fabAnchorPoint(in size: CGSize, corner: FabCorner) -> CGPoint {
-        let pad: CGFloat = 16
-        let buttonHalf: CGFloat = 30
-        switch corner {
-        case .bottomLeading:
-            return CGPoint(x: pad + buttonHalf, y: size.height - pad - buttonHalf)
-        case .bottomTrailing:
-            return CGPoint(x: size.width - pad - buttonHalf, y: size.height - pad - buttonHalf)
-        case .topLeading:
-            return CGPoint(x: pad + buttonHalf, y: pad + buttonHalf)
-        case .topTrailing:
-            return CGPoint(x: size.width - pad - buttonHalf, y: pad + buttonHalf)
+    private var fabPosition: Double {
+        if storedPosition >= 0 {
+            return min(max(storedPosition, 0), 1)
+        }
+        return migratedPositionFromCorner()
+    }
+
+    private func migrateFromCornerIfNeeded() {
+        guard storedEdge.isEmpty else { return }
+        let edge = migratedEdgeFromCorner()
+        let position = migratedPositionFromCorner()
+        storedEdge = edge.rawValue
+        storedPosition = position
+    }
+
+    private func migratedEdgeFromCorner() -> ChatFabDockEdge {
+        switch LegacyFabCorner(rawValue: storedCorner) ?? .bottomLeading {
+        case .bottomLeading: return .left
+        case .bottomTrailing: return .right
+        case .topLeading: return .left
+        case .topTrailing: return .right
         }
     }
 
-    private func hintBubbleCenter(from fab: CGPoint, in size: CGSize) -> CGPoint {
-        let midX = size.width / 2
-        let midY = size.height / 2
-        let dx = midX - fab.x
-        let dy = midY - fab.y
-        let len = max(hypot(dx, dy), 1)
-        return CGPoint(x: fab.x + dx / len * 132, y: fab.y + dy / len * 96)
+    private func migratedPositionFromCorner() -> Double {
+        switch LegacyFabCorner(rawValue: storedCorner) ?? .bottomLeading {
+        case .bottomLeading, .bottomTrailing: return 1.0
+        case .topLeading, .topTrailing: return 0.0
+        }
     }
 
-    private func clampedHintBubbleCenter(from fab: CGPoint, in size: CGSize, maxBubbleW: CGFloat) -> CGPoint {
-        let edge: CGFloat = 12
-        let halfW = min((maxBubbleW + 28) / 2, size.width / 2 - edge - 1)
-        let halfH = min(108, size.height / 2 - edge - 1)
-        let raw = hintBubbleCenter(from: fab, in: size)
+    private func fabAnchorPoint(
+        edge: ChatFabDockEdge,
+        position: Double,
+        in size: CGSize
+    ) -> CGPoint {
+        let minX = fabSize.width / 2
+        let maxX = max(minX, size.width - fabSize.width / 2)
+        let minY = fabSize.height / 2 + 10
+        let maxY = max(minY, size.height - fabSize.height / 2 - bottomSafeInset)
+        let fraction = min(max(position, 0), 1)
+
+        switch edge {
+        case .left:
+            return CGPoint(x: minX, y: minY + (maxY - minY) * fraction)
+        case .right:
+            return CGPoint(x: maxX, y: minY + (maxY - minY) * fraction)
+        case .top:
+            return CGPoint(x: minX + (maxX - minX) * fraction, y: minY)
+        case .bottom:
+            return CGPoint(x: minX + (maxX - minX) * fraction, y: maxY)
+        }
+    }
+
+    private func fabDock(
+        for point: CGPoint,
+        in size: CGSize
+    ) -> (edge: ChatFabDockEdge, position: Double) {
+        let minX = fabSize.width / 2
+        let maxX = max(minX, size.width - fabSize.width / 2)
+        let minY = fabSize.height / 2 + 10
+        let maxY = max(minY, size.height - fabSize.height / 2 - bottomSafeInset)
+        let distances: [(ChatFabDockEdge, CGFloat)] = [
+            (.left, abs(point.x - minX)),
+            (.right, abs(point.x - maxX)),
+            (.top, abs(point.y - minY)),
+            (.bottom, abs(point.y - maxY))
+        ]
+        let edge = distances.min { $0.1 < $1.1 }?.0 ?? .right
+
+        switch edge {
+        case .left, .right:
+            let ratio = (point.y - minY) / max(maxY - minY, 1)
+            return (edge, Double(min(max(ratio, 0), 1)))
+        case .top, .bottom:
+            let ratio = (point.x - minX) / max(maxX - minX, 1)
+            return (edge, Double(min(max(ratio, 0), 1)))
+        }
+    }
+
+    private func fabDragHintPoint(
+        anchor: CGPoint,
+        edge: ChatFabDockEdge,
+        in size: CGSize
+    ) -> CGPoint {
+        let bubbleSize = CGSize(width: 210, height: 96)
+        let spacing: CGFloat = 70
+        let raw: CGPoint
+
+        switch edge {
+        case .left:
+            raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
+        case .right:
+            raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
+        case .top:
+            raw = CGPoint(x: anchor.x, y: anchor.y + 58)
+        case .bottom:
+            raw = CGPoint(x: anchor.x, y: anchor.y - 58)
+        }
+
         return CGPoint(
-            x: min(max(raw.x, halfW + edge), size.width - halfW - edge),
-            y: min(max(raw.y, halfH + edge), size.height - halfH - edge)
+            x: min(max(raw.x, bubbleSize.width / 2 + 12), size.width - bubbleSize.width / 2 - 12),
+            y: min(max(raw.y, bubbleSize.height / 2 + 12), size.height - bubbleSize.height / 2 - 12)
         )
     }
 
     @ViewBuilder
-    private func fabDragHintBubble(fabCenter: CGPoint, containerSize: CGSize) -> some View {
-        let maxBubbleW = min(268, max(120, containerSize.width - 24))
-        let c = clampedHintBubbleCenter(from: fabCenter, in: containerSize, maxBubbleW: maxBubbleW)
+    private func fabDragHintBubbleContent(maxWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(String(localized: "Drag this button to any corner of the screen."))
+            Text(String(localized: "Drag the messages button to any side of the screen."))
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: maxBubbleW, alignment: .leading)
+                .frame(maxWidth: maxWidth, alignment: .leading)
             Button {
                 chatFabDragHintSeen = true
             } label: {
@@ -145,6 +222,7 @@ struct MessagesFloatingButton: View {
             }
             .buttonStyle(.borderedProminent)
         }
+        .frame(maxWidth: maxWidth, alignment: .leading)
         .padding(14)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -152,7 +230,6 @@ struct MessagesFloatingButton: View {
                 .stroke(.white.opacity(0.18), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.2), radius: 12, x: 0, y: 6)
-        .position(x: c.x, y: c.y)
         .allowsHitTesting(true)
         .transition(.opacity.combined(with: .scale(scale: 0.94)))
     }
@@ -161,6 +238,10 @@ struct MessagesFloatingButton: View {
     private var button: some View {
         ZStack(alignment: .topTrailing) {
             Button {
+                guard !fabDidDrag else {
+                    fabDidDrag = false
+                    return
+                }
                 presentInbox = true
             } label: {
                 Image(systemName: "paperplane.fill")
@@ -176,8 +257,8 @@ struct MessagesFloatingButton: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Open messages")
 
-            if unreadTotal > 0 {
-                Text(unreadTotal > 99 ? "99+" : "\(unreadTotal)")
+            if app.unreadChatMessagesCount > 0 {
+                Text(app.unreadChatMessagesCount > 99 ? "99+" : "\(app.unreadChatMessagesCount)")
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 6)
@@ -187,32 +268,6 @@ struct MessagesFloatingButton: View {
                     .offset(x: 6, y: -4)
                     .allowsHitTesting(false)
             }
-        }
-    }
-    
-    private func currentDropPoint(geo: GeometryProxy, drag: CGSize) -> CGPoint {
-        let anchor = fabAnchorPoint(in: geo.size, corner: FabCorner(rawValue: storedCorner) ?? .bottomLeading)
-        return CGPoint(x: anchor.x + drag.width, y: anchor.y + drag.height)
-    }
-
-    private func nearestCorner(for point: CGPoint, in size: CGSize) -> FabCorner {
-        let isLeft = point.x < size.width / 2
-        let isTop  = point.y < size.height / 2
-        switch (isTop, isLeft) {
-        case (true,  true):  return .topLeading
-        case (true,  false): return .topTrailing
-        case (false, true):  return .bottomLeading
-        case (false, false): return .bottomTrailing
-        }
-    }
-
-    @MainActor
-    private func refreshUnread() async {
-        do {
-            let list = try await ChatService.fetchConversations(limit: 100)
-            self.unreadTotal = list.reduce(0) { $0 + $1.unread_count }
-        } catch {
-            self.unreadTotal = 0
         }
     }
 }

@@ -3,6 +3,7 @@ import Supabase
 import Security
 
 struct LoginView: View {
+    @EnvironmentObject private var app: AppState
     @State private var email = ""
     @State private var password = ""
     @State private var loading = false
@@ -17,10 +18,10 @@ struct LoginView: View {
     private var isButtonEnabled: Bool { !loading && isEmailValid && !password.isEmpty }
     
     var body: some View {
-        ZStack {
+        GradientBackground {
             ZStack {
                 Circle()
-                    .fill(LinearGradient(colors: [.blue.opacity(0.28), .purple.opacity(0.28)],
+                    .fill(LinearGradient(colors: [.blue.opacity(0.20), .purple.opacity(0.20)],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 320, height: 320)
                     .blur(radius: 90)
@@ -37,6 +38,12 @@ struct LoginView: View {
                         .padding(.horizontal, 24)
                     
                     VStack(spacing: 14) {
+                        if let callbackError = app.authCallbackError {
+                            Text(callbackError)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
                         if let error {
                             Text(error)
                                 .foregroundStyle(.red)
@@ -51,7 +58,16 @@ struct LoginView: View {
                         
                         SecureField("Password", text: $password)
                             .textContentType(.password)
-                        
+
+                        NavigationLink {
+                            ForgotPasswordView()
+                        } label: {
+                            Text("Forgot password?")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+
                         Toggle("Remember me", isOn: $rememberMe)
                             .tint(.blue)
                         
@@ -98,6 +114,7 @@ struct LoginView: View {
                 .padding(.horizontal, 24)
             }
         }
+        .toolbarBackground(.hidden, for: .navigationBar)
         .onAppear { loadRemembered() }
     }
     
@@ -113,6 +130,7 @@ struct LoginView: View {
     
     private func signIn() async {
         error = nil
+        app.clearAuthCallbackError()
         loading = true
         defer { loading = false }
         

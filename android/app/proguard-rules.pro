@@ -19,3 +19,7 @@
 
 # Modelos @Serializable (el patrón **$$serializer choca con R8: `$` es comodín en ProGuard)
 -keep @kotlinx.serialization.Serializable class com.lilru.liftr.** { *; }
+
+# ML Kit text recognition (nutrition label OCR)
+-keep class com.google.mlkit.** { *; }
+-dontwarn com.google.mlkit.**

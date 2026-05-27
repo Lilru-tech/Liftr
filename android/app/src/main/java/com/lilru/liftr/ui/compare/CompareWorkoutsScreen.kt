@@ -46,16 +46,23 @@ private val RightBar = Color(0xFFD12E36)
 fun CompareWorkoutsScreen(
     supabase: SupabaseClient,
     currentWorkoutId: Int,
-    otherWorkoutId: Int,
+    other: CompareOtherTarget,
+    averageRightLabel: String? = null,
     onClose: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val vmKey = when (other) {
+        is CompareOtherTarget.Workout -> "compare-$currentWorkoutId-w-${other.id}"
+        is CompareOtherTarget.Average ->
+            "compare-$currentWorkoutId-a-${other.scope}-${other.sampleCount}"
+    }
     val vm: CompareWorkoutsViewModel = viewModel(
-        key = "compare-$currentWorkoutId-$otherWorkoutId",
+        key = vmKey,
         factory = CompareWorkoutsViewModelFactory(
             supabase = supabase,
             currentWorkoutId = currentWorkoutId,
-            otherWorkoutId = otherWorkoutId
+            other = other,
+            averageRightLabel = averageRightLabel
         )
     )
     val state by vm.uiState.collectAsStateWithLifecycle()

@@ -10,8 +10,10 @@ import com.lilru.liftr.cardio.CardioRouteGeoJson
 import com.lilru.liftr.cardio.KmPaceSplitCalculator
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ongoing.CardioLocationBridge
-import com.lilru.liftr.prefs.CardioGpsPreferences
 import com.lilru.liftr.prefs.CardioGpsProfile
+import com.lilru.liftr.prefs.CardioGpsPreferences
+import com.lilru.liftr.territory.TerritoryCaptureClient
+import com.lilru.liftr.ui.AppSnackbar
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -61,6 +63,7 @@ data class ActiveCardioUiState(
     val kmSplitCumulativeSec: List<Int> = emptyList(),
     /** Puntos GPS (lat, lon) para el mapa; vacío al abrir. */
     val routePoints: List<Pair<Double, Double>> = emptyList(),
+    val territoryPreviewRings: List<List<Pair<Double, Double>>> = emptyList(),
     /** True while the stopwatch is counting; false at open and when paused. */
     val isSessionRunning: Boolean = false,
     val elapsedSec: Int = 0,
@@ -81,6 +84,9 @@ class ActiveCardioWorkoutViewModel(
     private var sessionJob: Job? = null
     private val routePoints: MutableList<Pair<Double, Double>> =
         Collections.synchronizedList(mutableListOf())
+    private var lastTerritoryPreviewAtMs = 0L
+    private var lastTerritoryPreviewPointCount = 0
+    private var territoryPreviewJob: Job? = null
     private var routeDistanceM: Double = 0.0
     private val splitCumulativeSec: MutableList<Int> = mutableListOf()
     private var cardioSessionId: Int = 0
@@ -150,6 +156,30 @@ class ActiveCardioWorkoutViewModel(
     private fun publishRoutePointsToUi() {
         val copy = synchronized(routePoints) { routePoints.map { it.first to it.second } }
         _ui.value = _ui.value.copy(routePoints = copy)
+        maybeRefreshTerritoryPreview()
+    }
+
+    private fun maybeRefreshTerritoryPreview() {
+        val st = _ui.value
+        if (!st.isSessionRunning || st.routePoints.size < 2) return
+        val now = System.currentTimeMillis()
+        val pointCount = st.routePoints.size
+        if (now - lastTerritoryPreviewAtMs < 15_000 && pointCount - lastTerritoryPreviewPointCount < 8) {
+            return
+        }
+        lastTerritoryPreviewAtMs = now
+        lastTerritoryPreviewPointCount = pointCount
+        val routeJson = routeGeoJsonLineString() ?: return
+        territoryPreviewJob?.cancel()
+        territoryPreviewJob = viewModelScope.launch {
+            val display = TerritoryCaptureClient.fetchTerritoryPreviewDisplay(
+                supabase,
+                routeJson,
+                maxCells = 200
+            ) ?: return@launch
+            val rings = display.fillRings + display.sampleCellRings
+            _ui.value = _ui.value.copy(territoryPreviewRings = rings)
+        }
     }
 
     private fun recordKmSplitsIfNeeded() {
@@ -199,6 +229,7 @@ class ActiveCardioWorkoutViewModel(
             elapsedSec = 0,
             distanceText = initialDistanceText,
             routePoints = emptyList(),
+            territoryPreviewRings = emptyList(),
             kmSplitCumulativeSec = emptyList()
         )
     }
@@ -350,6 +381,19 @@ class ActiveCardioWorkoutViewModel(
                     filter { eq("id", workoutId) }
                 }
             }.onSuccess {
+                routeGeoJsonLineString()?.let {
+                    val summary = TerritoryCaptureClient.applyCapture(supabase, workoutId)
+                    summary?.let { captured ->
+                        TerritoryCaptureClient.storeCaptureReferenceCoordinate(app, captured)
+                    }
+                    TerritoryCaptureClient.captureMessage(summary ?: return@let)?.let { message ->
+                        if (summary?.ok == true) {
+                            AppSnackbar.showSuccess(message)
+                        } else {
+                            AppSnackbar.showError(message)
+                        }
+                    }
+                }
                 _ui.value = _ui.value.copy(finishing = false)
                 onDone()
             }.onFailure { e ->

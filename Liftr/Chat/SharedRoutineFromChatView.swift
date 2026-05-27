@@ -168,25 +168,8 @@ struct SharedRoutineFromChatView: View {
                     Text(String(localized: "No exercises in this routine."))
                         .foregroundStyle(.secondary)
                 } else {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(built.enumerated()), id: \.offset) { idx, ex in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(ex.exerciseName)
-                                    .font(.subheadline.weight(.semibold))
-                                if !ex.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text(ex.notes)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                let ordered = ex.sets.sorted { $0.setNumber < $1.setNumber }
-                                ForEach(ordered) { s in
-                                    strengthSetSummaryLine(s)
-                                }
-                            }
-                            if idx < built.count - 1 {
-                                Divider()
-                            }
-                        }
+                    StrengthRoutinePreviewExercisesList(exercises: built) { s in
+                        strengthSetSummaryLine(s)
                     }
                 }
             } else if isHyrox, let detail = hyroxDetail {

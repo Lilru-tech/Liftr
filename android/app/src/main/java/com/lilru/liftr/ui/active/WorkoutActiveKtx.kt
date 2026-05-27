@@ -2,13 +2,15 @@ package com.lilru.liftr.ui.active
 
 import com.lilru.liftr.cardio.CardioKmPaceSplits
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.LiftrSupabase
+import com.lilru.liftr.workout.WorkoutStartSync
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import java.time.Instant
 
 @Serializable
 internal data class WorkoutNotesStateRow(
@@ -99,15 +101,6 @@ internal fun mergeWorkoutNotesForFinish(existing: String?, gpsLine: String?): St
  * marca [started_at] al abrir el entreno en vivo.
  */
 internal suspend fun patchWorkoutStartedAtNow(supabase: SupabaseClient, workoutId: Int) {
-    runCatching {
-        supabase.from(BackendContracts.Tables.WORKOUTS).update(
-            buildJsonObject {
-                put("started_at", Instant.now().toString())
-                // Al reiniciar un activo, limpiamos ended_at para reflejar la nueva sesión.
-                put("ended_at", JsonNull)
-            }
-        ) {
-            filter { eq("id", workoutId) }
-        }
-    }
+    val ctx = LiftrSupabase.appContext ?: return
+    WorkoutStartSync.enqueueStart(ctx, workoutId)
 }

@@ -302,7 +302,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
         case .strength:
             base = [.strengthVolume, .strengthReps, .strengthSets, .strengthMaxSetWeight]
         case .cardio:
-            base = [.cardioDistance, .cardioElevation, .cardioDuration, .cardioBestPace]
+            base = [.cardioDistance, .cardioElevation, .cardioDuration, .cardioBestPace, .territoryShare, .territoryCells]
         case .sport:
             base = [
                 .sportWins, .sportWinRate, .sportDuration,
@@ -331,6 +331,8 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case cardioElevation = "Cardio ascent (m)"
     case cardioDuration = "Cardio time"
     case cardioBestPace = "Cardio best pace"
+    case territoryShare = "Territory %"
+    case territoryCells = "Territory cells"
     case sportWins = "Sport wins"
     case sportWinRate = "Sport win %"
     case sportDuration = "Sport play time"
@@ -348,7 +350,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
         switch self {
         case .strengthVolume, .strengthReps, .strengthSets, .strengthMaxSetWeight:
             return kind == .all || kind == .strength
-        case .cardioDistance, .cardioElevation, .cardioDuration, .cardioBestPace:
+        case .cardioDistance, .cardioElevation, .cardioDuration, .cardioBestPace, .territoryShare, .territoryCells:
             return kind == .all || kind == .cardio
         case .sportWins, .sportWinRate, .sportDuration, .hyroxBestTime, .footballGoals, .skiDistanceKpi:
             return kind == .all || kind == .sport
@@ -486,6 +488,9 @@ final class RankingVM: ObservableObject {
     @Published var footballGoalsRows: [FootballGoalsLeaderRow] = []
     @Published var skiDistanceKpiRows: [SkiDistanceKpiLeaderRow] = []
     @Published var segmentPopularityRows: [SegmentPopularityLeaderRow] = []
+    @Published var territoryShareRows: [TerritoryShareLeaderRow] = []
+    @Published var territoryCities: [TerritoryCityRegionRow] = []
+    @Published var territoryCityKey: String?
     @Published var loading = false
     @Published var error: String?
     @Published var scope: LBScope = .global
@@ -556,6 +561,7 @@ final class RankingVM: ObservableObject {
         footballGoalsRows = []
         skiDistanceKpiRows = []
         segmentPopularityRows = []
+        territoryShareRows = []
     }
     
     private func fetchStrengthVolumeLeaderboard() async {
@@ -1008,6 +1014,60 @@ final class RankingVM: ObservableObject {
         }
     }
 
+    private func fetchTerritoryShareLeaderboard() async {
+        let started = Date()
+        let cities = await TerritoryCaptureClient.fetchTerritoryCityRegions()
+        let pendingCount = cities.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
+        TerritoryCaptureClient.logTerritoryShare("ranking cities count=\(cities.count) pending=\(pendingCount) elapsedMs=\(Int(Date().timeIntervalSince(started) * 1000))")
+        let cityKey = await MainActor.run { () -> String? in
+            territoryCities = cities
+            if let selectedKey = territoryCityKey,
+               cities.contains(where: { $0.city_key == selectedKey }) {
+                return selectedKey
+            }
+            let reference = AppState.shared.territoryReferenceCoordinate
+            let preferred = TerritoryCaptureClient.preferredCityKey(
+                latitude: reference?.latitude,
+                longitude: reference?.longitude,
+                from: cities
+            )
+            territoryCityKey = preferred
+            return preferred
+        }
+        guard let cityKey, !cityKey.isEmpty else {
+            TerritoryCaptureClient.logTerritoryShare("ranking leaderboard skipped missing cityKey")
+            await MainActor.run { territoryShareRows = [] }
+            return
+        }
+        let scopeValue = scope == .global ? "global" : "friends"
+        let leaderboardStarted = Date()
+        let decoded = await TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+            cityKey: cityKey,
+            scope: scopeValue
+        )
+        TerritoryCaptureClient.logTerritoryShare("ranking leaderboard cityKey=\(cityKey) scope=\(scopeValue) rows=\(decoded.count) elapsedMs=\(Int(Date().timeIntervalSince(leaderboardStarted) * 1000))")
+        await MainActor.run { self.territoryShareRows = decoded }
+        if pendingCount > 0 {
+            TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground { updated in
+                let remainingPending = updated.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
+                TerritoryCaptureClient.logTerritoryShare("ranking background cities count=\(updated.count) pending=\(remainingPending)")
+                self.territoryCities = updated
+            }
+        }
+    }
+
+    private func fetchTerritoryTotalCellsLeaderboard() async {
+        let scopeValue = scope == .global ? "global" : "friends"
+        let decoded = await TerritoryCaptureClient.fetchTerritoryTotalCellsLeaderboard(
+            scope: scopeValue
+        )
+        await MainActor.run {
+            territoryCities = []
+            territoryCityKey = nil
+            territoryShareRows = decoded
+        }
+    }
+
     private func fetchLevelLeaderboard() async {
         do {
             var params: [String: AnyJSON] = [:]
@@ -1267,6 +1327,14 @@ final class RankingVM: ObservableObject {
             await fetchSegmentPopularityLeaderboard()
             return
         }
+        if metric == .territoryShare {
+            await fetchTerritoryShareLeaderboard()
+            return
+        }
+        if metric == .territoryCells {
+            await fetchTerritoryTotalCellsLeaderboard()
+            return
+        }
         
         do {
             var params: [String: AnyJSON] = [:]
@@ -1302,21 +1370,22 @@ struct RankingView: View {
     var presetMetric: LBMetric? = nil
     var presetScope: LBScope? = nil
 
+    @EnvironmentObject private var app: AppState
     @StateObject private var vm = RankingVM()
     @StateObject private var weeklyChallengesLoader = WeeklyChallengesLoader()
     @State private var challengesHubPresented = false
     @State private var didApplyRankingPreset = false
     @State private var metricPickerOpen = false
     @State private var metricSearchText = ""
-    @AppStorage("isPremium") private var isPremium: Bool = false
-
+    @State private var territoryCityPickerOpen = false
+    @State private var showTerritoryMap = false
     var body: some View {
         GradientBackground {
             ZStack(alignment: .bottomTrailing) {
                 VStack(spacing: 12) {
                     headerBars
                     listContent
-                    if !isPremium {
+                    if !app.isPremium {
                         BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                             .frame(height: 50)
                             .padding(.horizontal)
@@ -1348,7 +1417,7 @@ struct RankingView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Challenges")
                 .padding(.trailing, 4)
-                .padding(.bottom, isPremium ? 12 : 64)
+                .padding(.bottom, app.isPremium ? 12 : 64)
             }
         }
         .sheet(isPresented: $challengesHubPresented) {
@@ -1389,6 +1458,41 @@ struct RankingView: View {
             RankingMetricPickerSheet(metric: $vm.metric, kind: vm.kind, searchText: $metricSearchText)
                 .presentationDetents([.medium, .large])
                 .presentationBackground(.clear)
+        }
+        .sheet(isPresented: $territoryCityPickerOpen) {
+            TerritoryCitySearchSheet(
+                selectedCityKey: $vm.territoryCityKey,
+                referenceLatitude: AppState.shared.territoryReferenceCoordinate?.latitude,
+                referenceLongitude: AppState.shared.territoryReferenceCoordinate?.longitude
+            ) { city in
+                vm.territoryCityKey = city.city_key
+                vm.load()
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .fullScreenCover(isPresented: $showTerritoryMap) {
+            NavigationStack {
+                TerritoryMapView(
+                    initialLatitude: TerritoryCaptureClient.selectedTerritoryCity(
+                        from: vm.territoryCities,
+                        preferredKey: vm.territoryCityKey,
+                        referenceLatitude: AppState.shared.territoryReferenceCoordinate?.latitude,
+                        referenceLongitude: AppState.shared.territoryReferenceCoordinate?.longitude
+                    )?.center_lat,
+                    initialLongitude: TerritoryCaptureClient.selectedTerritoryCity(
+                        from: vm.territoryCities,
+                        preferredKey: vm.territoryCityKey,
+                        referenceLatitude: AppState.shared.territoryReferenceCoordinate?.latitude,
+                        referenceLongitude: AppState.shared.territoryReferenceCoordinate?.longitude
+                    )?.center_lon
+                )
+                .environmentObject(AppState.shared)
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Close") { showTerritoryMap = false }
+                    }
+                }
+            }
         }
     }
     
@@ -1470,6 +1574,35 @@ struct RankingView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Choose ranking metric")
             
+            if vm.metric == .territoryShare {
+                if vm.territoryCities.count > 1 {
+                    TerritoryCityPickerButton(
+                        selectedCity: TerritoryCaptureClient.selectedTerritoryCity(
+                            from: vm.territoryCities,
+                            preferredKey: vm.territoryCityKey,
+                            referenceLatitude: AppState.shared.territoryReferenceCoordinate?.latitude,
+                            referenceLongitude: AppState.shared.territoryReferenceCoordinate?.longitude
+                        )
+                    ) {
+                        territoryCityPickerOpen = true
+                    }
+                } else if let city = vm.territoryCities.first {
+                    Text(TerritoryCaptureClient.citySummaryLabel(for: city))
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+
+            if vm.metric == .territoryShare,
+               let cityKey = vm.territoryCityKey,
+               !TerritoryCaptureClient.isPendingTerritoryCityKey(cityKey) {
+                Button("View on map") {
+                    showTerritoryMap = true
+                }
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            
             HStack(spacing: 10) {
                 if !metricSkipsKind(vm.metric) {
                     Menu {
@@ -1511,14 +1644,14 @@ struct RankingView: View {
     
     private func metricSkipsPeriod(_ m: LBMetric) -> Bool {
         switch m {
-        case .level, .goals, .duels: return true
+        case .level, .goals, .duels, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
     
     private func metricSkipsKind(_ m: LBMetric) -> Bool {
         switch m {
-        case .level, .goals, .duels, .challengePodiums, .segmentPopularity: return true
+        case .level, .goals, .duels, .challengePodiums, .segmentPopularity, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
@@ -2429,6 +2562,76 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
+            } else if vm.metric == .territoryShare {
+                List(vm.territoryShareRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.owned_cells ?? 0) cells")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(String(format: "%.2f%%", row.territory_share_pct ?? 0))
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(row.user_id == AppState.shared.userId ? Color.white.opacity(0.12) : Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+            } else if vm.metric == .territoryCells {
+                List(vm.territoryShareRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text(String(format: "%.2f%% global share", row.territory_share_pct ?? 0))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.owned_cells ?? 0)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(row.user_id == AppState.shared.userId ? Color.white.opacity(0.12) : Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             } else if vm.metric == .segmentPopularity {
                 List(vm.segmentPopularityRows) { row in
                     Section {
@@ -2586,6 +2789,7 @@ struct RankingView: View {
         case .footballGoals: return vm.footballGoalsRows.isEmpty
         case .skiDistanceKpi: return vm.skiDistanceKpiRows.isEmpty
         case .segmentPopularity: return vm.segmentPopularityRows.isEmpty
+        case .territoryShare, .territoryCells: return vm.territoryShareRows.isEmpty
         }
     }
     

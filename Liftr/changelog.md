@@ -6,6 +6,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-05-27
+
+### Added
+- **Nutrition** — Log and track nutrition in the app.
+- **Comments — mentions** — Tag other users in the comment section.
+- **Feed** — **Comment count** shown on workout cards in the home feed.
+- **Active strength** — Edit the **current set** and **all future sets** for the same exercise in one flow.
+- **Chat — draft workouts** — Open **draft** workouts shared by another user via chat (even when they are not published on the feed).
+- **Premium — server-verified entitlements** — Migrated monetization off client-side validation: **`user_subscriptions`** table with strict RLS (owner read only; writes blocked for `public` / `authenticated`, delegated to `service_role`); **`get_user_premium_status_v1()`** (`SECURITY DEFINER`) RPC for active subscription (`expires_at > now()`); **`process-billing-webhook`** Edge Function (App Store / Google Play signature validation + admin upsert); contracts synced in `docs/backend-contracts.md` and `BackendContracts.kt`; local **`isPremium`** deprecated on iOS and Android in favor of the server RPC at session init.
+- **Territory — expansion suggestions** — **Suggest Expansion Zone** on the territory map (iOS `TerritoryMapView`, Android territory map): **`get_recommended_expansion_cells_v1`** (`SECURITY DEFINER`, PostGIS) scores the top **10** cells within a dynamic radius (default **5000 m**) from the athlete’s GPS — prioritizing unoccupied or rival cells adjacent to holdings and cells in municipalities where the user competes on **`get_territory_city_share_leaderboard_v1`**; polygons returned as GeoJSON (`ST_AsGeoJSON`) with a translucent **neon amber** overlay.
+
+### Changed
+- **Active strength** — Sets and exercises **not completed** during an active session are **removed automatically** when the workout ends (no leftover incomplete rows).
+- **Territory / map** — Faster loading for workouts with a **large number of cells** and for the **territory map**.
+
+### Fixed
+- **Territory — new city** — Correct **total cell count** when initializing a new city.
+- **Territory — notifications** — Fixed deeplink **redirection** for territory **captured** and **lost** notifications.
+- **Territory — capture** — Fixed capture when the GPS **loop** was too large.
+- **Active strength** — Fixed an issue when **adding a new exercise** during an active workout.
+
+### Notes (database / ops)
+- **Premium** — Apply migrations for **`user_subscriptions`**, deploy **`process-billing-webhook`**, and grant **`get_user_premium_status_v1`** before shipping clients that no longer trust local premium flags.
+- **Territory expansion** — Deploy **`get_recommended_expansion_cells_v1`** (PostGIS) and related contract updates; reference `docs/backend-contracts.md`.
+
+## [1.14.0] - 2026-05-22
+
+### Added
+- **Compare workouts** — Compare against your last **10** sessions and the **average** of the last **50** workouts (all users).
+- **Cardio import** — Option to **prevent duplicate** workouts when logging in-app and auto-importing from external devices.
+- **Home** — **Merged** Quick Actions and Chat into a single floating dock.
+- **Territory / GPS** — Improvement for **low signal** conditions.
+
+### Changed
+- **Active strength** — **Completed** tag shown in **green**.
+- **Home** — Chat icon behavior aligned with Quick Actions (including merged dock).
+- **Database** — Refactors to reduce disk I/O and improve performance.
+
+### Fixed
+- **Workout detail** — Set count displayed correctly.
+- **Supersets** — Display fixed in Active Strength, Edit Workout, and routines.
+- **Home floating dock** — Dragging Chat or Quick Actions no longer opens the action.
+
+## [1.13.0] - 2026-05-14
+
+### Added
+- **Territories** — During **cardio** workouts, users **capture territories** and can **take over** other users’ territories.
+- **Hyrox routines** — Saved **Hyrox** routines can now be **edited**.
+- **Active strength** — Users can see **all sets** for an exercise in **Active Strength Workout**.
+- **Active strength** — Users can **add** and **delete exercises** from an active strength workout.
+- **Active strength** — Users can move **sets** up and down when adding or editing a workout.
+- **Active strength** — **Recommended resting time** is now personalized for each user from recent strength history; new users keep the standard presets.
+- **Plan** — **Tooltip** for new users explaining how to use **Active Workouts**.
+- **Profile / body weight** — **Import weight data** and view **weight history**.
+- **Apple Health — cardio** — **Auto-import** cardio workouts from Apple Health; a **notification** is sent when a new workout is imported.
+- **Auth** — **Forgot password** flow to recover account access via email.
+- **Notifications** — Users can now **mark all notifications as read**.
+- **Workout actions** — Added a **quick action button** so users can start a workout immediately.
+- **Hyrox** — Users can now add **zones** to Hyrox workouts.
+
+### Changed
+- **Workouts — saving** — Faster saves when **editing a workout** and when **finishing** an active workout.
+- **Chat — compose** — Polished **message input** UI.
+- **Workout editing** — Exercises can now be moved **up** and **down** with arrows while editing a workout.
+- **Exercise search** — Users can search by **muscle group**; empty results now explain that users can ask Liftr to add the missing exercise to the catalog.
+- **Hyrox active workout** — Improved the active Hyrox workout experience.
+- **Calories** — Adjusted calories calculation.
+- **Comments** — Improved the comment section.
+- **Profile calendar** — Improved the calendar view in the profile.
+- **Workout detail** — Improved Workout Detail View.
+
+### Fixed
+- **Active strength — Superseries** — Fixed superseries so they work correctly again.
+- **Chat — tooltips** — Tooltip **messages** display correctly again.
+- **Chat — unread count** — Fixed unread chat count so it appears before the user opens the conversations list.
+- **Chat — shared items** — Fixed the last message preview when the last conversation message is a shared item.
+- **Active cardio** — **Distance** is no longer editable in a way that **stops** the live **distance tracker** or allows arbitrary values.
+- **Active strength — Set editor** — Fixed the edit set background color to match the rest of the app and removed the extra **Done** button shown at the bottom.
+- **Home** — Fixed an issue where workouts could appear **twice** in HomeView.
+
 ## [1.12.0] - 2026-05-11
 
 ### Added
@@ -70,6 +150,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.15.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.15.0
+[1.14.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.14.0
+[1.13.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.13.0
 [1.12.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.12.0
 [1.11.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.11.0
 

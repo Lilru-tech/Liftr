@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum Tab: Hashable { case home, search, add, ranking, profile }
+enum Tab: Hashable { case home, search, add, nutrition, profile }
 
 struct RootView: View {
     @EnvironmentObject var app: AppState
@@ -8,6 +8,7 @@ struct RootView: View {
     @State private var showAuthAlert = false
     @State private var updatePrompt: AppUpdatePrompt?
     @State private var didRunUpdateCheck = false
+    @State private var territoryBackfillStartedForUserId: UUID?
     
     var body: some View {
         TabView(selection: $app.selectedTab) {
@@ -27,9 +28,9 @@ struct RootView: View {
             .tag(Tab.add)
             .tabItem { Label("", systemImage: "plus.circle.fill") }
             
-            NavigationStack { RankingView().gradientBG() }
-                .tag(Tab.ranking)
-                .tabItem { Label("", systemImage: "trophy.fill") }
+            NavigationStack { NutritionView().gradientBG() }
+                .tag(Tab.nutrition)
+                .tabItem { Label("", systemImage: "fork.knife") }
             
             NavigationStack { ProfileGate().gradientBG() }
                 .tag(Tab.profile)
@@ -46,6 +47,36 @@ struct RootView: View {
                     }
                 }
                 .badge(app.unreadNotificationsCount)
+        }
+        .task(id: app.userId) {
+            guard let userId = app.userId else { return }
+            guard territoryBackfillStartedForUserId != userId else { return }
+            territoryBackfillStartedForUserId = userId
+            Task.detached(priority: .utility) {
+                try? await Task.sleep(nanoseconds: 12_000_000_000)
+                await TerritoryCaptureClient.backfillHistoricalCaptures(
+                    batchSize: 5,
+                    maxBatchesPerVisit: 12
+                )
+            }
+        }
+        .overlay(alignment: .top) {
+            if let message = app.territoryCaptureToast {
+                Text(message)
+                    .font(.subheadline.weight(.semibold))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    .padding(.top, 8)
+                    .padding(.horizontal, 16)
+                    .onAppear {
+                        Task {
+                            try? await Task.sleep(nanoseconds: 4_000_000_000)
+                            await MainActor.run { app.territoryCaptureToast = nil }
+                        }
+                    }
+            }
         }
         .onAppear {
             if !didRunUpdateCheck {
@@ -66,6 +97,10 @@ struct RootView: View {
                     )
                     app.pendingNotification = nil
                 }
+            }
+            Task {
+                await HealthKitBodyWeightSyncService.shared.handleAppForegroundIfNeeded()
+                await HealthKitCardioSyncService.shared.handleAppForegroundIfNeeded()
             }
         }
         .onReceive(app.$pendingNotification) { pending in
@@ -96,7 +131,7 @@ struct RootView: View {
             case .goals:
                 app.selectedTab = .profile
             case .challengeWeekly:
-                app.selectedTab = .ranking
+                break
 
             case .competitionsHub, .competitionDetail, .competitionReviews:
                 app.selectedTab = .home
@@ -211,6 +246,17 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: updatePrompt != nil)
+        .fullScreenCover(isPresented: $app.passwordRecoveryPending) {
+            NavigationStack {
+                ResetPasswordView()
+            }
+            .interactiveDismissDisabled(true)
+        }
+        .onChange(of: app.passwordRecoveryPending) { _, pending in
+            if pending {
+                AuthCallbackLogger.log("RootView presenting password recovery fullScreenCover", source: "RootView")
+            }
+        }
     }
 
     @ViewBuilder

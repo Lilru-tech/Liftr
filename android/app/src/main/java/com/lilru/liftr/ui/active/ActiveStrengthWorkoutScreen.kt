@@ -1,6 +1,7 @@
 package com.lilru.liftr.ui.active
 
 import com.lilru.liftr.ui.add.StrengthRoutineOverwriteBottomSheet
+import com.lilru.liftr.workout.StrengthFinishConfirmationCopy
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,10 +16,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -28,21 +35,27 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -65,14 +78,21 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.scale
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.lilru.liftr.ui.add.ExercisePickerSortMode
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
+import com.lilru.liftr.ui.AppSnackbar
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.workout.WorkoutStartSync
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
 import com.lilru.liftr.ui.add.StrengthSegmentPayload
@@ -133,16 +153,72 @@ fun ActiveStrengthWorkoutScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val appCtx = ctx.applicationContext
-    var isPremium by remember { mutableStateOf(LiftrPreferences.isPremium(appCtx)) }
+    val isPremium by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
     var showNavHint by remember { mutableStateOf(true) }
+    var showFinishConfirm by remember { mutableStateOf(false) }
+    val finishConfirmMessage = remember(
+        ui.exercises,
+        ui.currentSetIndexByExerciseId,
+        ui.guestExercises,
+        ui.guest2Exercises,
+        ui.completedEntirely
+    ) {
+        StrengthFinishConfirmationCopy.message(
+            incomplete = vm.strengthFinishIncompleteCounts(),
+            standardBody = ctx.getString(R.string.active_strength_finish_standard_body)
+        )
+    }
+    val runFinishWorkout: () -> Unit = {
+        vm.finishWorkout { offlineQueued ->
+            if (offlineQueued) {
+                AppSnackbar.showSuccess(
+                    ctx.getString(R.string.active_workout_finish_saved_offline)
+                )
+            }
+            onClose()
+        }
+    }
+    val requestFinishWorkout: () -> Unit = {
+        val incomplete = vm.strengthFinishIncompleteCounts()
+        if (incomplete.exercises > 0 && incomplete.sets > 0) {
+            showFinishConfirm = true
+        } else {
+            runFinishWorkout()
+        }
+    }
     LaunchedEffect(Unit) {
         showNavHint = !LiftrPreferences.activeStrengthNavHintSeen(appCtx)
-        isPremium = LiftrPreferences.isPremium(appCtx)
+        vm.updateStartSyncStatus(WorkoutStartSync.status(workoutId))
+    }
+    val syncListener: (Int, WorkoutStartSync.Status) -> Unit = remember(workoutId) {
+        { wid, status ->
+            if (wid == workoutId) vm.updateStartSyncStatus(status)
+        }
+    }
+    DisposableEffect(workoutId, syncListener) {
+        WorkoutStartSync.addListener(syncListener)
+        onDispose { WorkoutStartSync.removeListener(syncListener) }
     }
     val ongoingSubtitle = stringResource(R.string.active_strength_title)
     DisposableEffect(ongoingSubtitle, workoutId) {
         OngoingWorkoutService.start(ctx, ongoingSubtitle, trackLocation = false, workoutId = workoutId)
         onDispose { OngoingWorkoutService.stop(ctx) }
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                vm.onScreenResumed()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val connectionUnstableMsg = stringResource(R.string.active_strength_connection_unstable)
+    LaunchedEffect(ui.toastMessage) {
+        val msg = ui.toastMessage ?: return@LaunchedEffect
+        AppSnackbar.showInfo(msg)
+        vm.clearToast()
     }
     LaunchedEffect(
         workoutId,
@@ -215,6 +291,7 @@ fun ActiveStrengthWorkoutScreen(
     }
 
     var showEditSheet by remember { mutableStateOf(false) }
+    var applyEditToRemainingSets by remember { mutableStateOf(false) }
     var guestEditRepsText by remember { mutableStateOf("") }
     var guestEditWeightText by remember { mutableStateOf("") }
     var guestEditRestText by remember { mutableStateOf("") }
@@ -232,7 +309,7 @@ fun ActiveStrengthWorkoutScreen(
             return@LaunchedEffect
         }
         if (ui.currentExerciseIndex != lastSyncedHostWorkIndex) {
-            hostPagerDisplayIndex = ui.currentExerciseIndex
+            hostPagerDisplayIndex = pagerAnchorExerciseIndex(ui.currentExerciseIndex, ui.exercises)
             lastSyncedHostWorkIndex = ui.currentExerciseIndex
         }
     }
@@ -242,10 +319,89 @@ fun ActiveStrengthWorkoutScreen(
     } else {
         hostPagerDisplayIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
     }
+    val isGuestLaneActive = activeLane == 1 && ui.guestExercises.isNotEmpty()
+    val laneDisplayGroups = strengthDisplayGroups(laneExercises)
+    val laneGroupIndex = displayGroupIndexForExerciseIndex(laneExerciseIndex, laneExercises) ?: 0
+    val currentDisplayGroup = laneDisplayGroups.getOrNull(laneGroupIndex)
+    val isSupersetCard = currentDisplayGroup?.isSuperset == true && !isGuestLaneActive
     val laneProgressMap = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) guestSetProgress else ui.currentSetIndexByExerciseId
-    val ex = laneExercises.getOrNull(laneExerciseIndex)
+    val workExerciseIndex = if (isGuestLaneActive) {
+        guestCurrentExerciseIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
+    } else {
+        ui.currentExerciseIndex.coerceIn(0, laneExercises.lastIndex.coerceAtLeast(0))
+    }
+    val ex = laneExercises.getOrNull(
+        if (isSupersetCard) workExerciseIndex else laneExerciseIndex
+    )
     val currentSetIndex = ex?.let { laneProgressMap[it.workoutExerciseId] ?: 0 } ?: 0
     val set = ex?.sets?.getOrNull(currentSetIndex)
+    var editingExpandedIndex by remember { mutableStateOf<Int?>(null) }
+    var editingWorkoutExerciseId by remember { mutableStateOf<Int?>(null) }
+    var editDraftsByWorkoutExerciseId by remember { mutableStateOf<Map<Int, SetEditDraft>>(emptyMap()) }
+
+    fun populateEditFieldsFromSet(visitedSet: ActiveStrengthSetLine) {
+        vm.setEditRepsText(visitedSet.reps?.toString() ?: "")
+        vm.setEditWeightText(
+            visitedSet.weightKg?.let { v ->
+                if (v == v.toInt().toDouble()) v.toInt().toString()
+                else String.format(Locale.US, "%.1f", v)
+            } ?: ""
+        )
+        vm.setEditRestText(visitedSet.restSec?.toString() ?: "")
+        vm.setEditRpeText(visitedSet.rpe?.toString() ?: "")
+    }
+
+    fun currentEditDraft(): SetEditDraft = SetEditDraft(
+        repsText = if (isGuestLaneActive) guestEditRepsText else ui.editRepsText,
+        weightText = if (isGuestLaneActive) guestEditWeightText else ui.editWeightText,
+        rpeText = if (isGuestLaneActive) "" else ui.editRpeText,
+        restText = if (isGuestLaneActive) guestEditRestText else ui.editRestText
+    )
+
+    fun stashCurrentEditDraft() {
+        val id = editingWorkoutExerciseId ?: return
+        editDraftsByWorkoutExerciseId = editDraftsByWorkoutExerciseId + (id to currentEditDraft())
+    }
+
+    fun editShowsRestField(anchor: ActiveStrengthExerciseLine?): Boolean {
+        if (isGuestLaneActive || anchor == null) return true
+        val members = supersetMembers(anchor, ui.exercises)
+        if (members.size <= 1) return true
+        val setIndex = editingExpandedIndex ?: currentSetIndex
+        val available = members.filter { it.sets.size > setIndex }
+        return available.lastOrNull()?.workoutExerciseId == editingWorkoutExerciseId
+    }
+
+    fun openEditSet(exerciseIndex: Int, expandedIndex: Int) {
+        val targetEx = ui.exercises.getOrNull(exerciseIndex) ?: return
+        val visitedSet = targetEx.sets.getOrNull(expandedIndex) ?: return
+        if (!showEditSheet) {
+            editDraftsByWorkoutExerciseId = emptyMap()
+            applyEditToRemainingSets = false
+        }
+        populateEditFieldsFromSet(visitedSet)
+        editingExpandedIndex = expandedIndex
+        editingWorkoutExerciseId = targetEx.workoutExerciseId
+        showEditSheet = true
+    }
+
+    fun switchEditSupersetMember(memberIndex: Int, expandedIndex: Int) {
+        stashCurrentEditDraft()
+        val targetEx = ui.exercises.getOrNull(memberIndex) ?: return
+        editingExpandedIndex = expandedIndex
+        editingWorkoutExerciseId = targetEx.workoutExerciseId
+        val draft = editDraftsByWorkoutExerciseId[targetEx.workoutExerciseId]
+        if (draft != null) {
+            vm.setEditRepsText(draft.repsText)
+            vm.setEditWeightText(draft.weightText)
+            vm.setEditRpeText(draft.rpeText)
+            vm.setEditRestText(draft.restText)
+        } else {
+            val visitedSet = targetEx.sets.getOrNull(expandedIndex) ?: return
+            populateEditFieldsFromSet(visitedSet)
+        }
+    }
+    var snapToCurrentSignal by remember(ex?.workoutExerciseId, activeLane) { mutableIntStateOf(0) }
     val guestRestSecByExerciseId = remember(ui.sessionElapsedSec, guestRestEndMsByExerciseId) {
         val n = System.currentTimeMillis()
         guestRestEndMsByExerciseId.mapValues { (_, endMs) ->
@@ -273,7 +429,6 @@ fun ActiveStrengthWorkoutScreen(
     } else {
         ui.restSecondsLeft
     }
-    val isGuestLaneActive = activeLane == 1 && ui.guestExercises.isNotEmpty()
     val hostPagerPreviewWeId = ui.exercises.getOrNull(
         hostPagerDisplayIndex.coerceIn(0, ui.exercises.lastIndex.coerceAtLeast(0))
     )?.workoutExerciseId
@@ -283,7 +438,7 @@ fun ActiveStrengthWorkoutScreen(
     )?.workoutExerciseId
     val guestBubbleEmphasisWeId = guestNavEmphasisLockWeId ?: guestPagerPreviewWeId
     val allSetsDoneCurrent = ex != null && currentSetIndex >= ex.sets.size
-    val isLastExercise = laneExerciseIndex == laneExercises.lastIndex
+    val isLastExercise = laneGroupIndex == laneDisplayGroups.lastIndex
     val allExercisesDone = laneExercises.isNotEmpty() && laneExercises.all { line ->
         (laneProgressMap[line.workoutExerciseId] ?: 0) >= line.sets.size
     }
@@ -345,13 +500,31 @@ fun ActiveStrengthWorkoutScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(24.dp),
-                    verticalArrangement = Arrangement.Center
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(stringResource(R.string.active_strength_no_exercises))
+                    Text(
+                        stringResource(R.string.active_strength_no_exercises),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stringResource(R.string.active_strength_add_exercise_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
                     Button(
+                        onClick = { vm.startAddExercise() },
+                        modifier = Modifier
+                            .padding(top = 16.dp)
+                            .fillMaxWidth()
+                    ) { Text(stringResource(R.string.active_strength_add_exercise)) }
+                    OutlinedButton(
                         onClick = onClose,
                         modifier = Modifier
-                            .padding(top = 12.dp)
+                            .padding(top = 8.dp)
                             .fillMaxWidth()
                     ) { Text(stringResource(R.string.active_strength_back)) }
                 }
@@ -363,6 +536,30 @@ fun ActiveStrengthWorkoutScreen(
                         .fillMaxSize()
                         .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
+                    when (ui.startSyncStatus) {
+                        WorkoutStartSync.Status.PENDING,
+                        WorkoutStartSync.Status.SYNCING -> {
+                            Text(
+                                text = stringResource(R.string.active_workout_syncing_start),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            )
+                        }
+                        WorkoutStartSync.Status.WILL_RETRY -> {
+                            Text(
+                                text = stringResource(R.string.active_workout_sync_will_retry),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                            )
+                        }
+                        else -> Unit
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -551,7 +748,18 @@ fun ActiveStrengthWorkoutScreen(
                         horizontalArrangement = Arrangement.Center
                     ) {
                         val isSolo = ui.guestExercises.isEmpty()
-                        laneExercises.forEachIndexed { index, bubbleEx ->
+                        val bubbleGroups = if (isGuestLaneActive) {
+                            laneExercises.mapIndexed { i, _ ->
+                                StrengthDisplayGroup("exercise-$i", null, listOf(i))
+                            }
+                        } else {
+                            strengthDisplayGroups(laneExercises)
+                        }
+                        bubbleGroups.forEach { bubbleGroup ->
+                            val bubbleIndices = bubbleGroup.exerciseIndices
+                            val bubbleGroupContent: @Composable () -> Unit = {
+                                bubbleIndices.forEach { index ->
+                                    val bubbleEx = laneExercises[index]
                             val total = bubbleEx.sets.size.coerceAtLeast(1)
                             val done = (laneProgressMap[bubbleEx.workoutExerciseId] ?: 0).coerceIn(0, total)
                             val progress = done.toFloat() / total.toFloat()
@@ -621,6 +829,7 @@ fun ActiveStrengthWorkoutScreen(
                                         if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
                                             guestCurrentExerciseIndex = index
                                         } else {
+                                            hostPagerDisplayIndex = pagerAnchorExerciseIndex(index, ui.exercises)
                                             vm.goToExercise(index)
                                         }
                                     }
@@ -665,6 +874,22 @@ fun ActiveStrengthWorkoutScreen(
                                     )
                                 }
                             }
+                                }
+                            }
+                            if (bubbleGroup.isSuperset) {
+                                Row(
+                                    modifier = Modifier
+                                        .padding(horizontal = 4.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                        .background(Color.White.copy(alpha = 0.35f))
+                                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    bubbleGroupContent()
+                                }
+                            } else {
+                                bubbleGroupContent()
+                            }
                         }
                     }
 
@@ -673,8 +898,12 @@ fun ActiveStrengthWorkoutScreen(
                             .weight(1f, fill = true)
                             .padding(top = 14.dp)
                     ) {
-                        val prevEx = laneExercises.getOrNull(laneExerciseIndex - 1)
-                        val nextEx = laneExercises.getOrNull(laneExerciseIndex + 1)
+                        val prevEx = laneDisplayGroups.getOrNull(laneGroupIndex - 1)
+                            ?.exerciseIndices?.firstOrNull()
+                            ?.let { laneExercises.getOrNull(it) }
+                        val nextEx = laneDisplayGroups.getOrNull(laneGroupIndex + 1)
+                            ?.exerciseIndices?.firstOrNull()
+                            ?.let { laneExercises.getOrNull(it) }
                         if (prevEx != null) {
                             Card(
                                 modifier = Modifier
@@ -711,7 +940,8 @@ fun ActiveStrengthWorkoutScreen(
                                 .align(Alignment.Center)
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp)
-                                .pointerInput(laneExerciseIndex, currentSetIndex, activeLane, hostPagerDisplayIndex) {
+                                .pointerInput(laneExerciseIndex, currentSetIndex, activeLane, hostPagerDisplayIndex, isSupersetCard) {
+                                    if (isSupersetCard) return@pointerInput
                                     var totalDrag = 0f
                                     detectVerticalDragGestures(
                                         onVerticalDrag = { _, dragAmount -> totalDrag += dragAmount },
@@ -721,11 +951,18 @@ fun ActiveStrengthWorkoutScreen(
                                                     if (totalDrag < 0f && guestCurrentExerciseIndex < laneExercises.lastIndex) guestCurrentExerciseIndex++
                                                     if (totalDrag > 0f && guestCurrentExerciseIndex > 0) guestCurrentExerciseIndex--
                                                 } else {
-                                                    if (totalDrag < 0f && hostPagerDisplayIndex < laneExercises.lastIndex) {
-                                                        hostPagerDisplayIndex++
+                                                    val gi = laneGroupIndex
+                                                    if (totalDrag < 0f && gi + 1 < laneDisplayGroups.size) {
+                                                        laneDisplayGroups[gi + 1].exerciseIndices.firstOrNull()?.let {
+                                                            hostPagerDisplayIndex = it
+                                                            vm.goToExercise(it)
+                                                        }
                                                     }
-                                                    if (totalDrag > 0f && hostPagerDisplayIndex > 0) {
-                                                        hostPagerDisplayIndex--
+                                                    if (totalDrag > 0f && gi > 0) {
+                                                        laneDisplayGroups[gi - 1].exerciseIndices.firstOrNull()?.let {
+                                                            hostPagerDisplayIndex = it
+                                                            vm.goToExercise(it)
+                                                        }
                                                     }
                                                 }
                                             }
@@ -734,99 +971,292 @@ fun ActiveStrengthWorkoutScreen(
                                 },
                             colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.52f))
                         ) {
-                            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Column(
+                                Modifier.padding(if (isSupersetCard) 18.dp else 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                if (isSupersetCard && currentDisplayGroup != null) {
+                                    ActiveStrengthSupersetCard(
+                                        group = currentDisplayGroup,
+                                        exercises = laneExercises,
+                                        activeExerciseIndex = workExerciseIndex,
+                                        setProgress = laneProgressMap,
+                                        completedSetsByExerciseId = ui.completedSetsByExerciseId,
+                                        restSecondsByExerciseId = if (isGuestLaneActive) {
+                                            guestRestSecByExerciseId
+                                        } else {
+                                            ui.restSecondsLeftByExerciseId
+                                        },
+                                        finishing = ui.finishing,
+                                        onMemberTap = { idx ->
+                                            hostPagerDisplayIndex = pagerAnchorExerciseIndex(idx, ui.exercises)
+                                            vm.goToExercise(idx)
+                                        },
+                                        onEditSet = { exerciseIndex, roundIndex ->
+                                            openEditSet(exerciseIndex, roundIndex)
+                                        },
+                                        editEnabled = !isGuestLaneActive,
+                                        onSetDone = { vm.onSetDone() },
+                                        onSkipRest = {
+                                            if (isGuestLaneActive) {
+                                                ex?.workoutExerciseId?.let { wid ->
+                                                    guestRestEndMsByExerciseId =
+                                                        guestRestEndMsByExerciseId.filterKeys { it != wid }
+                                                    guestRestPlannedTotalSecByExerciseId =
+                                                        guestRestPlannedTotalSecByExerciseId.filterKeys { it != wid }
+                                                }
+                                            } else {
+                                                vm.skipRest()
+                                            }
+                                        },
+                                        onNextExercise = { vm.goToNextExercise() },
+                                        showNextExercise = !isLastExercise
+                                    )
+                                } else {
                                 Text(
                                     text = ex?.displayName.orEmpty(),
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold
                                 )
 
-                                Card(colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.72f))) {
-                                    Column(
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .padding(14.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        if (!allSetsDoneCurrent && set != null) {
-                                            Text(
-                                                text = stringResource(
-                                                    R.string.active_strength_set_progress,
-                                                    currentSetIndex + 1,
-                                                    ex?.sets?.size ?: 0
-                                                ),
-                                                style = MaterialTheme.typography.titleMedium
-                                            )
-                                            val segs = set.weightSegments
-                                            if (segs != null && segs.size >= 2) {
-                                                Text("Drop set", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                val laneCompletedMap = if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+                                    emptyMap()
+                                } else {
+                                    ui.completedSetsByExerciseId
+                                }
+                                val totalSetsForEx = ex?.sets?.size ?: 0
+                                val sliderEnabled = ex != null && totalSetsForEx > 0 && !allSetsDoneCurrent
+                                var visitedSetIndexForActions by remember(ex?.workoutExerciseId, activeLane) {
+                                    mutableIntStateOf(currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1)))
+                                }
+                                val sliderEx = if (sliderEnabled) ex else null
+
+                                if (sliderEx != null) {
+                                    key(sliderEx.workoutExerciseId, activeLane) {
+                                        val pagerState = rememberPagerState(
+                                            initialPage = currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1)),
+                                            pageCount = { totalSetsForEx }
+                                        )
+                                        LaunchedEffect(currentSetIndex, totalSetsForEx) {
+                                            val target = currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1))
+                                            if (pagerState.currentPage != target) {
+                                                pagerState.animateScrollToPage(target)
+                                            }
+                                        }
+                                        LaunchedEffect(pagerState.currentPage) {
+                                            visitedSetIndexForActions = pagerState.currentPage
+                                        }
+                                        LaunchedEffect(snapToCurrentSignal) {
+                                            if (snapToCurrentSignal > 0) {
+                                                val target = currentSetIndex.coerceIn(0, max(0, totalSetsForEx - 1))
+                                                if (pagerState.currentPage != target) {
+                                                    pagerState.animateScrollToPage(target)
+                                                }
+                                            }
+                                        }
+
+                                        HorizontalPager(
+                                            state = pagerState,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { page ->
+                                            val plannedSet = sliderEx.sets.getOrNull(page)
+                                            val isPast = page < currentSetIndex
+                                            val isCurrent = page == currentSetIndex
+                                            val performed = laneCompletedMap[sliderEx.workoutExerciseId]?.getOrNull(page)
+                                            val displayReps: Int? = if (isPast) (performed?.reps ?: plannedSet?.reps) else plannedSet?.reps
+                                            val displayWeight: Double? = if (isPast) (performed?.weightKg ?: plannedSet?.weightKg) else plannedSet?.weightKg
+                                            val displayRpe: Double? = if (isPast) (performed?.rpe ?: plannedSet?.rpe) else plannedSet?.rpe
+                                            val displaySegs = if (isPast) (performed?.weightSegments ?: plannedSet?.weightSegments) else plannedSet?.weightSegments
+                                            val statusLabel = when {
+                                                isPast -> "Completed"
+                                                isCurrent -> "Current"
+                                                else -> "Upcoming"
+                                            }
+                                            val statusColor = when {
+                                                isPast -> Color(0xFF666666)
+                                                isCurrent -> MaterialTheme.colorScheme.primary
+                                                else -> Color(0xFFD08A1B)
+                                            }
+
+                                            Card(
+                                                colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.72f)),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 4.dp)
+                                            ) {
                                                 Column(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(14.dp),
                                                     horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                                                    modifier = Modifier.padding(top = 2.dp)
+                                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                                 ) {
-                                                    segs.forEach { el ->
-                                                        val o = el.jsonObject
-                                                        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-                                                        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
                                                         Text(
-                                                            "$r reps · ${String.format(Locale.US, "%.1f", w)} kg",
-                                                            style = MaterialTheme.typography.titleLarge,
-                                                            textAlign = TextAlign.Center
+                                                            text = statusLabel.uppercase(),
+                                                            color = statusColor,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.Bold,
+                                                            modifier = Modifier
+                                                                .clip(CircleShape)
+                                                                .background(statusColor.copy(alpha = 0.15f))
+                                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                                        )
+                                                    }
+                                                    Text(
+                                                        text = stringResource(
+                                                            R.string.active_strength_set_progress,
+                                                            page + 1,
+                                                            totalSetsForEx
+                                                        ),
+                                                        style = MaterialTheme.typography.titleMedium
+                                                    )
+                                                    if (displaySegs != null && displaySegs.size >= 2) {
+                                                        Text("Drop set", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                        Column(
+                                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        ) {
+                                                            displaySegs.forEach { el ->
+                                                                val o = el.jsonObject
+                                                                val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                                                val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 0.0
+                                                                Text(
+                                                                    "$r reps · ${String.format(Locale.US, "%.1f", w)} kg",
+                                                                    style = MaterialTheme.typography.titleLarge,
+                                                                    textAlign = TextAlign.Center
+                                                                )
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Text(
+                                                            "${displayReps ?: 0} reps",
+                                                            style = MaterialTheme.typography.headlineSmall,
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        )
+                                                        Text(
+                                                            "${displayWeight?.let { String.format(Locale.US, "%.1f", it) } ?: "0.0"} kg",
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        )
+                                                    }
+                                                    displayRpe?.let {
+                                                        Text(
+                                                            "Target RPE ${String.format(Locale.US, "%.1f", it)}",
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    val plannedRest = plannedSet?.restSec ?: 0
+                                                    if (isCurrent && !laneIsResting && plannedRest > 0) {
+                                                        Text(
+                                                            "Rest ${plannedRest}s after set",
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
                                                     }
                                                 }
-                                            } else {
-                                                Text("${set.reps ?: 0} reps", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.padding(top = 2.dp))
-                                                Text(
-                                                    "${set.weightKg?.let { String.format(Locale.US, "%.1f", it) } ?: "0.0"} kg",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.padding(top = 2.dp)
+                                            }
+                                        }
+
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(top = 4.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            for (i in 0 until totalSetsForEx) {
+                                                val isVisited = i == pagerState.currentPage
+                                                val isCurrentDot = i == currentSetIndex
+                                                val dotColor = when {
+                                                    isVisited -> MaterialTheme.colorScheme.primary
+                                                    isCurrentDot -> MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+                                                    else -> Color.Black.copy(alpha = 0.25f)
+                                                }
+                                                Box(
+                                                    Modifier
+                                                        .padding(horizontal = 3.dp)
+                                                        .size(if (isCurrentDot || isVisited) 9.dp else 7.dp)
+                                                        .clip(CircleShape)
+                                                        .background(dotColor)
                                                 )
                                             }
-                                            set.rpe?.let {
-                                                Text(
-                                                    "Target RPE ${String.format("%.1f", it)}",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                            val plannedRest = set.restSec ?: 0
-                                            if (!laneIsResting && plannedRest > 0) {
-                                                Text(
-                                                    "Rest ${plannedRest}s after set",
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        } else {
+                                        }
+                                    }
+                                } else {
+                                    Card(colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.72f))) {
+                                        Column(
+                                            Modifier
+                                                .fillMaxWidth()
+                                                .padding(14.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
                                             Text(stringResource(R.string.active_strength_all_sets_done))
                                             Text("Great job! Move on when ready.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                 }
 
-                                if (!allSetsDoneCurrent) {
-                                    OutlinedButton(
-                                        onClick = { showEditSheet = true },
-                                        enabled = set != null && !laneIsResting && !ui.finishing,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) { Text("Edit reps, weight & rest") }
+                                val isVisitingCurrent = visitedSetIndexForActions == currentSetIndex
+                                val visitedIsPast = sliderEnabled && visitedSetIndexForActions < currentSetIndex
 
-                                    if (laneIsResting) {
-                                        Button(
+                                if (!allSetsDoneCurrent) {
+                                    if (!visitedIsPast) {
+                                        OutlinedButton(
                                             onClick = {
-                                                if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
-                                                    ex?.workoutExerciseId?.let { wid ->
-                                                        guestRestEndMsByExerciseId =
-                                                            guestRestEndMsByExerciseId.filterKeys { it != wid }
-                                                        guestRestPlannedTotalSecByExerciseId =
-                                                            guestRestPlannedTotalSecByExerciseId.filterKeys { it != wid }
+                                                val visitedSet = ex?.sets?.getOrNull(visitedSetIndexForActions)
+                                                if (visitedSet != null && !isGuestLaneActive) {
+                                                    openEditSet(workExerciseIndex, visitedSetIndexForActions)
+                                                } else if (visitedSet != null && isGuestLaneActive) {
+                                                    if (!showEditSheet) {
+                                                        applyEditToRemainingSets = false
                                                     }
-                                                } else {
-                                                    vm.skipRest()
+                                                    editingExpandedIndex = visitedSetIndexForActions
+                                                    editingWorkoutExerciseId = null
+                                                    guestEditRepsText = visitedSet.reps?.toString() ?: ""
+                                                    guestEditWeightText = visitedSet.weightKg?.let { v ->
+                                                        if (v == v.toInt().toDouble()) v.toInt().toString()
+                                                        else String.format(Locale.US, "%.1f", v)
+                                                    } ?: ""
+                                                    guestEditRestText = visitedSet.restSec?.toString() ?: ""
+                                                    showEditSheet = true
                                                 }
                                             },
+                                            enabled = ex?.sets?.getOrNull(visitedSetIndexForActions) != null && !laneIsResting && !ui.finishing,
                                             modifier = Modifier.fillMaxWidth()
-                                        ) { Text("Rest ${laneRestSec}s · Skip") }
+                                        ) { Text("Edit reps, weight & rest") }
+                                    }
+
+                                    if (laneIsResting) {
+                                        Column(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            ActiveStrengthRestTimerRow(restSec = laneRestSec)
+                                            ActiveStrengthSkipRestOutlinedButton(
+                                                onClick = {
+                                                    if (activeLane == 1 && ui.guestExercises.isNotEmpty()) {
+                                                        ex?.workoutExerciseId?.let { wid ->
+                                                            guestRestEndMsByExerciseId =
+                                                                guestRestEndMsByExerciseId.filterKeys { it != wid }
+                                                            guestRestPlannedTotalSecByExerciseId =
+                                                                guestRestPlannedTotalSecByExerciseId.filterKeys { it != wid }
+                                                        }
+                                                    } else {
+                                                        vm.skipRest()
+                                                    }
+                                                },
+                                                enabled = !ui.finishing
+                                            )
+                                        }
+                                    } else if (!isVisitingCurrent && sliderEnabled) {
+                                        Button(
+                                            onClick = { snapToCurrentSignal += 1 },
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) { Text("Back to current set") }
                                     } else {
                                         Button(
                                             onClick = {
@@ -860,8 +1290,18 @@ fun ActiveStrengthWorkoutScreen(
                                             enabled = set != null && !ui.finishing,
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            val rest = set?.restSec?.takeIf { it > 0 }
-                                            Text(if (rest != null) "Rest ${rest}s" else stringResource(R.string.active_strength_set_done))
+                                            val label = if (set != null && ex != null) {
+                                                primarySetActionLabel(
+                                                    ex = ex,
+                                                    exercises = ui.exercises,
+                                                    setIndex = currentSetIndex,
+                                                    setProgress = ui.currentSetIndexByExerciseId,
+                                                    currentSet = set
+                                                )
+                                            } else {
+                                                stringResource(R.string.active_strength_set_done)
+                                            }
+                                            Text(label)
                                         }
                                     }
                                 }
@@ -921,8 +1361,9 @@ fun ActiveStrengthWorkoutScreen(
                                         },
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Text("Next exercise")
+                                        Text(stringResource(R.string.active_strength_next_exercise))
                                     }
+                                }
                                 }
                             }
                         }
@@ -930,11 +1371,22 @@ fun ActiveStrengthWorkoutScreen(
 
                     if (isLastExercise) {
                         Button(
-                            onClick = { vm.finishWorkout(onClose) },
+                            onClick = requestFinishWorkout,
                             enabled = !ui.finishing,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp)
+                        ) {
+                            Text(if (ui.finishing) stringResource(R.string.active_strength_saving) else stringResource(R.string.active_strength_finish))
+                        }
+                    } else if (!ui.completedEntirely) {
+                        Button(
+                            onClick = requestFinishWorkout,
+                            enabled = !ui.finishing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34C759))
                         ) {
                             Text(if (ui.finishing) stringResource(R.string.active_strength_saving) else stringResource(R.string.active_strength_finish))
                         }
@@ -957,13 +1409,28 @@ fun ActiveStrengthWorkoutScreen(
                 }
             }
         }
-        if (showEditSheet && set != null) {
-        var showConvertToNormal by remember(showEditSheet, set.setId) { mutableStateOf(false) }
-        var convertNormalRepsText by remember(showEditSheet, set.setId) { mutableStateOf("") }
-        var convertNormalWeightText by remember(showEditSheet, set.setId) { mutableStateOf("") }
+        val editTargetEx = editingWorkoutExerciseId?.let { wid ->
+            ui.exercises.firstOrNull { it.workoutExerciseId == wid }
+        } ?: ex
+        val editingSet = run {
+            val idx = editingExpandedIndex ?: currentSetIndex
+            editTargetEx?.sets?.getOrNull(idx) ?: set
+        }
+        val editSupersetMembers = remember(editingWorkoutExerciseId, showEditSheet, ui.exercises) {
+            val anchor = editTargetEx ?: return@remember emptyList()
+            supersetMembers(anchor, ui.exercises).takeIf { it.size > 1 }.orEmpty()
+        }
+        val editStartIndex = editingExpandedIndex ?: currentSetIndex
+        val editSetsForRemaining = editTargetEx?.sets ?: ex?.sets
+        val editLastSetIndex = editSetsForRemaining?.lastIndex?.coerceAtLeast(0) ?: 0
+        val showApplyToRemainingToggle = editStartIndex < editLastSetIndex
+        if (showEditSheet && editingSet != null) {
+        var showConvertToNormal by remember(showEditSheet, editingSet.setId) { mutableStateOf(false) }
+        var convertNormalRepsText by remember(showEditSheet, editingSet.setId) { mutableStateOf("") }
+        var convertNormalWeightText by remember(showEditSheet, editingSet.setId) { mutableStateOf("") }
 
-        val initialDropSegs = remember(showEditSheet, set.setId) {
-            val arr = set.weightSegments
+        val initialDropSegs = remember(showEditSheet, editingSet.setId) {
+            val arr = editingSet.weightSegments
             if (arr == null || arr.size < 2) {
                 mutableListOf<Pair<String, String>>()
             } else {
@@ -975,7 +1442,7 @@ fun ActiveStrengthWorkoutScreen(
                 }.toMutableList()
             }
         }
-        var dropSegs by remember(showEditSheet, set.setId) { mutableStateOf(initialDropSegs) }
+        var dropSegs by remember(showEditSheet, editingSet.setId) { mutableStateOf(initialDropSegs) }
 
             Card(
                 modifier = Modifier
@@ -985,6 +1452,32 @@ fun ActiveStrengthWorkoutScreen(
             ) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Edit reps, weight & rest", style = MaterialTheme.typography.titleMedium)
+
+                if (editSupersetMembers.isNotEmpty() && !isGuestLaneActive) {
+                    Text("Exercise", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        editSupersetMembers.forEach { member ->
+                            val memberIndex = ui.exercises.indexOfFirst { it.workoutExerciseId == member.workoutExerciseId }
+                            if (memberIndex < 0) return@forEach
+                            val selected = editingWorkoutExerciseId == member.workoutExerciseId
+                            OutlinedButton(
+                                onClick = {
+                                    switchEditSupersetMember(memberIndex, editingExpandedIndex ?: currentSetIndex)
+                                },
+                                border = if (selected) {
+                                    androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary)
+                                } else null
+                            ) {
+                                Text(member.displayName, maxLines = 1)
+                            }
+                        }
+                    }
+                }
 
                 val isDropSet = !isGuestLaneActive && (dropSegs.size >= 2)
                 if (isDropSet) {
@@ -1032,8 +1525,8 @@ fun ActiveStrengthWorkoutScreen(
                     OutlinedButton(
                         onClick = {
                             val first = dropSegs.firstOrNull()
-                            convertNormalRepsText = first?.first ?: (set.reps?.toString() ?: "")
-                            convertNormalWeightText = first?.second ?: (set.weightKg?.toString() ?: "")
+                            convertNormalRepsText = first?.first ?: (editingSet.reps?.toString() ?: "")
+                            convertNormalWeightText = first?.second ?: (editingSet.weightKg?.toString() ?: "")
                             showConvertToNormal = true
                         },
                         modifier = Modifier.fillMaxWidth()
@@ -1065,31 +1558,64 @@ fun ActiveStrengthWorkoutScreen(
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
-                    OutlinedTextField(
-                        value = if (isGuestLaneActive) guestEditRestText else ui.editRestText,
-                        onValueChange = {
-                            if (isGuestLaneActive) {
-                                guestEditRestText = it
-                            } else {
-                                vm.setEditRestText(it)
-                            }
-                        },
-                        label = { Text("Rest (sec)") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
-                    )
-                val isWireDropSet = set.weightSegments != null && set.weightSegments.size >= 2
+                    if (editShowsRestField(editTargetEx)) {
+                        OutlinedTextField(
+                            value = if (isGuestLaneActive) guestEditRestText else ui.editRestText,
+                            onValueChange = {
+                                if (isGuestLaneActive) {
+                                    guestEditRestText = it
+                                } else {
+                                    vm.setEditRestText(it)
+                                }
+                            },
+                            label = { Text("Rest (sec)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                    }
+                val isWireDropSet = editingSet.weightSegments != null && editingSet.weightSegments.size >= 2
                 if (!isGuestLaneActive && !isDropSet && !isWireDropSet) {
                         OutlinedButton(
                             onClick = {
-                                vm.convertCurrentSetToDropSet()
+                                vm.convertCurrentSetToDropSet(editingExpandedIndex, editingWorkoutExerciseId)
                                 showEditSheet = false
+                                editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) { Text("Convert to drop set") }
                     }
+                    if (showApplyToRemainingToggle) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                stringResource(
+                                    R.string.active_strength_apply_to_remaining_sets,
+                                    editStartIndex + 1,
+                                    editLastSetIndex + 1
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = applyEditToRemainingSets,
+                                onCheckedChange = { applyEditToRemainingSets = it }
+                            )
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { showEditSheet = false }, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(
+                            onClick = {
+                                showEditSheet = false
+                                editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
+                                editDraftsByWorkoutExerciseId = emptyMap()
+                                applyEditToRemainingSets = false
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
                             Text("Cancel")
                         }
                         Button(
@@ -1097,18 +1623,29 @@ fun ActiveStrengthWorkoutScreen(
                                 if (isGuestLaneActive) {
                                     val exLocal = guestExercisesUi.getOrNull(guestCurrentExerciseIndex)
                                         ?: return@Button
-                                    val setIndex = (guestSetProgress[exLocal.workoutExerciseId] ?: 0)
+                                    val guestCurrent = guestSetProgress[exLocal.workoutExerciseId] ?: 0
+                                    val setIndex = (editingExpandedIndex ?: guestCurrent)
+                                        .coerceIn(0, exLocal.sets.lastIndex.coerceAtLeast(0))
                                     val reps = guestEditRepsText.trim().toIntOrNull()
                                     val weight = guestEditWeightText.trim().replace(',', '.').toDoubleOrNull()
                                     val rest = guestEditRestText.trim().toIntOrNull()?.coerceAtLeast(0)
-                                    val nextSets = updateBlockForExpandedIndex(
-                                        sets = exLocal.sets,
-                                        expandedIndex = setIndex,
-                                        reps = reps,
-                                        weightKg = weight,
-                                        rpe = exLocal.sets.getOrNull(setIndex)?.rpe,
-                                        restSec = rest
-                                    )
+                                    val lastIndex = exLocal.sets.lastIndex.coerceAtLeast(0)
+                                    val targetIndices = if (applyEditToRemainingSets && setIndex < lastIndex) {
+                                        setIndex..lastIndex
+                                    } else {
+                                        listOf(setIndex)
+                                    }
+                                    var nextSets = exLocal.sets
+                                    for (idx in targetIndices) {
+                                        nextSets = updateBlockForExpandedIndex(
+                                            sets = nextSets,
+                                            expandedIndex = idx,
+                                            reps = reps,
+                                            weightKg = weight,
+                                            rpe = nextSets.getOrNull(idx)?.rpe,
+                                            restSec = rest
+                                        )
+                                    }
                                     val nextEx = exLocal.copy(sets = nextSets)
                                     guestExercisesUi = guestExercisesUi.toMutableList().apply {
                                         if (guestCurrentExerciseIndex in indices) {
@@ -1123,13 +1660,29 @@ fun ActiveStrengthWorkoutScreen(
                                         StrengthSegmentPayload(r, w)
                                     }
                                     if (segPayload.size >= 2) {
-                                        vm.applyCurrentDropSetEdits(segPayload)
+                                        vm.applyCurrentDropSetEdits(
+                                            segPayload,
+                                            editingExpandedIndex,
+                                            editingWorkoutExerciseId,
+                                            applyEditToRemainingSets
+                                        )
                                     }
                                 } else {
-                                    vm.applyCurrentSetEdits()
+                                    val mergedDrafts = editingWorkoutExerciseId?.let { wid ->
+                                        editDraftsByWorkoutExerciseId + (wid to currentEditDraft())
+                                    } ?: editDraftsByWorkoutExerciseId
+                                    vm.applyAllSetEditDrafts(
+                                        editingExpandedIndex ?: currentSetIndex,
+                                        mergedDrafts,
+                                        applyEditToRemainingSets
+                                    )
                                 }
                                 }
                                 showEditSheet = false
+                                editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
+                                editDraftsByWorkoutExerciseId = emptyMap()
+                                applyEditToRemainingSets = false
                             },
                             modifier = Modifier.weight(1f)
                         ) { Text("Save") }
@@ -1170,9 +1723,11 @@ fun ActiveStrengthWorkoutScreen(
                             onClick = {
                                 val r = convertNormalRepsText.trim().toIntOrNull() ?: 10
                                 val w = convertNormalWeightText.trim().replace(',', '.').toDoubleOrNull() ?: 0.0
-                                vm.convertCurrentSetToNormalSet(r, w)
+                                vm.convertCurrentSetToNormalSet(r, w, editingExpandedIndex, editingWorkoutExerciseId)
                                 showConvertToNormal = false
                                 showEditSheet = false
+                                editingExpandedIndex = null
+                                editingWorkoutExerciseId = null
                             },
                             modifier = Modifier.weight(1f)
                         ) { Text("Convert") }
@@ -1181,6 +1736,71 @@ fun ActiveStrengthWorkoutScreen(
             }
         }
         }
+    }
+    if (ui.showExercisePicker) {
+        val pickerSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        ModalBottomSheet(
+            onDismissRequest = { vm.dismissExercisePicker() },
+            sheetState = pickerSheetState
+        ) {
+            ActiveStrengthExercisePickerSheet(
+                exercises = ui.pickerExercises,
+                loading = ui.pickerLoading,
+                loadError = ui.pickerLoadError,
+                sortMode = ui.exercisePickerSortMode,
+                onSortMode = { vm.setExercisePickerSortMode(it) },
+                onPick = { vm.onExercisePicked(it) },
+                onDismiss = { vm.dismissExercisePicker() }
+            )
+        }
+    }
+    if (ui.showExerciseSetup) {
+        ActiveStrengthExerciseSetupDialog(
+            drafts = ui.exerciseSetupDrafts,
+            isSaving = ui.isPersistingExerciseAdd,
+            error = ui.exerciseSetupError,
+            onDismiss = { vm.dismissExerciseSetup() },
+            onAddSet = { vm.addSetToExerciseSetupDraft() },
+            onRemoveSet = { vm.removeSetFromExerciseSetupDraft() },
+            onUpdateSet = vm::updateExerciseSetupSet,
+            onConfirm = { vm.saveConfiguredExercise(connectionUnstableMsg) }
+        )
+    }
+    if (showFinishConfirm) {
+        AlertDialog(
+            onDismissRequest = { if (!ui.finishing) showFinishConfirm = false },
+            title = {
+                Text(
+                    stringResource(
+                        if (ui.completedEntirely) {
+                            R.string.active_strength_finish_confirm_title
+                        } else {
+                            R.string.active_strength_finish_early_title
+                        }
+                    )
+                )
+            },
+            text = { Text(finishConfirmMessage) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showFinishConfirm = false
+                        runFinishWorkout()
+                    },
+                    enabled = !ui.finishing
+                ) {
+                    Text(stringResource(R.string.active_strength_finish))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showFinishConfirm = false },
+                    enabled = !ui.finishing
+                ) {
+                    Text(stringResource(R.string.home_guest_detail_cancel))
+                }
+            }
+        )
     }
     ui.strengthRoutineOverwritePrompt?.let { prompt ->
         StrengthRoutineOverwriteBottomSheet(
@@ -1241,6 +1861,152 @@ private fun ElborblaFinishCelebrationOverlay(
             }
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ActiveStrengthExercisePickerSheet(
+    exercises: List<com.lilru.liftr.ui.add.ExerciseLite>,
+    loading: Boolean,
+    loadError: String?,
+    sortMode: ExercisePickerSortMode,
+    onSortMode: (ExercisePickerSortMode) -> Unit,
+    onPick: (com.lilru.liftr.ui.add.ExerciseLite) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                stringResource(R.string.add_exercise_pick),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.home_guest_detail_cancel))
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 8.dp)) {
+            TextButton(onClick = { onSortMode(ExercisePickerSortMode.ALPHABETIC) }) {
+                Text(stringResource(R.string.add_exercise_sort_a_z))
+            }
+            TextButton(onClick = { onSortMode(ExercisePickerSortMode.MOST_USED) }) {
+                Text(stringResource(R.string.add_exercise_sort_most_used))
+            }
+        }
+        loadError?.let { err ->
+            Text(
+                err,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+        if (loading) {
+            Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(360.dp)
+            ) {
+                items(exercises, key = { it.id }) { ex ->
+                    Text(
+                        ex.name,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(ex) }
+                            .padding(vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveStrengthExerciseSetupDialog(
+    drafts: List<ActiveExerciseSetupExerciseDraft>,
+    isSaving: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onAddSet: () -> Unit,
+    onRemoveSet: () -> Unit,
+    onUpdateSet: (draftId: String, setId: String, repsText: String?, weightText: String?, restText: String?, rpeText: String?) -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = { if (!isSaving) onDismiss() },
+        title = { Text(stringResource(R.string.active_strength_configure_exercise)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                drafts.forEach { draft ->
+                    Text(draft.exercise.name, fontWeight = FontWeight.SemiBold)
+                    draft.sets.forEachIndexed { idx, set ->
+                        Text("Set ${idx + 1}", style = MaterialTheme.typography.labelMedium)
+                        OutlinedTextField(
+                            value = set.repsText,
+                            onValueChange = { onUpdateSet(draft.id, set.id, it, null, null, null) },
+                            label = { Text(stringResource(R.string.active_strength_field_reps)) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = set.weightText,
+                            onValueChange = { onUpdateSet(draft.id, set.id, null, it, null, null) },
+                            label = { Text(stringResource(R.string.active_strength_field_weight_kg)) },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = set.restText,
+                            onValueChange = { onUpdateSet(draft.id, set.id, null, null, it, null) },
+                            label = { Text("Rest (s)") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = onAddSet) { Text(stringResource(R.string.add_set_add)) }
+                    TextButton(onClick = onRemoveSet) { Text("Remove set") }
+                }
+                error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onConfirm, enabled = !isSaving && drafts.isNotEmpty()) {
+                if (isSaving) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text(stringResource(R.string.active_strength_add_exercise))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSaving) {
+                Text(stringResource(R.string.home_guest_detail_cancel))
+            }
+        }
+    )
 }
 
 private fun formatElapsed(totalSec: Int): String {

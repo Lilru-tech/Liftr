@@ -3,18 +3,19 @@ import Supabase
 
 struct SearchView: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium: Bool = false
 
     private enum SearchTab: String, CaseIterable, Identifiable {
         case users
         case workouts
         case segments
+        case map
         var id: String { rawValue }
         var label: String {
             switch self {
             case .users: "Users"
             case .workouts: "Workouts"
             case .segments: "Segments"
+            case .map: "Map"
             }
         }
         var rpcScope: String {
@@ -22,6 +23,7 @@ struct SearchView: View {
             case .users: "users"
             case .workouts: "workouts"
             case .segments: "segments"
+            case .map: "map"
             }
         }
     }
@@ -89,7 +91,7 @@ struct SearchView: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
             Picker("", selection: $tab) {
                 ForEach(SearchTab.allCases) { t in
                     Text(t.label).tag(t)
@@ -98,38 +100,50 @@ struct SearchView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal)
 
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                TextField(
-                    tab == .users ? "Search users…" : (tab == .workouts ? "Search workouts…" : "Search segments…"),
-                    text: $query
-                )
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            .padding(12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal)
-
-            List {
-                if trimmedQuery.isEmpty {
-                    suggestionsSections
+            Group {
+                if tab == .map {
+                    TerritoryMapView()
+                        .id("territory-map")
                 } else {
-                    resultsSections
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass")
+                            TextField(
+                                tab == .users ? "Search users…" : (tab == .workouts ? "Search workouts…" : "Search segments…"),
+                                text: $query
+                            )
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                        .padding(12)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal)
+
+                        List {
+                            if trimmedQuery.isEmpty {
+                                suggestionsSections
+                            } else {
+                                resultsSections
+                            }
+                        }
+                        .listStyle(.plain)
+                        .scrollContentBackground(.hidden)
+                        .listRowSeparator(.hidden)
+                        .refreshable { await loadSuggestions() }
+                    }
                 }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .listRowSeparator(.hidden)
-            .refreshable { await loadSuggestions() }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
-            if !isPremium {
+            if !app.isPremium && tab != .map {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)
                     .padding(.bottom, 8)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .toolbar(.hidden, for: .navigationBar)
         .onAppear { Task { await loadSuggestions() } }
         .onChange(of: query) { _, newValue in
             searchTask?.cancel()

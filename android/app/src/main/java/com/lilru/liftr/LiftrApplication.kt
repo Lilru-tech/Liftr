@@ -7,6 +7,8 @@ import com.google.firebase.messaging.FirebaseMessaging
 import com.lilru.liftr.billing.PlayBillingManager
 import com.lilru.liftr.data.LiftrSupabase
 import com.lilru.liftr.push.FcmTokenUploader
+import com.lilru.liftr.workout.WorkoutFinishSync
+import com.lilru.liftr.workout.WorkoutStartSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -20,6 +22,8 @@ class LiftrApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         LiftrSupabase.init(this)
+        WorkoutStartSync.scheduleWorker(this)
+        WorkoutFinishSync.scheduleWorker(this)
         playBilling = PlayBillingManager(this)
         playBilling.start()
         // MobileAds se inicializa tras UMP en MainActivity

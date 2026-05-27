@@ -50,7 +50,7 @@ data class RecentQueryRow(
     @SerialName("normalized_query") val query: String
 )
 
-enum class SearchScope { USERS, WORKOUTS, SEGMENTS }
+enum class SearchScope { USERS, WORKOUTS, SEGMENTS, MAP }
 
 @Serializable
 data class SearchSegmentRow(
