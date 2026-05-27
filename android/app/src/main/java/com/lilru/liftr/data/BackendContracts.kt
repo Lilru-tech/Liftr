@@ -191,6 +191,8 @@ object BackendContracts {
         const val TOGGLE_MESSAGE_REACTION = "toggle_message_reaction"
         const val EDIT_MESSAGE = "edit_message"
         const val DELETE_MESSAGE = "delete_message"
+        const val CLONE_SHARED_INGREDIENT = "clone_shared_ingredient"
+        const val CLONE_SHARED_RECIPE = "clone_shared_recipe"
     }
 
     object ProfileColumns {

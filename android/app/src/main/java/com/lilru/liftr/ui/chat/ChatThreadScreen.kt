@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -93,6 +94,7 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -117,6 +119,9 @@ fun ChatThreadScreen(
     var sharedRoutine by remember { mutableStateOf<RoutineShareSnapshot?>(null) }
     var sharedAchievementCode by remember { mutableStateOf<String?>(null) }
     var sharedSegmentId by remember { mutableStateOf<UUID?>(null) }
+    var sharedIngredientDetail by remember { mutableStateOf<SharedIngredientSnapshot?>(null) }
+    var sharedRecipeDetail by remember { mutableStateOf<SharedRecipeSnapshot?>(null) }
+    var sharedDetailSaving by remember { mutableStateOf(false) }
 
     LaunchedEffect(conversationId) {
         viewModel.loadInitial()
@@ -268,6 +273,12 @@ fun ChatThreadScreen(
                                     },
                                     onOpenSegmentShare = { segmentUuid ->
                                         sharedSegmentId = segmentUuid
+                                    },
+                                    onSaveSharedIngredient = { snap ->
+                                        sharedIngredientDetail = snap
+                                    },
+                                    onSaveSharedRecipe = { snap ->
+                                        sharedRecipeDetail = snap
                                     }
                                 )
                             }
@@ -368,6 +379,120 @@ fun ChatThreadScreen(
                     onBack = { sharedSegmentId = null },
                     modifier = Modifier.fillMaxSize()
                 )
+            }
+        }
+
+        if (sharedIngredientDetail != null || sharedRecipeDetail != null) {
+            val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(
+                onDismissRequest = {
+                    if (!sharedDetailSaving) {
+                        sharedIngredientDetail = null
+                        sharedRecipeDetail = null
+                    }
+                },
+                sheetState = sheetState
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    sharedIngredientDetail?.let { snap ->
+                        Text("Ingredient", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(snap.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "${snap.caloriesPer100g.roundToInt()} kcal · P ${snap.proteinPer100g.roundToInt()}g · C ${snap.carbsPer100g.roundToInt()}g · F ${snap.fatPer100g.roundToInt()}g (per 100g)",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        SharedNutritionDetailFacts(
+                            lines = listOf(
+                                "Calories" to "${snap.caloriesPer100g}",
+                                "Protein (g)" to "${snap.proteinPer100g}",
+                                "Carbs (g)" to "${snap.carbsPer100g}",
+                                "Fat (g)" to "${snap.fatPer100g}",
+                                "Saturated fat (g)" to "${snap.saturatedFatPer100g}",
+                                "Sugars (g)" to "${snap.sugarsPer100g}",
+                                "Fiber (g)" to "${snap.fiberPer100g}",
+                                "Sodium (mg)" to "${snap.sodiumMgPer100g}"
+                            )
+                        )
+                        Button(
+                            onClick = {
+                                if (sharedDetailSaving) return@Button
+                                sharedDetailSaving = true
+                                scope.launch {
+                                    runCatching { viewModel.cloneSharedIngredient(snap) }
+                                        .onSuccess {
+                                            snackbar.showSnackbar("Saved to your ingredients")
+                                            sharedIngredientDetail = null
+                                            sharedRecipeDetail = null
+                                        }
+                                        .onFailure { e ->
+                                            snackbar.showSnackbar(e.message ?: "Couldn't save")
+                                        }
+                                    sharedDetailSaving = false
+                                }
+                            },
+                            enabled = !sharedDetailSaving,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (sharedDetailSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Text("Save to My Ingredients")
+                        }
+                    }
+
+                    sharedRecipeDetail?.let { snap ->
+                        Text("Recipe", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text(snap.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        snap.description?.takeIf { it.isNotBlank() }?.let { d ->
+                            Text(d, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        val profile = snap.profilePer100g
+                        val line = if (profile != null) {
+                            "${profile.calories.roundToInt()} kcal · P ${profile.protein.roundToInt()}g · C ${profile.carbs.roundToInt()}g · F ${profile.fat.roundToInt()}g (per 100g)"
+                        } else {
+                            "${snap.ingredients.size} ingredients"
+                        }
+                        Text(line, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Button(
+                            onClick = {
+                                if (sharedDetailSaving) return@Button
+                                sharedDetailSaving = true
+                                scope.launch {
+                                    runCatching { viewModel.cloneSharedRecipe(snap) }
+                                        .onSuccess {
+                                            snackbar.showSnackbar("Saved to your recipes")
+                                            sharedIngredientDetail = null
+                                            sharedRecipeDetail = null
+                                        }
+                                        .onFailure { e ->
+                                            snackbar.showSnackbar(e.message ?: "Couldn't save")
+                                        }
+                                    sharedDetailSaving = false
+                                }
+                            },
+                            enabled = !sharedDetailSaving,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            if (sharedDetailSaving) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                            else Text("Save to My Recipes")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SharedNutritionDetailFacts(lines: List<Pair<String, String>>) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        lines.forEach { (k, v) ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(k, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(v, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -508,7 +633,9 @@ private fun MessageRow(
     onOpenRoutineShare: (RoutineShareSnapshot) -> Unit,
     onOpenWorkoutShare: (WorkoutShareSnapshot) -> Unit,
     onOpenAchievementShare: (String) -> Unit,
-    onOpenSegmentShare: (UUID) -> Unit
+    onOpenSegmentShare: (UUID) -> Unit,
+    onSaveSharedIngredient: (SharedIngredientSnapshot) -> Unit,
+    onSaveSharedRecipe: (SharedRecipeSnapshot) -> Unit
 ) {
     val deleted = msg.deletedAt != null
     Row(
@@ -551,6 +678,8 @@ private fun MessageRow(
                     val workoutSnap = msg.decodeWorkoutShare()
                     val achievementSnap = msg.decodeAchievementShare()
                     val segmentSnap = msg.decodeSegmentShare()
+                    val sharedIngredientSnap = msg.decodeSharedIngredient()
+                    val sharedRecipeSnap = msg.decodeSharedRecipe()
                     when {
                         routineSnap != null -> {
                             Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -782,10 +911,110 @@ private fun MessageRow(
                                 }
                             }
                         }
+                        sharedIngredientSnap != null -> {
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                if (!msg.body.isNullOrBlank()) {
+                                    Text(
+                                        text = msg.body.orEmpty(),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (mine) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+                                    modifier = Modifier.clickable { onSaveSharedIngredient(sharedIngredientSnap) }
+                                ) {
+                                    Column(
+                                        Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Ingredient",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (mine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = sharedIngredientSnap.name,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = if (mine) MaterialTheme.colorScheme.onPrimary
+                                            else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        val c = sharedIngredientSnap.caloriesPer100g.roundToInt()
+                                        val p = sharedIngredientSnap.proteinPer100g.roundToInt()
+                                        val ca = sharedIngredientSnap.carbsPer100g.roundToInt()
+                                        val f = sharedIngredientSnap.fatPer100g.roundToInt()
+                                        Text(
+                                            text = "$c kcal · P ${p}g · C ${ca}g · F ${f}g",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (mine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        sharedRecipeSnap != null -> {
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+                                if (!msg.body.isNullOrBlank()) {
+                                    Text(
+                                        text = msg.body.orEmpty(),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = if (mine) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(bottom = 6.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f),
+                                    modifier = Modifier.clickable { onSaveSharedRecipe(sharedRecipeSnap) }
+                                ) {
+                                    Column(
+                                        Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = "Recipe",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (mine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.85f)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = sharedRecipeSnap.name,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = if (mine) MaterialTheme.colorScheme.onPrimary
+                                            else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        val profile = sharedRecipeSnap.profilePer100g
+                                        val line = if (profile != null) {
+                                            val c = profile.calories.roundToInt()
+                                            val p = profile.protein.roundToInt()
+                                            val ca = profile.carbs.roundToInt()
+                                            val f = profile.fat.roundToInt()
+                                            "$c kcal · P ${p}g · C ${ca}g · F ${f}g"
+                                        } else {
+                                            "${sharedRecipeSnap.ingredients.size} ingredients"
+                                        }
+                                        Text(
+                                            text = line,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (mine) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.9f)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         ChatKind.fromRaw(msg.kind) == ChatKind.ROUTINE_SHARE ||
                             ChatKind.fromRaw(msg.kind) == ChatKind.WORKOUT_SHARE ||
                             ChatKind.fromRaw(msg.kind) == ChatKind.ACHIEVEMENT_SHARE ||
-                            ChatKind.fromRaw(msg.kind) == ChatKind.SEGMENT_SHARE -> {
+                            ChatKind.fromRaw(msg.kind) == ChatKind.SEGMENT_SHARE ||
+                            ChatKind.fromRaw(msg.kind) == ChatKind.SHARED_INGREDIENT ||
+                            ChatKind.fromRaw(msg.kind) == ChatKind.SHARED_RECIPE -> {
                             Text(
                                 text = stringResource(R.string.chat_share_sent_fallback),
                                 color = if (mine) MaterialTheme.colorScheme.onPrimary
