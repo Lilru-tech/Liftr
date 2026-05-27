@@ -193,7 +193,7 @@ private fun ProfileIosStyleHeader(
     onMenuAchievements: () -> Unit,
     onMenuGoals: () -> Unit,
     onMenuCompetitions: () -> Unit,
-    onMenuRanking: () -> Unit,
+    onOpenRanking: () -> Unit,
     showUsernameInCard: Boolean = true,
     toggleFollow: () -> Unit
 ) {
@@ -511,6 +511,12 @@ private fun ProfileIosStyleHeader(
             }
             Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onOpenRanking) {
+                        Icon(
+                            Icons.Filled.EmojiEvents,
+                            contentDescription = stringResource(R.string.profile_menu_ranking)
+                        )
+                    }
                     IconButton(onClick = { onProfileMenuExpandedChange(true) }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = null)
                     }
@@ -551,20 +557,6 @@ private fun ProfileIosStyleHeader(
                             }
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.profile_menu_ranking)) },
-                        onClick = {
-                            onProfileMenuExpandedChange(false)
-                            onMenuRanking()
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Filled.EmojiEvents,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.profile_menu_achievements)) },
                         onClick = {
@@ -996,7 +988,7 @@ fun ProfileTabScreen(
                     competitionsHubContextOpponent = null
                     showCompetitions = true
                 },
-                onMenuRanking = { showRanking = true },
+                onOpenRanking = { showRanking = true },
                 showUsernameInCard = onBack == null,
                 toggleFollow = vm::toggleFollow
             )
@@ -1643,6 +1635,32 @@ private fun ProfilePersonalInformationCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium
                     )
+                }
+                if (editingPersonalInfo) {
+                    OutlinedTextField(
+                        value = ui.baseCaloriesTargetDraft,
+                        onValueChange = vm::setBaseCaloriesTargetDraft,
+                        label = { Text(stringResource(R.string.profile_base_calories_target)) },
+                        singleLine = true,
+                        enabled = !ui.saveProfileMetricsBusy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_base_calories_target),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = ui.baseCaloriesTargetDraft.ifBlank { "2000" },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
                 OutlinedButton(
                     onClick = onOpenBodyWeightHistory,

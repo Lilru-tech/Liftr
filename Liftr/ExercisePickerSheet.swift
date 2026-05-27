@@ -1,5 +1,6 @@
 import SwiftUI
 import Supabase
+import Network
 
 struct Exercise: Identifiable, Decodable {
     let id: Int64
@@ -121,6 +122,7 @@ struct ExercisePickerSheet: View {
     @State private var query = ""
     @State private var sortMode: SortMode = .alphabetic
     @State private var loading = false
+    @State private var loadError: String?
     @State private var exercises: [Exercise] = []
     @State private var favorites = Set<Int64>()
     @State private var navigationPath: [ExercisePickerDestination] = []
@@ -266,11 +268,25 @@ struct ExercisePickerSheet: View {
             .scrollContentBackground(.hidden)
             .listRowBackground(Color.clear)
             .toolbarBackground(.hidden, for: .navigationBar)
-            .overlay {
-                if loading {
-                    ProgressView("Loading…")
-                        .padding()
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(alignment: .top) {
+                VStack(spacing: 8) {
+                    if let loadError, !loadError.isEmpty {
+                        Text(loadError)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                    }
+                    if loading {
+                        ProgressView("Loading…")
+                            .padding()
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                    }
                 }
             }
             .task {
@@ -323,12 +339,14 @@ struct ExercisePickerSheet: View {
         .padding(.horizontal, 18)
     }
     
+    @MainActor
     private func loadExercises() async {
         if loading {
             print("[EXERCISE_PICKER] loadExercises() called but already loading – ignoring (sortMode=\(sortMode.rawValue))")
             return
         }
         loading = true
+        loadError = nil
         print("[EXERCISE_PICKER] loadExercises() START – sortMode=\(sortMode.rawValue), language=\(exerciseLanguageRaw)")
         defer {
             loading = false
@@ -336,7 +354,7 @@ struct ExercisePickerSheet: View {
         }
         do {
             await loadFavorites()
-            
+            let loaded: [Exercise]
             switch sortMode {
             case .alphabetic:
                 let res = try await SupabaseManager.shared.client
@@ -346,7 +364,7 @@ struct ExercisePickerSheet: View {
                     .eq("modality", value: "strength")
                     .order("name", ascending: true)
                     .execute()
-                exercises = try JSONDecoder().decode([Exercise].self, from: res.data)
+                loaded = try JSONDecoder().decode([Exercise].self, from: res.data)
                 
             case .mostUsed:
                 let params: [String: AnyJSON] = [
@@ -359,7 +377,7 @@ struct ExercisePickerSheet: View {
                     .execute()
                 let used = try JSONDecoder.supabaseCustom().decode([ExerciseUsage].self, from: res.data)
                 
-                exercises = used.compactMap { usage in
+                loaded = used.compactMap { usage in
                     if let full = all.first(where: { $0.id == usage.id }) {
                         return full
                     } else {
@@ -378,7 +396,7 @@ struct ExercisePickerSheet: View {
                 
             case .favorites:
                 if favorites.isEmpty {
-                    exercises = []
+                    loaded = []
                 } else {
                     let ids = favorites.map(Int.init)
                     let res = try await SupabaseManager.shared.client
@@ -389,7 +407,7 @@ struct ExercisePickerSheet: View {
                         .in("id", values: ids)
                         .order("name", ascending: true)
                         .execute()
-                    exercises = try JSONDecoder().decode([Exercise].self, from: res.data)
+                    loaded = try JSONDecoder().decode([Exercise].self, from: res.data)
                 }
             case .recent:
                 let params: [String: AnyJSON] = [
@@ -409,7 +427,7 @@ struct ExercisePickerSheet: View {
                         (a.last_used_at ?? .distantPast) > (b.last_used_at ?? .distantPast)
                     }
                 
-                exercises = sorted.compactMap { usage in
+                loaded = sorted.compactMap { usage in
                     if let full = all.first(where: { $0.id == usage.id }) {
                         return full
                     } else {
@@ -426,10 +444,61 @@ struct ExercisePickerSheet: View {
                     }
                 }
             }
+            exercises = loaded
         } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
-            print("Error loading exercises:", error)
+            logExercisePickerFailure(error, phase: "loadExercises")
+            if isExercisePickerConnectivityFailure(error) {
+                loadError = "Connection unstable. Retrying offline..."
+            } else {
+                loadError = error.localizedDescription
+            }
         }
+    }
+
+    private func exercisePickerNetworkStatusLabel() -> String {
+        let monitor = NWPathMonitor()
+        let sem = DispatchSemaphore(value: 0)
+        var label = "unknown"
+        monitor.pathUpdateHandler = { path in
+            label = "\(path.status)"
+            sem.signal()
+        }
+        monitor.start(queue: DispatchQueue(label: "liftr.exercise-picker.net-snapshot"))
+        _ = sem.wait(timeout: .now() + 0.3)
+        monitor.cancel()
+        return label
+    }
+
+    private func logExercisePickerFailure(_ error: Error, phase: String) {
+        print("[ExercisePicker][\(phase)] \(error.localizedDescription) network=\(exercisePickerNetworkStatusLabel())")
+    }
+
+    private func isExercisePickerConnectivityFailure(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+                 .dataNotAllowed:
+                return true
+            default:
+                break
+            }
+        }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            let codes: [Int] = [
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorTimedOut,
+                NSURLErrorCannotFindHost,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorDNSLookupFailed,
+                NSURLErrorDataNotAllowed
+            ]
+            if codes.contains(ns.code) { return true }
+        }
+        return false
     }
     
     private func loadFavorites() async {

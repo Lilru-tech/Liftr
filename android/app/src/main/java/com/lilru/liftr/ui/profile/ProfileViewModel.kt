@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.loadProfileAvatarUrl
 import com.lilru.liftr.data.SupabaseResponseDecoding
+import com.lilru.liftr.nutrition.NutritionMetabolism
 import com.lilru.liftr.ui.goals.LiftrGoalsTime
 import com.lilru.liftr.ui.notifications.UnreadNotificationCounter
 import io.github.jan.supabase.SupabaseClient
@@ -44,7 +45,10 @@ private data class ProfileRow(
     /** [Double] (no [Int]) para que JSON con decimales o numeric no rompa la deserialización. */
     @SerialName("height_cm") val heightCm: Double? = null,
     @SerialName("weight_kg") val weightKg: Double? = null,
-    @SerialName("date_of_birth") val dateOfBirth: String? = null
+    @SerialName("date_of_birth") val dateOfBirth: String? = null,
+    val sex: String? = null,
+    @SerialName("base_calories_target") val baseCaloriesTarget: Int? = null,
+    @SerialName("base_calories_target_is_manual") val baseCaloriesTargetIsManual: Boolean = false
 )
 
 @Serializable
@@ -121,6 +125,10 @@ data class ProfileUiState(
     /** Borradores de “Personal information” (paridad [Liftr/ProfileView.swift] settings). */
     val heightCmDraft: String = "",
     val weightKgDraft: String = "",
+    val baseCaloriesTargetDraft: String = "2000",
+    val baseCaloriesTargetLoadedSnapshot: String = "2000",
+    val baseCaloriesTargetIsManual: Boolean = false,
+    val profileSex: String? = null,
     val hasBirthDate: Boolean = false,
     val birthDateMillis: Long? = null,
     val saveProfileMetricsBusy: Boolean = false,
@@ -160,7 +168,7 @@ class ProfileViewModel(
                     supabase.from(BackendContracts.Tables.PROFILES)
                         .select(
                             columns = Columns.raw(
-                                "user_id, username, avatar_url, bio, height_cm, weight_kg, date_of_birth"
+                                "user_id, username, avatar_url, bio, height_cm, weight_kg, date_of_birth, sex, base_calories_target, base_calories_target_is_manual"
                             )
                         ) {
                             filter { eq("user_id", uid) }
@@ -262,6 +270,10 @@ class ProfileViewModel(
                         if (v == floor(v)) v.toInt().toString() else String.format(Locale.US, "%.1f", v)
                     } ?: "",
                     weightKgDraft = profile?.weightKg?.let { String.format(Locale.US, "%.1f", it) } ?: "",
+                    profileSex = profile?.sex,
+                    baseCaloriesTargetIsManual = profile?.baseCaloriesTargetIsManual == true,
+                    baseCaloriesTargetDraft = resolvedBaseCaloriesDraft(profile, dobStr).toString(),
+                    baseCaloriesTargetLoadedSnapshot = resolvedBaseCaloriesDraft(profile, dobStr).toString(),
                     hasBirthDate = dobStr != null,
                     birthDateMillis = dobMillis,
                     weeklyGoalsDone = headerSnippets?.goalsDone ?: 0,
@@ -377,7 +389,12 @@ class ProfileViewModel(
     }
 
     fun setHeightCmDraft(value: String) {
-        _uiState.value = _uiState.value.copy(heightCmDraft = value)
+        val next = _uiState.value.copy(heightCmDraft = value)
+        _uiState.value = next.withAutoBmrDraftIfNeeded()
+    }
+
+    fun setBaseCaloriesTargetDraft(value: String) {
+        _uiState.value = _uiState.value.copy(baseCaloriesTargetDraft = value.filter { it.isDigit() })
     }
 
     fun setWeightKgDraft(value: String) {
@@ -387,7 +404,7 @@ class ProfileViewModel(
     fun setHasBirthDate(value: Boolean) {
         val cur = _uiState.value
         val defaultDob = java.util.Calendar.getInstance().apply { add(java.util.Calendar.YEAR, -20) }.timeInMillis
-        _uiState.value = cur.copy(
+        val next = cur.copy(
             hasBirthDate = value,
             birthDateMillis = when {
                 !value -> null
@@ -395,10 +412,11 @@ class ProfileViewModel(
                 else -> defaultDob
             }
         )
+        _uiState.value = next.withAutoBmrDraftIfNeeded()
     }
 
     fun setBirthDateMillis(value: Long?) {
-        _uiState.value = _uiState.value.copy(birthDateMillis = value)
+        _uiState.value = _uiState.value.copy(birthDateMillis = value).withAutoBmrDraftIfNeeded()
     }
 
     /**
@@ -413,12 +431,21 @@ class ProfileViewModel(
             if (me != s.userId) return@launch
             _uiState.value = s.copy(saveProfileMetricsBusy = true, error = null)
             val hText = s.heightCmDraft.trim()
+            val calText = s.baseCaloriesTargetDraft.trim()
+            val caloriesChanged = calText != s.baseCaloriesTargetLoadedSnapshot.trim()
             runCatching {
                 val heightForPayload: Int? = if (hText.isEmpty()) {
                     null
                 } else {
                     hText.toIntOrNull()?.takeIf { it > 0 }
                         ?: error("Height must be a positive whole number, or leave empty.")
+                }
+                val baseCal = if (caloriesChanged) {
+                    calText.toIntOrNull()?.takeIf {
+                        it in BackendContracts.NutritionMetabolism.MIN_KCAL..BackendContracts.NutritionMetabolism.MAX_KCAL
+                    } ?: error("BMR / basal metabolism must be between 800 and 6000 kcal.")
+                } else {
+                    null
                 }
                 if (s.hasBirthDate && s.birthDateMillis == null) {
                     error("Choose a birth date or turn off “Show birth date”.")
@@ -428,6 +455,10 @@ class ProfileViewModel(
                         put("height_cm", JsonNull)
                     } else {
                         put("height_cm", JsonPrimitive(heightForPayload!!))
+                    }
+                    if (baseCal != null) {
+                        put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET, baseCal)
+                        put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET_IS_MANUAL, true)
                     }
                     if (s.hasBirthDate) {
                         val d = Instant.ofEpochMilli(s.birthDateMillis!!).atZone(ZoneId.systemDefault())
@@ -441,9 +472,17 @@ class ProfileViewModel(
                     filter { eq("user_id", me) }
                 }
                 val newH = if (hText.isEmpty()) "" else "${heightForPayload!!}"
-                _uiState.value = _uiState.value.copy(
+                val resolvedDraft = if (baseCal != null) {
+                    baseCal
+                } else {
+                    resolvedBaseCaloriesDraftFromState(s.copy(heightCmDraft = newH))
+                }
+                _uiState.value = s.copy(
                     saveProfileMetricsBusy = false,
                     heightCmDraft = newH,
+                    baseCaloriesTargetDraft = resolvedDraft.toString(),
+                    baseCaloriesTargetLoadedSnapshot = resolvedDraft.toString(),
+                    baseCaloriesTargetIsManual = baseCal != null || s.baseCaloriesTargetIsManual,
                     hasBirthDate = s.hasBirthDate,
                     birthDateMillis = s.birthDateMillis
                 )
@@ -561,6 +600,46 @@ class ProfileViewModel(
         val d = LocalDate.parse(s.take(10))
         d.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
     }.getOrNull()
+
+    private fun resolvedBaseCaloriesDraft(profile: ProfileRow?, dobStr: String?): Int {
+        val dob = dobStr?.let { runCatching { LocalDate.parse(it.take(10)) }.getOrNull() }
+        return NutritionMetabolism.resolveDisplayKcal(
+            sex = profile?.sex,
+            dateOfBirth = dob,
+            heightCm = profile?.heightCm,
+            weightKg = profile?.weightKg,
+            storedTarget = profile?.baseCaloriesTarget,
+            isManual = profile?.baseCaloriesTargetIsManual == true
+        )
+    }
+
+    private fun resolvedBaseCaloriesDraftFromState(state: ProfileUiState): Int {
+        val hText = state.heightCmDraft.trim()
+        val heightCm = hText.toDoubleOrNull()?.takeIf { it > 0 }
+        val weightKg = state.weightKgDraft.trim().toDoubleOrNull()?.takeIf { it > 0 }
+        val dob = if (state.hasBirthDate && state.birthDateMillis != null) {
+            Instant.ofEpochMilli(state.birthDateMillis).atZone(ZoneId.systemDefault()).toLocalDate()
+        } else {
+            null
+        }
+        val stored = state.baseCaloriesTargetLoadedSnapshot.toIntOrNull()
+        return NutritionMetabolism.resolveDisplayKcal(
+            sex = state.profileSex,
+            dateOfBirth = dob,
+            heightCm = heightCm,
+            weightKg = weightKg,
+            storedTarget = stored,
+            isManual = state.baseCaloriesTargetIsManual
+        )
+    }
+
+    private fun ProfileUiState.withAutoBmrDraftIfNeeded(): ProfileUiState {
+        if (baseCaloriesTargetIsManual) return this
+        val resolved = resolvedBaseCaloriesDraftFromState(this)
+        return copy(
+            baseCaloriesTargetDraft = resolved.toString()
+        )
+    }
 
 }
 

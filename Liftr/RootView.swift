@@ -1,6 +1,6 @@
 import SwiftUI
 
-enum Tab: Hashable { case home, search, add, ranking, profile }
+enum Tab: Hashable { case home, search, add, nutrition, profile }
 
 struct RootView: View {
     @EnvironmentObject var app: AppState
@@ -28,9 +28,9 @@ struct RootView: View {
             .tag(Tab.add)
             .tabItem { Label("", systemImage: "plus.circle.fill") }
             
-            NavigationStack { RankingView().gradientBG() }
-                .tag(Tab.ranking)
-                .tabItem { Label("", systemImage: "trophy.fill") }
+            NavigationStack { NutritionView().gradientBG() }
+                .tag(Tab.nutrition)
+                .tabItem { Label("", systemImage: "fork.knife") }
             
             NavigationStack { ProfileGate().gradientBG() }
                 .tag(Tab.profile)
@@ -131,7 +131,7 @@ struct RootView: View {
             case .goals:
                 app.selectedTab = .profile
             case .challengeWeekly:
-                app.selectedTab = .ranking
+                break
 
             case .competitionsHub, .competitionDetail, .competitionReviews:
                 app.selectedTab = .home

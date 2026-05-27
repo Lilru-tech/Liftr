@@ -66,6 +66,24 @@ Tablas:
 - `challenge_templates` (catálogo de retos; `metric_kind`, `cadence`, umbrales, ámbitos opcionales `scope_activity_code` / `scope_sport` / `scope_muscle_primary`; ver [`docs/migrations/challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql))
 - `challenge_instances` (ventana temporal por plantilla, p. ej. semana ISO)
 - `challenge_claims` (adjudicaciones: usuario, rango, `workout_id`, `adjudication_ts`)
+- `nutrition_ingredients` (catálogo de ingredientes; ver [`Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql))
+  - Columns: `id` (uuid PK), `user_id` (uuid nullable FK `auth.users` — `NULL` = ingrediente global del sistema), `name` (text), `calories_per_100g` (numeric(6,2)), `protein_per_100g`, `carbs_per_100g`, `fat_per_100g` (numeric(5,2)), `saturated_fat_per_100g`, `sugars_per_100g`, `fiber_per_100g` (numeric(5,2) default 0), `sodium_mg_per_100g` (numeric(6,2) default 0), `is_public` (boolean default false); ver migración `20260525140000_nutrition_full_profile_v1.sql`
+  - RLS: `authenticated` **SELECT** si `is_public = true` OR `user_id = auth.uid()`; **INSERT/UPDATE/DELETE** solo si `user_id = auth.uid()`
+- `user_favorite_nutrition_ingredients` (favoritos de ingredientes por usuario; PK `user_id`, `ingredient_id`; ver [`20260525230000_nutrition_favorites_v1.sql`](../Liftr/supabase/migrations/20260525230000_nutrition_favorites_v1.sql))
+  - RLS: `authenticated` **SELECT/INSERT/DELETE** solo `user_id = auth.uid()`
+- `user_favorite_nutrition_recipes` (favoritos de recetas por usuario; PK `user_id`, `recipe_id`; misma migración)
+  - RLS: `authenticated` **SELECT/INSERT/DELETE** solo `user_id = auth.uid()`
+- `nutrition_recipes` (recetas del usuario + catálogo global del sistema)
+  - Columns: `id`, `user_id` (uuid nullable FK `auth.users` — `NULL` = receta preset del catálogo), `name`, `description` (text nullable), `created_at`
+  - RLS: `authenticated` **SELECT** si `user_id IS NULL` OR `user_id = auth.uid()`; **INSERT/UPDATE/DELETE** solo si `user_id = auth.uid()` (los presets del sistema se insertan vía migraciones, p. ej. [`20260525160000_nutrition_standard_recipes_catalog_v1.sql`](../Liftr/supabase/migrations/20260525160000_nutrition_standard_recipes_catalog_v1.sql))
+  - Catálogo seed (8 presets): Classic Pasta Carbonara, Pisto Manchego (Veggie Stew), Spanish Tortilla (Potato & Egg), Fitness Chicken & Rice Bowl, Avocado Toast with Egg, High-Protein Yogurt Bowl, Classic Greek Salad, Healthy Beef & Broccoli Stir-Fry
+- `nutrition_recipe_ingredients` (junction receta ↔ ingrediente)
+  - Columns: `id`, `recipe_id`, `ingredient_id`, `weight_g`
+  - RLS: **SELECT** si la receta padre es del sistema (`user_id IS NULL`) o propia; **INSERT/UPDATE/DELETE** solo vía recetas con `user_id = auth.uid()`
+- `nutrition_diary_logs` (registro diario de ingesta)
+  - Columns: `id`, `user_id`, `log_date` (date default `current_date`), `meal_slot` (`Breakfast` | `Lunch` | `Dinner` | `Snack`), `ingredient_id` (nullable), `recipe_id` (nullable), `quantity_g`
+  - Constraint: exactamente uno de `ingredient_id` o `recipe_id` debe estar presente
+  - RLS: todas las operaciones solo `user_id = auth.uid()`
 
 Vistas:
 
@@ -111,9 +129,16 @@ Vistas:
 - `get_user_premium_status_v1` () → `boolean`; `auth.uid()` required; `true` iff a `user_subscriptions` row exists for the caller with `status in ('active','trialing')` and `expires_at > now()` (see migration above)
 - `get_user_level`
 - `get_weekly_goal_recommendation`
+- `nutrition_diary_nutrient_total_v1` (`p_date` date, `p_nutrient` text) → `numeric`; suma diario de un nutriente del diario (ingredientes y recetas); `SECURITY DEFINER`; ver `20260526210000_nutrition_diary_nutrient_total_v1.sql`
+- `nutrition_compute_bmr_kcal_v1` (`p_sex` text, `p_date_of_birth` date, `p_height_cm` numeric, `p_weight_kg` numeric) → `integer` o `null`; Mifflin-St Jeor (hombre `+5`, mujer `−161`; sexos `male`/`m`/`female`/`f`); edad con `extract(year from age(current_date, p_date_of_birth))`; resultado redondeado y acotado 800–6000; `null` si faltan biometrías o sexo usable
+- `nutrition_resolve_base_calories_target_v1` (`p_user_id` uuid) → `integer`; si `profiles.base_calories_target_is_manual` usa la columna almacenada (800–6000); si no, `coalesce(nutrition_compute_bmr_kcal_v1(...), 2000)`
+- `get_daily_nutrition_recommendation_v1` (`p_date` date, default `current_date`) → `jsonb` con totales consumidos (kcal, proteína, carbs, grasa, grasa saturada, azúcares, fibra, sodio mg), `base_calories_target` (**valor resuelto**: BMR o override manual), `total_calories_burned_active`, `remaining_calories` (= `net_calories_balance` = `base_calories_target + burned − consumed`), `recommendation_text`; `SECURITY DEFINER`; agregación vía `nutrition_diary_nutrient_total_v1`; ver `20260526200000_nutrition_daily_balance_metabolic_fix_v1.sql`, `20260526250000_nutrition_bmr_mifflin_st_jeor_v1.sql`
+- `get_nutrition_month_balance_v1` (`p_month` date — primer día del mes) → `jsonb` array de `{ log_date, meal_log_count, remaining_calories }` por cada día del mes con entradas en `nutrition_diary_logs`; `remaining_calories` vía `get_daily_nutrition_recommendation_v1` (misma lógica BMR + actividad que el tab diario); calendario cliente: naranja si `remaining_calories ≥ 0`, rojo si `< 0`; ver `20260526260000_nutrition_month_calendar_balance_v1.sql`
+- `get_smart_nutrition_recommendation_v1` (`p_start_date` date, `p_end_date` date) → `jsonb` con análisis multi-día, alertas heurísticas y promedios diarios; ventana máxima 70 días inclusive (cap silencioso en servidor); `SECURITY DEFINER`; ver `20260526220000_smart_nutrition_recommendation_v1.sql`
 - `list_comparable_workouts_v1`
 - `list_compare_average_pool_v1` (`p_baseline_workout`, `p_scope` `mine`|`global`, `p_limit`) → `workout_id`, `started_at` for compare-average pools (cardio activity / sport / strength exact primary-muscle set); see `Liftr/supabase/migrations/20260521120000_compare_average_pool_v1.sql`
 - `get_home_feed_page_v1` (`p_page`, `p_page_size`, optional `p_kind`) → JSON `{ workouts, scores, likes, participants }` for authenticated home feed (one round-trip); see `Liftr/supabase/migrations/20260522140000_disk_io_optimizations_v1.sql`
+- `is_workout_shared_with_user` (`p_workout_id`, optional `p_user_id`) → `boolean`; `true` when the user is a `conversation_participants` member of a non-deleted `workout_share` message referencing that workout (recipient only). Used by RLS `*_select_workout_share` on `workout_exercises`, `exercise_sets`, `cardio_sessions`, `sport_sessions` so chat recipients can read detail rows for shared drafts without exposing followees’ `planned` workouts on Home; see `20260526240000_workout_share_detail_read_v1.sql`
 - `plan_strength_squad_programs`
 - `precheck_signup`
 - `recompute_weekly_goal_results`
@@ -192,7 +217,7 @@ Añadir filas a `achievements` o cambiar triggers sin actualizar `check_and_unlo
 
 ## Cobertura Android actual (fase auth)
 
-- Tabla: `profiles`
+- Tabla: `profiles` (incl. `base_calories_target` integer, default 2000 — override manual cuando `base_calories_target_is_manual`; BMR automático vía `nutrition_resolve_base_calories_target_v1` cuando `is_manual = false`)
 - RPC: `precheck_signup`
 
 Implementadas en:
@@ -359,6 +384,70 @@ Migración: [`Liftr/supabase/migrations/20260524210000_territory_display_perform
 - `preview_territory_capture_v1`, `apply_territory_capture_v1` — preview y aplicación de captura
 - `get_my_territory_summary_v1`, `get_territory_summary_v1`
 - `list_territory_city_regions_v1`, `get_territory_city_share_leaderboard_v1`, `get_territory_total_cells_leaderboard_v1`
+
+## Nutrition (MVP)
+
+Migraciones: [`20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql), [`20260525140000_nutrition_full_profile_v1.sql`](../Liftr/supabase/migrations/20260525140000_nutrition_full_profile_v1.sql), [`20260525220000_nutrition_metabolism_macros_ux_v1.sql`](../Liftr/supabase/migrations/20260525220000_nutrition_metabolism_macros_ux_v1.sql), [`20260526200000_nutrition_daily_balance_metabolic_fix_v1.sql`](../Liftr/supabase/migrations/20260526200000_nutrition_daily_balance_metabolic_fix_v1.sql), [`20260526210000_nutrition_diary_nutrient_total_v1.sql`](../Liftr/supabase/migrations/20260526210000_nutrition_diary_nutrient_total_v1.sql), [`20260525230000_nutrition_favorites_v1.sql`](../Liftr/supabase/migrations/20260525230000_nutrition_favorites_v1.sql), [`20260526250000_nutrition_bmr_mifflin_st_jeor_v1.sql`](../Liftr/supabase/migrations/20260526250000_nutrition_bmr_mifflin_st_jeor_v1.sql)
+
+| Tabla | Uso cliente |
+|-------|-------------|
+| `profiles` | `base_calories_target` (integer, default 2000, not null) — valor guardado cuando el usuario define override manual; `base_calories_target_is_manual` (boolean, default `false`) — `true` = usar columna; `false` = BMR Mifflin-St Jeor en servidor |
+| `nutrition_ingredients` | Búsqueda/alta de alimentos (`is_public` + propios); perfiles por 100g (macros + micros) |
+| `nutrition_recipes` | Recetas propias + catálogo global (`user_id` null); columna opcional `description` (text) |
+| `nutrition_recipe_ingredients` | Composición de receta (lectura en presets del sistema) |
+| `nutrition_diary_logs` | Diario por `log_date` + `meal_slot` |
+| `user_favorite_nutrition_ingredients` | Favoritos de ingredientes (`ingredient_id`) por `user_id` |
+| `user_favorite_nutrition_recipes` | Favoritos de recetas (`recipe_id`) por `user_id` |
+
+**Meal slots (exactos en BD):** `Breakfast`, `Lunch`, `Dinner`, `Snack`
+
+**Perfil por 100g (`nutrition_ingredients`):** `calories_per_100g`, `protein_per_100g`, `carbs_per_100g`, `fat_per_100g`, `saturated_fat_per_100g`, `sugars_per_100g`, `fiber_per_100g`, `sodium_mg_per_100g`
+
+**Recetas (rollup cliente/RPC):** para cada nutriente, densidad por gramo = `Σ(weight_g * nutrient_per_100g / 100) / Σ(weight_g)`; consumo diario = `quantity_g × densidad`.
+
+**BMR (Mifflin-St Jeor):** hombre `BMR = 10×weight_kg + 6.25×height_cm − 5×age_years + 5`; mujer `… − 161`. Sexo: `male`/`m` o `female`/`f`. Si faltan `weight_kg`, `height_cm`, `date_of_birth` o sexo usable (`other`, `prefer_not_to_say`, null) → **2000 kcal**. Funciones: `nutrition_compute_bmr_kcal_v1`, `nutrition_resolve_base_calories_target_v1`.
+
+**RPC `get_smart_nutrition_recommendation_v1`:** parámetros `p_start_date`, `p_end_date` (ISO `yyyy-MM-dd`). Si `p_end_date < p_start_date`, se intercambian. Si el rango supera 70 días inclusive, `p_end_date` se recorta a `p_start_date + 69`. Requiere `auth.uid()`. Agrega `nutrition_diary_logs` (promedios diarios = total del rango ÷ días calendario) y `workouts` publicados (`calories_kcal`, conteos strength/cardio). `base_calories_target` en la respuesta es el valor **resuelto** (`nutrition_resolve_base_calories_target_v1`). Heurísticas en `alerts`: proteína &lt; 1.6×`weight_kg` (default 70 kg), sodio &gt; 2300 mg/día, azúcares &gt; 50 g/día, más sesiones strength que cardio. Respuesta JSON:
+
+```json
+{
+  "recommendation_text": "...",
+  "alerts": ["...", "..."],
+  "avg_daily_consumed_kcal": 0.0,
+  "avg_daily_burned_kcal": 0.0,
+  "base_calories_target": 2000,
+  "avg_daily_energy_out": 0.0,
+  "avg_daily_remaining_budget": 0.0
+}
+```
+
+**Balance metabólico (multi-día):** `avg_daily_energy_out` = `base_calories_target + avg_daily_burned_kcal`. `avg_daily_remaining_budget` = `avg_daily_energy_out − avg_daily_consumed_kcal` (misma lógica que `remaining_calories` del RPC diario). Migración UX/copy: `20260526230000_smart_nutrition_recommendation_v2_metabolic_ux.sql`.
+
+**RPC `get_daily_nutrition_recommendation_v1`:** parámetro `p_date` (ISO `yyyy-MM-dd`). Respuesta JSON:
+
+```json
+{
+  "base_calories_target": 2000,
+  "total_calories_consumed": 0,
+  "total_calories_burned_active": 0,
+  "remaining_calories": 0,
+  "net_calories_balance": 0,
+  "total_protein_g_consumed": 0,
+  "total_carbs_g_consumed": 0,
+  "total_fat_g_consumed": 0,
+  "total_saturated_fat_g_consumed": 0,
+  "total_sugars_g_consumed": 0,
+  "total_fiber_g_consumed": 0,
+  "total_sodium_mg_consumed": 0,
+  "recommendation_text": "..."
+}
+```
+
+**Balance calórico:** `remaining_calories` = `net_calories_balance` = `base_calories_target + total_calories_burned_active − total_calories_consumed`. Valor positivo = kcal restantes en el presupuesto del día; negativo = por encima del objetivo + actividad. En despliegues legacy (pre-`20260526200000`), `net_calories_balance` podía ser solo `consumed − burned`; los clientes no deben usar ese campo como remaining si falta `remaining_calories` — calcular con la fórmula metabólica anterior.
+
+**Objetivo kcal en UI:** anillo de calorías y columna “Metabolism (BMR)” usan `base_calories_target` **resuelto** del RPC (BMR automático o override manual). Perfil: mostrar BMR calculado cuando `base_calories_target_is_manual = false`; al guardar solo el campo BMR, persistir override (`is_manual = true`). Macros secundarios (proteína, carbs, grasa, micros): defaults en `BackendContracts.NutritionDisplayTargets` (150 g proteína, 250 g carbs, etc.).
+
+Android: constantes en `BackendContracts` (`Tables`, `Rpc`, `NutritionColumns`, `NutritionRpcKeys`, `NutritionDisplayTargets`, `NutritionMealSlots`).
 
 ## Política de cambios de contrato
 
