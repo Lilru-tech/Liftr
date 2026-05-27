@@ -1,8 +1,19 @@
 package com.lilru.liftr.territory
 
 import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.hypot
+import kotlin.math.max
 
 object TerritoryMapGeometry {
+    fun expansionSearchRadiusMeters(latitude: Double, latSpanDeg: Double, lonSpanDeg: Double): Double {
+        val latRad = Math.toRadians(latitude)
+        val latHalfM = latSpanDeg * 111_320.0 / 2.0
+        val lonHalfM = lonSpanDeg * 111_320.0 * max(cos(latRad), 0.2) / 2.0
+        val diagonal = hypot(latHalfM * 2.0, lonHalfM * 2.0) * 1.2
+        return minOf(25_000.0, maxOf(6_000.0, diagonal))
+    }
+
     fun polygonContains(lat: Double, lon: Double, ring: List<Pair<Double, Double>>): Boolean {
         if (ring.size < 3) return false
         var inside = false

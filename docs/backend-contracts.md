@@ -23,7 +23,7 @@ Tablas:
 - `competition_workouts`
 - `contact_messages`
 - `exercises`
-- `exercise_sets`
+- `exercise_sets` (incl. `is_completed boolean` — plantilla en vivo `false`, series persistidas al finalizar `true`; ver migración `20260527120000_strength_workout_finish_purge_v1.sql`)
 - `feature_requests`
 - `feature_request_comments`
 - `feature_request_votes`
@@ -45,11 +45,14 @@ Tablas:
 - `strength_routine_folders`
 - `strength_routine_sets`
 - `user_favorite_exercises`
+- `user_subscriptions` (Premium entitlement; one row per `user_id`; written only via `service_role` / edge webhook — ver [`Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql`](../Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql))
+  - Columns: `id` (uuid PK), `user_id` (uuid, unique, FK `auth.users`), `status` (`active` | `trialing` | `canceled` | `expired`), `provider` (`apple` | `google`), `original_transaction_id` (text, unique), `expires_at` (timestamptz), `created_at`, `updated_at`
+  - RLS: `authenticated` may **SELECT** own row only; **INSERT/UPDATE/DELETE** revoked for `anon` and `authenticated` (writes via webhook + `service_role` only)
 - `volleyball_session_stats`
 - `weekly_goals`
 - `weekly_goal_results`
 - `workouts`
-- `workout_comments`
+- `workout_comments` (`mentioned_user_ids uuid[]`, followee-validated; notification type `comment_mention`)
 - `workout_comment_likes`
 - `workout_exercises`
 - `workout_likes`
@@ -63,6 +66,24 @@ Tablas:
 - `challenge_templates` (catálogo de retos; `metric_kind`, `cadence`, umbrales, ámbitos opcionales `scope_activity_code` / `scope_sport` / `scope_muscle_primary`; ver [`docs/migrations/challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql))
 - `challenge_instances` (ventana temporal por plantilla, p. ej. semana ISO)
 - `challenge_claims` (adjudicaciones: usuario, rango, `workout_id`, `adjudication_ts`)
+- `nutrition_ingredients` (catálogo de ingredientes; ver [`Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql))
+  - Columns: `id` (uuid PK), `user_id` (uuid nullable FK `auth.users` — `NULL` = ingrediente global del sistema), `name` (text), `calories_per_100g` (numeric(6,2)), `protein_per_100g`, `carbs_per_100g`, `fat_per_100g` (numeric(5,2)), `saturated_fat_per_100g`, `sugars_per_100g`, `fiber_per_100g` (numeric(5,2) default 0), `sodium_mg_per_100g` (numeric(6,2) default 0), `is_public` (boolean default false); ver migración `20260525140000_nutrition_full_profile_v1.sql`
+  - RLS: `authenticated` **SELECT** si `is_public = true` OR `user_id = auth.uid()`; **INSERT/UPDATE/DELETE** solo si `user_id = auth.uid()`
+- `user_favorite_nutrition_ingredients` (favoritos de ingredientes por usuario; PK `user_id`, `ingredient_id`; ver [`20260525230000_nutrition_favorites_v1.sql`](../Liftr/supabase/migrations/20260525230000_nutrition_favorites_v1.sql))
+  - RLS: `authenticated` **SELECT/INSERT/DELETE** solo `user_id = auth.uid()`
+- `user_favorite_nutrition_recipes` (favoritos de recetas por usuario; PK `user_id`, `recipe_id`; misma migración)
+  - RLS: `authenticated` **SELECT/INSERT/DELETE** solo `user_id = auth.uid()`
+- `nutrition_recipes` (recetas del usuario + catálogo global del sistema)
+  - Columns: `id`, `user_id` (uuid nullable FK `auth.users` — `NULL` = receta preset del catálogo), `name`, `description` (text nullable), `created_at`
+  - RLS: `authenticated` **SELECT** si `user_id IS NULL` OR `user_id = auth.uid()`; **INSERT/UPDATE/DELETE** solo si `user_id = auth.uid()` (los presets del sistema se insertan vía migraciones, p. ej. [`20260525160000_nutrition_standard_recipes_catalog_v1.sql`](../Liftr/supabase/migrations/20260525160000_nutrition_standard_recipes_catalog_v1.sql))
+  - Catálogo seed (8 presets): Classic Pasta Carbonara, Pisto Manchego (Veggie Stew), Spanish Tortilla (Potato & Egg), Fitness Chicken & Rice Bowl, Avocado Toast with Egg, High-Protein Yogurt Bowl, Classic Greek Salad, Healthy Beef & Broccoli Stir-Fry
+- `nutrition_recipe_ingredients` (junction receta ↔ ingrediente)
+  - Columns: `id`, `recipe_id`, `ingredient_id`, `weight_g`
+  - RLS: **SELECT** si la receta padre es del sistema (`user_id IS NULL`) o propia; **INSERT/UPDATE/DELETE** solo vía recetas con `user_id = auth.uid()`
+- `nutrition_diary_logs` (registro diario de ingesta)
+  - Columns: `id`, `user_id`, `log_date` (date default `current_date`), `meal_slot` (`Breakfast` | `Lunch` | `Dinner` | `Snack`), `ingredient_id` (nullable), `recipe_id` (nullable), `quantity_g`
+  - Constraint: exactamente uno de `ingredient_id` o `recipe_id` debe estar presente
+  - RLS: todas las operaciones solo `user_id = auth.uid()`
 
 Vistas:
 
@@ -105,11 +126,19 @@ Vistas:
 - `get_hyrox_best_official_time_leaderboard_v1`, `get_football_goals_leaderboard_v1`, `get_ski_distance_leaderboard_v1`
 - `get_user_achievements`
 - `get_user_prs` (`p_user_id`, optional `p_kind`, optional `p_search`) — profile/compare PR lists; bypasses own-only RLS via `SECURITY DEFINER` + authenticated read policies on PR tables
+- `get_user_premium_status_v1` () → `boolean`; `auth.uid()` required; `true` iff a `user_subscriptions` row exists for the caller with `status in ('active','trialing')` and `expires_at > now()` (see migration above)
 - `get_user_level`
 - `get_weekly_goal_recommendation`
+- `nutrition_diary_nutrient_total_v1` (`p_date` date, `p_nutrient` text) → `numeric`; suma diario de un nutriente del diario (ingredientes y recetas); `SECURITY DEFINER`; ver `20260526210000_nutrition_diary_nutrient_total_v1.sql`
+- `nutrition_compute_bmr_kcal_v1` (`p_sex` text, `p_date_of_birth` date, `p_height_cm` numeric, `p_weight_kg` numeric) → `integer` o `null`; Mifflin-St Jeor (hombre `+5`, mujer `−161`; sexos `male`/`m`/`female`/`f`); edad con `extract(year from age(current_date, p_date_of_birth))`; resultado redondeado y acotado 800–6000; `null` si faltan biometrías o sexo usable
+- `nutrition_resolve_base_calories_target_v1` (`p_user_id` uuid) → `integer`; si `profiles.base_calories_target_is_manual` usa la columna almacenada (800–6000); si no, `coalesce(nutrition_compute_bmr_kcal_v1(...), 2000)`
+- `get_daily_nutrition_recommendation_v1` (`p_date` date, default `current_date`) → `jsonb` con totales consumidos (kcal, proteína, carbs, grasa, grasa saturada, azúcares, fibra, sodio mg), `base_calories_target` (**valor resuelto**: BMR o override manual), `total_calories_burned_active`, `remaining_calories` (= `net_calories_balance` = `base_calories_target + burned − consumed`), `recommendation_text`; `SECURITY DEFINER`; agregación vía `nutrition_diary_nutrient_total_v1`; ver `20260526200000_nutrition_daily_balance_metabolic_fix_v1.sql`, `20260526250000_nutrition_bmr_mifflin_st_jeor_v1.sql`
+- `get_nutrition_month_balance_v1` (`p_month` date — primer día del mes) → `jsonb` array de `{ log_date, meal_log_count, remaining_calories }` por cada día del mes con entradas en `nutrition_diary_logs`; `remaining_calories` vía `get_daily_nutrition_recommendation_v1` (misma lógica BMR + actividad que el tab diario); calendario cliente: naranja si `remaining_calories ≥ 0`, rojo si `< 0`; ver `20260526260000_nutrition_month_calendar_balance_v1.sql`
+- `get_smart_nutrition_recommendation_v1` (`p_start_date` date, `p_end_date` date) → `jsonb` con análisis multi-día, alertas heurísticas y promedios diarios; ventana máxima 70 días inclusive (cap silencioso en servidor); `SECURITY DEFINER`; ver `20260526220000_smart_nutrition_recommendation_v1.sql`
 - `list_comparable_workouts_v1`
 - `list_compare_average_pool_v1` (`p_baseline_workout`, `p_scope` `mine`|`global`, `p_limit`) → `workout_id`, `started_at` for compare-average pools (cardio activity / sport / strength exact primary-muscle set); see `Liftr/supabase/migrations/20260521120000_compare_average_pool_v1.sql`
 - `get_home_feed_page_v1` (`p_page`, `p_page_size`, optional `p_kind`) → JSON `{ workouts, scores, likes, participants }` for authenticated home feed (one round-trip); see `Liftr/supabase/migrations/20260522140000_disk_io_optimizations_v1.sql`
+- `is_workout_shared_with_user` (`p_workout_id`, optional `p_user_id`) → `boolean`; `true` when the user is a `conversation_participants` member of a non-deleted `workout_share` message referencing that workout (recipient only). Used by RLS `*_select_workout_share` on `workout_exercises`, `exercise_sets`, `cardio_sessions`, `sport_sessions` so chat recipients can read detail rows for shared drafts without exposing followees’ `planned` workouts on Home; see `20260526240000_workout_share_detail_read_v1.sql`
 - `plan_strength_squad_programs`
 - `precheck_signup`
 - `recompute_weekly_goal_results`
@@ -130,6 +159,7 @@ Vistas:
 - `list_my_segments_v1` (`p_limit` opcional) → segmentos creados por `auth.uid()` (`id`, `name`, `buffer_m`, `status`, `created_at`); solo `authenticated`
 - `list_segments_popularity_leaderboard_v1` (`p_period` como otros rankings: `day`/`week`/`month`/`all`, `p_limit` opcional) → `rank`, `segment_id`, `name`, `efforts_count`, `buffer_m` (conteo de `segment_efforts` con workout publicado en la ventana por `matched_at`)
 - `match_segment_efforts_for_workout_v1` (`p_workout_id`) → reprocesa matching para el dueño (misma lógica que el trigger al publicar)
+- `get_recommended_expansion_cells_v1` (`p_user_id`, `p_current_lat`, `p_current_lng`, `p_radius_meters` opcional) → hasta 10 celdas sugeridas para expansión de territorio (`cell_id`, `cell_geojson`, `weight_priority`); ver sección **Territory (map game)**
 - Tras [`segments_mvp_v7_segment_rank_notifications.sql`](migrations/segments_mvp_v7_segment_rank_notifications.sql): el matching interno llama a **`create_notification`** existente (`_user_id`, `_type`, `_title`, `_body`, `_data`) para insertar en **`notifications`** (mismo pipeline `send-notifications` + FCM). Tipos: **`segment_you_are_first`**, **`segment_lost_first`** (solo pérdida del 1º cuando el nuevo líder es el effort del `workout_id` recién matcheado). `data` incluye al menos `segment_id`, `segment_name`; en `segment_lost_first` también `overtaker_user_id`, `overtaker_username` (y `notification_id` si lo añade vuestra `create_notification`).
 - `list_active_challenges_v1` () → retos con instancia activa (`instance_id`, `template_code`, `title`, `description`, `cadence` = `week` | `month` | `once`, `period_start`, `period_end`, `max_winners`, `claims_count`, `metric_kind`, `threshold_numeric`, `threshold_secondary`, `challenge_category` = `cardio` | `strength` | `sport`, `scope_activity_code`, `scope_sport`, `scope_muscle_primary` opcionales, más `viewer_rank` y `viewer_claimed` para `auth.uid()` en esa instancia). **VOLATILE** como arriba.
 - `get_challenge_instance_detail_v1` (`p_instance_id` uuid) → una fila con meta del reto + `viewer_rank`, `viewer_claimed`, `viewer_workout_id` para `auth.uid()`. Misma nota **VOLATILE** que la lista.
@@ -187,7 +217,7 @@ Añadir filas a `achievements` o cambiar triggers sin actualizar `check_and_unlo
 
 ## Cobertura Android actual (fase auth)
 
-- Tabla: `profiles`
+- Tabla: `profiles` (incl. `base_calories_target` integer, default 2000 — override manual cuando `base_calories_target_is_manual`; BMR automático vía `nutrition_resolve_base_calories_target_v1` cuando `is_manual = false`)
 - RPC: `precheck_signup`
 
 Implementadas en:
@@ -201,11 +231,237 @@ Implementadas en:
 - El programa de fuerza (ejercicios + series) se cachea al cargar el detalle y rehidrata la pantalla activa si la segunda lectura falla.
 - Dual/grupo: si `create_linked_strength_workout_copy` falla, el cliente ofrece **Start solo** / **Start offline** además de reintentar.
 
-## Fin de entreno en vivo (`finish_strength_workout_v1` / persistencia Android)
+## Fin de entreno en vivo (`finish_strength_workout_v1`)
 
-- iOS: al pulsar **Finish workout**, si la red falla de forma recuperable, el cliente encola el payload de `finish_strength_workout_v1`, muestra un toast y cierra la pantalla activa (sin pantalla de error bloqueante).
-- Android: misma semántica con cola local (`WorkoutFinishSync`) que reejecuta la persistencia de series + cierre del workout cuando vuelve la conexión.
+- iOS y Android llaman al RPC **`finish_strength_workout_v1`** con `p_workout_id`, `p_ended_at`, `p_paused_sec`, `p_exercises` (todas las filas `workout_exercises` del host, incluidas las que no tienen series realizadas) y `p_linked` opcional para dual/trio.
+- Si la red falla de forma recuperable, el cliente encola el mismo payload (`WorkoutFinishSync` en Android; `WorkoutFinishSync` en iOS), muestra un toast y cierra la pantalla activa.
 - Los errores de **carga** del programa siguen bloqueando solo cuando no hay caché local; los errores de **finish** no reemplazan la UI del entreno en curso.
+
+### Purga de series/ejercicios incompletos al finalizar
+
+Migración: [`Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql`](../Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql).
+
+- Columna **`exercise_sets.is_completed`** (`boolean NOT NULL DEFAULT false`): las series insertadas por el finish RPC se marcan `true`; las plantillas del entreno en curso permanecen `false`.
+- **`_liftr_finish_strength_workout_core`**: tras `_liftr_replace_strength_exercise_sets`, ejecuta `_liftr_purge_incomplete_strength_workout` (borra series con `is_completed = false` y ejercicios sin series).
+- **Trigger** `purge_incomplete_strength_on_workout_finalize` en `workouts` (`BEFORE UPDATE OF ended_at`): red de seguridad cuando `ended_at` pasa de NULL a NOT NULL en entrenos `strength`.
+- Finalización = `ended_at` establecido + `state` `planned` → `published` (sin columna `status = completed`).
+
+### Confirmación en cliente
+
+- Antes de finalizar, iOS y Android calculan localmente ejercicios/series sin marcar y muestran aviso dinámico (ES: *"Tienes N ejercicios y M series sin terminar…"*).
+- Si todo está completo, se usa el texto estándar de confirmación o finalización directa.
+
+## Premium subscriptions
+
+Migración: [`Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql`](../Liftr/supabase/migrations/20260524140000_user_subscriptions_premium_v1.sql).
+
+### Client entitlement
+
+- iOS y Android **no** persisten `isPremium` localmente para gating de anuncios/UI.
+- Tras login o refresh de sesión, llamar al RPC `get_user_premium_status_v1` (sin parámetros) y cachear el boolean en estado global (`AppState` / `PremiumStatusStore`).
+- StoreKit (iOS) y Play Billing (Android) siguen gestionando compra/restauración en UI; el acceso premium efectivo depende de la fila en `user_subscriptions`.
+
+### Edge function `process-billing-webhook`
+
+- Ruta: `Liftr/supabase/functions/process-billing-webhook/`
+- Config local: `[functions.process-billing-webhook] verify_jwt = false` en `Liftr/supabase/config.toml` (los webhooks de tienda no envían JWT de Supabase).
+- Secreto: variable de entorno `BILLING_WEBHOOK_SECRET` en el proyecto Supabase (Edge secrets).
+- Autenticación del request: header `X-Billing-Signature: <secret>` **o** `Authorization: Bearer <secret>` (comparación constant-time).
+- Cuerpo JSON normalizado (adaptadores Apple ASSN v2 / Google RTDN pueden transformar al formato interno antes de POST):
+
+```json
+{
+  "user_id": "<uuid>",
+  "status": "active",
+  "provider": "apple",
+  "original_transaction_id": "<store original transaction id>",
+  "expires_at": "2026-06-24T12:00:00.000Z"
+}
+```
+
+- `status`: `active` | `trialing` | `canceled` | `expired`
+- `provider`: `apple` | `google`
+- Upsert en `user_subscriptions` con `onConflict: user_id` (service role); actualiza `status`, `provider`, `original_transaction_id`, `expires_at`, `updated_at`.
+
+### Apple App Store Server Notifications (V2)
+
+- Función dedicada: `process-apple-app-store-notification` (no usar `process-billing-webhook` en App Store Connect).
+- URL de ejemplo (proyecto `rjzhaafvkxmvlnpsikbi`):  
+  `https://rjzhaafvkxmvlnpsikbi.supabase.co/functions/v1/process-apple-app-store-notification`
+- Apple envía `{ "signedPayload": "<JWS>" }`. El handler decodifica la transacción y usa `appAccountToken` como `user_id` (UUID de Supabase Auth, fijado en iOS con `Product.PurchaseOption.appAccountToken` al comprar).
+- Guía paso a paso en App Store Connect: [`docs/apple-premium-webhook-setup.md`](apple-premium-webhook-setup.md).
+
+### Operación en producción
+
+1. Configurar **App Store Server Notifications v2** (URL anterior) y **Google Play Real-time developer notifications** (adaptador → `process-billing-webhook` con secreto compartido).
+2. Definir `BILLING_WEBHOOK_SECRET` y usar el mismo valor en el verificador de la tienda o en el proxy que reenvía eventos.
+3. Tras desplegar la migración, verificar con `curl` en staging:
+
+```bash
+curl -sS -X POST "$SUPABASE_URL/functions/v1/process-billing-webhook" \
+  -H "Content-Type: application/json" \
+  -H "X-Billing-Signature: $BILLING_WEBHOOK_SECRET" \
+  -d '{
+    "user_id": "<auth-users-uuid>",
+    "status": "active",
+    "provider": "apple",
+    "original_transaction_id": "test-txn-001",
+    "expires_at": "2099-01-01T00:00:00.000Z"
+  }'
+```
+
+Luego, con sesión de ese usuario, `get_user_premium_status_v1` debe devolver `true`.
+
+## Territory (map game)
+
+Migraciones: `Liftr/supabase/migrations/20260513140000_territory_capture_v1.sql` y sucesivas (hex capture, municipios, map RPC).
+
+### Tablas principales
+
+- `territory_cells` — hexágonos capturados (`cell_id`, `cell_geog`, `owner_user_id`, `city_key`, …). Solo lectura para clientes; escritura vía RPC `apply_territory_capture_v1`.
+- `territory_municipalities` — límites municipales (`city_key`, `boundary_geom`, `total_capture_cells`, …).
+- `territory_capture_events`, `territory_capture_takeovers` — historial y eventos sociales.
+
+### RPC `get_recommended_expansion_cells_v1`
+
+Sugiere hasta **10** celdas hex prioritarias cerca de la posición del atleta para ampliar territorio (zonas calientes).
+
+| Parámetro | Tipo | Default | Notas |
+|-----------|------|---------|-------|
+| `p_user_id` | uuid | — | Debe coincidir con `auth.uid()` |
+| `p_current_lat` | double | — | WGS84 |
+| `p_current_lng` | double | — | WGS84 |
+| `p_radius_meters` | double | `12000` | Acotado en servidor a 500–25000 m; clientes deben enviar ~radio del viewport del mapa |
+
+**Filas de respuesta:**
+
+```json
+{
+  "cell_id": "12345:67890",
+  "cell_geojson": { "type": "Polygon", "coordinates": [[[lon, lat], ...]] },
+  "weight_priority": 1
+}
+```
+
+- `weight_priority` **1**: celdas en municipios donde el usuario ya tiene capturas pero **no** es líder de ciudad (celdas enemigas; prioriza las del líder actual).
+- `weight_priority` **2**: frontera adyacente (`st_touches`) a celdas del usuario — sin capturar (no existen en `territory_cells`) o propiedad de otro jugador.
+- Orden final: prioridad ascendente, distancia al punto de consulta, `cell_id`.
+- `SECURITY DEFINER`; `GRANT EXECUTE` a `authenticated`.
+
+Migración: [`Liftr/supabase/migrations/20260524150000_territory_expansion_recommendations_v1.sql`](../Liftr/supabase/migrations/20260524150000_territory_expansion_recommendations_v1.sql).
+
+### Captura de rutas circulares (loop interior)
+
+Migración: [`Liftr/supabase/migrations/20260524200000_territory_large_loop_capture_v2.sql`](../Liftr/supabase/migrations/20260524200000_territory_large_loop_capture_v2.sql).
+
+La geometría de captura (`_liftr_territory_capture_geom`) combina:
+
+1. **Corredor** — `ST_Buffer` de media anchura de celda (12,5 m con hex de 25 m); siempre aplicado.
+2. **Interior de bucle** — polígono por cierre inicio/fin (`_liftr_territory_start_end_loop_polygon`) y/o caras de `ST_Polygonize` en rutas que se cruzan (`_liftr_territory_polygonize_loop_faces`).
+
+| Regla | Valor |
+|-------|-------|
+| Cierre dinámico inicio/fin | `least(250 m, greatest(50 m, longitud_ruta × 0,025))` — p. ej. ~225 m en una ruta de 9 km |
+| Área mínima de bucle | ~1 celda hex (`_liftr_territory_min_loop_area_m2`) |
+| Área máxima de interior (por cara) | **10 km²** — caras mayores se ignoran |
+| Ruta mínima | 500 m |
+| `route_kind` | `closed` si hay interior válido; si no, `open` (solo corredor) |
+
+**Importante:** ya no se descarta el interior cuando el área unida (corredor + polígono) supera 2 km² (límite anterior que dejaba solo el corredor en bucles grandes).
+
+Si `ST_MakePolygon` falla en rutas ≥ 3 km con inicio/fin dentro del umbral dinámico, se reintenta con `ST_Snap` de extremos (5 m en Web Mercator).
+
+`apply_territory_capture_v1` es idempotente por `workout_id`; cambios de geometría en producción requieren `_liftr_reexpand_territory_capture_for_workout` (la migración v2 re-expande automáticamente workouts 1987/1988 y bucles largos previamente `open` elegibles).
+
+Verificación SQL: [`Liftr/supabase/verify/territory_capture_baseline.sql`](../Liftr/supabase/verify/territory_capture_baseline.sql).
+
+### Rendimiento del mapa de territorio
+
+Migración: [`Liftr/supabase/migrations/20260524220000_territory_map_load_performance_v1.sql`](../Liftr/supabase/migrations/20260524220000_territory_map_load_performance_v1.sql).
+
+- `get_territory_map_v1` simplifica `cell_geojson` según el tamaño del viewport (menos bytes por celda).
+- `get_territory_map_v1` (migración `20260524230000`): si el reparto por rutas de otros jugadores no cabe en `p_limit`, hace fallback por celdas recientes en lugar de devolver 0 celdas ajenas.
+- Clientes iOS/Android: paginación secuencial en páginas de **1000** filas (tope PostgREST), hasta `p_limit` (5000 en zoom ciudad), una sola carga al abrir (sin doble fetch), y menos hexágonos dibujados solo en zoom continental (span > 0.30). En el mapa, las celdas propias se dibujan siempre; las ajenas se recortan solo si hace falta por rendimiento.
+
+### Visualización rápida de territorio (workout detail)
+
+Migración: [`Liftr/supabase/migrations/20260524210000_territory_display_performance_v1.sql`](../Liftr/supabase/migrations/20260524210000_territory_display_performance_v1.sql).
+
+| RPC | Uso |
+|-----|-----|
+| `get_workout_territory_display_v1(p_workout_id)` | Detalle de entreno: devuelve `capture_fill_geojson` (polígono simplificado) y `cells_count` desde `territory_capture_events`; **no** devuelve miles de hexágonos |
+| `preview_territory_capture_v1(p_route_geojson, p_max_cells)` | Preview en vivo: `p_max_cells = 0` solo fill; `null` = todas las celdas (legacy); `200` = muestra + fill si hay más |
+
+### Otros RPC de territorio (referencia)
+
+- `get_territory_map_v1` — viewport de celdas para el mapa
+- `preview_territory_capture_v1`, `apply_territory_capture_v1` — preview y aplicación de captura
+- `get_my_territory_summary_v1`, `get_territory_summary_v1`
+- `list_territory_city_regions_v1`, `get_territory_city_share_leaderboard_v1`, `get_territory_total_cells_leaderboard_v1`
+
+## Nutrition (MVP)
+
+Migraciones: [`20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql), [`20260525140000_nutrition_full_profile_v1.sql`](../Liftr/supabase/migrations/20260525140000_nutrition_full_profile_v1.sql), [`20260525220000_nutrition_metabolism_macros_ux_v1.sql`](../Liftr/supabase/migrations/20260525220000_nutrition_metabolism_macros_ux_v1.sql), [`20260526200000_nutrition_daily_balance_metabolic_fix_v1.sql`](../Liftr/supabase/migrations/20260526200000_nutrition_daily_balance_metabolic_fix_v1.sql), [`20260526210000_nutrition_diary_nutrient_total_v1.sql`](../Liftr/supabase/migrations/20260526210000_nutrition_diary_nutrient_total_v1.sql), [`20260525230000_nutrition_favorites_v1.sql`](../Liftr/supabase/migrations/20260525230000_nutrition_favorites_v1.sql), [`20260526250000_nutrition_bmr_mifflin_st_jeor_v1.sql`](../Liftr/supabase/migrations/20260526250000_nutrition_bmr_mifflin_st_jeor_v1.sql)
+
+| Tabla | Uso cliente |
+|-------|-------------|
+| `profiles` | `base_calories_target` (integer, default 2000, not null) — valor guardado cuando el usuario define override manual; `base_calories_target_is_manual` (boolean, default `false`) — `true` = usar columna; `false` = BMR Mifflin-St Jeor en servidor |
+| `nutrition_ingredients` | Búsqueda/alta de alimentos (`is_public` + propios); perfiles por 100g (macros + micros) |
+| `nutrition_recipes` | Recetas propias + catálogo global (`user_id` null); columna opcional `description` (text) |
+| `nutrition_recipe_ingredients` | Composición de receta (lectura en presets del sistema) |
+| `nutrition_diary_logs` | Diario por `log_date` + `meal_slot` |
+| `user_favorite_nutrition_ingredients` | Favoritos de ingredientes (`ingredient_id`) por `user_id` |
+| `user_favorite_nutrition_recipes` | Favoritos de recetas (`recipe_id`) por `user_id` |
+
+**Meal slots (exactos en BD):** `Breakfast`, `Lunch`, `Dinner`, `Snack`
+
+**Perfil por 100g (`nutrition_ingredients`):** `calories_per_100g`, `protein_per_100g`, `carbs_per_100g`, `fat_per_100g`, `saturated_fat_per_100g`, `sugars_per_100g`, `fiber_per_100g`, `sodium_mg_per_100g`
+
+**Recetas (rollup cliente/RPC):** para cada nutriente, densidad por gramo = `Σ(weight_g * nutrient_per_100g / 100) / Σ(weight_g)`; consumo diario = `quantity_g × densidad`.
+
+**BMR (Mifflin-St Jeor):** hombre `BMR = 10×weight_kg + 6.25×height_cm − 5×age_years + 5`; mujer `… − 161`. Sexo: `male`/`m` o `female`/`f`. Si faltan `weight_kg`, `height_cm`, `date_of_birth` o sexo usable (`other`, `prefer_not_to_say`, null) → **2000 kcal**. Funciones: `nutrition_compute_bmr_kcal_v1`, `nutrition_resolve_base_calories_target_v1`.
+
+**RPC `get_smart_nutrition_recommendation_v1`:** parámetros `p_start_date`, `p_end_date` (ISO `yyyy-MM-dd`). Si `p_end_date < p_start_date`, se intercambian. Si el rango supera 70 días inclusive, `p_end_date` se recorta a `p_start_date + 69`. Requiere `auth.uid()`. Agrega `nutrition_diary_logs` (promedios diarios = total del rango ÷ días calendario) y `workouts` publicados (`calories_kcal`, conteos strength/cardio). `base_calories_target` en la respuesta es el valor **resuelto** (`nutrition_resolve_base_calories_target_v1`). Heurísticas en `alerts`: proteína &lt; 1.6×`weight_kg` (default 70 kg), sodio &gt; 2300 mg/día, azúcares &gt; 50 g/día, más sesiones strength que cardio. Respuesta JSON:
+
+```json
+{
+  "recommendation_text": "...",
+  "alerts": ["...", "..."],
+  "avg_daily_consumed_kcal": 0.0,
+  "avg_daily_burned_kcal": 0.0,
+  "base_calories_target": 2000,
+  "avg_daily_energy_out": 0.0,
+  "avg_daily_remaining_budget": 0.0
+}
+```
+
+**Balance metabólico (multi-día):** `avg_daily_energy_out` = `base_calories_target + avg_daily_burned_kcal`. `avg_daily_remaining_budget` = `avg_daily_energy_out − avg_daily_consumed_kcal` (misma lógica que `remaining_calories` del RPC diario). Migración UX/copy: `20260526230000_smart_nutrition_recommendation_v2_metabolic_ux.sql`.
+
+**RPC `get_daily_nutrition_recommendation_v1`:** parámetro `p_date` (ISO `yyyy-MM-dd`). Respuesta JSON:
+
+```json
+{
+  "base_calories_target": 2000,
+  "total_calories_consumed": 0,
+  "total_calories_burned_active": 0,
+  "remaining_calories": 0,
+  "net_calories_balance": 0,
+  "total_protein_g_consumed": 0,
+  "total_carbs_g_consumed": 0,
+  "total_fat_g_consumed": 0,
+  "total_saturated_fat_g_consumed": 0,
+  "total_sugars_g_consumed": 0,
+  "total_fiber_g_consumed": 0,
+  "total_sodium_mg_consumed": 0,
+  "recommendation_text": "..."
+}
+```
+
+**Balance calórico:** `remaining_calories` = `net_calories_balance` = `base_calories_target + total_calories_burned_active − total_calories_consumed`. Valor positivo = kcal restantes en el presupuesto del día; negativo = por encima del objetivo + actividad. En despliegues legacy (pre-`20260526200000`), `net_calories_balance` podía ser solo `consumed − burned`; los clientes no deben usar ese campo como remaining si falta `remaining_calories` — calcular con la fórmula metabólica anterior.
+
+**Objetivo kcal en UI:** anillo de calorías y columna “Metabolism (BMR)” usan `base_calories_target` **resuelto** del RPC (BMR automático o override manual). Perfil: mostrar BMR calculado cuando `base_calories_target_is_manual = false`; al guardar solo el campo BMR, persistir override (`is_manual = true`). Macros secundarios (proteína, carbs, grasa, micros): defaults en `BackendContracts.NutritionDisplayTargets` (150 g proteína, 250 g carbs, etc.).
+
+Android: constantes en `BackendContracts` (`Tables`, `Rpc`, `NutritionColumns`, `NutritionRpcKeys`, `NutritionDisplayTargets`, `NutritionMealSlots`).
 
 ## Política de cambios de contrato
 

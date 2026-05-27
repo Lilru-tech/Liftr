@@ -1,6 +1,7 @@
 package com.lilru.liftr.workout
 
 import android.content.Context
+import com.lilru.liftr.ui.active.ActiveStrengthExerciseLine
 import com.lilru.liftr.ui.home.StrengthReadonlyDetail
 import com.lilru.liftr.ui.home.StrengthReadonlyExerciseLine
 import com.lilru.liftr.ui.home.StrengthReadonlySetLine
@@ -82,6 +83,36 @@ object WorkoutProgramCache {
 
     fun hasProgram(context: Context, workoutId: Int): Boolean {
         return entry(context, workoutId)?.exercises?.isNotEmpty() == true
+    }
+
+    fun storeFromActiveExercises(context: Context, workoutId: Int, lines: List<ActiveStrengthExerciseLine>) {
+        if (lines.isEmpty()) return
+        val entry = WorkoutProgramCacheEntry(
+            workoutId = workoutId,
+            cachedAtEpochMs = System.currentTimeMillis(),
+            exercises = lines.map { line ->
+                CachedWorkoutExercise(
+                    workoutExerciseId = line.workoutExerciseId,
+                    orderIndex = line.orderIndex,
+                    displayName = line.displayName,
+                    sets = line.sets.map { s ->
+                        CachedWorkoutSet(
+                            setNumber = s.setNumber,
+                            reps = s.reps,
+                            weightKg = s.weightKg,
+                            rpe = s.rpe,
+                            restSec = s.restSec
+                        )
+                    }
+                )
+            }
+        )
+        memory[workoutId] = entry
+        context.applicationContext
+            .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(key(workoutId), json.encodeToString(WorkoutProgramCacheEntry.serializer(), entry))
+            .apply()
     }
 
     private fun key(workoutId: Int) = "program.$workoutId"

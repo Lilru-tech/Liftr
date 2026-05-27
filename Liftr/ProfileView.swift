@@ -20,6 +20,9 @@ private struct ProfileRow: Decodable {
     let height_cm: Int?
     let weight_kg: Double?
     let birth_date: Date?
+    let sex: String?
+    let base_calories_target: Int?
+    let base_calories_target_is_manual: Bool?
 }
 
 private struct DayActivity: Decodable, Identifiable {
@@ -126,7 +129,6 @@ private func fetchParticipantWorkoutIds(for userId: UUID) async throws -> [Int] 
 
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium: Bool = false
     @AppStorage("backgroundTheme") private var backgroundTheme: String = "mintBlue"
     let userId: UUID?
     private var viewingUserId: UUID? { userId ?? app.userId }
@@ -195,6 +197,10 @@ struct ProfileView: View {
     @State private var editingProfile = false
     @State private var heightCm: String = ""
     @State private var weightKg: String = ""
+    @State private var baseCaloriesTarget: String = "2000"
+    @State private var baseCaloriesTargetLoadedSnapshot: String = "2000"
+    @State private var baseCaloriesTargetIsManual: Bool = false
+    @State private var profileSex: String?
     @State private var birthDate: Date = Date()
     @State private var hasBirthDate: Bool = false
     @State private var showBodyWeightHistory = false
@@ -323,7 +329,7 @@ struct ProfileView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
 
-            if !isPremium {
+            if !app.isPremium {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)
@@ -1333,6 +1339,20 @@ struct ProfileView: View {
                 .layoutPriority(1)
             }
 
+            HStack(spacing: 8) {
+                NavigationLink {
+                    RankingView(presetMetric: .level)
+                        .gradientBG()
+                        .navigationTitle("Level Ranking")
+                } label: {
+                    Image(systemName: "trophy.fill")
+                        .font(.subheadline.weight(.bold))
+                        .padding(8)
+                        .background(.thinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Ranking")
+
             Menu {
                 if isOwnProfile {
                     NavigationLink {
@@ -1341,14 +1361,6 @@ struct ProfileView: View {
                     } label: {
                         Label(notificationsMenuTitle, systemImage: "bell.fill")
                     }
-                }
-
-                NavigationLink {
-                    RankingView(presetMetric: .level)
-                        .gradientBG()
-                        .navigationTitle("Level Ranking")
-                } label: {
-                    Label("Ranking", systemImage: "trophy")
                 }
 
                 NavigationLink {
@@ -1402,6 +1414,7 @@ struct ProfileView: View {
                 }
             }
             .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
@@ -1716,22 +1729,22 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(spacing: 10) {
                             Image(systemName: "star.circle.fill")
-                            Text(isPremium ? "You are Premium" : "Remove ads")
+                            Text(app.isPremium ? "You are Premium" : "Remove ads")
                                 .font(.body.weight(.semibold))
                             Spacer()
                         }
                         
-                        if let product = premiumProduct, !isPremium {
+                        if let product = premiumProduct, !app.isPremium {
                             Text("Subscribe for \(product.displayPrice) per month to remove ads.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
-                        } else if isPremium {
+                        } else if app.isPremium {
                             Text("Ads are disabled on this account.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                         
-                        if !isPremium {
+                        if !app.isPremium {
                             Button {
                                 Task { await purchasePremium() }
                             } label: {
@@ -2020,6 +2033,9 @@ struct ProfileView: View {
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(maxWidth: 120)
+                                    .onChange(of: heightCm) { _, _ in
+                                        refreshAutoBmrDraftIfNeeded()
+                                    }
                             } else {
                                 Text(heightCm.isEmpty ? "–" : "\(heightCm) cm")
                                     .font(.footnote)
@@ -2035,6 +2051,23 @@ struct ProfileView: View {
                             Text(weightKg.isEmpty ? "–" : weightKg)
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
+                        }
+
+                        Divider().opacity(0.15)
+                        HStack {
+                            Text("Basal Metabolism / BMR (kcal)")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if editingProfile {
+                                TextField("2000", text: $baseCaloriesTarget)
+                                    .keyboardType(.numberPad)
+                                    .multilineTextAlignment(.trailing)
+                                    .frame(maxWidth: 120)
+                            } else {
+                                Text(baseCaloriesTarget.isEmpty ? "2000" : baseCaloriesTarget)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         Divider().opacity(0.15)
@@ -2087,6 +2120,9 @@ struct ProfileView: View {
                             Divider().opacity(0.15)
                             Toggle("Show birth date", isOn: $hasBirthDate)
                                 .font(.subheadline.weight(.semibold))
+                                .onChange(of: hasBirthDate) { _, _ in
+                                    refreshAutoBmrDraftIfNeeded()
+                                }
                             if hasBirthDate {
                                 Divider().opacity(0.15)
                                 HStack {
@@ -2094,6 +2130,9 @@ struct ProfileView: View {
                                     Spacer()
                                     DatePicker("", selection: $birthDate, displayedComponents: .date)
                                         .labelsHidden()
+                                        .onChange(of: birthDate) { _, _ in
+                                            refreshAutoBmrDraftIfNeeded()
+                                        }
                                 }
                             }
                         }
@@ -2219,11 +2258,42 @@ struct ProfileView: View {
         return cal.dateComponents([.year], from: birthDate, to: now).year
     }
     
+    private func refreshAutoBmrDraftIfNeeded() {
+        guard editingProfile, !baseCaloriesTargetIsManual else { return }
+        let resolved = resolvedBaseCaloriesDisplayKcal()
+        baseCaloriesTarget = "\(resolved)"
+    }
+
+    private func resolvedBaseCaloriesDisplayKcal() -> Int {
+        let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
+        let height = Double(Int(hText) ?? 0)
+        let weight = Double(weightKg.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        let birth = hasBirthDate ? birthDate : nil
+        return NutritionMetabolism.resolveDisplayKcal(
+            sex: profileSex,
+            birthDate: birth,
+            heightCm: height > 0 ? height : nil,
+            weightKg: weight > 0 ? weight : nil,
+            storedTarget: Int(baseCaloriesTargetLoadedSnapshot),
+            isManual: baseCaloriesTargetIsManual
+        )
+    }
+
     private func saveProfileMetrics() async {
         guard let uid = app.userId else { return }
         do {
             let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
             let height = Int(hText).flatMap { $0 > 0 ? $0 : nil }
+            let calText = baseCaloriesTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+            let caloriesChanged = calText != baseCaloriesTargetLoadedSnapshot.trimmingCharacters(in: .whitespacesAndNewlines)
+            var baseCal: Int?
+            if caloriesChanged {
+                guard let parsed = Int(calText), parsed >= NutritionMetabolism.minKcal, parsed <= NutritionMetabolism.maxKcal else {
+                    self.error = "BMR / basal metabolism must be between 800 and 6000 kcal."
+                    return
+                }
+                baseCal = parsed
+            }
 
             let df = DateFormatter()
             df.timeZone = TimeZone(secondsFromGMT: 0)
@@ -2235,6 +2305,11 @@ struct ProfileView: View {
                 payload["height_cm"] = AnyEncodable(nilValue: ())
             } else if let height, height > 0 {
                 payload["height_cm"] = AnyEncodable(height)
+            }
+
+            if let baseCal, caloriesChanged {
+                payload["base_calories_target"] = AnyEncodable(baseCal)
+                payload["base_calories_target_is_manual"] = AnyEncodable(true)
             }
 
             if hasBirthDate {
@@ -2371,7 +2446,7 @@ struct ProfileView: View {
         do {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
-                .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth")
+                .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth,sex,base_calories_target,base_calories_target_is_manual")
                 .eq("user_id", value: uid.uuidString)
                 .single()
                 .execute()
@@ -2389,6 +2464,18 @@ struct ProfileView: View {
             }
             self.heightCm = profile.height_cm.map { "\($0)" } ?? ""
             self.weightKg = profile.weight_kg.map { String(format: "%.1f", $0) } ?? ""
+            self.profileSex = profile.sex
+            self.baseCaloriesTargetIsManual = profile.base_calories_target_is_manual ?? false
+            let displayKcal = NutritionMetabolism.resolveDisplayKcal(
+                sex: profile.sex,
+                birthDate: profile.birth_date,
+                heightCm: profile.height_cm.map { Double($0) },
+                weightKg: profile.weight_kg,
+                storedTarget: profile.base_calories_target,
+                isManual: profile.base_calories_target_is_manual ?? false
+            )
+            self.baseCaloriesTarget = "\(displayKcal)"
+            self.baseCaloriesTargetLoadedSnapshot = "\(displayKcal)"
             self.hasBirthDate = profile.birth_date != nil
             self.birthDate = profile.birth_date ?? Date()
             let res2 = try await SupabaseManager.shared.client
@@ -3132,6 +3219,12 @@ struct ProfileView: View {
     
     private func purchasePremium() async {
         guard let product = premiumProduct else { return }
+        guard let userId = app.userId else {
+            await MainActor.run {
+                premiumError = "Sign in to subscribe."
+            }
+            return
+        }
         await MainActor.run {
             isPurchasingPremium = true
             premiumError = nil
@@ -3141,14 +3234,14 @@ struct ProfileView: View {
         }
         
         do {
-            let result = try await product.purchase()
+            let result = try await product.purchase(options: [
+                .appAccountToken(userId)
+            ])
             switch result {
             case .success(let verification):
                 if let transaction = verifiedTransaction(from: verification) {
-                    await MainActor.run {
-                        self.isPremium = true
-                    }
                     await transaction.finish()
+                    await app.refreshPremiumStatus()
                 } else {
                     await MainActor.run {
                         self.premiumError = "Purchase verification failed."
@@ -3182,9 +3275,7 @@ struct ProfileView: View {
             if let transaction = verifiedTransaction(from: result),
                transaction.productID == premiumProductID {
                 found = true
-                await MainActor.run {
-                    self.isPremium = true
-                }
+                await app.refreshPremiumStatus()
                 break
             }
         }

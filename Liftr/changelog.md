@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-05-27
+
+### Added
+- **Nutrition** — Log and track nutrition in the app.
+- **Comments — mentions** — Tag other users in the comment section.
+- **Feed** — **Comment count** shown on workout cards in the home feed.
+- **Active strength** — Edit the **current set** and **all future sets** for the same exercise in one flow.
+- **Chat — draft workouts** — Open **draft** workouts shared by another user via chat (even when they are not published on the feed).
+- **Premium — server-verified entitlements** — Migrated monetization off client-side validation: **`user_subscriptions`** table with strict RLS (owner read only; writes blocked for `public` / `authenticated`, delegated to `service_role`); **`get_user_premium_status_v1()`** (`SECURITY DEFINER`) RPC for active subscription (`expires_at > now()`); **`process-billing-webhook`** Edge Function (App Store / Google Play signature validation + admin upsert); contracts synced in `docs/backend-contracts.md` and `BackendContracts.kt`; local **`isPremium`** deprecated on iOS and Android in favor of the server RPC at session init.
+- **Territory — expansion suggestions** — **Suggest Expansion Zone** on the territory map (iOS `TerritoryMapView`, Android territory map): **`get_recommended_expansion_cells_v1`** (`SECURITY DEFINER`, PostGIS) scores the top **10** cells within a dynamic radius (default **5000 m**) from the athlete’s GPS — prioritizing unoccupied or rival cells adjacent to holdings and cells in municipalities where the user competes on **`get_territory_city_share_leaderboard_v1`**; polygons returned as GeoJSON (`ST_AsGeoJSON`) with a translucent **neon amber** overlay.
+
+### Changed
+- **Active strength** — Sets and exercises **not completed** during an active session are **removed automatically** when the workout ends (no leftover incomplete rows).
+- **Territory / map** — Faster loading for workouts with a **large number of cells** and for the **territory map**.
+
+### Fixed
+- **Territory — new city** — Correct **total cell count** when initializing a new city.
+- **Territory — notifications** — Fixed deeplink **redirection** for territory **captured** and **lost** notifications.
+- **Territory — capture** — Fixed capture when the GPS **loop** was too large.
+- **Active strength** — Fixed an issue when **adding a new exercise** during an active workout.
+
+### Notes (database / ops)
+- **Premium** — Apply migrations for **`user_subscriptions`**, deploy **`process-billing-webhook`**, and grant **`get_user_premium_status_v1`** before shipping clients that no longer trust local premium flags.
+- **Territory expansion** — Deploy **`get_recommended_expansion_cells_v1`** (PostGIS) and related contract updates; reference `docs/backend-contracts.md`.
+
 ## [1.14.0] - 2026-05-22
 
 ### Added
@@ -125,6 +150,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.15.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.15.0
 [1.14.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.14.0
 [1.13.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.13.0
 [1.12.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.12.0

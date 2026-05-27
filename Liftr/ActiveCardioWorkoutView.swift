@@ -9,7 +9,6 @@ struct ActiveCardioWorkoutView: View {
     let workoutId: Int
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium = false
     @AppStorage("cardioGPSProfile") private var cardioGPSProfileRaw: String = CardioGPSProfile.balanced.rawValue
 
     @StateObject private var gpsTracker = CardioWorkoutLocationTracker()
@@ -29,6 +28,7 @@ struct ActiveCardioWorkoutView: View {
     @State private var splitEndElapsedSec: [Int] = []
     @State private var lastSplitDistanceKm: Double = 0
     @State private var lastSplitElapsedSec: Int = 0
+    @State private var territoryFillRings: [[CLLocationCoordinate2D]] = []
     @State private var territoryPreviewCells: [TerritoryPreviewCell] = []
     @State private var lastTerritoryPreviewAt = Date.distantPast
     @State private var lastTerritoryPreviewPointCount = 0
@@ -209,11 +209,17 @@ struct ActiveCardioWorkoutView: View {
                             if gpsTracker.routeCoordinates.count >= 2 {
                                 ZStack(alignment: .topTrailing) {
                                     Map(position: $mapCameraPosition) {
+                                        ForEach(Array(territoryFillRings.enumerated()), id: \.offset) { _, ring in
+                                            if ring.count >= 3 {
+                                                MapPolygon(coordinates: ring)
+                                                    .foregroundStyle(Color.green.opacity(0.22))
+                                            }
+                                        }
                                         ForEach(territoryPreviewCells) { cell in
                                             let ring = cell.cell_geojson?.ring ?? []
                                             if ring.count >= 3 {
                                                 MapPolygon(coordinates: ring)
-                                                    .foregroundStyle(Color.green.opacity(0.22))
+                                                    .foregroundStyle(Color.green.opacity(0.16))
                                             }
                                         }
                                         MapPolyline(coordinates: gpsTracker.routeCoordinates)
@@ -391,7 +397,7 @@ struct ActiveCardioWorkoutView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !isPremium {
+                if !app.isPremium {
                     BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                         .frame(height: 50)
                         .padding(.horizontal)
@@ -455,11 +461,17 @@ struct ActiveCardioWorkoutView: View {
             NavigationStack {
                 ZStack {
                     Map(position: $mapCameraPosition) {
+                        ForEach(Array(territoryFillRings.enumerated()), id: \.offset) { _, ring in
+                            if ring.count >= 3 {
+                                MapPolygon(coordinates: ring)
+                                    .foregroundStyle(Color.green.opacity(0.22))
+                            }
+                        }
                         ForEach(territoryPreviewCells) { cell in
                             let ring = cell.cell_geojson?.ring ?? []
                             if ring.count >= 3 {
                                 MapPolygon(coordinates: ring)
-                                    .foregroundStyle(Color.green.opacity(0.22))
+                                    .foregroundStyle(Color.green.opacity(0.16))
                             }
                         }
                         MapPolyline(coordinates: gpsTracker.routeCoordinates)
@@ -962,10 +974,14 @@ struct ActiveCardioWorkoutView: View {
         territoryPreviewTask?.cancel()
         territoryPreviewTask = Task {
             guard let routeJSON = gpsTracker.routeGeoJSONString() else { return }
-            let preview = await TerritoryCaptureClient.previewCapture(routeGeoJSON: routeJSON)
+            let display = await TerritoryCaptureClient.fetchTerritoryPreview(
+                routeGeoJSON: routeJSON,
+                maxCells: 200
+            )
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                territoryPreviewCells = preview?.cells ?? []
+                territoryFillRings = display?.fillRings ?? []
+                territoryPreviewCells = display?.sampleCells ?? []
             }
         }
     }

@@ -55,7 +55,7 @@ import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
-import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
@@ -72,11 +72,7 @@ fun SearchTabScreen(
     onOpenAddWithPendingDuplicate: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    val searchCtx = LocalContext.current
-    var isPremium by remember { mutableStateOf(LiftrPreferences.isPremium(searchCtx)) }
-    LaunchedEffect(searchCtx) {
-        isPremium = LiftrPreferences.isPremium(searchCtx)
-    }
+    val isPremium by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
     val vm: SearchViewModel = viewModel(factory = SearchViewModelFactory(supabase))
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var selectedWorkout by rememberSaveable { mutableStateOf<Int?>(null) }

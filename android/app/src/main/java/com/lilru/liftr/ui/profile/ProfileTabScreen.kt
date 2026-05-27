@@ -103,6 +103,7 @@ import com.lilru.liftr.LiftrApplication
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.SupabaseResponseDecoding
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -192,7 +193,7 @@ private fun ProfileIosStyleHeader(
     onMenuAchievements: () -> Unit,
     onMenuGoals: () -> Unit,
     onMenuCompetitions: () -> Unit,
-    onMenuRanking: () -> Unit,
+    onOpenRanking: () -> Unit,
     showUsernameInCard: Boolean = true,
     toggleFollow: () -> Unit
 ) {
@@ -510,6 +511,12 @@ private fun ProfileIosStyleHeader(
             }
             Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onOpenRanking) {
+                        Icon(
+                            Icons.Filled.EmojiEvents,
+                            contentDescription = stringResource(R.string.profile_menu_ranking)
+                        )
+                    }
                     IconButton(onClick = { onProfileMenuExpandedChange(true) }) {
                         Icon(Icons.Filled.MoreVert, contentDescription = null)
                     }
@@ -550,20 +557,6 @@ private fun ProfileIosStyleHeader(
                             }
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.profile_menu_ranking)) },
-                        onClick = {
-                            onProfileMenuExpandedChange(false)
-                            onMenuRanking()
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Filled.EmojiEvents,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    )
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.profile_menu_achievements)) },
                         onClick = {
@@ -935,10 +928,7 @@ fun ProfileTabScreen(
     val selectedMainTab = tabEntries[safeTabIndex]
 
     Box(modifier = modifier.fillMaxSize()) {
-        var profileNoAds by remember { mutableStateOf(LiftrPreferences.isPremium(context)) }
-        LaunchedEffect(ui.isRefreshing) {
-            if (!ui.isRefreshing) profileNoAds = LiftrPreferences.isPremium(context)
-        }
+        val profileNoAds by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -998,7 +988,7 @@ fun ProfileTabScreen(
                     competitionsHubContextOpponent = null
                     showCompetitions = true
                 },
-                onMenuRanking = { showRanking = true },
+                onOpenRanking = { showRanking = true },
                 showUsernameInCard = onBack == null,
                 toggleFollow = vm::toggleFollow
             )
@@ -1223,7 +1213,7 @@ fun ProfileTabScreen(
                     ProfileMainTab.Settings -> {
                         val settingsScroll = rememberScrollState()
                         val billing = (context.applicationContext as? LiftrApplication)?.playBilling
-                        var isPrem by remember { mutableStateOf(LiftrPreferences.isPremium(context)) }
+                        val isPrem by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -1261,7 +1251,8 @@ fun ProfileTabScreen(
                                                     }
                                                     scope.launch {
                                                         delay(2000L)
-                                                        isPrem = LiftrPreferences.isPremium(context)
+                                                        billing.refreshPremiumFromPlay()
+                                                        PremiumStatusStore.refresh(supabase)
                                                     }
                                                 } else {
                                                     Toast.makeText(
@@ -1278,10 +1269,10 @@ fun ProfileTabScreen(
                                                 billing?.refreshPremiumFromPlay()
                                                 scope.launch {
                                                     delay(1500L)
-                                                    isPrem = LiftrPreferences.isPremium(context)
+                                                    PremiumStatusStore.refresh(supabase)
                                                     Toast.makeText(
                                                         context,
-                                                        if (isPrem) {
+                                                        if (PremiumStatusStore.isPremium.value) {
                                                             context.getString(R.string.profile_premium_active)
                                                         } else {
                                                             context.getString(R.string.profile_premium_restore_done)
@@ -1644,6 +1635,32 @@ private fun ProfilePersonalInformationCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium
                     )
+                }
+                if (editingPersonalInfo) {
+                    OutlinedTextField(
+                        value = ui.baseCaloriesTargetDraft,
+                        onValueChange = vm::setBaseCaloriesTargetDraft,
+                        label = { Text(stringResource(R.string.profile_base_calories_target)) },
+                        singleLine = true,
+                        enabled = !ui.saveProfileMetricsBusy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_base_calories_target),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = ui.baseCaloriesTargetDraft.ifBlank { "2000" },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
                 OutlinedButton(
                     onClick = onOpenBodyWeightHistory,

@@ -6,7 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
-import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.data.PremiumStatusStore
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -143,6 +143,11 @@ class HomeViewModel(
     private var nextFeedPage: Int = 0
 
     init {
+        viewModelScope.launch {
+            PremiumStatusStore.isPremium.collect { premium ->
+                _uiState.update { it.copy(isPremium = premium) }
+            }
+        }
         refresh()
     }
 
@@ -308,7 +313,7 @@ class HomeViewModel(
                     if (canLoadMore) nextFeedPage = 1 else nextFeedPage = 0
                     val merged = mergeOwnerProfiles(pageRows)
                     val enriched = enrichWithSocial(null, merged)
-                    val premium = LiftrPreferences.isPremium(app)
+                    val premium = PremiumStatusStore.isPremium.value
                     val emptyR = RecalcResult()
                     _uiState.value = st.copy(
                         loading = false,
@@ -373,7 +378,7 @@ class HomeViewModel(
                         Log.w(TAG, "PRs: ${e.message}")
                         emptyList()
                     }
-                val premium = LiftrPreferences.isPremium(app)
+                val premium = PremiumStatusStore.isPremium.value
                 val r = recalcParallels(me, followees, visibleUserIds)
                 HomeRefreshResult(enriched, month, prs, premium, canLoadMore, r)
             }.onSuccess { h ->
@@ -996,7 +1001,7 @@ class HomeViewModel(
             .getOrNull() ?: buildMonthSummaryFallback(me, _uiState.value.workouts)
         val prs = runCatching { loadRecentPrs(me, followees) }
             .getOrElse { emptyList() }
-        val premium = LiftrPreferences.isPremium(app)
+        val premium = PremiumStatusStore.isPremium.value
         val r = recalcParallels(me, followees, visibleUserIds)
         _uiState.update { s ->
             s.copy(

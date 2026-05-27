@@ -10,7 +10,7 @@
 		CF4BDEF92F9A1AA3001158D0 /* LiftrWorkoutActivityKit in Frameworks */ = {isa = PBXBuildFile; productRef = CFDB00022E9F8FA5002E1FCA /* LiftrWorkoutActivityKit */; };
 		CF4BDFD12F9A1EDD001158D0 /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF4BDFD02F9A1EDD001158D0 /* WidgetKit.framework */; };
 		CF4BDFD32F9A1EDD001158D0 /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF4BDFD22F9A1EDD001158D0 /* SwiftUI.framework */; };
-		CF4BDFE42F9A1EDE001158D0 /* LiftrWorkoutLiveActivityExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CF4BDFE42F9A1EDE001158D0 /* LiftrWorkoutLiveActivityELiftrtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		CF4BDFEA2F9A1F22001158D0 /* LiftrWorkoutActivityKit in Frameworks */ = {isa = PBXBuildFile; productRef = CFDB00022E9F8FA5002E1FCA /* LiftrWorkoutActivityKit */; };
 		CF5BF0BC2EE805240084B612 /* StoreKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CF5BF0BB2EE805240084B612 /* StoreKit.framework */; };
 		CFB0221D2EE0579F00E3E3D7 /* FirebaseAnalytics in Frameworks */ = {isa = PBXBuildFile; productRef = CFB0221C2EE0579F00E3E3D7 /* FirebaseAnalytics */; };
@@ -55,7 +55,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				CF4BDFE42F9A1EDE001158D0 /* LiftrWorkoutLiveActivityExtension.appex in Embed Foundation Extensions */,
+				CF4BDFE42F9A1EDE001158D0 /* LiftrWorkoutLiveActivityELiftrtension.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -63,7 +63,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiftrWorkoutLiveActivityExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LiftrWorkoutLiveActivityELiftrtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF4BDFD02F9A1EDD001158D0 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		CF4BDFD22F9A1EDD001158D0 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		CF5BF0BB2EE805240084B612 /* StoreKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = StoreKit.framework; path = System/Library/Frameworks/StoreKit.framework; sourceTree = SDKROOT; };
@@ -73,12 +73,12 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		CF4BDFE92F9A1EDE001158D0 /* Exceptions for "LiftrWorkoutLiveActivity" folder in "LiftrWorkoutLiveActivityExtension" target */ = {
+		CF4BDFE92F9A1EDE001158D0 /* Exceptions for "LiftrWorkoutLiveActivity" folder in "LiftrWorkoutLiveActivityELiftrtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension */;
+			target = CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension */;
 		};
 		CFB022292EE0629000E3E3D7 /* Exceptions for "Liftr" folder in "Liftr" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
@@ -94,7 +94,7 @@
 		CF4BDFD42F9A1EDD001158D0 /* LiftrWorkoutLiveActivity */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				CF4BDFE92F9A1EDE001158D0 /* Exceptions for "LiftrWorkoutLiveActivity" folder in "LiftrWorkoutLiveActivityExtension" target */,
+				CF4BDFE92F9A1EDE001158D0 /* Exceptions for "LiftrWorkoutLiveActivity" folder in "LiftrWorkoutLiveActivityELiftrtension" target */,
 			);
 			path = LiftrWorkoutLiveActivity;
 			sourceTree = "<group>";
@@ -186,7 +186,7 @@
 				CFBC42EF2E9F8FA3002E1FCA /* Liftr.app */,
 				CFBC42FF2E9F8FA5002E1FCA /* LiftrTests.xctest */,
 				CFBC43092E9F8FA5002E1FCA /* LiftrUITests.xctest */,
-				CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension.appex */,
+				CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -204,9 +204,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension */ = {
+		CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = CF4BDFE82F9A1EDE001158D0 /* Build configuration list for PBXNativeTarget "LiftrWorkoutLiveActivityExtension" */;
+			buildConfigurationList = CF4BDFE82F9A1EDE001158D0 /* Build configuration list for PBXNativeTarget "LiftrWorkoutLiveActivityELiftrtension" */;
 			buildPhases = (
 				CF4BDFCB2F9A1EDD001158D0 /* Sources */,
 				CF4BDFCC2F9A1EDD001158D0 /* Frameworks */,
@@ -219,12 +219,12 @@
 			fileSystemSynchronizedGroups = (
 				CF4BDFD42F9A1EDD001158D0 /* LiftrWorkoutLiveActivity */,
 			);
-			name = LiftrWorkoutLiveActivityExtension;
+			name = LiftrWorkoutLiveActivityELiftrtension;
 			packageProductDependencies = (
 				CFDB00022E9F8FA5002E1FCA /* LiftrWorkoutActivityKit */,
 			);
 			productName = LiftrWorkoutLiveActivityExtension;
-			productReference = CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension.appex */;
+			productReference = CF4BDFCF2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 		CFBC42EE2E9F8FA3002E1FCA /* Liftr */ = {
@@ -356,7 +356,7 @@
 				CFBC42EE2E9F8FA3002E1FCA /* Liftr */,
 				CFBC42FE2E9F8FA5002E1FCA /* LiftrTests */,
 				CFBC43082E9F8FA5002E1FCA /* LiftrUITests */,
-				CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension */,
+				CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension */,
 			);
 		};
 /* End PBXProject section */
@@ -426,7 +426,7 @@
 /* Begin PBXTargetDependency section */
 		CF4BDFE32F9A1EDE001158D0 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityExtension */;
+			target = CF4BDFCE2F9A1EDD001158D0 /* LiftrWorkoutLiveActivityELiftrtension */;
 			targetProxy = CF4BDFE22F9A1EDE001158D0 /* PBXContainerItemProxy */;
 		};
 		CFBC43012E9F8FA5002E1FCA /* PBXTargetDependency */ = {
@@ -459,7 +459,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.14.0;
+				MARKETING_VERSION = 1.15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr.LiftrWorkoutLiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -489,7 +489,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.14.0;
+				MARKETING_VERSION = 1.15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr.LiftrWorkoutLiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -637,7 +637,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Liftr/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to the camera to take your avatar photo.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Liftr uses the camera to set your profile photo and to scan nutrition labels when you create ingredients.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photos to set your avatar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -648,7 +648,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.14.0;
+				MARKETING_VERSION = 1.15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -669,7 +669,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Liftr/Info.plist;
-				INFOPLIST_KEY_NSCameraUsageDescription = "We need access to the camera to take your avatar photo.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Liftr uses the camera to set your profile photo and to scan nutrition labels when you create ingredients.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "We need access to your photos to set your avatar.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -680,7 +680,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.14.0;
+				MARKETING_VERSION = 1.15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -760,7 +760,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		CF4BDFE82F9A1EDE001158D0 /* Build configuration list for PBXNativeTarget "LiftrWorkoutLiveActivityExtension" */ = {
+		CF4BDFE82F9A1EDE001158D0 /* Build configuration list for PBXNativeTarget "LiftrWorkoutLiveActivityELiftrtension" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				CF4BDFE62F9A1EDE001158D0 /* Debug */,

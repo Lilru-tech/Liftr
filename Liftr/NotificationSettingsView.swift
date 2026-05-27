@@ -10,6 +10,7 @@ struct NotificationSettingsRow: Codable {
     var pushWorkoutComment: Bool
     var pushCommentLike: Bool
     var pushCommentReply: Bool
+    var pushCommentMention: Bool
     var pushAddedAsParticipant: Bool
     var pushAchievementUnlocked: Bool
     var pushGoalCompleted: Bool
@@ -43,6 +44,7 @@ struct NotificationSettingsRow: Codable {
         case pushWorkoutComment = "push_workout_comment"
         case pushCommentLike = "push_comment_like"
         case pushCommentReply = "push_comment_reply"
+        case pushCommentMention = "push_comment_mention"
         case pushAddedAsParticipant = "push_added_as_participant"
         case pushAchievementUnlocked = "push_achievement_unlocked"
         case pushGoalCompleted = "push_goal_completed"
@@ -77,6 +79,7 @@ struct NotificationSettingsRow: Codable {
         pushWorkoutComment = try c.decode(Bool.self, forKey: .pushWorkoutComment)
         pushCommentLike = try c.decode(Bool.self, forKey: .pushCommentLike)
         pushCommentReply = try c.decode(Bool.self, forKey: .pushCommentReply)
+        pushCommentMention = try c.decodeIfPresent(Bool.self, forKey: .pushCommentMention) ?? true
         pushAddedAsParticipant = try c.decode(Bool.self, forKey: .pushAddedAsParticipant)
         pushAchievementUnlocked = try c.decode(Bool.self, forKey: .pushAchievementUnlocked)
         pushGoalCompleted = try c.decode(Bool.self, forKey: .pushGoalCompleted)
@@ -163,6 +166,7 @@ struct NotificationSettingsView: View {
                     toggleCard(title: "Workout comments", isOn: binding(\.pushWorkoutComment), enabled: pushMaster && !saving)
                     toggleCard(title: "Comment likes", isOn: binding(\.pushCommentLike), enabled: pushMaster && !saving)
                     toggleCard(title: "Comment replies", isOn: binding(\.pushCommentReply), enabled: pushMaster && !saving)
+                    toggleCard(title: "Comment mentions", isOn: binding(\.pushCommentMention), enabled: pushMaster && !saving)
                     toggleCard(title: "Added as participant", isOn: binding(\.pushAddedAsParticipant), enabled: pushMaster && !saving)
                 }
 
@@ -315,6 +319,7 @@ struct NotificationSettingsView: View {
             let push_workout_comment: Bool
             let push_comment_like: Bool
             let push_comment_reply: Bool
+            let push_comment_mention: Bool
             let push_added_as_participant: Bool
             let push_achievement_unlocked: Bool
             let push_goal_completed: Bool
@@ -346,6 +351,7 @@ struct NotificationSettingsView: View {
                 case push_workout_comment
                 case push_comment_like
                 case push_comment_reply
+                case push_comment_mention
                 case push_added_as_participant
                 case push_achievement_unlocked
                 case push_goal_completed
@@ -379,6 +385,7 @@ struct NotificationSettingsView: View {
                 try c.encode(push_workout_comment, forKey: .push_workout_comment)
                 try c.encode(push_comment_like, forKey: .push_comment_like)
                 try c.encode(push_comment_reply, forKey: .push_comment_reply)
+                try c.encode(push_comment_mention, forKey: .push_comment_mention)
                 try c.encode(push_added_as_participant, forKey: .push_added_as_participant)
                 try c.encode(push_achievement_unlocked, forKey: .push_achievement_unlocked)
                 try c.encode(push_goal_completed, forKey: .push_goal_completed)
@@ -412,6 +419,7 @@ struct NotificationSettingsView: View {
             push_workout_comment: row.pushWorkoutComment,
             push_comment_like: row.pushCommentLike,
             push_comment_reply: row.pushCommentReply,
+            push_comment_mention: row.pushCommentMention,
             push_added_as_participant: row.pushAddedAsParticipant,
             push_achievement_unlocked: row.pushAchievementUnlocked,
             push_goal_completed: row.pushGoalCompleted,

@@ -5,7 +5,6 @@ struct ActiveSportWorkoutView: View {
     let workoutId: Int
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium = false
     @State private var showCountdown = true
     @State private var isRunning = false
     @State private var elapsedSec: Int = 0
@@ -230,7 +229,7 @@ struct ActiveSportWorkoutView: View {
                     hyroxExercisePagerSection
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
-                        .padding(.bottom, isPremium ? 140 : 200)
+                        .padding(.bottom, app.isPremium ? 140 : 200)
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
@@ -285,7 +284,7 @@ struct ActiveSportWorkoutView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
-                        .padding(.bottom, isPremium ? 140 : 200)
+                        .padding(.bottom, app.isPremium ? 140 : 200)
                     }
                 }
                 VStack {
@@ -293,7 +292,7 @@ struct ActiveSportWorkoutView: View {
                     if !showCountdown, sportType != .hyrox {
                         VStack(spacing: 8) {
                             bottomControls
-                            if !isPremium {
+                            if !app.isPremium {
                                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                                     .frame(height: 50)
                                     .padding(.horizontal)
@@ -348,7 +347,7 @@ struct ActiveSportWorkoutView: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !isPremium, !showCountdown, !isSaving, sportType == .hyrox {
+            if !app.isPremium, !showCountdown, !isSaving, sportType == .hyrox {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)

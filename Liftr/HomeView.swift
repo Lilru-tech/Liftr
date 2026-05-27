@@ -160,7 +160,6 @@ private struct QuickActiveWorkout: Identifiable, Hashable {
 
 struct HomeView: View {
     @EnvironmentObject var app: AppState
-    @AppStorage("isPremium") private var isPremium = false
     
     enum KindFilter: String, CaseIterable { case all = "All", strength = "Strength", cardio = "Cardio", sport = "Sport" }
     @State private var filter: KindFilter = .all
@@ -655,7 +654,7 @@ struct HomeView: View {
                     .animation(.easeInOut(duration: 0.2), value: showScrollToTopButton)
                 }
             }
-            if !isPremium {
+            if !app.isPremium {
                 BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                     .frame(height: 50)
                     .padding(.horizontal)
@@ -668,7 +667,7 @@ struct HomeView: View {
         .background(.clear)
         .overlay {
             HomeFloatingDockOverlay(
-                bottomSafeInset: isPremium ? 18 : 70,
+                bottomSafeInset: app.isPremium ? 18 : 70,
                 showChat: app.isAuthenticated,
                 quickStartBusyKind: quickStartBusyKind,
                 onQuickStrength: { startQuickWorkout(.strength) },

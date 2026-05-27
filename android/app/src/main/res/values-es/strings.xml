@@ -116,6 +116,11 @@
     <string name="shared_routine_implements_n">Implementos: %1$d</string>
     <string name="shared_routine_notes_line">Notas: %1$s</string>
     <string name="chat_routine_share_updated">Actualizado %1$s</string>
+    <string name="active_strength_add_exercise">Añadir ejercicio</string>
+    <string name="active_strength_add_exercise_hint">Añade un ejercicio y configura sus series para continuar el entreno.</string>
+    <string name="active_strength_configure_exercise">Configurar ejercicio</string>
+    <string name="active_strength_connection_unstable">Conexión inestable. Reintentando sin conexión…</string>
+    <string name="active_strength_lane_unavailable">Esta vía del entreno no está disponible.</string>
     <string name="active_strength_pause">Pausa</string>
     <string name="active_strength_resume">Reanudar</string>
     <string name="active_strength_all_sets_done_title">Series completadas ✅</string>
@@ -132,6 +137,10 @@
     <string name="active_strength_back_to_current_set">Volver a la serie actual</string>
     <string name="active_strength_viewing_set">Viendo serie %1$d</string>
     <string name="active_strength_rest_skip">Descanso %1$ds · Saltar</string>
+    <string name="active_strength_finish_confirm_title">¿Finalizar entrenamiento?</string>
+    <string name="active_strength_finish_early_title">¿Finalizar entrenamiento antes de tiempo?</string>
+    <string name="active_strength_finish_incomplete_warning">Tienes %1$d ejercicios y %2$d series sin terminar. Si finalizas el entrenamiento ahora, se eliminarán automáticamente de tu historial.</string>
+    <string name="active_strength_finish_standard_body">No has completado todas las series planificadas. El entrenamiento se guardará solo con las series que hayas hecho. Si finalizas ahora, se publicará automáticamente.</string>
     <string name="compare_average_mine">Mi media</string>
     <string name="compare_average_global">Media global</string>
     <string name="compare_average_subtitle">%1$s · últimos %2$d</string>
@@ -144,4 +153,24 @@
     <string name="active_workout_syncing_start">Sincronizando inicio…</string>
     <string name="active_workout_sync_will_retry">Inicio guardado en el dispositivo — se sincronizará al volver la conexión</string>
     <string name="active_workout_finish_saved_offline">Entreno guardado en el dispositivo — se sincronizará al volver la conexión</string>
+    <string name="nutrition_scan_label">Escanear etiqueta nutricional</string>
+    <string name="nutrition_scan_source_camera">Hacer foto</string>
+    <string name="nutrition_scan_source_gallery">Biblioteca de fotos</string>
+    <string name="nutrition_scan_source_cancel">Cancelar</string>
+    <string name="nutrition_scan_failed">No se pudo leer la etiqueta con claridad. Ajusta la luz o introduce los datos manualmente.</string>
+    <string name="nutrition_target_base">Metabolismo (TMB)</string>
+    <string name="nutrition_insights_metabolic_hint">Incluye tu TMB (metabolismo basal) más el gasto del entreno.</string>
+    <string name="profile_base_calories_target">Metabolismo basal / TMB (kcal)</string>
+    <string name="nutrition_insights_energy_budget_left">Energía disponible</string>
+    <string name="nutrition_budget_remaining_title">Presupuesto restante</string>
+    <string name="nutrition_budget_over_title">Por encima del presupuesto</string>
+    <string name="nutrition_budget_remaining_hint">Margen en tu balance energético de hoy</string>
+    <string name="nutrition_budget_over_hint">Por encima de TMB + actividad de hoy</string>
+    <string name="nutrition_kcal_left_format">%1$d kcal restantes</string>
+    <string name="nutrition_kcal_over_format">%1$d kcal de más</string>
+    <string name="nutrition_budget_remaining_a11y">%1$d kilocalorías restantes en el presupuesto de hoy</string>
+    <string name="nutrition_budget_over_a11y">%1$d kilocalorías por encima del presupuesto</string>
+    <string name="nutrition_insights_budget_over_title">Por encima del presupuesto diario</string>
+    <string name="nutrition_insights_budget_remaining_hint">Objetivo + actividad − comida (media diaria)</string>
+    <string name="nutrition_insights_budget_over_hint">Por encima de objetivo + actividad (media diaria)</string>
 </resources>

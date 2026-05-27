@@ -39,6 +39,14 @@ enum TerritoryMapGeometry {
         return true
     }
 
+    static func expansionSearchRadiusMeters(for region: MKCoordinateRegion) -> Double {
+        let latRad = region.center.latitude * .pi / 180
+        let latHalfM = region.span.latitudeDelta * 111_320 / 2
+        let lonHalfM = region.span.longitudeDelta * 111_320 * max(cos(latRad), 0.2) / 2
+        let diagonal = hypot(latHalfM * 2, lonHalfM * 2) * 1.2
+        return min(25_000, max(6_000, diagonal))
+    }
+
     static func regionsApproximatelyEqual(_ lhs: MKCoordinateRegion, _ rhs: MKCoordinateRegion) -> Bool {
         abs(lhs.center.latitude - rhs.center.latitude) < 0.000001
             && abs(lhs.center.longitude - rhs.center.longitude) < 0.000001

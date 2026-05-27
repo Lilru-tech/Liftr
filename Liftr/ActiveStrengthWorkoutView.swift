@@ -1,5 +1,6 @@
 import SwiftUI
 import Supabase
+import Network
 import AVFoundation
 import AudioToolbox
 import UIKit
@@ -108,8 +109,8 @@ struct ActiveStrengthWorkoutView: View {
             rpe = try c.decodeIfPresent(Decimal.self, forKey: .rpe)
             rest_sec = try c.decodeIfPresent(Int.self, forKey: .rest_sec)
             weight_segments = try c.decodeIfPresent([StrengthWeightSegWire].self, forKey: .weight_segments)
-            let k = (weight_segments?.count ?? 0) >= 2 ? weight_segments!.count : 1
-            segmentsInRow = k
+            let segmentCount = weight_segments?.count ?? 0
+            segmentsInRow = segmentCount >= 2 ? segmentCount : 1
             configId = id
         }
 
@@ -288,7 +289,6 @@ struct ActiveStrengthWorkoutView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var app: AppState
-    @AppStorage("isPremium") private var isPremium = false
     @AppStorage("activeStrengthNavHintSeen") private var activeStrengthNavHintSeen = false
 
     @State private var restEndDate: Date? = nil
@@ -322,8 +322,10 @@ struct ActiveStrengthWorkoutView: View {
     @State private var remainingRest: Int = 0
     @State private var performedSetsByExercise: [Int: [PerformedSet]] = [:]
     @State private var showEditSheet = false
+    @State private var applyEditToRemainingSets = false
     @State private var editRepsText: String = ""
     @State private var showFinishEarlyConfirm = false
+    @State private var showFinishConfirm = false
     @State private var showDualIncompleteFinishConfirm = false
     @State private var editWeightText: String = ""
     @State private var editRestText: String = ""
@@ -706,6 +708,7 @@ struct ActiveStrengthWorkoutView: View {
                         image: Self.loadElborblaCelebrationImage(),
                         onContinue: {
                             showElborblaCelebration = false
+                            resetActiveWorkoutSessionState()
                             dismiss()
                         }
                     )
@@ -714,7 +717,7 @@ struct ActiveStrengthWorkoutView: View {
                 }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if !isPremium, !showElborblaCelebration {
+                if !app.isPremium, !showElborblaCelebration {
                     BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
                         .frame(height: 50)
                         .padding(.horizontal)
@@ -753,6 +756,14 @@ struct ActiveStrengthWorkoutView: View {
                 }
             } message: {
                 Text(dualIncompleteFinishMessage())
+            }
+            .alert("Finish workout?", isPresented: $showFinishConfirm) {
+                Button("Finish", role: .destructive) {
+                    Task { await saveAndFinishWorkout() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(strengthFinishConfirmationMessage())
             }
         }
         .onDisappear {
@@ -961,6 +972,10 @@ struct ActiveStrengthWorkoutView: View {
                         }
                     }
 
+                    if shouldShowApplyToRemainingSetsToggle(), let range = editRemainingSetRange() {
+                        Toggle("Apply to sets \(range.start)–\(range.end)", isOn: $applyEditToRemainingSets)
+                    }
+
                     Text("Edits update this workout flow now and are written when you finish the workout.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -1011,6 +1026,7 @@ struct ActiveStrengthWorkoutView: View {
                         Button("Cancel") {
                             editMetricFocus = nil
                             clearEditDrafts()
+                            applyEditToRemainingSets = false
                             showEditSheet = false
                             editTargetExpandedIndex = nil
                             editTargetExerciseId = nil
@@ -1021,6 +1037,7 @@ struct ActiveStrengthWorkoutView: View {
                             editMetricFocus = nil
                             applyAllStashedEditDrafts()
                             clearEditDrafts()
+                            applyEditToRemainingSets = false
                             showEditSheet = false
                             editTargetExpandedIndex = nil
                             editTargetExerciseId = nil
@@ -1044,6 +1061,7 @@ struct ActiveStrengthWorkoutView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else { return }
+            restoreActiveWorkoutStateOnForeground()
             guard !isSessionPaused else { return }
             syncRestCountdownFromEndDate()
             if strengthWorkoutSessionStart != nil {
@@ -2056,7 +2074,12 @@ struct ActiveStrengthWorkoutView: View {
                     if isDualMode && !bothLanesFullyComplete() {
                         showDualIncompleteFinishConfirm = true
                     } else {
-                        Task { await saveAndFinishWorkout() }
+                        let incomplete = aggregatedStrengthFinishIncompleteCounts()
+                        if incomplete.exercises > 0, incomplete.sets > 0 {
+                            showFinishConfirm = true
+                        } else {
+                            Task { await saveAndFinishWorkout() }
+                        }
                     }
                 } label: {
                     HStack(spacing: 8) {
@@ -2627,15 +2650,89 @@ struct ActiveStrengthWorkoutView: View {
         if !guestLaneFullyComplete() { s += "· Partner 1\n" }
         if !guest2LaneFullyComplete() { s += "· Partner 2\n" }
         s += "\nThis will save, publish, and close all workouts on this phone. Continue?"
+        let incomplete = aggregatedStrengthFinishIncompleteCounts()
+        if incomplete.exercises > 0, incomplete.sets > 0 {
+            s = StrengthFinishConfirmationCopy.incompleteWarning(
+                exercises: incomplete.exercises,
+                sets: incomplete.sets
+            ) + "\n\n" + s
+        }
         return s
     }
 
-    private func earlyFinishAlertMessage() -> String {
-        let base = "You haven't completed all planned sets. The workout will be saved with only the sets you actually performed. If you finish now, it will be published automatically."
-        if isDualMode, let extra = dualPartnerProgressNote(), !extra.isEmpty {
-            return base + "\n\n" + extra
+    private func strengthFinishIncompleteCounts(
+        exercises: [ExerciseRow],
+        lane: StrengthLaneKind
+    ) -> StrengthFinishIncompleteCounts {
+        StrengthFinishIncompleteCounting.counts(
+            exercises: exercises,
+            totalSets: { setsFor($0, lane: lane).count },
+            completedSetIndex: { effectiveSetIndex(for: $0, lane: lane) }
+        )
+    }
+
+    private func aggregatedStrengthFinishIncompleteCounts() -> StrengthFinishIncompleteCounts {
+        var parts: [StrengthFinishIncompleteCounts] = [
+            strengthFinishIncompleteCounts(exercises: orderedExercises, lane: .host)
+        ]
+        if dualGuestWorkoutId != nil {
+            parts.append(strengthFinishIncompleteCounts(exercises: orderedGuestExercises, lane: .guest))
         }
-        return base
+        if dualGuest2WorkoutId != nil {
+            parts.append(strengthFinishIncompleteCounts(exercises: orderedGuest2Exercises, lane: .guest2))
+        }
+        return StrengthFinishIncompleteCounts.aggregate(parts)
+    }
+
+    private func strengthFinishConfirmationMessage() -> String {
+        let incomplete = aggregatedStrengthFinishIncompleteCounts()
+        return StrengthFinishConfirmationCopy.message(
+            incomplete: incomplete,
+            standardBody: StrengthFinishConfirmationCopy.standardEarlyFinishBody,
+            dualPartnerNote: isDualMode ? dualPartnerProgressNote() : nil
+        )
+    }
+
+    private func earlyFinishAlertMessage() -> String {
+        strengthFinishConfirmationMessage()
+    }
+
+    @MainActor
+    private func resetActiveWorkoutSessionState() {
+        performedSetsByExercise = [:]
+        gPerformedSetsByExercise = [:]
+        g2PerformedSetsByExercise = [:]
+        currentSetIndex = 0
+        currentSetIndexByExercise = [:]
+        gCurrentSetIndex = 0
+        gCurrentSetIndexByExercise = [:]
+        g2CurrentSetIndex = 0
+        g2CurrentSetIndexByExercise = [:]
+        isResting = false
+        remainingRest = 0
+        restEndDate = nil
+        isRestingByExercise = [:]
+        remainingRestByExercise = [:]
+        restEndDateByExercise = [:]
+        restTotalPlannedByExercise = [:]
+        gIsResting = false
+        gRemainingRest = 0
+        gRestEndDate = nil
+        gIsRestingByExercise = [:]
+        gRemainingRestByExercise = [:]
+        gRestEndDateByExercise = [:]
+        gRestTotalPlannedByExercise = [:]
+        g2IsResting = false
+        g2RemainingRest = 0
+        g2RestEndDate = nil
+        g2IsRestingByExercise = [:]
+        g2RemainingRestByExercise = [:]
+        g2RestEndDateByExercise = [:]
+        g2RestTotalPlannedByExercise = [:]
+        isSaving = false
+        showFinishEarlyConfirm = false
+        showFinishConfirm = false
+        showDualIncompleteFinishConfirm = false
     }
 
     private func skipRest(for lane: StrengthLaneKind, exerciseId: Int) {
@@ -4004,19 +4101,26 @@ struct ActiveStrengthWorkoutView: View {
         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14))
     }
 
+    @MainActor
     private func startActiveExerciseAdd(lane: StrengthLaneKind) {
         guard canModifyActiveExercises else { return }
+        guard workoutId(for: lane) != nil else {
+            showToast("This workout lane is not available.")
+            return
+        }
         activeExerciseSetupLane = lane
         activeExerciseSetupDrafts = []
         activeExerciseSetupError = nil
         showActiveExercisePicker = true
     }
 
+    @MainActor
     private func appendExerciseToActiveSetup(_ exercise: Exercise) {
         activeExerciseSetupError = nil
         if activeExerciseSetupDrafts.isEmpty {
             activeExerciseSetupDrafts = [ActiveExerciseSetupExercise(exercise: exercise)]
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 200_000_000)
                 showActiveExerciseSetup = true
             }
         } else if !activeExerciseSetupDrafts.contains(where: { $0.exercise.id == exercise.id }) {
@@ -4025,6 +4129,7 @@ struct ActiveStrengthWorkoutView: View {
         }
     }
 
+    @MainActor
     private func resetActiveExerciseSetup() {
         showActiveExerciseSetup = false
         activeExerciseSetupDrafts = []
@@ -4258,6 +4363,7 @@ struct ActiveStrengthWorkoutView: View {
         (orderedExercises(lane: lane).map(\.order_index).max() ?? 0) + 1
     }
 
+    @MainActor
     private func saveConfiguredActiveExercise() async {
         guard !isPersistingActiveExerciseEdit else { return }
         guard !activeExerciseSetupDrafts.isEmpty else { return }
@@ -4276,6 +4382,7 @@ struct ActiveStrengthWorkoutView: View {
         }
 
         isPersistingActiveExerciseEdit = true
+        defer { isPersistingActiveExerciseEdit = false }
         let client = SupabaseManager.shared.client
 
         do {
@@ -4349,21 +4456,30 @@ struct ActiveStrengthWorkoutView: View {
                 localRows.append((row: row, sets: localSets))
             }
 
-            appendActiveExercises(localRows, lane: lane)
+            withAnimation(.easeInOut(duration: 0.25)) {
+                appendActiveExercises(localRows, lane: lane)
+            }
+            persistProgramCacheSnapshot()
             NotificationCenter.default.post(name: .workoutDidChange, object: targetWorkoutId)
             resetActiveExerciseSetup()
             showToast(supersetGroupId == nil ? "Added exercise" : "Added superserie")
         } catch {
-            activeExerciseSetupError = error.localizedDescription
+            logActiveExerciseFailure(error, phase: "saveConfiguredActiveExercise")
+            if isActiveExerciseConnectivityFailure(error) {
+                showToast(activeExerciseConnectionUnstableMessage)
+                activeExerciseSetupError = activeExerciseConnectionUnstableMessage
+            } else {
+                activeExerciseSetupError = error.localizedDescription
+            }
         }
-
-        isPersistingActiveExerciseEdit = false
     }
 
+    @MainActor
     private func appendActiveExercise(_ row: ExerciseRow, sets: [SetRow], lane: StrengthLaneKind) {
         appendActiveExercises([(row: row, sets: sets)], lane: lane)
     }
 
+    @MainActor
     private func appendActiveExercises(_ rows: [(row: ExerciseRow, sets: [SetRow])], lane: StrengthLaneKind) {
         guard !rows.isEmpty else { return }
         persistStateForCurrentDualIndex()
@@ -4418,10 +4534,12 @@ struct ActiveStrengthWorkoutView: View {
         showDeleteExerciseConfirm = true
     }
 
+    @MainActor
     private func deleteActiveExercise(_ ex: ExerciseRow, lane: StrengthLaneKind) async {
         guard !isPersistingActiveExerciseEdit else { return }
         guard let targetWorkoutId = workoutId(for: lane) else { return }
         isPersistingActiveExerciseEdit = true
+        defer { isPersistingActiveExerciseEdit = false }
         let client = SupabaseManager.shared.client
 
         do {
@@ -4452,14 +4570,18 @@ struct ActiveStrengthWorkoutView: View {
                     .execute()
             }
 
+            persistProgramCacheSnapshot()
             NotificationCenter.default.post(name: .workoutDidChange, object: targetWorkoutId)
             deleteExerciseCandidate = nil
             showToast("Deleted exercise")
         } catch {
-            showToast(error.localizedDescription)
+            logActiveExerciseFailure(error, phase: "deleteActiveExercise")
+            if isActiveExerciseConnectivityFailure(error) {
+                showToast(activeExerciseConnectionUnstableMessage)
+            } else {
+                showToast(error.localizedDescription)
+            }
         }
-
-        isPersistingActiveExerciseEdit = false
     }
 
     private func removeActiveExerciseLocally(_ ex: ExerciseRow, lane: StrengthLaneKind) -> [(id: Int, orderIndex: Int, supersetGroupId: UUID?, supersetPosition: Int?)] {
@@ -5756,6 +5878,7 @@ struct ActiveStrengthWorkoutView: View {
                         self.showElborblaCelebration = true
                     }
                 } else {
+                    self.resetActiveWorkoutSessionState()
                     dismiss()
                 }
             }
@@ -5786,6 +5909,7 @@ struct ActiveStrengthWorkoutView: View {
             NotificationCenter.default.post(name: .workoutDidChange, object: wid)
         }
         showToast(String(localized: "Workout saved on device — will sync when online"))
+        resetActiveWorkoutSessionState()
         dismiss()
     }
 
@@ -6079,6 +6203,7 @@ struct ActiveStrengthWorkoutView: View {
         editTargetExerciseId = exerciseId
         if openingFresh {
             clearEditDrafts()
+            applyEditToRemainingSets = false
         }
         loadEditFieldsFromSet(ex, set: s)
         showEditSheet = true
@@ -6098,14 +6223,35 @@ struct ActiveStrengthWorkoutView: View {
         loadEditFieldsFromSet(ex, set: s)
     }
 
+    private func editRemainingSetRange() -> (start: Int, end: Int)? {
+        guard let ex = exerciseForEditSheet() else { return nil }
+        let startIndex = currentSetIndexForEditLane()
+        let lastIndex = max(0, setsFor(ex, lane: editTargetLane).count - 1)
+        guard startIndex < lastIndex else { return nil }
+        return (start: startIndex + 1, end: lastIndex + 1)
+    }
+
+    private func shouldShowApplyToRemainingSetsToggle() -> Bool {
+        editRemainingSetRange() != nil
+    }
+
     private func applyAllStashedEditDrafts() {
         stashCurrentEditDraft()
-        let setIndex = currentSetIndexForEditLane()
+        let startIndex = currentSetIndexForEditLane()
         let lane = editTargetLane
         for (exerciseId, draft) in editDraftsByExerciseId {
             guard let ex = orderedExercises(lane: lane).first(where: { $0.id == exerciseId }) else { continue }
-            let applyRest = isLastSupersetMemberForRestEdit(ex, lane: lane, setIndex: setIndex)
-            applyEdits(draft: draft, to: ex, lane: lane, setIndex: setIndex, applyRest: applyRest)
+            let lastIndex = max(0, setsFor(ex, lane: lane).count - 1)
+            let targetIndices: [Int]
+            if applyEditToRemainingSets && startIndex < lastIndex {
+                targetIndices = Array(startIndex...lastIndex)
+            } else {
+                targetIndices = [startIndex]
+            }
+            for setIndex in targetIndices {
+                let applyRest = isLastSupersetMemberForRestEdit(ex, lane: lane, setIndex: setIndex)
+                applyEdits(draft: draft, to: ex, lane: lane, setIndex: setIndex, applyRest: applyRest)
+            }
         }
     }
 
@@ -6685,13 +6831,124 @@ struct ActiveStrengthWorkoutView: View {
         return String(format: "%.1f kg", NSDecimalNumber(decimal: w).doubleValue)
     }
     
+    @MainActor
     private func showToast(_ msg: String) {
         toastMessage = msg
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
             if toastMessage == msg {
                 toastMessage = nil
             }
         }
+    }
+
+    private let activeExerciseConnectionUnstableMessage = "Connection unstable. Retrying offline..."
+
+    @MainActor
+    private func restoreActiveWorkoutStateOnForeground() {
+        if workoutId(for: activeExerciseSetupLane) == nil {
+            if showActiveExercisePicker || showActiveExerciseSetup {
+                showActiveExercisePicker = false
+                resetActiveExerciseSetup()
+                showToast("This workout lane is not available.")
+            }
+        }
+        if exercises.isEmpty && !loading {
+            if hydrateFromProgramCache() {
+                loading = false
+            } else {
+                Task { await load() }
+            }
+        }
+    }
+
+    @MainActor
+    private func persistProgramCacheSnapshot() {
+        guard !exercises.isEmpty else { return }
+        let cachedExercises = exercises.map {
+            WorkoutProgramCache.CachedExercise(
+                id: $0.id,
+                exercise_id: $0.exercise_id,
+                order_index: $0.order_index,
+                superset_group_id: $0.superset_group_id,
+                superset_position: $0.superset_position,
+                notes: $0.notes,
+                custom_name: $0.custom_name,
+                exercise_name: $0.exercise_name
+            )
+        }
+        let cachedSets = setsByExercise.mapValues { rows in
+            rows.map {
+                WorkoutProgramCache.CachedSet(
+                    id: $0.id,
+                    workout_exercise_id: $0.workout_exercise_id,
+                    set_number: $0.set_number,
+                    order_index: $0.order_index,
+                    reps: $0.reps,
+                    weight_kg: $0.weight_kg,
+                    rpe: $0.rpe,
+                    rest_sec: $0.rest_sec,
+                    notes: nil
+                )
+            }
+        }
+        WorkoutProgramCache.store(
+            workoutId: workoutId,
+            exercises: cachedExercises,
+            setsByExerciseId: cachedSets
+        )
+    }
+
+    private func activeWorkoutNetworkStatusLabel() -> String {
+        let monitor = NWPathMonitor()
+        let sem = DispatchSemaphore(value: 0)
+        var label = "unknown"
+        monitor.pathUpdateHandler = { path in
+            label = "\(path.status)"
+            if path.usesInterfaceType(.wifi) { label += ",wifi" }
+            if path.usesInterfaceType(.cellular) { label += ",cellular" }
+            sem.signal()
+        }
+        monitor.start(queue: DispatchQueue(label: "liftr.active-strength.net-snapshot"))
+        _ = sem.wait(timeout: .now() + 0.3)
+        monitor.cancel()
+        return label
+    }
+
+    private func logActiveExerciseFailure(_ error: Error, phase: String) {
+        print("[ActiveStrength][\(phase)] \(error.localizedDescription) network=\(activeWorkoutNetworkStatusLabel())")
+    }
+
+    private func isActiveExerciseConnectivityFailure(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+                 .dataNotAllowed, .internationalRoamingOff:
+                return true
+            default:
+                break
+            }
+        }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain {
+            let codes: [Int] = [
+                NSURLErrorNotConnectedToInternet,
+                NSURLErrorNetworkConnectionLost,
+                NSURLErrorTimedOut,
+                NSURLErrorCannotFindHost,
+                NSURLErrorCannotConnectToHost,
+                NSURLErrorDNSLookupFailed,
+                NSURLErrorDataNotAllowed,
+                NSURLErrorInternationalRoamingOff
+            ]
+            if codes.contains(ns.code) { return true }
+        }
+        let msg = error.localizedDescription.lowercased()
+        if msg.contains("network") || msg.contains("connection") || msg.contains("offline") || msg.contains("timeout") {
+            return true
+        }
+        return false
     }
 }
 

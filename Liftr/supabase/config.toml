@@ -16,3 +16,9 @@ enable_signup = true
 [auth.email.template.recovery]
 subject = "Reset your Liftr password"
 content_path = "./supabase/templates/recovery.html"
+
+[functions.process-billing-webhook]
+verify_jwt = false
+
+[functions.process-apple-app-store-notification]
+verify_jwt = false

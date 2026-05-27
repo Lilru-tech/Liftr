@@ -5,9 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
@@ -15,16 +17,29 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 
 @Composable
 fun WorkoutDetailCommentsSheetContent(
     comments: List<WorkoutCommentUi>,
-    commentDraft: String,
-    onCommentDraftChange: (String) -> Unit,
+    commentDraft: TextFieldValue,
+    onCommentDraftChange: (TextFieldValue) -> Unit,
+    trackedMentions: List<TrackedMention>,
+    onTrackedMentionsChange: (List<TrackedMention>) -> Unit,
+    followees: List<CommentFollowee>,
+    onRequestFollowees: () -> Unit,
     replyToCommentId: Int?,
     onCancelReply: () -> Unit,
     commentBusy: Boolean,
@@ -39,6 +54,22 @@ fun WorkoutDetailCommentsSheetContent(
     onOpenProfile: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val mentionQuery = CommentMentionSupport.activeMentionQuery(
+        commentDraft.text,
+        commentDraft.selection.end
+    )
+    val showMentionPicker = mentionQuery != null
+    val usernameToUserId = remember(comments, followees) {
+        CommentMentionSupport.usernameToUserIdMap(followees, comments)
+    }
+    val filteredFollowees = remember(followees, mentionQuery) {
+        CommentMentionSupport.filterFollowees(followees, mentionQuery ?: "")
+    }
+
+    if (showMentionPicker) {
+        onRequestFollowees()
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxWidth()
@@ -50,6 +81,32 @@ fun WorkoutDetailCommentsSheetContent(
                 stringResource(R.string.home_detail_comments_title),
                 style = MaterialTheme.typography.titleMedium
             )
+        }
+        if (showMentionPicker) {
+            item {
+                MentionPicker(
+                    followees = filteredFollowees,
+                    onSelect = { followee ->
+                        val tokenText = CommentMentionSupport.insertMentionToken(
+                            currentText = commentDraft.text,
+                            mentionQuery = mentionQuery,
+                            username = followee.username
+                        )
+                        val updatedMentions = if (trackedMentions.any { it.userId == followee.userId }) {
+                            trackedMentions
+                        } else {
+                            trackedMentions + TrackedMention(followee.userId, followee.username)
+                        }
+                        onTrackedMentionsChange(updatedMentions)
+                        onCommentDraftChange(
+                            TextFieldValue(
+                                text = tokenText,
+                                selection = androidx.compose.ui.text.TextRange(tokenText.length)
+                            )
+                        )
+                    }
+                )
+            }
         }
         item {
             OutlinedTextField(
@@ -79,7 +136,7 @@ fun WorkoutDetailCommentsSheetContent(
         item {
             Button(
                 onClick = onSendComment,
-                enabled = !commentBusy && commentDraft.trim().isNotEmpty()
+                enabled = !commentBusy && commentDraft.text.trim().isNotEmpty()
             ) {
                 Text(
                     if (commentBusy) {
@@ -101,22 +158,26 @@ fun WorkoutDetailCommentsSheetContent(
             items(comments, key = { it.id }) { c ->
                 CommentCard(
                     comment = c,
+                    usernameToUserId = usernameToUserId,
                     onToggleLike = { onToggleLike(c.id) },
                     onReply = { onReply(c.id) },
                     onDelete = { onDelete(c.id) },
                     onToggleReplies = { onToggleReplies(c.id) },
                     onOpenProfile = { onOpenProfile(c.userId) },
+                    onOpenMentionProfile = onOpenProfile,
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (c.isExpanded && c.replies.isNotEmpty()) {
                     c.replies.forEach { reply ->
                         CommentCard(
                             comment = reply,
+                            usernameToUserId = usernameToUserId,
                             onToggleLike = { onToggleLike(reply.id) },
                             onReply = { onReply(c.id) },
                             onDelete = { onDelete(reply.id) },
                             onToggleReplies = {},
                             onOpenProfile = { onOpenProfile(reply.userId) },
+                            onOpenMentionProfile = onOpenProfile,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(start = 20.dp)
@@ -146,13 +207,53 @@ fun WorkoutDetailCommentsSheetContent(
 }
 
 @Composable
+private fun MentionPicker(
+    followees: List<CommentFollowee>,
+    onSelect: (CommentFollowee) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = 180.dp)
+                .padding(vertical = 4.dp)
+        ) {
+            if (followees.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.home_detail_comment_mention_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(12.dp)
+                )
+            } else {
+                followees.forEach { followee ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(followee) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "@${followee.username}",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun CommentCard(
     comment: WorkoutCommentUi,
+    usernameToUserId: Map<String, String>,
     onToggleLike: () -> Unit,
     onReply: () -> Unit,
     onDelete: () -> Unit,
     onToggleReplies: () -> Unit,
     onOpenProfile: () -> Unit,
+    onOpenMentionProfile: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(modifier = modifier) {
@@ -162,9 +263,10 @@ fun CommentCard(
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.clickable(onClick = onOpenProfile)
             )
-            Text(
-                text = comment.body,
-                style = MaterialTheme.typography.bodyMedium
+            CommentBodyText(
+                body = comment.body,
+                usernameToUserId = usernameToUserId,
+                onOpenMentionProfile = onOpenMentionProfile
             )
             Text(
                 text = comment.createdAt?.substringBefore("T") ?: "-",
@@ -202,4 +304,64 @@ fun CommentCard(
             }
         }
     }
+}
+
+@Composable
+private fun CommentBodyText(
+    body: String,
+    usernameToUserId: Map<String, String>,
+    onOpenMentionProfile: (String) -> Unit
+) {
+    val mentionColor = MaterialTheme.colorScheme.primary
+    val annotated = remember(body, usernameToUserId, mentionColor) {
+        buildAnnotatedString {
+            var index = 0
+            while (index < body.length) {
+                val at = body.indexOf('@', index)
+                if (at < 0) {
+                    append(body.substring(index))
+                    break
+                }
+                if (at > index) {
+                    append(body.substring(index, at))
+                }
+                var end = at + 1
+                while (end < body.length) {
+                    val ch = body[end]
+                    if (ch.isWhitespace()) break
+                    if (!ch.isLetterOrDigit() && ch != '_') break
+                    end++
+                }
+                if (end > at + 1) {
+                    val token = body.substring(at, end)
+                    val username = token.drop(1)
+                    val userId = usernameToUserId[username]
+                    if (userId != null) {
+                        pushStringAnnotation(tag = "mention", annotation = userId)
+                        withStyle(SpanStyle(color = mentionColor, fontWeight = FontWeight.SemiBold)) {
+                            append(token)
+                        }
+                        pop()
+                    } else {
+                        withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                            append(token)
+                        }
+                    }
+                    index = end
+                } else {
+                    append('@')
+                    index = at + 1
+                }
+            }
+        }
+    }
+    ClickableText(
+        text = annotated,
+        style = MaterialTheme.typography.bodyMedium,
+        onClick = { offset ->
+            annotated.getStringAnnotations(tag = "mention", start = offset, end = offset)
+                .firstOrNull()
+                ?.let { onOpenMentionProfile(it.item) }
+        }
+    )
 }

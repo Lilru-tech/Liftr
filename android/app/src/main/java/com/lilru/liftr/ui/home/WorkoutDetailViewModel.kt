@@ -215,7 +215,8 @@ private data class CommentInsert(
     @SerialName("workout_id") val workoutId: Int,
     @SerialName("user_id") val userId: String,
     val body: String,
-    @SerialName("parent_id") val parentId: Int? = null
+    @SerialName("parent_id") val parentId: Int? = null,
+    @SerialName("mentioned_user_ids") val mentionedUserIds: List<String> = emptyList()
 )
 
 data class WorkoutCommentUi(
@@ -245,6 +246,18 @@ private data class CommentLikeInsert(
     @SerialName("user_id") val userId: String
 )
 
+@Serializable
+private data class FolloweeEdgeRow(
+    @SerialName("followee_id") val followeeId: String
+)
+
+@Serializable
+private data class FolloweeProfileRow(
+    @SerialName("user_id") val userId: String,
+    val username: String? = null,
+    @SerialName("avatar_url") val avatarUrl: String? = null
+)
+
 data class WorkoutDetailUiState(
     val loading: Boolean = true,
     val error: String? = null,
@@ -253,6 +266,7 @@ data class WorkoutDetailUiState(
     val totalScore: Double? = null,
     val meUserId: String? = null,
     val likeCount: Int = 0,
+    val commentCount: Int = 0,
     val isLikedByMe: Boolean = false,
     val participants: List<ProfileLite> = emptyList(),
     val comments: List<WorkoutCommentUi> = emptyList(),
@@ -269,6 +283,7 @@ data class WorkoutDetailUiState(
     val likersLoading: Boolean = false,
     val commentsCanLoadMore: Boolean = false,
     val commentsLoadingMore: Boolean = false,
+    val commentFollowees: List<CommentFollowee> = emptyList(),
     val comparePicker: ComparePickerState = ComparePickerState(),
     val compareReady: Boolean = false,
     val compareCandidateId: Int? = null,
@@ -473,6 +488,7 @@ class WorkoutDetailViewModel(
                         workoutOwnerUserId = workout.userId
                     )
                 }.getOrDefault(emptyList<WorkoutCommentUi>() to false)
+                val commentCount = runCatching { loadWorkoutCommentCount() }.getOrDefault(0)
 
                 val sportSess: SportSessionDetail? =
                     if (workout.kind?.lowercase() == "sport") {
@@ -532,6 +548,7 @@ class WorkoutDetailViewModel(
                     totalScore = totalScore,
                     meUserId = me,
                     likeCount = likes.size,
+                    commentCount = commentCount,
                     isLikedByMe = mine,
                     participants = participants,
                     comments = comments,
@@ -900,8 +917,10 @@ class WorkoutDetailViewModel(
         val capture = TerritoryCaptureClient.fetchCaptureEvent(supabase, workoutId)
         val territoryTakeovers = TerritoryCaptureClient.fetchWorkoutTakeovers(supabase, workoutId)
         val territoryPreviewRings =
-            if ((capture?.cellsGained ?: 0) > 0 && !w.routeGeojson.isNullOrBlank()) {
-                TerritoryCaptureClient.fetchTerritoryPreviewRings(supabase, w.routeGeojson)
+            if ((capture?.cellsGained ?: 0) > 0) {
+                TerritoryCaptureClient.fetchWorkoutTerritoryDisplay(supabase, workoutId)
+                    ?.let { display -> display.fillRings + display.sampleCellRings }
+                    .orEmpty()
             } else {
                 emptyList()
             }
@@ -1284,7 +1303,51 @@ class WorkoutDetailViewModel(
         HomeFeedSync.notifyWorkoutChanged(workoutId)
     }
 
-    fun sendComment(body: String, parentId: Int? = null, onSent: () -> Unit = {}) {
+    fun loadCommentFolloweesIfNeeded() {
+        if (_uiState.value.commentFollowees.isNotEmpty()) return
+        viewModelScope.launch {
+            val me = supabase.auth.currentUserOrNull()?.id ?: return@launch
+            runCatching {
+                val edges = supabase
+                    .from(BackendContracts.Tables.FOLLOWS)
+                    .select(columns = Columns.raw("followee_id")) {
+                        filter { eq("follower_id", me) }
+                        limit(1000)
+                    }
+                    .decodeList<FolloweeEdgeRow>()
+                val ids = edges.map { it.followeeId }.distinct()
+                if (ids.isEmpty()) {
+                    _uiState.value = _uiState.value.copy(commentFollowees = emptyList())
+                    return@runCatching
+                }
+                val profiles = supabase
+                    .from(BackendContracts.Tables.PROFILES)
+                    .select(columns = Columns.raw("user_id, username, avatar_url")) {
+                        filter { isIn("user_id", ids) }
+                        limit(1000)
+                    }
+                    .decodeList<FolloweeProfileRow>()
+                val followees = profiles
+                    .filter { !it.username.isNullOrBlank() }
+                    .map {
+                        CommentFollowee(
+                            userId = it.userId,
+                            username = it.username!!.trim(),
+                            avatarUrl = it.avatarUrl
+                        )
+                    }
+                    .sortedBy { it.username.lowercase() }
+                _uiState.value = _uiState.value.copy(commentFollowees = followees)
+            }
+        }
+    }
+
+    fun sendComment(
+        body: String,
+        parentId: Int? = null,
+        mentionedUserIds: List<String> = emptyList(),
+        onSent: () -> Unit = {}
+    ) {
         val trimmed = body.trim()
         if (trimmed.isEmpty() || _uiState.value.commentBusy) return
         viewModelScope.launch {
@@ -1296,7 +1359,8 @@ class WorkoutDetailViewModel(
                         workoutId = workoutId,
                         userId = me,
                         body = trimmed,
-                        parentId = parentId
+                        parentId = parentId,
+                        mentionedUserIds = mentionedUserIds
                     )
                 ) { }
                 val (comments, canMore) = loadFirstPageOfRootComments(
@@ -1305,10 +1369,12 @@ class WorkoutDetailViewModel(
                 )
                 comments to canMore
             }.onSuccess { (comments, canMore) ->
+                val count = runCatching { loadWorkoutCommentCount() }.getOrDefault(_uiState.value.commentCount)
                 _uiState.value = _uiState.value.copy(
                     commentBusy = false,
                     comments = comments,
-                    commentsCanLoadMore = canMore
+                    commentsCanLoadMore = canMore,
+                    commentCount = count
                 )
                 onSent()
             }.onFailure { e ->
@@ -1463,10 +1529,12 @@ class WorkoutDetailViewModel(
                 )
                 comments to canMore
             }.onSuccess { (comments, canMore) ->
+                val count = runCatching { loadWorkoutCommentCount() }.getOrDefault(_uiState.value.commentCount)
                 _uiState.value = _uiState.value.copy(
                     commentBusy = false,
                     comments = comments,
-                    commentsCanLoadMore = canMore
+                    commentsCanLoadMore = canMore,
+                    commentCount = count
                 )
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
@@ -1475,6 +1543,23 @@ class WorkoutDetailViewModel(
                 )
             }
         }
+    }
+
+    @Serializable
+    private data class CommentIdRow(val id: Int)
+
+    private suspend fun loadWorkoutCommentCount(): Int {
+        val rows = supabase
+            .from(BackendContracts.Tables.WORKOUT_COMMENTS)
+            .select(columns = Columns.raw("id")) {
+                filter {
+                    eq("workout_id", workoutId)
+                    filter("deleted_at", FilterOperator.IS, null)
+                }
+                limit(10_000)
+            }
+            .let { decodeFlexibleList<CommentIdRow>(it.data) }
+        return rows.size
     }
 
     private suspend fun loadFirstPageOfRootComments(

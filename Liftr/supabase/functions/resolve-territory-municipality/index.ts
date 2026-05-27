@@ -2,6 +2,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
 const USER_AGENT = "Liftr/1.0 (territory-municipality-resolve)";
+const MIN_MUNICIPALITY_AREA_M2 = 5_000_000;
+const REVERSE_ZOOM_SUBURB = 14;
+const REVERSE_ZOOM_CITY = 10;
 
 type QueueRow = {
   bucket_lat: number;
@@ -11,7 +14,7 @@ type QueueRow = {
   attempts: number;
 };
 
-type NominatimReverse = {
+type NominatimPlace = {
   place_id?: number;
   osm_type?: string;
   osm_id?: number;
@@ -21,6 +24,8 @@ type NominatimReverse = {
   boundingbox?: string[];
   geojson?: { type?: string; coordinates?: unknown };
   address?: Record<string, string | undefined>;
+  type?: string;
+  category?: string;
 };
 
 type IngestRequest = {
@@ -28,6 +33,15 @@ type IngestRequest = {
   lon: number;
   bucket_lat?: number;
   bucket_lon?: number;
+};
+
+type MunicipalityResolution = {
+  payload: NominatimPlace;
+  cityKey: string;
+  label: string;
+  countryCode: string;
+  adminLevel: number | null;
+  geocodeSource: string;
 };
 
 function sleep(ms: number) {
@@ -62,7 +76,7 @@ function municipalityLabel(address: Record<string, string | undefined> | undefin
   return fallback;
 }
 
-function cityKeyFromReverse(payload: NominatimReverse, label: string, countryCode: string) {
+function cityKeyFromPlace(payload: NominatimPlace, label: string, countryCode: string) {
   if (payload.osm_type && payload.osm_id) {
     return `osm:${payload.osm_type}:${payload.osm_id}`;
   }
@@ -71,7 +85,7 @@ function cityKeyFromReverse(payload: NominatimReverse, label: string, countryCod
   return `${country}:${slug}`;
 }
 
-function bboxFromReverse(payload: NominatimReverse) {
+function bboxFromPlace(payload: NominatimPlace) {
   const bbox = payload.boundingbox;
   if (!bbox || bbox.length < 4) {
     return null;
@@ -86,29 +100,101 @@ function bboxFromReverse(payload: NominatimReverse) {
   return { south, north, west, east };
 }
 
-async function reverseGeocode(lat: number, lon: number, includePolygon: boolean): Promise<NominatimReverse> {
-  const url = new URL(`${NOMINATIM_BASE}/reverse`);
-  url.searchParams.set("format", "jsonv2");
-  url.searchParams.set("lat", String(lat));
-  url.searchParams.set("lon", String(lon));
-  url.searchParams.set("zoom", "14");
-  url.searchParams.set("addressdetails", "1");
-  if (includePolygon) {
-    url.searchParams.set("polygon_geojson", "1");
+function approximateBoundaryAreaM2(payload: NominatimPlace) {
+  const bbox = bboxFromPlace(payload);
+  if (!bbox) {
+    return 0;
   }
+  const latMid = (bbox.south + bbox.north) / 2;
+  const latM = 111_320;
+  const lonM = 111_320 * Math.cos((latMid * Math.PI) / 180);
+  return Math.abs(bbox.north - bbox.south) * latM * Math.abs(bbox.east - bbox.west) * lonM;
+}
 
+function isAdministrativeBoundary(payload: NominatimPlace) {
+  return payload.category === "boundary" && payload.type === "administrative";
+}
+
+async function nominatimFetch(path: string, params: Record<string, string>) {
+  const url = new URL(`${NOMINATIM_BASE}${path}`);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
   const response = await fetch(url.toString(), {
     headers: {
       "User-Agent": USER_AGENT,
       Accept: "application/json",
     },
   });
-
   if (!response.ok) {
     throw new Error(`nominatim_http_${response.status}`);
   }
+  return await response.json();
+}
 
-  return await response.json() as NominatimReverse;
+async function reverseGeocode(
+  lat: number,
+  lon: number,
+  includePolygon: boolean,
+  zoom = REVERSE_ZOOM_SUBURB,
+): Promise<NominatimPlace> {
+  const params: Record<string, string> = {
+    format: "jsonv2",
+    lat: String(lat),
+    lon: String(lon),
+    zoom: String(zoom),
+    addressdetails: "1",
+  };
+  if (includePolygon) {
+    params.polygon_geojson = "1";
+  }
+  return await nominatimFetch("/reverse", params) as NominatimPlace;
+}
+
+async function lookupOsmRelation(osmId: number): Promise<NominatimPlace | null> {
+  const rows = await nominatimFetch("/lookup", {
+    format: "jsonv2",
+    osm_ids: `R${osmId}`,
+    polygon_geojson: "1",
+  }) as NominatimPlace[];
+  return rows[0] ?? null;
+}
+
+function countryNameForSearch(
+  countryCode: string,
+  address: Record<string, string | undefined> | undefined,
+) {
+  const fromAddress = address?.country?.trim();
+  if (fromAddress) {
+    return fromAddress;
+  }
+  if (countryCode === "es") {
+    return "Spain";
+  }
+  return countryCode.toUpperCase();
+}
+
+async function searchMunicipality(
+  label: string,
+  countryCode: string,
+  address?: Record<string, string | undefined>,
+): Promise<NominatimPlace | null> {
+  const countryName = countryNameForSearch(countryCode, address);
+  const query = countryName.length > 0 ? `${label}, ${countryName}` : label;
+  const rows = await nominatimFetch("/search", {
+    format: "jsonv2",
+    q: query,
+    featuretype: "city",
+    polygon_geojson: "1",
+    limit: "5",
+    addressdetails: "1",
+  }) as NominatimPlace[];
+
+  const ranked = rows
+    .filter((row) => row.osm_type === "relation" && row.osm_id)
+    .sort((left, right) => approximateBoundaryAreaM2(right) - approximateBoundaryAreaM2(left));
+
+  return ranked[0] ?? null;
 }
 
 function municipalityTownName(address: Record<string, string | undefined> | undefined) {
@@ -126,58 +212,153 @@ function municipalityTownName(address: Record<string, string | undefined> | unde
   return null;
 }
 
-async function resolveCityKey(
+async function findExistingMunicipalityCityKey(
   admin: ReturnType<typeof createClient>,
-  payload: NominatimReverse,
   label: string,
   countryCode: string,
 ) {
-  if (payload.osm_type === "relation" && payload.osm_id) {
-    return `osm:${payload.osm_type}:${payload.osm_id}`;
+  let query = admin
+    .from("territory_municipalities")
+    .select("city_key, total_capture_cells")
+    .ilike("display_name", label);
+  if (countryCode) {
+    query = query.eq("country_code", countryCode);
+  }
+  const { data, error } = await query
+    .order("total_capture_cells", { ascending: false })
+    .limit(1);
+  if (error || !data?.[0]?.city_key) {
+    return null;
+  }
+  return data[0].city_key as string;
+}
+
+async function resolveCityKey(
+  admin: ReturnType<typeof createClient>,
+  payload: NominatimPlace,
+  label: string,
+  countryCode: string,
+) {
+  const payloadKey = cityKeyFromPlace(payload, label, countryCode);
+  if (approximateBoundaryAreaM2(payload) >= MIN_MUNICIPALITY_AREA_M2) {
+    return payloadKey;
   }
 
-  const townName = municipalityTownName(payload.address);
-  if (townName) {
-    const { data, error } = await admin
-      .from("territory_municipalities")
-      .select("city_key")
-      .ilike("display_name", townName)
-      .limit(1);
-    if (!error && data?.[0]?.city_key) {
-      return data[0].city_key as string;
+  const existing = await findExistingMunicipalityCityKey(admin, label, countryCode);
+  if (existing) {
+    return existing;
+  }
+
+  return payloadKey;
+}
+
+async function upgradeToMunicipalityBoundary(
+  admin: ReturnType<typeof createClient>,
+  payload: NominatimPlace,
+  label: string,
+  countryCode: string,
+): Promise<NominatimPlace> {
+  const bboxArea = approximateBoundaryAreaM2(payload);
+  const townName = municipalityTownName(payload.address) ?? label;
+  const shouldUpgrade = bboxArea < MIN_MUNICIPALITY_AREA_M2 || !isAdministrativeBoundary(payload);
+
+  if (!shouldUpgrade) {
+    return payload;
+  }
+
+  const forward = await searchMunicipality(townName, countryCode, payload.address);
+  if (forward && approximateBoundaryAreaM2(forward) >= MIN_MUNICIPALITY_AREA_M2) {
+    return forward;
+  }
+
+  if (bboxArea < MIN_MUNICIPALITY_AREA_M2) {
+    const cityReverse = await reverseGeocode(
+      Number(payload.lat ?? 0),
+      Number(payload.lon ?? 0),
+      true,
+      REVERSE_ZOOM_CITY,
+    );
+    if (approximateBoundaryAreaM2(cityReverse) > bboxArea) {
+      return cityReverse;
     }
   }
 
-  return cityKeyFromReverse(payload, label, countryCode);
+  return payload;
 }
 
-async function ingestMunicipality(
+async function resolveMunicipality(
   admin: ReturnType<typeof createClient>,
-  request: IngestRequest,
-) {
-  const { lat, lon, bucket_lat: bucketLat, bucket_lon: bucketLon } = request;
-  let payload: NominatimReverse;
+  lat: number,
+  lon: number,
+): Promise<MunicipalityResolution> {
+  let payload: NominatimPlace;
   try {
-    payload = await reverseGeocode(lat, lon, true);
+    payload = await reverseGeocode(lat, lon, true, REVERSE_ZOOM_SUBURB);
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown";
     console.error("[resolve-territory-municipality] nominatim polygon failed", { lat, lon, error: message });
-    payload = await reverseGeocode(lat, lon, false);
+    payload = await reverseGeocode(lat, lon, false, REVERSE_ZOOM_SUBURB);
   }
 
   const label = municipalityLabel(payload.address, payload.display_name ?? "Unknown city");
   const countryCode = (payload.address?.country_code ?? "").toLowerCase();
-  const cityKey = await resolveCityKey(admin, payload, label, countryCode);
-  const bbox = bboxFromReverse(payload);
+  payload = await upgradeToMunicipalityBoundary(admin, payload, label, countryCode);
+
+  const resolvedLabel = municipalityLabel(payload.address, payload.display_name ?? label);
+  const cityKey = await resolveCityKey(admin, payload, resolvedLabel, countryCode);
+
+  return {
+    payload,
+    cityKey,
+    label: resolvedLabel,
+    countryCode,
+    adminLevel: null,
+    geocodeSource: "nominatim",
+  };
+}
+
+async function resolveMunicipalityFromOsmRelation(
+  admin: ReturnType<typeof createClient>,
+  osmRelationId: number,
+): Promise<MunicipalityResolution> {
+  const payload = await lookupOsmRelation(osmRelationId);
+  if (!payload) {
+    throw new Error("osm_relation_not_found");
+  }
+
+  const label = municipalityLabel(payload.address, payload.display_name ?? "Unknown city");
+  const countryCode = (payload.address?.country_code ?? "es").toLowerCase();
+  const upgraded = await upgradeToMunicipalityBoundary(admin, payload, label, countryCode);
+  const resolvedLabel = municipalityLabel(upgraded.address, upgraded.display_name ?? label);
+  const cityKey = `osm:relation:${osmRelationId}`;
+
+  return {
+    payload: upgraded,
+    cityKey,
+    label: resolvedLabel,
+    countryCode,
+    adminLevel: null,
+    geocodeSource: "nominatim_lookup",
+  };
+}
+
+async function ingestResolvedMunicipality(
+  admin: ReturnType<typeof createClient>,
+  resolution: MunicipalityResolution,
+  request: IngestRequest,
+) {
+  const { lat, lon, bucket_lat: bucketLat, bucket_lon: bucketLon } = request;
+  const payload = resolution.payload;
+  const bbox = bboxFromPlace(payload);
   const centerLat = Number(payload.lat ?? lat);
   const centerLon = Number(payload.lon ?? lon);
   const boundaryGeojson = payload.geojson ? JSON.stringify(payload.geojson) : null;
 
-  const { data, error } = await admin.rpc("ingest_territory_municipality_v1", {
-    p_city_key: cityKey,
-    p_display_name: label,
-    p_country_code: countryCode,
-    p_admin_level: null,
+  const ingestArgs = {
+    p_city_key: resolution.cityKey,
+    p_display_name: resolution.label,
+    p_country_code: resolution.countryCode,
+    p_admin_level: resolution.adminLevel,
     p_boundary_geojson: boundaryGeojson,
     p_min_lat: bbox?.south ?? centerLat - 0.15,
     p_min_lon: bbox?.west ?? centerLon - 0.15,
@@ -185,36 +366,25 @@ async function ingestMunicipality(
     p_max_lon: bbox?.east ?? centerLon + 0.15,
     p_center_lat: centerLat,
     p_center_lon: centerLon,
-    p_geocode_source: "nominatim",
+    p_geocode_source: resolution.geocodeSource,
     p_display_name_override: null,
     p_bucket_lat: bucketLat ?? null,
     p_bucket_lon: bucketLon ?? null,
-  });
+  };
+
+  const { data, error } = await admin.rpc("ingest_territory_municipality_v1", ingestArgs);
 
   if (error) {
     if (boundaryGeojson) {
       console.error("[resolve-territory-municipality] ingest polygon failed, retrying bbox", {
         lat,
         lon,
-        cityKey,
+        cityKey: resolution.cityKey,
         error: error.message,
       });
       const { data: retryData, error: retryError } = await admin.rpc("ingest_territory_municipality_v1", {
-        p_city_key: cityKey,
-        p_display_name: label,
-        p_country_code: countryCode,
-        p_admin_level: null,
+        ...ingestArgs,
         p_boundary_geojson: null,
-        p_min_lat: bbox?.south ?? centerLat - 0.15,
-        p_min_lon: bbox?.west ?? centerLon - 0.15,
-        p_max_lat: bbox?.north ?? centerLat + 0.15,
-        p_max_lon: bbox?.east ?? centerLon + 0.15,
-        p_center_lat: centerLat,
-        p_center_lon: centerLon,
-        p_geocode_source: "nominatim",
-        p_display_name_override: null,
-        p_bucket_lat: bucketLat ?? null,
-        p_bucket_lon: bucketLon ?? null,
       });
       if (retryError) {
         throw new Error(retryError.message);
@@ -224,6 +394,29 @@ async function ingestMunicipality(
     throw new Error(error.message);
   }
 
+  return data;
+}
+
+async function ingestMunicipality(
+  admin: ReturnType<typeof createClient>,
+  request: IngestRequest,
+) {
+  const resolution = await resolveMunicipality(admin, request.lat, request.lon);
+  return ingestResolvedMunicipality(admin, resolution, request);
+}
+
+async function mergeTerritoryMunicipalityKeys(
+  admin: ReturnType<typeof createClient>,
+  fromCityKey: string,
+  toCityKey: string,
+) {
+  const { data, error } = await admin.rpc("merge_territory_municipality_keys_v1", {
+    p_from_city_key: fromCityKey,
+    p_to_city_key: toCityKey,
+  });
+  if (error) {
+    throw new Error(error.message);
+  }
   return data;
 }
 
@@ -286,7 +479,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const processed: unknown[] = [];
     const errors: Array<{ bucket_lat?: number; bucket_lon?: number; lat?: number; lon?: number; error: string }> = [];
-    let assignmentBackfill: { updated?: number; has_more?: boolean } | null = null;
+    let assignmentBackfill: { ok?: boolean; updated?: number; has_more?: boolean } | null = null;
     const isBulkOperator = maintenanceAuthorized || serviceAuthorized;
     const requestedItems = Number(body.max_items ?? body.limit ?? 2);
     const maxItems = isBulkOperator
@@ -312,12 +505,38 @@ Deno.serve(async (req) => {
           headers: { "Content-Type": "application/json" },
         });
       }
+      if (typeof body.osm_relation_id === "number" || typeof body.merge_from_city_key === "string") {
+        return new Response(JSON.stringify({ ok: false, error: "forbidden_maintenance_repair" }), {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
     }
 
     const processQueue = body.process_queue !== false;
     const runAssignmentBackfillFlag = isBulkOperator && body.run_assignment_backfill === true;
 
-    if (isBulkOperator && typeof body.lat === "number" && typeof body.lon === "number") {
+    if (isBulkOperator && typeof body.osm_relation_id === "number") {
+      try {
+        const resolution = await resolveMunicipalityFromOsmRelation(admin, body.osm_relation_id);
+        const result = await ingestResolvedMunicipality(admin, resolution, {
+          lat: Number(resolution.payload.lat ?? 41.39),
+          lon: Number(resolution.payload.lon ?? 2.17),
+        });
+        processed.push(result);
+        if (typeof body.merge_from_city_key === "string" && body.merge_from_city_key.length > 0) {
+          const mergeResult = await mergeTerritoryMunicipalityKeys(
+            admin,
+            body.merge_from_city_key,
+            resolution.cityKey,
+          );
+          processed.push(mergeResult);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "unknown";
+        errors.push({ error: message });
+      }
+    } else if (isBulkOperator && typeof body.lat === "number" && typeof body.lon === "number") {
       try {
         const result = await ingestMunicipality(admin, {
           lat: body.lat,

@@ -1,5 +1,6 @@
 import Testing
 @testable import Liftr
+import CoreGraphics
 
 struct HomeFloatingDockTests {
 

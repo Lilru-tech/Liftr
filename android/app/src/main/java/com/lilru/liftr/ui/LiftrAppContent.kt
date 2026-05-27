@@ -32,6 +32,7 @@ import com.lilru.liftr.R
 import com.lilru.liftr.auth.AuthViewModel
 import com.lilru.liftr.auth.AuthViewModelFactory
 import com.lilru.liftr.auth.PasswordRecoveryGate
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.ui.auth.ResetPasswordScreen
 import com.lilru.liftr.ui.main.MainShellScreen
 import io.github.jan.supabase.auth.status.SessionStatus
@@ -69,6 +70,7 @@ fun LiftrAppContent(
         is SessionStatus.Authenticated -> {
             LaunchedEffect(supabase) {
                 withContext(Dispatchers.IO) {
+                    runCatching { PremiumStatusStore.refresh(supabase) }
                     runCatching {
                         val t = Tasks.await(FirebaseMessaging.getInstance().token)
                         FcmTokenUploader.updateFcmToken(supabase, t)
@@ -99,6 +101,9 @@ fun LiftrAppContent(
         }
         is SessionStatus.NotAuthenticated,
         is SessionStatus.RefreshFailure -> {
+            LaunchedEffect(Unit) {
+                PremiumStatusStore.clear()
+            }
             MainShellScreen(
                 supabase = supabase,
                 onSignOut = { },

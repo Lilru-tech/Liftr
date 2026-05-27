@@ -65,7 +65,7 @@ import com.google.android.gms.ads.AdSize
 import com.google.android.gms.ads.AdView
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
-import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
@@ -140,11 +140,7 @@ fun RankingTabScreen(
     } else {
         "ranking-tab-main"
     }
-    val rankingCtx = LocalContext.current
-    var isPremium by remember { mutableStateOf(LiftrPreferences.isPremium(rankingCtx)) }
-    LaunchedEffect(rankingCtx) {
-        isPremium = LiftrPreferences.isPremium(rankingCtx)
-    }
+    val isPremium by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
     val vm: RankingViewModel = viewModel(
         key = vmKey,
         factory = RankingViewModelFactory(supabase, rankingInitial)
