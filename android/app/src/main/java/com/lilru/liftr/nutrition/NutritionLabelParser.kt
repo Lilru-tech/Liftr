@@ -544,8 +544,9 @@ object NutritionLabelParser {
                 val folded = foldDiacritics(rawLine.lowercase())
                 if (!fatKeywords.any { folded.contains(foldDiacritics(it.lowercase())) }) continue
                 val grams = rowUnitNumberTokens(folded).filter { it.unit == "g" }.map { it.value }.filter { it > 0.0 && it <= 1.0 }
-                grams.minOrNull()?.let {
-                    out = out.copy(fat = it)
+                val min = grams.minOrNull()
+                if (min != null) {
+                    out = out.copy(fat = min)
                     break
                 }
             }
@@ -565,8 +566,9 @@ object NutritionLabelParser {
                     val folded = foldDiacritics(rawLine.lowercase())
                     if (!fatKeywords.any { folded.contains(foldDiacritics(it.lowercase())) }) continue
                     val grams = rowUnitNumberTokens(folded).filter { it.unit == "g" }.map { it.value }.filter { it > 0.0 && it < out.fat }
-                    grams.minOrNull()?.let {
-                        out = out.copy(saturatedFat = it)
+                    val min = grams.minOrNull()
+                    if (min != null) {
+                        out = out.copy(saturatedFat = min)
                         break
                     }
                 }
@@ -672,7 +674,7 @@ object NutritionLabelParser {
     }
 
     fun formatFieldValue(value: Double): String {
-        val rounded = (value * 10.0).round() / 10.0
+        val rounded = round(value * 10.0) / 10.0
         return if (rounded == rounded.toLong().toDouble()) {
             rounded.toLong().toString()
         } else {

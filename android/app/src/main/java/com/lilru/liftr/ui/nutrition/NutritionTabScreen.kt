@@ -8,9 +8,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
-import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -320,7 +321,8 @@ private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) 
     val hasSelection = ui.selectedIngredientId != null || ui.selectedRecipeId != null
     val selectedIngredient = ui.ingredientResults.find { it.id == ui.selectedIngredientId }
     val selectedRecipe = ui.recipeResults.find { it.id == ui.selectedRecipeId }
-    val panelTheme = remember { LiftrPreferences.backgroundTheme(LocalContext.current) }
+    val context = LocalContext.current
+    val panelTheme = remember(context) { LiftrPreferences.backgroundTheme(context) }
     val panelBottomPadding = if (hasSelection) 380.dp else 16.dp
 
     Box(Modifier.fillMaxSize()) {
@@ -761,6 +763,7 @@ private fun NutritionCreateIngredientSheet(
                     ) { Text(stringResource(R.string.nutrition_scan_source_gallery)) }
                 }
             },
+            confirmButton = {},
             dismissButton = {
                 TextButton(onClick = { showSourceChooser = false }) {
                     Text(stringResource(R.string.nutrition_scan_source_cancel))

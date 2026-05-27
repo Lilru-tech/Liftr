@@ -237,7 +237,6 @@ private data class SmartNutritionRecommendationWire(
 )
 
 @Serializable
-@Serializable
 private data class NutritionMonthBalanceWire(
     @SerialName("log_date") val logDate: String,
     @SerialName("meal_log_count") val mealLogCount: Int,
@@ -249,6 +248,7 @@ class NutritionViewModel(
 ) : ViewModel() {
     companion object {
         const val MAX_INSIGHTS_SPAN_DAYS = 70
+        private const val ingredientPageSize = 50
     }
 
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
@@ -1299,10 +1299,6 @@ class NutritionViewModel(
             page += 1
         }
         return merged.distinctBy { it.id }
-    }
-
-    companion object {
-        private const val ingredientPageSize = 50
     }
 
     private suspend fun fetchRecipes(

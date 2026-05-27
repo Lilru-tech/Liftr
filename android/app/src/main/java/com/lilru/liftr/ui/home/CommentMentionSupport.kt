@@ -57,7 +57,7 @@ object CommentMentionSupport {
     }
 
     fun mentionUsernamesInBody(body: String): List<String> =
-        mentionToken.findAll(body).map { it.groupValues[1] }.distinct()
+        mentionToken.findAll(body).map { it.groupValues[1] }.distinct().toList()
 
     fun usernameToUserIdMap(
         followees: List<CommentFollowee>,

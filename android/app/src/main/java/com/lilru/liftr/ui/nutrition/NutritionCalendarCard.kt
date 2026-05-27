@@ -36,10 +36,10 @@ import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
 
-@Composable
 private val CalendarBudgetUnderColor = Color(0xFFFF9800)
 private val CalendarBudgetOverColor = Color(0xFFE53935)
 
+@Composable
 fun NutritionCalendarCard(
     month: YearMonth,
     selectedDate: LocalDate,

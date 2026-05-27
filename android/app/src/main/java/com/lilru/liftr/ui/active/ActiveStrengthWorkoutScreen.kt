@@ -217,7 +217,7 @@ fun ActiveStrengthWorkoutScreen(
     val connectionUnstableMsg = stringResource(R.string.active_strength_connection_unstable)
     LaunchedEffect(ui.toastMessage) {
         val msg = ui.toastMessage ?: return@LaunchedEffect
-        AppSnackbar.show(ctx, msg)
+        AppSnackbar.showInfo(msg)
         vm.clearToast()
     }
     LaunchedEffect(
@@ -1959,7 +1959,7 @@ private fun ActiveStrengthExerciseSetupDialog(
                         Text("Set ${idx + 1}", style = MaterialTheme.typography.labelMedium)
                         OutlinedTextField(
                             value = set.repsText,
-                            onValueChange = { onUpdateSet(draft.id, set.id, repsText = it, weightText = null, restText = null, rpeText = null) },
+                            onValueChange = { onUpdateSet(draft.id, set.id, it, null, null, null) },
                             label = { Text(stringResource(R.string.active_strength_field_reps)) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -1967,7 +1967,7 @@ private fun ActiveStrengthExerciseSetupDialog(
                         )
                         OutlinedTextField(
                             value = set.weightText,
-                            onValueChange = { onUpdateSet(draft.id, set.id, repsText = null, weightText = it, restText = null, rpeText = null) },
+                            onValueChange = { onUpdateSet(draft.id, set.id, null, it, null, null) },
                             label = { Text(stringResource(R.string.active_strength_field_weight_kg)) },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
@@ -1975,7 +1975,7 @@ private fun ActiveStrengthExerciseSetupDialog(
                         )
                         OutlinedTextField(
                             value = set.restText,
-                            onValueChange = { onUpdateSet(draft.id, set.id, repsText = null, weightText = null, restText = it, rpeText = null) },
+                            onValueChange = { onUpdateSet(draft.id, set.id, null, null, it, null) },
                             label = { Text("Rest (s)") },
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),

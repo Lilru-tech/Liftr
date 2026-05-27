@@ -109,7 +109,7 @@ fun WorkoutDetailScreen(
     val scope = rememberCoroutineScope()
     var duplicateBusy by rememberSaveable(workoutId) { mutableStateOf(false) }
     var duplicateError by rememberSaveable(workoutId) { mutableStateOf<String?>(null) }
-    var commentDraft by rememberSaveable(workoutId, saver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
+    var commentDraft by rememberSaveable(workoutId, stateSaver = androidx.compose.ui.text.input.TextFieldValue.Saver) {
         mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
     }
     var trackedMentions by remember(workoutId) { mutableStateOf(listOf<TrackedMention>()) }

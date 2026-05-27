@@ -394,7 +394,7 @@ fun TerritoryMapScreen(
                     expansionError = null
                     val result = TerritoryCaptureClient.fetchRecommendedExpansionCells(
                         supabase = supabase,
-                        userId = userId,
+                        userId = UUID.fromString(userId),
                         lat = target.latitude,
                         lon = target.longitude,
                         radiusMeters = radiusMeters

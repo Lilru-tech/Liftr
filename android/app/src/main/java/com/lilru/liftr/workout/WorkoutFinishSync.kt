@@ -48,7 +48,7 @@ object WorkoutFinishSync {
     private val json = Json { ignoreUnknownKeys = true }
     private val pendingListSerializer = ListSerializer(PendingStrengthFinish.serializer())
 
-    fun enqueue(
+    internal fun enqueue(
         context: Context,
         workoutId: Int,
         endedAtIso: String,
