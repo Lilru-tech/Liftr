@@ -325,6 +325,7 @@ struct ActiveStrengthWorkoutView: View {
     @State private var applyEditToRemainingSets = false
     @State private var editRepsText: String = ""
     @State private var showFinishEarlyConfirm = false
+    @State private var showFinishConfirm = false
     @State private var showDualIncompleteFinishConfirm = false
     @State private var editWeightText: String = ""
     @State private var editRestText: String = ""
@@ -707,6 +708,7 @@ struct ActiveStrengthWorkoutView: View {
                         image: Self.loadElborblaCelebrationImage(),
                         onContinue: {
                             showElborblaCelebration = false
+                            resetActiveWorkoutSessionState()
                             dismiss()
                         }
                     )
@@ -754,6 +756,14 @@ struct ActiveStrengthWorkoutView: View {
                 }
             } message: {
                 Text(dualIncompleteFinishMessage())
+            }
+            .alert("Finish workout?", isPresented: $showFinishConfirm) {
+                Button("Finish", role: .destructive) {
+                    Task { await saveAndFinishWorkout() }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(strengthFinishConfirmationMessage())
             }
         }
         .onDisappear {
@@ -2064,7 +2074,12 @@ struct ActiveStrengthWorkoutView: View {
                     if isDualMode && !bothLanesFullyComplete() {
                         showDualIncompleteFinishConfirm = true
                     } else {
-                        Task { await saveAndFinishWorkout() }
+                        let incomplete = aggregatedStrengthFinishIncompleteCounts()
+                        if incomplete.exercises > 0, incomplete.sets > 0 {
+                            showFinishConfirm = true
+                        } else {
+                            Task { await saveAndFinishWorkout() }
+                        }
                     }
                 } label: {
                     HStack(spacing: 8) {
@@ -2635,15 +2650,89 @@ struct ActiveStrengthWorkoutView: View {
         if !guestLaneFullyComplete() { s += "· Partner 1\n" }
         if !guest2LaneFullyComplete() { s += "· Partner 2\n" }
         s += "\nThis will save, publish, and close all workouts on this phone. Continue?"
+        let incomplete = aggregatedStrengthFinishIncompleteCounts()
+        if incomplete.exercises > 0, incomplete.sets > 0 {
+            s = StrengthFinishConfirmationCopy.incompleteWarning(
+                exercises: incomplete.exercises,
+                sets: incomplete.sets
+            ) + "\n\n" + s
+        }
         return s
     }
 
-    private func earlyFinishAlertMessage() -> String {
-        let base = "You haven't completed all planned sets. The workout will be saved with only the sets you actually performed. If you finish now, it will be published automatically."
-        if isDualMode, let extra = dualPartnerProgressNote(), !extra.isEmpty {
-            return base + "\n\n" + extra
+    private func strengthFinishIncompleteCounts(
+        exercises: [ExerciseRow],
+        lane: StrengthLaneKind
+    ) -> StrengthFinishIncompleteCounts {
+        StrengthFinishIncompleteCounting.counts(
+            exercises: exercises,
+            totalSets: { setsFor($0, lane: lane).count },
+            completedSetIndex: { effectiveSetIndex(for: $0, lane: lane) }
+        )
+    }
+
+    private func aggregatedStrengthFinishIncompleteCounts() -> StrengthFinishIncompleteCounts {
+        var parts: [StrengthFinishIncompleteCounts] = [
+            strengthFinishIncompleteCounts(exercises: orderedExercises, lane: .host)
+        ]
+        if dualGuestWorkoutId != nil {
+            parts.append(strengthFinishIncompleteCounts(exercises: orderedGuestExercises, lane: .guest))
         }
-        return base
+        if dualGuest2WorkoutId != nil {
+            parts.append(strengthFinishIncompleteCounts(exercises: orderedGuest2Exercises, lane: .guest2))
+        }
+        return StrengthFinishIncompleteCounts.aggregate(parts)
+    }
+
+    private func strengthFinishConfirmationMessage() -> String {
+        let incomplete = aggregatedStrengthFinishIncompleteCounts()
+        return StrengthFinishConfirmationCopy.message(
+            incomplete: incomplete,
+            standardBody: StrengthFinishConfirmationCopy.standardEarlyFinishBody,
+            dualPartnerNote: isDualMode ? dualPartnerProgressNote() : nil
+        )
+    }
+
+    private func earlyFinishAlertMessage() -> String {
+        strengthFinishConfirmationMessage()
+    }
+
+    @MainActor
+    private func resetActiveWorkoutSessionState() {
+        performedSetsByExercise = [:]
+        gPerformedSetsByExercise = [:]
+        g2PerformedSetsByExercise = [:]
+        currentSetIndex = 0
+        currentSetIndexByExercise = [:]
+        gCurrentSetIndex = 0
+        gCurrentSetIndexByExercise = [:]
+        g2CurrentSetIndex = 0
+        g2CurrentSetIndexByExercise = [:]
+        isResting = false
+        remainingRest = 0
+        restEndDate = nil
+        isRestingByExercise = [:]
+        remainingRestByExercise = [:]
+        restEndDateByExercise = [:]
+        restTotalPlannedByExercise = [:]
+        gIsResting = false
+        gRemainingRest = 0
+        gRestEndDate = nil
+        gIsRestingByExercise = [:]
+        gRemainingRestByExercise = [:]
+        gRestEndDateByExercise = [:]
+        gRestTotalPlannedByExercise = [:]
+        g2IsResting = false
+        g2RemainingRest = 0
+        g2RestEndDate = nil
+        g2IsRestingByExercise = [:]
+        g2RemainingRestByExercise = [:]
+        g2RestEndDateByExercise = [:]
+        g2RestTotalPlannedByExercise = [:]
+        isSaving = false
+        showFinishEarlyConfirm = false
+        showFinishConfirm = false
+        showDualIncompleteFinishConfirm = false
     }
 
     private func skipRest(for lane: StrengthLaneKind, exerciseId: Int) {
@@ -5789,6 +5878,7 @@ struct ActiveStrengthWorkoutView: View {
                         self.showElborblaCelebration = true
                     }
                 } else {
+                    self.resetActiveWorkoutSessionState()
                     dismiss()
                 }
             }
@@ -5819,6 +5909,7 @@ struct ActiveStrengthWorkoutView: View {
             NotificationCenter.default.post(name: .workoutDidChange, object: wid)
         }
         showToast(String(localized: "Workout saved on device — will sync when online"))
+        resetActiveWorkoutSessionState()
         dismiss()
     }
 

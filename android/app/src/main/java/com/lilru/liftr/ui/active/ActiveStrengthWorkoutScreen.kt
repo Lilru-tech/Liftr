@@ -1,6 +1,7 @@
 package com.lilru.liftr.ui.active
 
 import com.lilru.liftr.ui.add.StrengthRoutineOverwriteBottomSheet
+import com.lilru.liftr.workout.StrengthFinishConfirmationCopy
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -153,6 +155,37 @@ fun ActiveStrengthWorkoutScreen(
     val appCtx = ctx.applicationContext
     val isPremium by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
     var showNavHint by remember { mutableStateOf(true) }
+    var showFinishConfirm by remember { mutableStateOf(false) }
+    val finishConfirmMessage = remember(
+        ui.exercises,
+        ui.currentSetIndexByExerciseId,
+        ui.guestExercises,
+        ui.guest2Exercises,
+        ui.completedEntirely
+    ) {
+        StrengthFinishConfirmationCopy.message(
+            incomplete = vm.strengthFinishIncompleteCounts(),
+            standardBody = ctx.getString(R.string.active_strength_finish_standard_body)
+        )
+    }
+    val runFinishWorkout: () -> Unit = {
+        vm.finishWorkout { offlineQueued ->
+            if (offlineQueued) {
+                AppSnackbar.showSuccess(
+                    ctx.getString(R.string.active_workout_finish_saved_offline)
+                )
+            }
+            onClose()
+        }
+    }
+    val requestFinishWorkout: () -> Unit = {
+        val incomplete = vm.strengthFinishIncompleteCounts()
+        if (incomplete.exercises > 0 && incomplete.sets > 0) {
+            showFinishConfirm = true
+        } else {
+            runFinishWorkout()
+        }
+    }
     LaunchedEffect(Unit) {
         showNavHint = !LiftrPreferences.activeStrengthNavHintSeen(appCtx)
         vm.updateStartSyncStatus(WorkoutStartSync.status(workoutId))
@@ -1338,20 +1371,22 @@ fun ActiveStrengthWorkoutScreen(
 
                     if (isLastExercise) {
                         Button(
-                            onClick = {
-                                vm.finishWorkout { offlineQueued ->
-                                    if (offlineQueued) {
-                                        AppSnackbar.showSuccess(
-                                            ctx.getString(R.string.active_workout_finish_saved_offline)
-                                        )
-                                    }
-                                    onClose()
-                                }
-                            },
+                            onClick = requestFinishWorkout,
                             enabled = !ui.finishing,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp)
+                        ) {
+                            Text(if (ui.finishing) stringResource(R.string.active_strength_saving) else stringResource(R.string.active_strength_finish))
+                        }
+                    } else if (!ui.completedEntirely) {
+                        Button(
+                            onClick = requestFinishWorkout,
+                            enabled = !ui.finishing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF34C759))
                         ) {
                             Text(if (ui.finishing) stringResource(R.string.active_strength_saving) else stringResource(R.string.active_strength_finish))
                         }
@@ -1729,6 +1764,42 @@ fun ActiveStrengthWorkoutScreen(
             onRemoveSet = { vm.removeSetFromExerciseSetupDraft() },
             onUpdateSet = vm::updateExerciseSetupSet,
             onConfirm = { vm.saveConfiguredExercise(connectionUnstableMsg) }
+        )
+    }
+    if (showFinishConfirm) {
+        AlertDialog(
+            onDismissRequest = { if (!ui.finishing) showFinishConfirm = false },
+            title = {
+                Text(
+                    stringResource(
+                        if (ui.completedEntirely) {
+                            R.string.active_strength_finish_confirm_title
+                        } else {
+                            R.string.active_strength_finish_early_title
+                        }
+                    )
+                )
+            },
+            text = { Text(finishConfirmMessage) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showFinishConfirm = false
+                        runFinishWorkout()
+                    },
+                    enabled = !ui.finishing
+                ) {
+                    Text(stringResource(R.string.active_strength_finish))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showFinishConfirm = false },
+                    enabled = !ui.finishing
+                ) {
+                    Text(stringResource(R.string.home_guest_detail_cancel))
+                }
+            }
         )
     }
     ui.strengthRoutineOverwritePrompt?.let { prompt ->

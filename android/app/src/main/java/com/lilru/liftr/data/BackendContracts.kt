@@ -99,6 +99,7 @@ object BackendContracts {
         const val CREATE_STRENGTH_WORKOUT = "create_strength_workout"
         const val DELETE_MY_ACCOUNT = "delete_my_account"
         const val FETCH_DUAL_LINKED_STRENGTH_WORKOUT_DATA = "fetch_dual_linked_strength_workout_data"
+        const val FINISH_STRENGTH_WORKOUT_V1 = "finish_strength_workout_v1"
         const val GET_BEST_WORKOUTS_LEADERBOARD_V1 = "get_best_workouts_leaderboard_v1"
         const val GET_CALORIES_LEADERBOARD_V1 = "get_calories_leaderboard_v1"
         const val GET_CARDIO_DISTANCE_LEADERBOARD_V1 = "get_cardio_distance_leaderboard_v1"

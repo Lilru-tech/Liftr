@@ -137,6 +137,10 @@
     <string name="active_strength_back_to_current_set">Volver a la serie actual</string>
     <string name="active_strength_viewing_set">Viendo serie %1$d</string>
     <string name="active_strength_rest_skip">Descanso %1$ds · Saltar</string>
+    <string name="active_strength_finish_confirm_title">¿Finalizar entrenamiento?</string>
+    <string name="active_strength_finish_early_title">¿Finalizar entrenamiento antes de tiempo?</string>
+    <string name="active_strength_finish_incomplete_warning">Tienes %1$d ejercicios y %2$d series sin terminar. Si finalizas el entrenamiento ahora, se eliminarán automáticamente de tu historial.</string>
+    <string name="active_strength_finish_standard_body">No has completado todas las series planificadas. El entrenamiento se guardará solo con las series que hayas hecho. Si finalizas ahora, se publicará automáticamente.</string>
     <string name="compare_average_mine">Mi media</string>
     <string name="compare_average_global">Media global</string>
     <string name="compare_average_subtitle">%1$s · últimos %2$d</string>

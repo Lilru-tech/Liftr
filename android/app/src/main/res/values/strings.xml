@@ -1166,6 +1166,10 @@
     <string name="active_strength_next_exercise">Next exercise</string>
     <string name="active_strength_rest_skip">Rest %1$ds · Skip</string>
     <string name="active_strength_finish">Finish workout</string>
+    <string name="active_strength_finish_confirm_title">Finish workout?</string>
+    <string name="active_strength_finish_early_title">Finish workout early?</string>
+    <string name="active_strength_finish_incomplete_warning">You have %1$d exercises and %2$d sets left unfinished. If you finish now, they will be removed from your history automatically.</string>
+    <string name="active_strength_finish_standard_body">You haven\'t completed all planned sets. The workout will be saved with only the sets you actually performed. If you finish now, it will be published automatically.</string>
     <string name="active_strength_saving">Saving…</string>
     <string name="elborbla_finish_title">¡Entreno terminado!</string>
     <string name="elborbla_finish_continue">Continuar</string>

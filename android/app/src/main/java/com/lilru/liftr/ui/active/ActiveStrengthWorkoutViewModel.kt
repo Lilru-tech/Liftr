@@ -8,7 +8,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.LiftrSupabase
-import com.lilru.liftr.workout.StrengthFinishPersistence
+import com.lilru.liftr.workout.StrengthFinishIncompleteCounting
+import com.lilru.liftr.workout.StrengthFinishIncompleteCounts
+import com.lilru.liftr.workout.StrengthWorkoutFinishCollapse
+import com.lilru.liftr.workout.StrengthWorkoutSaveRpc
+import com.lilru.liftr.workout.StrengthFinishExercisePayload
 import com.lilru.liftr.workout.WorkoutFinishSync
 import com.lilru.liftr.workout.WorkoutProgramCache
 import com.lilru.liftr.workout.WorkoutProgramCacheEntry
@@ -1185,6 +1189,25 @@ class ActiveStrengthWorkoutViewModel(
         }
     }
 
+    fun strengthFinishIncompleteCounts(): StrengthFinishIncompleteCounts {
+        val s = _ui.value
+        val parts = mutableListOf<StrengthFinishIncompleteCounts>()
+        parts += StrengthFinishIncompleteCounting.counts(s.exercises, s.currentSetIndexByExerciseId)
+        if (dualGuestWorkoutId != null && s.guestExercises.isNotEmpty()) {
+            parts += StrengthFinishIncompleteCounting.counts(s.guestExercises, emptyMap())
+        }
+        if (dualGuest2WorkoutId != null && s.guest2Exercises.isNotEmpty()) {
+            parts += StrengthFinishIncompleteCounting.counts(s.guest2Exercises, emptyMap())
+        }
+        return StrengthFinishIncompleteCounts.aggregate(parts)
+    }
+
+    private fun buildHostFinishExercises(): List<StrengthFinishExercisePayload> {
+        val byWe = completedSetLines.groupBy { it.workoutExerciseId }
+        val ids = hostWeRows.sortedBy { it.orderIndex }.map { it.id }
+        return StrengthWorkoutFinishCollapse.buildExercisePayloads(ids, byWe)
+    }
+
     private suspend fun runFinishPersistence(
         onDone: (offlineQueued: Boolean) -> Unit,
         routineUpdate: Pair<Long, List<StrengthExerciseDraft>>?
@@ -1193,15 +1216,18 @@ class ActiveStrengthWorkoutViewModel(
         val openPauseSec = pauseBeganEpochMs?.let {
             ((System.currentTimeMillis() - it).coerceAtLeast(0L) / 1000L).toInt()
         } ?: 0
-        val pausedSecSnapshot = accumulatedPausedSeconds
+        val pausedSecSnapshot = (accumulatedPausedSeconds + openPauseSec).coerceAtLeast(0)
+        var effectiveEnded = Instant.now()
+        val hostExercises = buildHostFinishExercises()
+        val endedAtIso = effectiveEnded.toString()
         val res = runCatching {
             val userId = supabase.auth.currentUserOrNull()?.id ?: error("No session")
-            StrengthFinishPersistence.persist(
+            StrengthWorkoutSaveRpc.finishStrengthWorkoutV1(
                 supabase = supabase,
                 workoutId = workoutId,
-                completedSetLines = completedSetLines.toList(),
-                accumulatedPausedSeconds = pausedSecSnapshot,
-                openPauseSec = openPauseSec
+                endedAtIso = endedAtIso,
+                pausedSec = pausedSecSnapshot,
+                hostExercises = hostExercises
             )
             if (routineUpdate != null) {
                 applyStrengthRoutinePrescriptionUpdate(
@@ -1220,12 +1246,13 @@ class ActiveStrengthWorkoutViewModel(
                     WorkoutFinishSync.enqueue(
                         ctx,
                         workoutId,
+                        endedAtIso,
                         pausedSecSnapshot,
-                        openPauseSec,
-                        completedSetLines.toList()
+                        hostExercises
                     )
                 }
                 _ui.value = _ui.value.copy(finishing = false, error = null)
+                resetSessionProgress()
                 onDone(true)
                 return
             }
@@ -1236,6 +1263,7 @@ class ActiveStrengthWorkoutViewModel(
             return
         }
         val celebrate = checkElborblaCelebration()
+        resetSessionProgress()
         _ui.value = _ui.value.copy(
             finishing = false,
             showElborblaCelebration = celebrate

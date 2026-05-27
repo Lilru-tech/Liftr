@@ -23,7 +23,7 @@ Tablas:
 - `competition_workouts`
 - `contact_messages`
 - `exercises`
-- `exercise_sets`
+- `exercise_sets` (incl. `is_completed boolean` — plantilla en vivo `false`, series persistidas al finalizar `true`; ver migración `20260527120000_strength_workout_finish_purge_v1.sql`)
 - `feature_requests`
 - `feature_request_comments`
 - `feature_request_votes`
@@ -231,11 +231,25 @@ Implementadas en:
 - El programa de fuerza (ejercicios + series) se cachea al cargar el detalle y rehidrata la pantalla activa si la segunda lectura falla.
 - Dual/grupo: si `create_linked_strength_workout_copy` falla, el cliente ofrece **Start solo** / **Start offline** además de reintentar.
 
-## Fin de entreno en vivo (`finish_strength_workout_v1` / persistencia Android)
+## Fin de entreno en vivo (`finish_strength_workout_v1`)
 
-- iOS: al pulsar **Finish workout**, si la red falla de forma recuperable, el cliente encola el payload de `finish_strength_workout_v1`, muestra un toast y cierra la pantalla activa (sin pantalla de error bloqueante).
-- Android: misma semántica con cola local (`WorkoutFinishSync`) que reejecuta la persistencia de series + cierre del workout cuando vuelve la conexión.
+- iOS y Android llaman al RPC **`finish_strength_workout_v1`** con `p_workout_id`, `p_ended_at`, `p_paused_sec`, `p_exercises` (todas las filas `workout_exercises` del host, incluidas las que no tienen series realizadas) y `p_linked` opcional para dual/trio.
+- Si la red falla de forma recuperable, el cliente encola el mismo payload (`WorkoutFinishSync` en Android; `WorkoutFinishSync` en iOS), muestra un toast y cierra la pantalla activa.
 - Los errores de **carga** del programa siguen bloqueando solo cuando no hay caché local; los errores de **finish** no reemplazan la UI del entreno en curso.
+
+### Purga de series/ejercicios incompletos al finalizar
+
+Migración: [`Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql`](../Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql).
+
+- Columna **`exercise_sets.is_completed`** (`boolean NOT NULL DEFAULT false`): las series insertadas por el finish RPC se marcan `true`; las plantillas del entreno en curso permanecen `false`.
+- **`_liftr_finish_strength_workout_core`**: tras `_liftr_replace_strength_exercise_sets`, ejecuta `_liftr_purge_incomplete_strength_workout` (borra series con `is_completed = false` y ejercicios sin series).
+- **Trigger** `purge_incomplete_strength_on_workout_finalize` en `workouts` (`BEFORE UPDATE OF ended_at`): red de seguridad cuando `ended_at` pasa de NULL a NOT NULL en entrenos `strength`.
+- Finalización = `ended_at` establecido + `state` `planned` → `published` (sin columna `status = completed`).
+
+### Confirmación en cliente
+
+- Antes de finalizar, iOS y Android calculan localmente ejercicios/series sin marcar y muestran aviso dinámico (ES: *"Tienes N ejercicios y M series sin terminar…"*).
+- Si todo está completo, se usa el texto estándar de confirmación o finalización directa.
 
 ## Premium subscriptions
 
