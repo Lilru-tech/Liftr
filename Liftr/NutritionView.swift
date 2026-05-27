@@ -931,6 +931,7 @@ private struct NutritionLogFoodSheet: View {
     let initialMealSlot: NutritionMealSlot
     let onDone: () -> Void
 
+    @EnvironmentObject private var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var nestedSheet: NutritionLogNestedSheet?
     @State private var mode: String = "Ingredient"
@@ -952,6 +953,8 @@ private struct NutritionLogFoodSheet: View {
     @State private var listScope: NutritionListScope = .all
     @State private var favoriteIngredientIds: Set<UUID> = []
     @State private var favoriteRecipeIds: Set<UUID> = []
+    @State private var showShareIngredientToChat = false
+    @State private var showShareRecipeToChat = false
 
     private var hasLogSelection: Bool {
         selectedIngredient != nil || selectedRecipe != nil
@@ -1074,6 +1077,20 @@ private struct NutritionLogFoodSheet: View {
                     .gradientBG()
                 }
             }
+            .sheet(isPresented: $showShareIngredientToChat) {
+                if let snap = sharedIngredientSnapshot {
+                    ShareIngredientToChatSheet(snapshot: snap) {}
+                        .environmentObject(app)
+                        .gradientBG()
+                }
+            }
+            .sheet(isPresented: $showShareRecipeToChat) {
+                if let snap = sharedRecipeSnapshot {
+                    ShareRecipeToChatSheet(snapshot: snap) {}
+                        .environmentObject(app)
+                        .gradientBG()
+                }
+            }
         }
     }
 
@@ -1112,6 +1129,20 @@ private struct NutritionLogFoodSheet: View {
 
             NutritionGramsInput(grams: $grams, kcalPreview: previewKcal)
 
+            if sharedIngredientSnapshot != nil || sharedRecipeSnapshot != nil {
+                Button {
+                    if sharedIngredientSnapshot != nil {
+                        showShareIngredientToChat = true
+                    } else if sharedRecipeSnapshot != nil {
+                        showShareRecipeToChat = true
+                    }
+                } label: {
+                    Text("Share via Chat").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(saving)
+            }
+
             Button { Task { await save() } } label: {
                 Group {
                     if saving { ProgressView() }
@@ -1125,6 +1156,60 @@ private struct NutritionLogFoodSheet: View {
         .nutritionCard()
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
+    }
+
+    private var sharedIngredientSnapshot: SharedIngredientSnapshot? {
+        guard let ing = selectedIngredient else { return nil }
+        return SharedIngredientSnapshot(
+            v: 1,
+            type: "shared_ingredient",
+            name: ing.name,
+            calories_per_100g: ing.calories_per_100g,
+            protein_per_100g: ing.protein_per_100g,
+            carbs_per_100g: ing.carbs_per_100g,
+            fat_per_100g: ing.fat_per_100g,
+            saturated_fat_per_100g: ing.saturated_fat_per_100g,
+            sugars_per_100g: ing.sugars_per_100g,
+            fiber_per_100g: ing.fiber_per_100g,
+            sodium_mg_per_100g: ing.sodium_mg_per_100g
+        )
+    }
+
+    private var sharedRecipeSnapshot: SharedRecipeSnapshot? {
+        guard let recipe = selectedRecipe else { return nil }
+        guard !selectedRecipeLines.isEmpty else { return nil }
+        let items = selectedRecipeLines.map { line in
+            SharedRecipeIngredientSnapshot(
+                name: line.ingredient.name,
+                weight_g: line.weightG,
+                calories_per_100g: line.ingredient.calories_per_100g,
+                protein_per_100g: line.ingredient.protein_per_100g,
+                carbs_per_100g: line.ingredient.carbs_per_100g,
+                fat_per_100g: line.ingredient.fat_per_100g,
+                saturated_fat_per_100g: line.ingredient.saturated_fat_per_100g,
+                sugars_per_100g: line.ingredient.sugars_per_100g,
+                fiber_per_100g: line.ingredient.fiber_per_100g,
+                sodium_mg_per_100g: line.ingredient.sodium_mg_per_100g
+            )
+        }
+        let profile = NutritionManager.rollupProfilePer100g(lines: selectedRecipeLines)
+        return SharedRecipeSnapshot(
+            v: 1,
+            type: "shared_recipe",
+            name: recipe.name,
+            description: recipe.description,
+            ingredients: items,
+            profile_per_100g: SharedRecipeProfilePer100gSnapshot(
+                calories: profile.calories,
+                protein: profile.protein,
+                carbs: profile.carbs,
+                fat: profile.fat,
+                saturatedFat: profile.saturatedFat,
+                sugars: profile.sugars,
+                fiber: profile.fiber,
+                sodiumMg: profile.sodiumMg
+            )
+        )
     }
 
     @ViewBuilder
@@ -1652,12 +1737,6 @@ private struct NutritionCreateRecipeSheet: View {
                         .padding(10)
                         .nutritionCard()
                     }
-                    if !lines.isEmpty {
-                        NutritionFactsLabel(
-                            title: name.isEmpty ? "Recipe preview" : name,
-                            profile: NutritionManager.rollupProfilePer100g(lines: lines)
-                        )
-                    }
                     if let pick = selectedPick {
                         NutritionFactsLabel(title: pick.name, profile: pick.profilePer100g)
                         NutritionGramsInput(grams: $pickWeight, kcalPreview: nil)
@@ -1668,6 +1747,17 @@ private struct NutritionCreateRecipeSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding()
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 10) {
+                    if !lines.isEmpty {
+                        NutritionFactsLabel(
+                            title: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Recipe preview" : name,
+                            profile: NutritionManager.rollupProfilePer100g(lines: lines)
+                        )
                     }
                     if let error {
                         Text(error).font(.caption).foregroundStyle(.red)
@@ -1681,7 +1771,16 @@ private struct NutritionCreateRecipeSheet: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(saving || lines.isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 10)
+                .background(.ultraThinMaterial)
+                .overlay(
+                    Rectangle()
+                        .fill(Color.primary.opacity(0.08))
+                        .frame(height: 1),
+                    alignment: .top
+                )
             }
             .navigationTitle("New recipe")
             .navigationBarTitleDisplayMode(.inline)

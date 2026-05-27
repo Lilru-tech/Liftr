@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.ChatRepository
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
+import com.lilru.liftr.ui.chat.SharedIngredientSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeSnapshot
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -330,6 +332,14 @@ class ChatThreadViewModel(
                 }
                 .onFailure { e -> _uiState.update { it.copy(error = e.message ?: "Couldn't clear") } }
         }
+    }
+
+    suspend fun cloneSharedIngredient(snapshot: SharedIngredientSnapshot): String {
+        return repo.cloneSharedIngredient(snapshot)
+    }
+
+    suspend fun cloneSharedRecipe(snapshot: SharedRecipeSnapshot): String {
+        return repo.cloneSharedRecipe(snapshot)
     }
 
     // MARK: - Internal

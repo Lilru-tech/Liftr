@@ -88,6 +88,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.ui.chat.ShareIngredientToChatSheetContent
+import com.lilru.liftr.ui.chat.ShareRecipeToChatSheetContent
+import com.lilru.liftr.ui.chat.SharedIngredientSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeIngredientSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeProfilePer100gSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeSnapshot
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradientOpaque
 import io.github.jan.supabase.SupabaseClient
 import java.time.format.DateTimeFormatter
@@ -188,7 +194,7 @@ fun NutritionTabScreen(
         ModalBottomSheet(onDismissRequest = { vm.dismissOverlay() }, sheetState = sheetState) {
             Box(Modifier.liftrAppBackgroundGradientOpaque(sheetTheme)) {
                 when (val overlay = ui.overlay) {
-                    NutritionOverlay.AddFood -> NutritionLogFoodSheet(ui, vm)
+                    NutritionOverlay.AddFood -> NutritionLogFoodSheet(supabase, ui, vm)
                     NutritionOverlay.CreateIngredient -> NutritionCreateIngredientSheet(ui, vm)
                     NutritionOverlay.CreateRecipe -> NutritionCreateRecipeSheet(ui, vm)
                     is NutritionOverlay.EditLog -> NutritionEditLogSheet(ui, vm, overlay.item)
@@ -317,13 +323,16 @@ private fun NutritionDiaryRowCard(row: NutritionDiaryItemUi, onClick: () -> Unit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) {
+private fun NutritionLogFoodSheet(supabase: SupabaseClient, ui: NutritionUiState, vm: NutritionViewModel) {
     val hasSelection = ui.selectedIngredientId != null || ui.selectedRecipeId != null
     val selectedIngredient = ui.ingredientResults.find { it.id == ui.selectedIngredientId }
     val selectedRecipe = ui.recipeResults.find { it.id == ui.selectedRecipeId }
     val context = LocalContext.current
     val panelTheme = remember(context) { LiftrPreferences.backgroundTheme(context) }
     val panelBottomPadding = if (hasSelection) 380.dp else 16.dp
+    var shareIngredientSnap by remember { mutableStateOf<SharedIngredientSnapshot?>(null) }
+    var shareRecipeSnap by remember { mutableStateOf<SharedRecipeSnapshot?>(null) }
+    val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -491,8 +500,87 @@ private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) 
                 onDismiss = { vm.clearLogSelection() },
                 onMealSlot = { vm.setAddMealSlot(it) },
                 onGrams = { vm.setAddGramsPreset(it) },
+                onShareViaChat = {
+                    val ing = selectedIngredient
+                    val rec = selectedRecipe
+                    val lines = ui.selectedRecipeLines
+                    if (ing != null) {
+                        shareIngredientSnap = SharedIngredientSnapshot(
+                            name = ing.name,
+                            caloriesPer100g = ing.caloriesPer100g,
+                            proteinPer100g = ing.proteinPer100g,
+                            carbsPer100g = ing.carbsPer100g,
+                            fatPer100g = ing.fatPer100g,
+                            saturatedFatPer100g = ing.saturatedFatPer100g,
+                            sugarsPer100g = ing.sugarsPer100g,
+                            fiberPer100g = ing.fiberPer100g,
+                            sodiumMgPer100g = ing.sodiumMgPer100g
+                        )
+                    } else if (rec != null && lines.isNotEmpty() && !ui.loadingRecipeComposition) {
+                        val profile = rollupProfilePer100g(lines)
+                        shareRecipeSnap = SharedRecipeSnapshot(
+                            name = rec.name,
+                            description = rec.description,
+                            ingredients = lines.map { line ->
+                                SharedRecipeIngredientSnapshot(
+                                    name = line.ingredient.name,
+                                    weightG = line.weightG,
+                                    caloriesPer100g = line.ingredient.caloriesPer100g,
+                                    proteinPer100g = line.ingredient.proteinPer100g,
+                                    carbsPer100g = line.ingredient.carbsPer100g,
+                                    fatPer100g = line.ingredient.fatPer100g,
+                                    saturatedFatPer100g = line.ingredient.saturatedFatPer100g,
+                                    sugarsPer100g = line.ingredient.sugarsPer100g,
+                                    fiberPer100g = line.ingredient.fiberPer100g,
+                                    sodiumMgPer100g = line.ingredient.sodiumMgPer100g
+                                )
+                            },
+                            profilePer100g = SharedRecipeProfilePer100gSnapshot(
+                                calories = profile.calories,
+                                protein = profile.protein,
+                                carbs = profile.carbs,
+                                fat = profile.fat,
+                                saturatedFat = profile.saturatedFat,
+                                sugars = profile.sugars,
+                                fiber = profile.fiber,
+                                sodiumMg = profile.sodiumMg
+                            )
+                        )
+                    }
+                },
                 onSave = { vm.saveDiaryEntry() }
             )
+        }
+    }
+
+    if (shareIngredientSnap != null || shareRecipeSnap != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                shareIngredientSnap = null
+                shareRecipeSnap = null
+            },
+            sheetState = shareSheetState
+        ) {
+            shareIngredientSnap?.let { snap ->
+                ShareIngredientToChatSheetContent(
+                    supabase = supabase,
+                    snapshot = snap,
+                    onDone = {
+                        shareIngredientSnap = null
+                        shareRecipeSnap = null
+                    }
+                )
+            }
+            shareRecipeSnap?.let { snap ->
+                ShareRecipeToChatSheetContent(
+                    supabase = supabase,
+                    snapshot = snap,
+                    onDone = {
+                        shareIngredientSnap = null
+                        shareRecipeSnap = null
+                    }
+                )
+            }
         }
     }
 
@@ -527,6 +615,7 @@ private fun NutritionLogFoodBottomPanel(
     onDismiss: () -> Unit,
     onMealSlot: (String) -> Unit,
     onGrams: (Double) -> Unit,
+    onShareViaChat: () -> Unit,
     onSave: () -> Unit
 ) {
     val kcalPreview = when {
@@ -598,6 +687,13 @@ private fun NutritionLogFoodBottomPanel(
             }
         }
         NutritionGramsPicker(grams, onGrams, kcalPreview)
+        Button(
+            onClick = onShareViaChat,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !saving && (ingredient != null || (recipeLines.isNotEmpty() && !loadingRecipeComposition))
+        ) {
+            Text("Share via Chat")
+        }
         Button(onClick = onSave, modifier = Modifier.fillMaxWidth(), enabled = canSave) {
             Text(stringResource(R.string.nutrition_add_to_diary))
         }
