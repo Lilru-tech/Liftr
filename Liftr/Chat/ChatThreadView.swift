@@ -1122,21 +1122,21 @@ struct ChatThreadView: View {
     }
 
     private var saveToLibraryButtonTitle: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Añadir a mis elementos"
         }
         return "Save to Library"
     }
 
     private var sharedIngredientLabel: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Ingrediente"
         }
         return "Ingredient"
     }
 
     private var sharedRecipeLabel: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Receta"
         }
         return "Recipe"
@@ -1493,13 +1493,28 @@ private struct ChatThreadRoutineShareCard: View {
         var lines: [String] = []
         if let n = snapshot.exercise_count, n > 0 {
             if snapshot.routine_kind == "hyrox" {
-                lines.append(String(localized: "\(n) stations"))
+                lines.append(
+                    String.localizedStringWithFormat(
+                        String(localized: "routine_share_stations_count_format"),
+                        n
+                    )
+                )
             } else {
-                lines.append(String(localized: "\(n) exercises"))
+                lines.append(
+                    String.localizedStringWithFormat(
+                        String(localized: "routine_share_exercises_count_format"),
+                        n
+                    )
+                )
             }
         }
         if let ts = snapshot.total_sets, ts > 0, snapshot.routine_kind == "strength" {
-            lines.append(String(localized: "\(ts) sets"))
+            lines.append(
+                String.localizedStringWithFormat(
+                    String(localized: "routine_share_sets_count_format"),
+                    ts
+                )
+            )
         }
         if let p = snapshot.preview_exercise_name?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
             lines.append(p)

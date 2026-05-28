@@ -323,6 +323,7 @@ struct CompareWorkoutsView: View {
             case "kg":       return String(format: "%.1f kg", v)
             case "sec":      return secs(v)
             case "sec_per_km": return secsPerKm(v)
+            case "sec_per_100m": return secsPer100m(v)
             case "sec_per_500m": return secsPer500(v)
             case "bpm":      return String(format: "%.0f bpm", v)
             case "m":        return String(format: "%.0f m", v)
@@ -362,6 +363,10 @@ struct CompareWorkoutsView: View {
         private func secsPer500(_ v: Double) -> String {
             let s = max(0, Int(v.rounded()))
             return String(format:"%d:%02d /500m", s/60, s%60)
+        }
+        private func secsPer100m(_ v: Double) -> String {
+            let s = max(0, Int(v.rounded()))
+            return String(format:"%d:%02d /100m", s/60, s%60)
         }
         private static func prettyMetric(_ m: String) -> String {
             switch m {
@@ -860,9 +865,20 @@ struct CompareWorkoutsView: View {
         }
         func d(_ dec: Decimal?) -> Double? { dec.map { NSDecimalNumber(decimal: $0).doubleValue } }
 
-        add("distance_km", "km", d(L.distance_km), d(R.distance_km))
+        let swimCompare = CardioSwimDisplay.isSwimActivity(code: la)
+        if swimCompare {
+            add("distance_km", "m", d(L.distance_km).map { $0 * 1000 }, d(R.distance_km).map { $0 * 1000 })
+            add(
+                "avg_pace_sec_per_km",
+                "sec_per_100m",
+                L.avg_pace_sec_per_km.map { Double(CardioSwimDisplay.secPer100m(fromSecPerKm: $0)) },
+                R.avg_pace_sec_per_km.map { Double(CardioSwimDisplay.secPer100m(fromSecPerKm: $0)) }
+            )
+        } else {
+            add("distance_km", "km", d(L.distance_km), d(R.distance_km))
+            add("avg_pace_sec_per_km", "sec_per_km", L.avg_pace_sec_per_km.map(Double.init), R.avg_pace_sec_per_km.map(Double.init))
+        }
         add("duration_sec", "sec", L.duration_sec.map(Double.init), R.duration_sec.map(Double.init))
-        add("avg_pace_sec_per_km", "sec_per_km", L.avg_pace_sec_per_km.map(Double.init), R.avg_pace_sec_per_km.map(Double.init))
         if let le = LE, let re = RE,
            let lFast = Self.fastestKmPaceSecFromSplits(le.km_split_pace_sec),
            let rFast = Self.fastestKmPaceSecFromSplits(re.km_split_pace_sec) {

@@ -65,12 +65,39 @@ suspend fun importHealthConnectSessionToCardio(
         healthConnectUuid?.let { put("p_healthkit_uuid", it) }
     }
     val wrapper = buildJsonObject { put("p", p) }
-    val res = supabase.postgrest.rpc(BackendContracts.Rpc.CREATE_CARDIO_WORKOUT_V2, wrapper) { }
-    val id = parseWorkoutIdFromCreateCardioResponse(res.data) ?: error("No se pudo leer el id del entreno.")
+    val id = try {
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.CREATE_CARDIO_WORKOUT_V2, wrapper) { }
+        parseWorkoutIdFromCreateCardioResponse(res.data) ?: error("No se pudo leer el id del entreno.")
+    } catch (e: Throwable) {
+        if (isHealthConnectUuidUniqueViolation(e)) {
+            healthConnectUuid?.let { lookupWorkoutIdByExternalUuid(supabase, userId, it) }
+                ?: throw e
+        } else {
+            throw e
+        }
+    }
     if (isOutdoorTerritoryEligible(rec.exerciseType)) {
         TerritoryCaptureClient.applyCapture(supabase, id.toInt())
     }
     id.toInt()
+}
+
+@kotlinx.serialization.Serializable
+private data class WorkoutIdRow(val id: Long)
+
+private suspend fun lookupWorkoutIdByExternalUuid(
+    supabase: SupabaseClient,
+    userId: String,
+    externalUuid: String
+): Long? {
+    val rows = supabase.postgrest.from(BackendContracts.Tables.WORKOUTS).select {
+        filter {
+            eq("user_id", userId)
+            eq("healthkit_uuid", externalUuid)
+        }
+        limit(1)
+    }.decodeList<WorkoutIdRow>()
+    return rows.firstOrNull()?.id
 }
 
 private fun parseWorkoutIdFromCreateCardioResponse(raw: String): Long? {

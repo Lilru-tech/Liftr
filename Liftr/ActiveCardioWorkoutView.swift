@@ -79,22 +79,36 @@ struct ActiveCardioWorkoutView: View {
         case countdown
     }
 
+    private var usesSwimUnitsLive: Bool {
+        guard let c = cardio else { return false }
+        return cardioActivityType(for: c).usesSwimDistanceAndPace
+    }
+
     private var effectiveDistanceKm: Double {
         guard cardio != nil else { return 0 }
         if usesGPSTracking {
             return gpsTracker.distanceKm
         }
+        if usesSwimUnitsLive {
+            return CardioSwimDisplay.distanceKm(fromMetersText: distanceText) ?? 0
+        }
         return parseDistanceKm(distanceText) ?? 0
     }
 
     private var gpsDistanceFormatted: String {
-        String(format: "%.2f km", gpsTracker.distanceKm)
+        if usesSwimUnitsLive {
+            return CardioSwimDisplay.formatSwimDistance(km: gpsTracker.distanceKm)
+        }
+        return String(format: "%.2f km", gpsTracker.distanceKm)
     }
 
     private var livePaceFormatted: String {
         let d = effectiveDistanceKm
-        guard d >= 0.01, elapsedSec > 0 else { return "—" }
+        guard d >= 0.001, elapsedSec > 0 else { return "—" }
         let secPerKm = Int(round(Double(elapsedSec) / d))
+        if usesSwimUnitsLive {
+            return CardioSwimDisplay.formatSwimPace(secPerKm: secPerKm)
+        }
         return "\(formatMinSec(secPerKm))/km"
     }
 
@@ -112,8 +126,11 @@ struct ActiveCardioWorkoutView: View {
                                 .font(.title2.weight(.bold))
                             HStack(spacing: 10) {
                                 if let d = c.distance_km {
-                                    Text(String(format: "Target %.2f km",
-                                                NSDecimalNumber(decimal: d).doubleValue))
+                                    let km = NSDecimalNumber(decimal: d).doubleValue
+                                    let targetDist = cardioActivityType(for: c).usesSwimDistanceAndPace
+                                        ? "Target \(CardioSwimDisplay.formatSwimDistance(km: km))"
+                                        : String(format: "Target %.2f km", km)
+                                    Text(targetDist)
                                 }
                                 if let target = c.duration_sec, target > 0 {
                                     Text("• \(formatTime(target))")
@@ -191,7 +208,7 @@ struct ActiveCardioWorkoutView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 Text("Actual distance")
                                     .font(.subheadline.weight(.semibold))
-                                TextField("Distance (km)", text: $distanceText)
+                                TextField(usesSwimUnitsLive ? "Distance (m)" : "Distance (km)", text: $distanceText)
                                     .keyboardType(.decimalPad)
                                     .textFieldStyle(.roundedBorder)
                             }
@@ -548,10 +565,12 @@ struct ActiveCardioWorkoutView: View {
         let t = cardioActivityType(for: row)
         guard !t.prefersGPSTracking else { return }
         if let d = row.distance_km {
-            distanceText = String(
-                format: "%.2f",
-                NSDecimalNumber(decimal: d).doubleValue
-            )
+            let km = NSDecimalNumber(decimal: d).doubleValue
+            if t.usesSwimDistanceAndPace {
+                distanceText = CardioSwimDisplay.metersText(fromKm: km)
+            } else {
+                distanceText = String(format: "%.2f", km)
+            }
         } else {
             distanceText = ""
         }
@@ -789,6 +808,7 @@ struct ActiveCardioWorkoutView: View {
         let distanceText: String
         let splitEndElapsedSec: [Int]
         let usesGPSTracking: Bool
+        let usesSwimUnits: Bool
         let routeGeoJSON: String?
         let gpsKm: Double
     }
@@ -798,11 +818,13 @@ struct ActiveCardioWorkoutView: View {
             isSaving = true
             isRunning = false
             gpsTracker.pauseUpdates()
+            let swimUnits = cardio.map { cardioActivityType(for: $0).usesSwimDistanceAndPace } ?? false
             return CardioFinishSnapshot(
                 elapsedSec: elapsedSec,
                 distanceText: distanceText,
                 splitEndElapsedSec: splitEndElapsedSec,
                 usesGPSTracking: usesGPSTracking,
+                usesSwimUnits: swimUnits,
                 routeGeoJSON: gpsTracker.routeGeoJSONString(),
                 gpsKm: gpsTracker.distanceKm
             )
@@ -828,6 +850,9 @@ struct ActiveCardioWorkoutView: View {
                 if trimmed.isEmpty {
                     distanceDecimal = nil
                     manualKm = 0
+                } else if snap.usesSwimUnits, let km = CardioSwimDisplay.distanceKm(fromMetersText: trimmed) {
+                    manualKm = km
+                    distanceDecimal = Decimal(string: String(format: "%.6f", km))
                 } else {
                     distanceDecimal = Decimal(string: trimmed)
                     manualKm = Double(trimmed) ?? 0

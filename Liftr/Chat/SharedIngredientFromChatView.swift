@@ -63,14 +63,14 @@ struct SharedIngredientFromChatView: View {
     }
 
     private var titleLabel: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Ingrediente"
         }
         return "Ingredient"
     }
 
     private var saveButtonTitle: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Guardar en mis ingredientes"
         }
         return "Save to My Ingredients"
@@ -84,7 +84,7 @@ struct SharedIngredientFromChatView: View {
         do {
             _ = try await ChatService.cloneSharedIngredient(snapshot: snapshot)
             BannerAction.showSuccess(
-                Locale.current.languageCode?.lowercased().hasPrefix("es") == true
+                AppLanguage.isSpanish
                 ? "Añadido a tus ingredientes"
                 : "Saved to your ingredients",
                 banner: $banner

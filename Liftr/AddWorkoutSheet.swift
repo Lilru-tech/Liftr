@@ -1100,124 +1100,127 @@ struct AddWorkoutSheet: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .onChange(of: cardio.activity) { _, new in
+                        if !new.showsSwimFields {
+                            cardio.swimDistanceManuallyEdited = false
+                        }
+                    }
                 }
 
-                Divider()
+                Divider().padding(.vertical, 6)
 
-                HStack(spacing: 12) {
-                    TextField("Distance (km)", text: $cardio.distanceKm)
-                        .keyboardType(.decimalPad)
-                        .onChange(of: cardio.distanceKm) { _, _ in
+                WorkoutMetricFieldsRow {
+                    WorkoutMetricField(title: cardio.activity.usesSwimDistanceAndPace ? "Distance m" : "Distance km") {
+                        TextField("—", text: $cardio.distanceKm)
+                            .keyboardType(.decimalPad)
+                            .onChange(of: cardio.distanceKm) { _, _ in
+                                if cardio.activity.usesSwimDistanceAndPace {
+                                    cardio.swimDistanceManuallyEdited = true
+                                }
+                                updateAutoPaceIfNeeded()
+                            }
+                    }
+                    WorkoutDurationHMSFields(
+                        hours: $cardio.durH,
+                        minutes: $cardio.durM,
+                        seconds: $cardio.durS,
+                        onAnyChange: {
+                            didEditCardioDuration = true
                             updateAutoPaceIfNeeded()
                         }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Duration").font(.caption).foregroundStyle(.secondary)
-                        HStack(spacing: 6) {
-                            TextField("h", text: $cardio.durH)
-                                .keyboardType(.numberPad)
-                                .frame(width: 36)
-                                .onChange(of: cardio.durH) { _, _ in
-                                    didEditCardioDuration = true
-                                    updateAutoPaceIfNeeded()
-                                }
-
-                            Text(":")
-
-                            TextField("m", text: $cardio.durM)
-                                .keyboardType(.numberPad)
-                                .frame(width: 36)
-                                .onChange(of: cardio.durM) { _, _ in updateAutoPaceIfNeeded() }
-
-                            Text(":")
-
-                            TextField("s", text: $cardio.durS)
-                                .keyboardType(.numberPad)
-                                .frame(width: 36)
-                                .onChange(of: cardio.durS) { _, _ in updateAutoPaceIfNeeded() }
-                        }
-                        .font(.subheadline)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    )
                 }
 
-                Divider()
+                Divider().padding(.vertical, 6)
 
-                HStack {
-                    TextField("Avg HR", text: $cardio.avgHR).keyboardType(.numberPad)
-                    TextField("Max HR", text: $cardio.maxHR).keyboardType(.numberPad)
+                WorkoutMetricFieldsRow {
+                    WorkoutMetricField(title: "Avg HR") {
+                        TextField("—", text: $cardio.avgHR).keyboardType(.numberPad)
+                    }
+                    WorkoutMetricField(title: "Max HR") {
+                        TextField("—", text: $cardio.maxHR).keyboardType(.numberPad)
+                    }
                 }
 
-                Divider()
+                Divider().padding(.vertical, 6)
 
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Avg pace (/km)").font(.caption).foregroundStyle(.secondary)
-                        if let p = autoPaceSec(distanceKmText: cardio.distanceKm,
-                                               durH: cardio.durH, durM: cardio.durM, durS: cardio.durS) {
-                            Text(String(format: "%d:%02d /km", p/60, p%60))
-                                .font(.subheadline.weight(.semibold))
-                        } else {
-                            Text("—").font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
+                WorkoutMetricFieldsRow {
+                    WorkoutMetricReadoutField(
+                        title: cardio.activity.usesSwimDistanceAndPace ? "Pace /100m" : "Pace /km",
+                        value: cardioComputedPaceLabel()
+                    )
                     if cardio.activity.showsElevation {
-                        TextField("Elevation gain (m)", text: $cardio.elevationGainM)
-                            .keyboardType(.numberPad)
+                        WorkoutMetricField(title: "Elev m") {
+                            TextField("—", text: $cardio.elevationGainM).keyboardType(.numberPad)
+                        }
                     }
                 }
 
                 if cardio.activity.showsKmPaceSplits {
-                    Divider()
-                    VStack(alignment: .leading, spacing: 4) {
+                    Divider().padding(.vertical, 6)
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("Per-km pace (optional)")
-                            .font(.caption)
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        TextField("e.g. 5:30, 5:25, 5:20", text: $cardio.kmSplitsPaceText)
-                            .font(.subheadline)
+                        FormNoteTextField(
+                            text: $cardio.kmSplitsPaceText,
+                            placeholder: "e.g. 5:30, 5:25, 5:20",
+                            lineRange: 1...4
+                        )
                     }
                 }
 
                 if cardio.activity.showsIncline {
-                    Divider()
-                    FieldRowPlain {
-                        TextField("Incline (%)", text: $cardio.inclinePercent)
-                            .keyboardType(.decimalPad)
+                    Divider().padding(.vertical, 6)
+                    WorkoutMetricFieldsRow {
+                        WorkoutMetricField(title: "Incline %") {
+                            TextField("—", text: $cardio.inclinePercent).keyboardType(.decimalPad)
+                        }
                     }
                 }
 
                 if cardio.activity.showsCadenceRpm {
-                    Divider()
-                    FieldRowPlain {
-                        HStack {
-                            TextField("Cadence (rpm/spm)", text: $cardio.cadenceRpm).keyboardType(.numberPad)
-                            if cardio.activity.showsWatts {
-                                TextField("Avg watts", text: $cardio.wattsAvg).keyboardType(.numberPad)
+                    Divider().padding(.vertical, 6)
+                    WorkoutMetricFieldsRow {
+                        WorkoutMetricField(title: "Cadence") {
+                            TextField("—", text: $cardio.cadenceRpm).keyboardType(.numberPad)
+                        }
+                        if cardio.activity.showsWatts {
+                            WorkoutMetricField(title: "Watts") {
+                                TextField("—", text: $cardio.wattsAvg).keyboardType(.numberPad)
                             }
                         }
                     }
                 }
 
                 if cardio.activity.showsSplit500m {
-                    Divider()
-                    FieldRowPlain {
-                        TextField("Split (sec/500m)", text: $cardio.splitSecPer500m).keyboardType(.numberPad)
+                    Divider().padding(.vertical, 6)
+                    WorkoutMetricFieldsRow {
+                        WorkoutMetricField(title: "Split /500m") {
+                            TextField("—", text: $cardio.splitSecPer500m).keyboardType(.numberPad)
+                        }
                     }
                 }
 
                 if cardio.activity.showsSwimFields {
-                    Divider()
-                    FieldRowPlain {
-                        HStack {
-                            TextField("Laps", text: $cardio.swimLaps).keyboardType(.numberPad)
-                            TextField("Pool length (m)", text: $cardio.poolLengthM).keyboardType(.numberPad)
+                    Divider().padding(.vertical, 6)
+                    WorkoutMetricFieldsRow {
+                        WorkoutMetricField(title: "Laps") {
+                            TextField("—", text: $cardio.swimLaps)
+                                .keyboardType(.numberPad)
+                                .onChange(of: cardio.swimLaps) { _, _ in applyPoolDistanceFromLapsIfNeeded() }
+                        }
+                        WorkoutMetricField(title: "Pool m") {
+                            TextField("—", text: $cardio.poolLengthM)
+                                .keyboardType(.numberPad)
+                                .onChange(of: cardio.poolLengthM) { _, _ in applyPoolDistanceFromLapsIfNeeded() }
                         }
                     }
-                    Divider()
-                    FieldRowPlain {
-                        TextField("Swim style", text: $cardio.swimStyle).textFieldStyle(.plain)
+                    Divider().padding(.vertical, 6)
+                    WorkoutMetricFieldsRow {
+                        WorkoutMetricField(title: "Style") {
+                            TextField("—", text: $cardio.swimStyle)
+                        }
                     }
                 }
             }
@@ -1267,39 +1270,32 @@ struct AddWorkoutSheet: View {
                     }
                 }
                 
-                Divider()
-                
-                FieldRowPlain {
-                    TextField("Duration (min)", text: $sport.durationMin)
-                        .keyboardType(.numberPad)
-                        .textFieldStyle(.plain)
-                        .onChange(of: sport.durationMin) { _, _ in
-                            didEditSportDuration = true
-                        }
+                Divider().padding(.vertical, 6)
+
+                WorkoutMetricFieldsRow {
+                    workoutMetricField("Duration min", text: $sport.durationMin) {
+                        didEditSportDuration = true
+                    }
                 }
-                
+
                 if sportUsesNumericScore(sport.sport) {
-                    Divider()
-                    FieldRowPlain {
-                        HStack {
-                            TextField("Score for", text: $sport.scoreFor).keyboardType(.numberPad)
-                            TextField("Score against", text: $sport.scoreAgainst).keyboardType(.numberPad)
-                        }
+                    Divider().padding(.vertical, 6)
+                    WorkoutMetricFieldsRow {
+                        workoutMetricField("Score for", text: $sport.scoreFor)
+                        workoutMetricField("Score vs", text: $sport.scoreAgainst)
                     }
                 }
-                
+
                 if sportUsesSetText(sport.sport) {
-                    Divider()
-                    FieldRowPlain {
-                        TextField("Match score text (e.g. 6/3 6/4 6/4)", text: $sport.matchScoreText)
-                            .textFieldStyle(.plain)
+                    Divider().padding(.vertical, 6)
+                    WorkoutMetricFieldsRow {
+                        workoutMetricField("Sets / score", text: $sport.matchScoreText, keyboard: .default)
                     }
                 }
-                
-                Divider()
-                FieldRowPlain {
-                    TextField("Location (optional)", text: $sport.location)
-                        .textFieldStyle(.plain)
+
+                Divider().padding(.vertical, 6)
+                WorkoutMetricFieldsRow {
+                    workoutMetricField("Location", text: $sport.location, keyboard: .default)
                 }
                 Divider()
                 
@@ -1457,49 +1453,39 @@ struct AddWorkoutSheet: View {
                 }
                 .pickerStyle(.menu)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Assists", text: $sport.fbAssists).keyboardType(.numberPad)
-                    TextField("Shots on target", text: $sport.fbShotsOnTarget).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Assists", text: $sport.fbAssists, keyboard: .numberPad)
+                workoutMetricField("SOT", text: $sport.fbShotsOnTarget, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Passes completed", text: $sport.fbPassesCompleted).keyboardType(.numberPad)
-                    TextField("Tackles", text: $sport.fbTackles).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Passes", text: $sport.fbPassesCompleted, keyboard: .numberPad)
+                workoutMetricField("Tackles", text: $sport.fbTackles, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Saves (GK)", text: $sport.fbSaves).keyboardType(.numberPad)
-                    TextField("Yellow cards", text: $sport.fbYellow).keyboardType(.numberPad)
-                    TextField("Red cards", text: $sport.fbRed).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Saves", text: $sport.fbSaves, keyboard: .numberPad)
+                workoutMetricField("Yellow cards", text: $sport.fbYellow, keyboard: .numberPad)
+                workoutMetricField("Red cards", text: $sport.fbRed, keyboard: .numberPad)
             }
             
         case .basketball:
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Points", text: $sport.bbPoints).keyboardType(.numberPad)
-                    TextField("Rebounds", text: $sport.bbRebounds).keyboardType(.numberPad)
-                    TextField("Assists", text: $sport.bbAssists).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Points", text: $sport.bbPoints, keyboard: .numberPad)
+                workoutMetricField("Rebounds", text: $sport.bbRebounds, keyboard: .numberPad)
+                workoutMetricField("Assists", text: $sport.bbAssists, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Steals", text: $sport.bbSteals).keyboardType(.numberPad)
-                    TextField("Blocks", text: $sport.bbBlocks).keyboardType(.numberPad)
-                    TextField("Turnovers", text: $sport.bbTurnovers).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Steals", text: $sport.bbSteals, keyboard: .numberPad)
+                workoutMetricField("Blocks", text: $sport.bbBlocks, keyboard: .numberPad)
+                workoutMetricField("Turnovers", text: $sport.bbTurnovers, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                TextField("Fouls", text: $sport.bbFouls).keyboardType(.numberPad)
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Fouls", text: $sport.bbFouls, keyboard: .default)
             }
             
         case .padel, .tennis, .badminton, .squash, .table_tennis:
@@ -1517,234 +1503,183 @@ struct AddWorkoutSheet: View {
                 }
                 .pickerStyle(.segmented)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Aces",            text: $sport.rkAces).keyboardType(.numberPad)
-                    TextField("Double faults",   text: $sport.rkDoubleFaults).keyboardType(.numberPad)
-                    TextField("Winners",         text: $sport.rkWinners).keyboardType(.numberPad)
-                }
-            }
-            
-            Divider()
-            FieldRowPlain {
-                TextField("Unforced errors", text: $sport.rkUnforcedErrors).keyboardType(.numberPad)
-            }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Sets won",  text: $sport.rkSetsWon).keyboardType(.numberPad)
-                    TextField("Sets lost", text: $sport.rkSetsLost).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Aces", text: $sport.rkAces)
+                workoutMetricField("DF", text: $sport.rkDoubleFaults)
+                workoutMetricField("Winners", text: $sport.rkWinners)
             }
 
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Games won",  text: $sport.rkGamesWon).keyboardType(.numberPad)
-                    TextField("Games lost", text: $sport.rkGamesLost).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("UE", text: $sport.rkUnforcedErrors, keyboard: .default)
             }
 
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Break pts won",   text: $sport.rkBreakPointsWon).keyboardType(.numberPad)
-                    TextField("Break pts total", text: $sport.rkBreakPointsTotal).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Sets won", text: $sport.rkSetsWon)
+                workoutMetricField("Sets lost", text: $sport.rkSetsLost)
             }
 
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Net pts won",   text: $sport.rkNetPointsWon).keyboardType(.numberPad)
-                    TextField("Net pts total", text: $sport.rkNetPointsTotal).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Games won", text: $sport.rkGamesWon)
+                workoutMetricField("Games lost", text: $sport.rkGamesLost)
+            }
+
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("BP won", text: $sport.rkBreakPointsWon)
+                workoutMetricField("BP tot", text: $sport.rkBreakPointsTotal)
+            }
+
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Net won", text: $sport.rkNetPointsWon)
+                workoutMetricField("Net tot", text: $sport.rkNetPointsTotal)
             }
             
         case .volleyball:
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Points", text: $sport.vbPoints).keyboardType(.numberPad)
-                    TextField("Aces", text: $sport.vbAces).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Points", text: $sport.vbPoints, keyboard: .numberPad)
+                workoutMetricField("Aces", text: $sport.vbAces, keyboard: .numberPad)
+            }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Blocks", text: $sport.vbBlocks, keyboard: .numberPad)
+                workoutMetricField("Digs", text: $sport.vbDigs, keyboard: .numberPad)
             }
 
         case .handball:
-            Divider()
-            FieldRowPlain {
-                TextField("Position (optional)", text: $sport.hbPosition)
-                    .textFieldStyle(.plain)
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Position", text: $sport.hbPosition, keyboard: .default)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Goals", text: $sport.hbGoals).keyboardType(.numberPad)
-                    TextField("Shots", text: $sport.hbShots).keyboardType(.numberPad)
-                    TextField("Shots on target", text: $sport.hbShotsOnTarget).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Goals", text: $sport.hbGoals, keyboard: .numberPad)
+                workoutMetricField("Shots", text: $sport.hbShots, keyboard: .numberPad)
+                workoutMetricField("SOT", text: $sport.hbShotsOnTarget, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Assists", text: $sport.hbAssists).keyboardType(.numberPad)
-                    TextField("Steals", text: $sport.hbSteals).keyboardType(.numberPad)
-                    TextField("Blocks", text: $sport.hbBlocks).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Assists", text: $sport.hbAssists, keyboard: .numberPad)
+                workoutMetricField("Steals", text: $sport.hbSteals, keyboard: .numberPad)
+                workoutMetricField("Blocks", text: $sport.hbBlocks, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Turnovers lost", text: $sport.hbTurnoversLost).keyboardType(.numberPad)
-                    TextField("7m goals", text: $sport.hbSevenMGoals).keyboardType(.numberPad)
-                    TextField("7m attempts", text: $sport.hbSevenMAttempts).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("TO lost", text: $sport.hbTurnoversLost, keyboard: .numberPad)
+                workoutMetricField("7m G", text: $sport.hbSevenMGoals, keyboard: .numberPad)
+                workoutMetricField("7m A", text: $sport.hbSevenMAttempts, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Saves (GK)", text: $sport.hbSaves).keyboardType(.numberPad)
-                    TextField("Yellow cards", text: $sport.hbYellow).keyboardType(.numberPad)
-                    TextField("2-min susp.", text: $sport.hbTwoMin).keyboardType(.numberPad)
-                    TextField("Red cards", text: $sport.hbRed).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Saves", text: $sport.hbSaves, keyboard: .numberPad)
+                workoutMetricField("Yellow cards", text: $sport.hbYellow, keyboard: .numberPad)
+                workoutMetricField("2min", text: $sport.hbTwoMin, keyboard: .numberPad)
+                workoutMetricField("Red cards", text: $sport.hbRed, keyboard: .numberPad)
             }
 
         case .hockey:
-            Divider()
-            FieldRowPlain {
-                TextField("Position (optional)", text: $sport.hkPosition)
-                    .textFieldStyle(.plain)
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Position", text: $sport.hkPosition, keyboard: .default)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Goals", text: $sport.hkGoals).keyboardType(.numberPad)
-                    TextField("Assists", text: $sport.hkAssists).keyboardType(.numberPad)
-                    TextField("Shots on goal", text: $sport.hkShotsOnGoal).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Goals", text: $sport.hkGoals, keyboard: .numberPad)
+                workoutMetricField("Assists", text: $sport.hkAssists, keyboard: .numberPad)
+                workoutMetricField("SOG", text: $sport.hkShotsOnGoal, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("+/-", text: $sport.hkPlusMinus).keyboardType(.numberPad)
-                    TextField("Hits", text: $sport.hkHits).keyboardType(.numberPad)
-                    TextField("Blocks", text: $sport.hkBlocks).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("+/-", text: $sport.hkPlusMinus, keyboard: .numberPad)
+                workoutMetricField("Hits", text: $sport.hkHits, keyboard: .numberPad)
+                workoutMetricField("Blocks", text: $sport.hkBlocks, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Faceoffs won", text: $sport.hkFaceoffsWon).keyboardType(.numberPad)
-                    TextField("Faceoffs total", text: $sport.hkFaceoffsTotal).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("FO won", text: $sport.hkFaceoffsWon, keyboard: .numberPad)
+                workoutMetricField("FO tot", text: $sport.hkFaceoffsTotal, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Saves (GK)", text: $sport.hkSaves).keyboardType(.numberPad)
-                    TextField("Penalty minutes", text: $sport.hkPenaltyMinutes).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Saves", text: $sport.hkSaves, keyboard: .numberPad)
+                workoutMetricField("PIM", text: $sport.hkPenaltyMinutes, keyboard: .numberPad)
             }
 
         case .rugby:
-            Divider()
-            FieldRowPlain {
-                TextField("Position (optional)", text: $sport.rgPosition)
-                    .textFieldStyle(.plain)
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Position", text: $sport.rgPosition, keyboard: .default)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Tries", text: $sport.rgTries).keyboardType(.numberPad)
-                    TextField("Conv. made", text: $sport.rgConversionsMade).keyboardType(.numberPad)
-                    TextField("Conv. att.", text: $sport.rgConversionsAttempted).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Tries", text: $sport.rgTries, keyboard: .numberPad)
+                workoutMetricField("Conv mk", text: $sport.rgConversionsMade, keyboard: .numberPad)
+                workoutMetricField("Conv att", text: $sport.rgConversionsAttempted, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Pen. goals made", text: $sport.rgPenaltyGoalsMade).keyboardType(.numberPad)
-                    TextField("Pen. goals att.", text: $sport.rgPenaltyGoalsAttempted).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("PG mk", text: $sport.rgPenaltyGoalsMade, keyboard: .numberPad)
+                workoutMetricField("PG att", text: $sport.rgPenaltyGoalsAttempted, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Runs", text: $sport.rgRuns).keyboardType(.numberPad)
-                    TextField("Meters gained", text: $sport.rgMetersGained).keyboardType(.numberPad)
-                    TextField("Offloads", text: $sport.rgOffloads).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Runs", text: $sport.rgRuns, keyboard: .numberPad)
+                workoutMetricField("M gained", text: $sport.rgMetersGained, keyboard: .numberPad)
+                workoutMetricField("Offloads", text: $sport.rgOffloads, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Tackles made", text: $sport.rgTacklesMade).keyboardType(.numberPad)
-                    TextField("Tackles missed", text: $sport.rgTacklesMissed).keyboardType(.numberPad)
-                    TextField("Turnovers won", text: $sport.rgTurnoversWon).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Tack mk", text: $sport.rgTacklesMade, keyboard: .numberPad)
+                workoutMetricField("Tack ms", text: $sport.rgTacklesMissed, keyboard: .numberPad)
+                workoutMetricField("TO won", text: $sport.rgTurnoversWon, keyboard: .numberPad)
             }
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Yellow cards", text: $sport.rgYellow).keyboardType(.numberPad)
-                    TextField("Red cards", text: $sport.rgRed).keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Yellow cards", text: $sport.rgYellow, keyboard: .numberPad)
+                workoutMetricField("Red cards", text: $sport.rgRed, keyboard: .numberPad)
             }
 
         case .hyrox:
             hyroxSportFieldsContent
 
         case .ski:
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Total distance (km)", text: $sport.skiTotalDistanceKm)
-                        .keyboardType(.decimalPad)
-                    TextField("Runs", text: $sport.skiRunsCount)
-                        .keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Dist km", text: $sport.skiTotalDistanceKm, keyboard: .numberPad)
+                workoutMetricField("Runs", text: $sport.skiRunsCount, keyboard: .numberPad)
             }
 
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Max speed (km/h)", text: $sport.skiMaxSpeedKmh)
-                        .keyboardType(.decimalPad)
-                    TextField("Avg speed (km/h)", text: $sport.skiAvgSpeedKmh)
-                        .keyboardType(.decimalPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Max km/h", text: $sport.skiMaxSpeedKmh, keyboard: .numberPad)
+                workoutMetricField("Avg km/h", text: $sport.skiAvgSpeedKmh, keyboard: .numberPad)
             }
 
-            Divider()
-            FieldRowPlain {
-                HStack {
-                    TextField("Vertical drop (m)", text: $sport.skiVerticalDropM)
-                        .keyboardType(.numberPad)
-                    TextField("Moving time (sec)", text: $sport.skiMovingTimeSec)
-                        .keyboardType(.numberPad)
-                    TextField("Paused time (sec)", text: $sport.skiPausedTimeSec)
-                        .keyboardType(.numberPad)
-                }
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Vert m", text: $sport.skiVerticalDropM, keyboard: .numberPad)
+                workoutMetricField("Move s", text: $sport.skiMovingTimeSec, keyboard: .numberPad)
+                workoutMetricField("Pause s", text: $sport.skiPausedTimeSec, keyboard: .numberPad)
             }
 
-            Divider()
-            FieldRowPlain {
-                TextField("Resort name", text: $sport.skiResortName)
-                    .textFieldStyle(.plain)
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Resort name", text: $sport.skiResortName, keyboard: .default)
             }
 
-            Divider()
-            FieldRowPlain {
-                TextField("Snow condition", text: $sport.skiSnowCondition)
-                    .textFieldStyle(.plain)
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Snow condition", text: $sport.skiSnowCondition, keyboard: .default)
             }
 
-            Divider()
-            FieldRowPlain {
-                TextField("Weather", text: $sport.skiWeather)
-                    .textFieldStyle(.plain)
+            Divider().padding(.vertical, 6)
+            WorkoutMetricFieldsRow {
+                workoutMetricField("Weather", text: $sport.skiWeather, keyboard: .default)
             }
         }
     }
@@ -2204,7 +2139,7 @@ struct AddWorkoutSheet: View {
                     p_started_at: iso.string(from: startedAt),
                     p_ended_at: endedAtEnabled ? iso.string(from: endedAt) : nil,
                     p_notes: note.isEmpty ? nil : note,
-                    p_distance_km: parseDouble(cardio.distanceKm),
+                    p_distance_km: parseCardioDistanceKmForSave(),
                     p_duration_sec: durSecHMS ?? parseInt(cardio.durationSec),
                     p_avg_hr: parseInt(cardio.avgHR),
                     p_max_hr: parseInt(cardio.maxHR),
@@ -2774,7 +2709,12 @@ struct AddWorkoutSheet: View {
         cardio.durM = String((sec % 3600) / 60)
         cardio.durS = String(sec % 60)
         didEditCardioDuration = true
-        cardio.distanceKm = r.distanceKm.map { String(format: "%.2f", $0) } ?? ""
+        if r.activity.usesSwimDistanceAndPace, let km = r.distanceKm {
+            cardio.distanceKm = CardioSwimDisplay.metersText(fromKm: km)
+            cardio.swimDistanceManuallyEdited = true
+        } else {
+            cardio.distanceKm = r.distanceKm.map { String(format: "%.2f", $0) } ?? ""
+        }
         cardio.elevationGainM = r.elevationGainM.map(String.init) ?? ""
         cardio.avgHR = r.avgHr.map(String.init) ?? ""
         cardio.maxHR = r.maxHr.map(String.init) ?? ""
@@ -2845,7 +2785,37 @@ struct AddWorkoutSheet: View {
         }
     }
     
+    private func parseCardioDistanceKmForSave() -> Double? {
+        if cardio.activity.usesSwimDistanceAndPace {
+            return CardioSwimDisplay.distanceKm(fromMetersText: cardio.distanceKm)
+        }
+        return parseDouble(cardio.distanceKm)
+    }
+
+    private func applyPoolDistanceFromLapsIfNeeded() {
+        guard cardio.activity.showsSwimFields, !cardio.swimDistanceManuallyEdited else { return }
+        guard let meters = CardioSwimDisplay.poolDistanceMeters(lapsText: cardio.swimLaps, poolLengthMText: cardio.poolLengthM) else { return }
+        cardio.distanceKm = "\(meters)"
+        updateAutoPaceIfNeeded()
+    }
+
+    private func cardioComputedPaceLabel() -> String {
+        guard let p = autoPaceSec(
+            distanceKmText: cardio.distanceKm,
+            durH: cardio.durH,
+            durM: cardio.durM,
+            durS: cardio.durS
+        ) else { return "—" }
+        if cardio.activity.usesSwimDistanceAndPace {
+            return CardioSwimDisplay.formatSwimPace(secPerKm: p)
+        }
+        return String(format: "%d:%02d /km", p / 60, p % 60)
+    }
+
     private func autoPaceSec(distanceKmText: String, durH: String, durM: String, durS: String) -> Int? {
+        if cardio.activity.usesSwimDistanceAndPace {
+            return CardioSwimDisplay.autoPaceSecPerKm(distanceMetersText: distanceKmText, durH: durH, durM: durM, durS: durS)
+        }
         guard let dist = parseDouble(distanceKmText), dist > 0,
               let dur = hmsToSeconds(durH, durM, durS) else { return nil }
         return Int((Double(dur) / dist).rounded())
@@ -3206,6 +3176,7 @@ struct EditableSet: Identifiable {
 struct CardioForm {
     var activity: CardioActivityType = .run
     var distanceKm: String = ""
+    var swimDistanceManuallyEdited: Bool = false
     var durH: String = ""
     var durM: String = ""
     var durS: String = ""

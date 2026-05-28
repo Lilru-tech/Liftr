@@ -112,21 +112,21 @@ struct SharedRecipeFromChatView: View {
     }
 
     private var titleLabel: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Receta"
         }
         return "Recipe"
     }
 
     private var ingredientsLabel: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Ingredientes"
         }
         return "Ingredients"
     }
 
     private var saveButtonTitle: String {
-        if Locale.current.languageCode?.lowercased().hasPrefix("es") == true {
+        if AppLanguage.isSpanish {
             return "Guardar en mis recetas"
         }
         return "Save to My Recipes"
@@ -140,7 +140,7 @@ struct SharedRecipeFromChatView: View {
         do {
             _ = try await ChatService.cloneSharedRecipe(snapshot: snapshot)
             BannerAction.showSuccess(
-                Locale.current.languageCode?.lowercased().hasPrefix("es") == true
+                AppLanguage.isSpanish
                 ? "Añadido a tus recetas"
                 : "Saved to your recipes",
                 banner: $banner

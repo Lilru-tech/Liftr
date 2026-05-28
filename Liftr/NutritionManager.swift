@@ -44,7 +44,7 @@ struct NutritionProfilePer100g: Hashable {
 }
 
 enum NutritionDisplayTargets {
-    static let caloriesKcal = 2000.0
+    static let caloriesKcal = Double(NutritionMetabolism.fallbackKcalNeutral)
     static let proteinG = 150.0
     static let carbsG = 250.0
     static let fatG = 70.0

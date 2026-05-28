@@ -244,6 +244,7 @@ object CompareWorkoutFormat {
         "kg" -> String.format(Locale.US, "%.1f kg", v)
         "sec" -> formatSecs(v)
         "sec_per_km" -> formatSecsPerKm(v)
+        "sec_per_100m" -> formatSecsPer100m(v)
         "sec_per_500m" -> formatSecsPer500(v)
         "bpm" -> String.format(Locale.US, "%.0f bpm", v)
         "m" -> String.format(Locale.US, "%.0f m", v)
@@ -278,6 +279,11 @@ object CompareWorkoutFormat {
     private fun formatSecsPer500(v: Double): String {
         val s = max(0, v.roundToInt())
         return String.format(Locale.US, "%d:%02d /500m", s / 60, s % 60)
+    }
+
+    private fun formatSecsPer100m(v: Double): String {
+        val s = max(0, v.roundToInt())
+        return String.format(Locale.US, "%d:%02d /100m", s / 60, s % 60)
     }
 
 }

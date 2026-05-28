@@ -16,6 +16,23 @@ enum HealthKitCardioImportMode: Sendable {
     case automatic
 }
 
+enum HealthKitCardioImportDuplicateDetection {
+    static func isHealthKitUuidUniqueViolation(_ error: Error) -> Bool {
+        if let pe = error as? PostgrestError {
+            guard pe.code == "23505" else { return false }
+            let message = (pe.message ?? "").lowercased()
+            return message.contains("healthkit_uuid")
+                || message.contains("workouts_healthkit_uuid_unique")
+                || message.contains("workouts_user_healthkit_uuid_unique")
+        }
+        let text = "\(error.localizedDescription) \(String(describing: error))".lowercased()
+        guard text.contains("23505") || text.contains("duplicate key") else { return false }
+        return text.contains("healthkit_uuid")
+            || text.contains("workouts_healthkit_uuid_unique")
+            || text.contains("workouts_user_healthkit_uuid_unique")
+    }
+}
+
 enum HealthKitCardioImportNotificationPolicy {
     static let recentImportWindow: TimeInterval = 48 * 3600
     static let mergedWorkoutAgeThreshold: TimeInterval = 120
@@ -102,7 +119,7 @@ final class HealthKitCardioImportService {
 
             let hkUUID = w.uuid.uuidString.lowercased()
 
-            if await isDuplicateHealthKitUUID(hkUUID) {
+            if await isDuplicateHealthKitUUID(hkUUID, userId: userId) {
                 summary.skippedDuplicate += 1
                 continue
             }
@@ -187,7 +204,7 @@ final class HealthKitCardioImportService {
 
                 var wid = Self.decodeRPCWorkoutId(res.data)
                 if wid == nil {
-                    wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID)
+                    wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID, userId: userId)
                 }
                 if let wid {
                     let merged = await wasMergedIntoExistingWorkout(workoutId: wid)
@@ -217,8 +234,12 @@ final class HealthKitCardioImportService {
                     summary.imported += 1
                 }
             } catch {
-                summary.failed += 1
-                summary.errorMessages.append("\(mapped.label): \(error.localizedDescription)")
+                if HealthKitCardioImportDuplicateDetection.isHealthKitUuidUniqueViolation(error) {
+                    summary.skippedDuplicate += 1
+                } else {
+                    summary.failed += 1
+                    summary.errorMessages.append("\(mapped.label): \(error.localizedDescription)")
+                }
             }
         }
 
@@ -517,8 +538,12 @@ final class HealthKitCardioImportService {
         }
     }
 
-    private func isDuplicateHealthKitUUID(_ uuid: String) async -> Bool {
-        await (try? fetchWorkoutIdByHealthKitUUID(uuid)) != nil
+    private func isDuplicateHealthKitUUID(_ uuid: String, userId: UUID) async -> Bool {
+        do {
+            return try await fetchWorkoutIdByHealthKitUUID(uuid, userId: userId) != nil
+        } catch {
+            return false
+        }
     }
 
     private func wasMergedIntoExistingWorkout(workoutId: Int) async -> Bool {
@@ -536,10 +561,11 @@ final class HealthKitCardioImportService {
         return HealthKitCardioImportNotificationPolicy.wasExistingWorkoutBeforeImport(createdAt: row.created_at)
     }
 
-    private func fetchWorkoutIdByHealthKitUUID(_ uuid: String) async throws -> Int? {
+    private func fetchWorkoutIdByHealthKitUUID(_ uuid: String, userId: UUID) async throws -> Int? {
         let res = try await SupabaseManager.shared.client
             .from("workouts")
             .select("id")
+            .eq("user_id", value: userId)
             .eq("healthkit_uuid", value: uuid)
             .limit(1)
             .execute()
