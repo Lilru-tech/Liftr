@@ -96,6 +96,7 @@ import com.lilru.liftr.ui.chat.SharedRecipeProfilePer100gSnapshot
 import com.lilru.liftr.ui.chat.SharedRecipeSnapshot
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradientOpaque
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlin.math.roundToInt
