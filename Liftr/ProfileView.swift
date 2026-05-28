@@ -197,8 +197,8 @@ struct ProfileView: View {
     @State private var editingProfile = false
     @State private var heightCm: String = ""
     @State private var weightKg: String = ""
-    @State private var baseCaloriesTarget: String = "2000"
-    @State private var baseCaloriesTargetLoadedSnapshot: String = "2000"
+    @State private var baseCaloriesTarget: String = "\(NutritionMetabolism.fallbackKcalNeutral)"
+    @State private var baseCaloriesTargetLoadedSnapshot: String = "\(NutritionMetabolism.fallbackKcalNeutral)"
     @State private var baseCaloriesTargetIsManual: Bool = false
     @State private var profileSex: String?
     @State private var birthDate: Date = Date()
@@ -1192,7 +1192,7 @@ struct ProfileView: View {
     }
     
     private var headerCard: some View {
-        HStack(alignment: .top, spacing: 14) {
+        ZStack(alignment: .topTrailing) {
             HStack(alignment: .center, spacing: 14) {
                 if isOwnProfile {
                     PhotosPicker(selection: $pickedItem, matching: .images) {
@@ -1325,9 +1325,18 @@ struct ProfileView: View {
                                     .padding()
                             }
                         } label: {
-                            Label("Challenge", systemImage: "figure.fencing")
-                                .font(.caption.weight(.semibold))
-                                .frame(maxWidth: .infinity)
+                            Label {
+                                Text("Challenge")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .allowsTightening(true)
+                            } icon: {
+                                Image(systemName: "figure.fencing")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .labelStyle(.titleAndIcon)
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -1338,6 +1347,7 @@ struct ProfileView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
                 NavigationLink {
@@ -1415,6 +1425,7 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
             }
+            .padding(.top, 2)
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
@@ -2059,12 +2070,12 @@ struct ProfileView: View {
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
                             if editingProfile {
-                                TextField("2000", text: $baseCaloriesTarget)
+                                TextField("\(metabolicTargetPlaceholderKcal)", text: $baseCaloriesTarget)
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(maxWidth: 120)
                             } else {
-                                Text(baseCaloriesTarget.isEmpty ? "2000" : baseCaloriesTarget)
+                                Text(baseCaloriesTarget.isEmpty ? "\(metabolicTargetPlaceholderKcal)" : baseCaloriesTarget)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
@@ -2258,6 +2269,10 @@ struct ProfileView: View {
         return cal.dateComponents([.year], from: birthDate, to: now).year
     }
     
+    private var metabolicTargetPlaceholderKcal: Int {
+        NutritionMetabolism.demographicFallbackKcal(sex: profileSex)
+    }
+
     private func refreshAutoBmrDraftIfNeeded() {
         guard editingProfile, !baseCaloriesTargetIsManual else { return }
         let resolved = resolvedBaseCaloriesDisplayKcal()
@@ -2310,12 +2325,22 @@ struct ProfileView: View {
             if let baseCal, caloriesChanged {
                 payload["base_calories_target"] = AnyEncodable(baseCal)
                 payload["base_calories_target_is_manual"] = AnyEncodable(true)
+            } else if !baseCaloriesTargetIsManual {
+                payload["base_calories_target"] = AnyEncodable(resolvedBaseCaloriesDisplayKcal())
+                payload["base_calories_target_is_manual"] = AnyEncodable(false)
             }
 
             if hasBirthDate {
                 payload["date_of_birth"] = AnyEncodable(df.string(from: birthDate))
             } else {
                 payload["date_of_birth"] = AnyEncodable(nilValue: ())
+            }
+
+            let wText = weightKg.trimmingCharacters(in: .whitespacesAndNewlines)
+            if wText.isEmpty {
+                payload["weight_kg"] = AnyEncodable(nilValue: ())
+            } else if let weight = Double(wText.replacingOccurrences(of: ",", with: ".")), weight > 0 {
+                payload["weight_kg"] = AnyEncodable(weight)
             }
 
             guard !payload.isEmpty else { return }

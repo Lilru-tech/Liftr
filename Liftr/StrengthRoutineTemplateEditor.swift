@@ -164,7 +164,11 @@ func strengthRoutinePreviewBlocks(from exercises: [EditableExercise]) -> [Streng
 }
 
 private func strengthRoutinePreviewMemberLabel(position: Int, memberCount: Int) -> String {
-    String(localized: "Exercise \(position) of \(memberCount)")
+    String.localizedStringWithFormat(
+        String(localized: "strength_preview_exercise_of_format"),
+        position,
+        memberCount
+    )
 }
 
 struct StrengthRoutinePreviewExercisesList<SetLine: View>: View {
@@ -197,7 +201,12 @@ struct StrengthRoutinePreviewExercisesList<SetLine: View>: View {
                 Text(String(localized: "Superserie"))
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text(String(localized: "\(memberCount) exercises"))
+                Text(
+                    String.localizedStringWithFormat(
+                        String(localized: "strength_preview_exercise_count_format"),
+                        memberCount
+                    )
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

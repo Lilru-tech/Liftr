@@ -22,6 +22,7 @@
 		CFBC43852E9FA7EC002E1FCA /* Realtime in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43842E9FA7EC002E1FCA /* Realtime */; };
 		CFBC43872E9FA7EC002E1FCA /* Storage in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43862E9FA7EC002E1FCA /* Storage */; };
 		CFBC43AC2E9FA8D9002E1FCA /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = CFBC43AB2E9FA8D9002E1FCA /* Supabase */; };
+		CFF0A0013C1A4B2A00123456 /* Liftr/Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = CFF0A0003C1A4B2A00123456 /* Liftr/Localizable.xcstrings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -70,6 +71,7 @@
 		CFBC42EF2E9F8FA3002E1FCA /* Liftr.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Liftr.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CFBC42FF2E9F8FA5002E1FCA /* LiftrTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiftrTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		CFBC43092E9F8FA5002E1FCA /* LiftrUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LiftrUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		CFF0A0003C1A4B2A00123456 /* Liftr/Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Liftr/Localizable.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -84,6 +86,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
+				Localizable.xcstrings,
 				supabase/functions,
 			);
 			target = CFBC42EE2E9F8FA3002E1FCA /* Liftr */;
@@ -168,6 +171,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		CF8D0A1D2FC82D6D002AAA38 /* Recovered References */ = {
+			isa = PBXGroup;
+			children = (
+				CFF0A0003C1A4B2A00123456 /* Liftr/Localizable.xcstrings */,
+			);
+			name = "Recovered References";
+			sourceTree = "<group>";
+		};
 		CFBC42E62E9F8FA3002E1FCA = {
 			isa = PBXGroup;
 			children = (
@@ -177,6 +188,7 @@
 				CF4BDFD42F9A1EDD001158D0 /* LiftrWorkoutLiveActivity */,
 				CFBC43AA2E9FA8D9002E1FCA /* Frameworks */,
 				CFBC42F02E9F8FA3002E1FCA /* Products */,
+				CF8D0A1D2FC82D6D002AAA38 /* Recovered References */,
 			);
 			sourceTree = "<group>";
 		};
@@ -315,7 +327,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2640;
-				LastUpgradeCheck = 2600;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					CF4BDFCE2F9A1EDD001158D0 = {
 						CreatedOnToolsVersion = 26.4.1;
@@ -373,6 +385,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CFF0A0013C1A4B2A00123456 /* Liftr/Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -459,7 +472,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.15.0;
+				MARKETING_VERSION = 1.16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr.LiftrWorkoutLiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -489,7 +502,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.15.0;
+				MARKETING_VERSION = 1.16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr.LiftrWorkoutLiveActivity;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -634,6 +647,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Liftr/Preview Content\"";
+				ENABLE_APPINTENTS_METADATA_EXTRACTION = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Liftr/Info.plist;
@@ -648,7 +662,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.15.0;
+				MARKETING_VERSION = 1.16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -666,6 +680,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Liftr/Preview Content\"";
+				ENABLE_APPINTENTS_METADATA_EXTRACTION = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Liftr/Info.plist;
@@ -680,7 +695,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.15.0;
+				MARKETING_VERSION = 1.16.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.davidgomez.Liftr;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

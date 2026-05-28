@@ -125,8 +125,8 @@ data class ProfileUiState(
     /** Borradores de “Personal information” (paridad [Liftr/ProfileView.swift] settings). */
     val heightCmDraft: String = "",
     val weightKgDraft: String = "",
-    val baseCaloriesTargetDraft: String = "2000",
-    val baseCaloriesTargetLoadedSnapshot: String = "2000",
+    val baseCaloriesTargetDraft: String = "${BackendContracts.NutritionMetabolism.FALLBACK_KCAL_NEUTRAL}",
+    val baseCaloriesTargetLoadedSnapshot: String = "${BackendContracts.NutritionMetabolism.FALLBACK_KCAL_NEUTRAL}",
     val baseCaloriesTargetIsManual: Boolean = false,
     val profileSex: String? = null,
     val hasBirthDate: Boolean = false,
@@ -450,15 +450,31 @@ class ProfileViewModel(
                 if (s.hasBirthDate && s.birthDateMillis == null) {
                     error("Choose a birth date or turn off “Show birth date”.")
                 }
+                val wText = s.weightKgDraft.trim()
+                val weightForPayload = if (wText.isEmpty()) {
+                    null
+                } else {
+                    wText.replace(',', '.').toDoubleOrNull()?.takeIf { it > 0 }
+                        ?: error("Weight must be a positive number, or leave empty.")
+                }
                 val payload = buildJsonObject {
                     if (hText.isEmpty()) {
                         put("height_cm", JsonNull)
                     } else {
                         put("height_cm", JsonPrimitive(heightForPayload!!))
                     }
+                    if (wText.isEmpty()) {
+                        put("weight_kg", JsonNull)
+                    } else {
+                        put("weight_kg", JsonPrimitive(weightForPayload!!))
+                    }
                     if (baseCal != null) {
                         put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET, baseCal)
                         put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET_IS_MANUAL, true)
+                    } else if (!s.baseCaloriesTargetIsManual) {
+                        val autoTarget = resolvedBaseCaloriesDraftFromState(s)
+                        put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET, autoTarget)
+                        put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET_IS_MANUAL, false)
                     }
                     if (s.hasBirthDate) {
                         val d = Instant.ofEpochMilli(s.birthDateMillis!!).atZone(ZoneId.systemDefault())
@@ -472,14 +488,18 @@ class ProfileViewModel(
                     filter { eq("user_id", me) }
                 }
                 val newH = if (hText.isEmpty()) "" else "${heightForPayload!!}"
+                val newW = if (wText.isEmpty()) "" else String.format(Locale.US, "%.1f", weightForPayload!!)
                 val resolvedDraft = if (baseCal != null) {
                     baseCal
                 } else {
-                    resolvedBaseCaloriesDraftFromState(s.copy(heightCmDraft = newH))
+                    resolvedBaseCaloriesDraftFromState(
+                        s.copy(heightCmDraft = newH, weightKgDraft = newW)
+                    )
                 }
                 _uiState.value = s.copy(
                     saveProfileMetricsBusy = false,
                     heightCmDraft = newH,
+                    weightKgDraft = newW,
                     baseCaloriesTargetDraft = resolvedDraft.toString(),
                     baseCaloriesTargetLoadedSnapshot = resolvedDraft.toString(),
                     baseCaloriesTargetIsManual = baseCal != null || s.baseCaloriesTargetIsManual,

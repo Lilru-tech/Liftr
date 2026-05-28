@@ -1,6 +1,7 @@
 package com.lilru.liftr.ui.profile
 
 import android.net.Uri
+import com.lilru.liftr.nutrition.NutritionMetabolism
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -484,7 +485,7 @@ private fun ProfileIosStyleHeader(
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
-                                            overflow = TextOverflow.Clip
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -1656,7 +1657,9 @@ private fun ProfilePersonalInformationCard(
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Text(
-                            text = ui.baseCaloriesTargetDraft.ifBlank { "2000" },
+                            text = ui.baseCaloriesTargetDraft.ifBlank {
+                                NutritionMetabolism.demographicFallbackKcal(ui.profileSex).toString()
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium
                         )

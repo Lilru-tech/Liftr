@@ -96,6 +96,13 @@ import com.lilru.liftr.ui.chat.RoutineShareSnapshot
 import com.lilru.liftr.ui.chat.SharedRoutineFromChatScreen
 import com.lilru.liftr.ui.chat.ShareRoutineToChatSheetContent
 import com.lilru.liftr.ui.components.LiftrAvatar
+import com.lilru.liftr.ui.components.WorkoutMetricField
+import com.lilru.liftr.ui.components.WorkoutMetricReadoutField
+import com.lilru.liftr.ui.home.autoPaceSecPerKmFromMeters
+import com.lilru.liftr.ui.home.formatSwimPaceMinSecPer100m
+import com.lilru.liftr.ui.home.metersTextFromKm
+import com.lilru.liftr.ui.home.poolDistanceMetersFromLaps
+import androidx.compose.ui.text.input.KeyboardType
 import com.lilru.liftr.ui.add.recommendation.CardioRecommendationResult
 import com.lilru.liftr.ui.add.recommendation.HyroxExerciseRecommendationResult
 import com.lilru.liftr.ui.add.recommendation.SportRecommendationResult
@@ -190,6 +197,7 @@ fun AddWorkoutTabScreen(
     var selectedKind by rememberSaveable { mutableStateOf(AddWorkoutKind.STRENGTH) }
     var cardioActivity by rememberSaveable { mutableStateOf(AddCardioActivity.RUN) }
     var cardioDistanceKm by rememberSaveable { mutableStateOf("") }
+    var cardioSwimDistanceManual by rememberSaveable { mutableStateOf(false) }
     var cardioDurH by rememberSaveable { mutableStateOf("") }
     var cardioDurM by rememberSaveable { mutableStateOf("") }
     var cardioDurS by rememberSaveable { mutableStateOf("") }
@@ -432,7 +440,11 @@ fun AddWorkoutTabScreen(
 
     val cardioDurationSecComputed = addHmsToTotalSecOrNull(cardioDurH, cardioDurM, cardioDurS)
         ?: cardioDurationSecFallback.trim().toIntOrNull()
-    val cardioPaceAutoSecPerKm = addCardioAutoPaceSecPerKm(cardioDistanceKm, cardioDurationSecComputed)
+    val cardioPaceAutoSecPerKm = if (cardioActivity.usesSwimDistanceAndPace) {
+        cardioDurationSecComputed?.let { autoPaceSecPerKmFromMeters(cardioDistanceKm, it) }
+    } else {
+        addCardioAutoPaceSecPerKm(cardioDistanceKm, cardioDurationSecComputed)
+    }
 
     LaunchedEffect(
         scheduleEndedEnabled,
@@ -851,71 +863,65 @@ fun AddWorkoutTabScreen(
                     items(AddCardioActivity.values()) { activity ->
                         FilterChip(
                             selected = cardioActivity == activity,
-                            onClick = { cardioActivity = activity },
+                            onClick = {
+                                cardioActivity = activity
+                                if (!activity.showsSwimFields) cardioSwimDistanceManual = false
+                            },
                             label = { Text(activity.wire) }
                         )
                     }
                 }
             }
             item {
-                OutlinedTextField(
-                    value = cardioDistanceKm,
-                    onValueChange = {
-                        cardioDistanceKm = it
-                        vm.clearStatus()
-                    },
-                    label = { Text(stringResource(R.string.add_cardio_distance_km_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = stringResource(R.string.add_cardio_duration_hms_caption),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                val swimUnits = cardioActivity.usesSwimDistanceAndPace
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    WorkoutMetricField(
+                        title = if (swimUnits) "Dist m" else "Dist km",
+                        value = cardioDistanceKm,
+                        onValueChange = {
+                            cardioDistanceKm = it
+                            if (swimUnits) cardioSwimDistanceManual = true
+                            vm.clearStatus()
+                        },
+                        modifier = Modifier.weight(1.2f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = cardioDurH,
-                            onValueChange = {
-                                didEditCardioDuration = true
-                                cardioDurH = it
-                                vm.clearStatus()
-                            },
-                            label = { Text(stringResource(R.string.add_cardio_duration_h_label)) },
-                            singleLine = true,
-                            modifier = Modifier.width(64.dp)
-                        )
-                        Text(":", style = MaterialTheme.typography.bodyLarge)
-                        OutlinedTextField(
-                            value = cardioDurM,
-                            onValueChange = {
-                                didEditCardioDuration = true
-                                cardioDurM = it
-                                vm.clearStatus()
-                            },
-                            label = { Text(stringResource(R.string.add_cardio_duration_m_label)) },
-                            singleLine = true,
-                            modifier = Modifier.width(64.dp)
-                        )
-                        Text(":", style = MaterialTheme.typography.bodyLarge)
-                        OutlinedTextField(
-                            value = cardioDurS,
-                            onValueChange = {
-                                didEditCardioDuration = true
-                                cardioDurS = it
-                                vm.clearStatus()
-                            },
-                            label = { Text(stringResource(R.string.add_cardio_duration_s_label)) },
-                            singleLine = true,
-                            modifier = Modifier.width(64.dp)
-                        )
-                    }
+                    WorkoutMetricField(
+                        title = "h",
+                        value = cardioDurH,
+                        onValueChange = {
+                            didEditCardioDuration = true
+                            cardioDurH = it
+                            vm.clearStatus()
+                        },
+                        modifier = Modifier.weight(0.6f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    WorkoutMetricField(
+                        title = "m",
+                        value = cardioDurM,
+                        onValueChange = {
+                            didEditCardioDuration = true
+                            cardioDurM = it
+                            vm.clearStatus()
+                        },
+                        modifier = Modifier.weight(0.6f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    WorkoutMetricField(
+                        title = "s",
+                        value = cardioDurS,
+                        onValueChange = {
+                            didEditCardioDuration = true
+                            cardioDurS = it
+                            vm.clearStatus()
+                        },
+                        modifier = Modifier.weight(0.6f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
             }
             item {
@@ -932,108 +938,94 @@ fun AddWorkoutTabScreen(
                 )
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    WorkoutMetricField(
+                        title = "Avg HR",
                         value = cardioAvgHr,
                         onValueChange = {
                             cardioAvgHr = it
                             vm.clearStatus()
                         },
-                        label = { Text(stringResource(R.string.add_cardio_avg_hr_label)) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
-                    OutlinedTextField(
+                    WorkoutMetricField(
+                        title = "Max HR",
                         value = cardioMaxHr,
                         onValueChange = {
                             cardioMaxHr = it
                             vm.clearStatus()
                         },
-                        label = { Text(stringResource(R.string.add_cardio_max_hr_label)) },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                 }
             }
             item {
-                if (cardioActivity.showsElevation) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Text(
-                                text = stringResource(R.string.add_cardio_pace_computed),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            val paceLabel = cardioPaceAutoSecPerKm?.let { addFormatPaceMinSecPerKm(it) }
-                                ?: stringResource(R.string.add_cardio_pace_none)
-                            Text(
-                                text = paceLabel,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                        OutlinedTextField(
+                val paceLabel = cardioPaceAutoSecPerKm?.let {
+                    if (cardioActivity.usesSwimDistanceAndPace) formatSwimPaceMinSecPer100m(it)
+                    else addFormatPaceMinSecPerKm(it)
+                } ?: "—"
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    WorkoutMetricReadoutField(
+                        title = if (cardioActivity.usesSwimDistanceAndPace) "Pace /100m" else "Pace /km",
+                        value = paceLabel,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (cardioActivity.showsElevation) {
+                        WorkoutMetricField(
+                            title = "Elev m",
                             value = cardioElevationGainM,
                             onValueChange = {
                                 cardioElevationGainM = it
                                 vm.clearStatus()
                             },
-                            label = { Text(stringResource(R.string.add_cardio_elevation_m_label)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            text = stringResource(R.string.add_cardio_pace_computed),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        val paceLabel = cardioPaceAutoSecPerKm?.let { addFormatPaceMinSecPerKm(it) }
-                            ?: stringResource(R.string.add_cardio_pace_none)
-                        Text(
-                            text = paceLabel,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
                     }
                 }
             }
             item {
-                OutlinedTextField(
+                WorkoutMetricField(
+                    title = if (cardioActivity.usesSwimDistanceAndPace) "Pace s/100m" else "Pace s/km",
                     value = cardioAvgPaceSecPerKm,
                     onValueChange = {
                         cardioAvgPaceSecPerKm = it
                         vm.clearStatus()
                     },
-                    label = { Text(stringResource(R.string.add_cardio_avg_pace_sec_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
             }
             if (cardioActivity.showsCadenceRpm || cardioActivity.showsWatts) {
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         if (cardioActivity.showsCadenceRpm) {
-                            OutlinedTextField(
+                            WorkoutMetricField(
+                                title = "Cadence",
                                 value = cardioStats["cadence_rpm"] ?: "",
                                 onValueChange = { cardioStats["cadence_rpm"] = it },
-                                label = { Text(stringResource(R.string.add_cardio_cadence_rpm_label)) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                             )
                         }
                         if (cardioActivity.showsWatts) {
-                            OutlinedTextField(
+                            WorkoutMetricField(
+                                title = "Watts",
                                 value = cardioStats["watts_avg"] ?: "",
                                 onValueChange = { cardioStats["watts_avg"] = it },
-                                label = { Text(stringResource(R.string.add_cardio_watts_avg_label)) },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f),
+                                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                             )
                         }
                     }
@@ -1041,42 +1033,61 @@ fun AddWorkoutTabScreen(
             }
             if (cardioActivity.showsIncline) {
                 item {
-                    OutlinedTextField(
+                    WorkoutMetricField(
+                        title = "Incline %",
                         value = cardioStats["incline_pct"] ?: "",
                         onValueChange = { cardioStats["incline_pct"] = it },
-                        label = { Text(stringResource(R.string.add_cardio_incline_pct_label)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Decimal)
                     )
                 }
             }
             if (cardioActivity.showsSplit500m) {
                 item {
-                    OutlinedTextField(
+                    WorkoutMetricField(
+                        title = "Split 500m",
                         value = cardioStats["split_sec_per_500m"] ?: "",
                         onValueChange = { cardioStats["split_sec_per_500m"] = it },
-                        label = { Text(stringResource(R.string.add_cardio_split_500m_label)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                 }
             }
             if (cardioActivity.showsSwimFields) {
                 item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        WorkoutMetricField(
+                            title = "Laps",
                             value = cardioStats["swim_laps"] ?: "",
-                            onValueChange = { cardioStats["swim_laps"] = it },
-                            label = { Text(stringResource(R.string.add_cardio_swim_laps_label)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
+                            onValueChange = {
+                                cardioStats["swim_laps"] = it
+                                if (!cardioSwimDistanceManual) {
+                                    poolDistanceMetersFromLaps(
+                                        it,
+                                        cardioStats["pool_length_m"].orEmpty()
+                                    )?.let { m -> cardioDistanceKm = m.toString() }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
-                        OutlinedTextField(
+                        WorkoutMetricField(
+                            title = "Pool m",
                             value = cardioStats["pool_length_m"] ?: "",
-                            onValueChange = { cardioStats["pool_length_m"] = it },
-                            label = { Text(stringResource(R.string.add_cardio_pool_length_m_label)) },
-                            singleLine = true,
-                            modifier = Modifier.weight(1f)
+                            onValueChange = {
+                                cardioStats["pool_length_m"] = it
+                                if (!cardioSwimDistanceManual) {
+                                    poolDistanceMetersFromLaps(
+                                        cardioStats["swim_laps"].orEmpty(),
+                                        it
+                                    )?.let { m -> cardioDistanceKm = m.toString() }
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
                     }
                 }
@@ -1123,22 +1134,35 @@ fun AddWorkoutTabScreen(
                 }
             }
             item {
-                OutlinedTextField(
-                    value = sportDurationMin,
-                    onValueChange = {
-                        didEditSportDuration = true
-                        sportDurationMin = it
-                        vm.clearStatus()
-                    },
-                    label = { Text(stringResource(R.string.add_sport_duration_min_label)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = sportScoreFor, onValueChange = { sportScoreFor = it }, label = { Text(stringResource(R.string.add_sport_score_for_label)) }, singleLine = true, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = sportScoreAgainst, onValueChange = { sportScoreAgainst = it }, label = { Text(stringResource(R.string.add_sport_score_against_label)) }, singleLine = true, modifier = Modifier.weight(1f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    WorkoutMetricField(
+                        title = "Min",
+                        value = sportDurationMin,
+                        onValueChange = {
+                            didEditSportDuration = true
+                            sportDurationMin = it
+                            vm.clearStatus()
+                        },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    WorkoutMetricField(
+                        title = "For",
+                        value = sportScoreFor,
+                        onValueChange = { sportScoreFor = it },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    WorkoutMetricField(
+                        title = "Against",
+                        value = sportScoreAgainst,
+                        onValueChange = { sportScoreAgainst = it },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
             }
             item {
@@ -2064,6 +2088,7 @@ fun AddWorkoutTabScreen(
                 applyCardioRecommendationToForm(
                     r = r,
                     setActivity = { cardioActivity = it },
+                    onDistanceApplied = { cardioSwimDistanceManual = it },
                     setDurH = { cardioDurH = it },
                     setDurM = { cardioDurM = it },
                     setDurS = { cardioDurS = it },
@@ -2368,7 +2393,8 @@ private fun applyCardioRecommendationToForm(
     setAvgHr: (String) -> Unit,
     setMaxHr: (String) -> Unit,
     setPace: (String) -> Unit,
-    setStat: (String, String) -> Unit
+    setStat: (String, String) -> Unit,
+    onDistanceApplied: (Boolean) -> Unit = {}
 ) {
     setActivity(
         AddCardioActivity.entries.firstOrNull { it.wire == r.activityWire }
@@ -2379,12 +2405,15 @@ private fun applyCardioRecommendationToForm(
     setDurM(((t % 3600) / 60).toString())
     setDurS((t % 60).toString())
     setDurFallback("")
+    val act = AddCardioActivity.entries.firstOrNull { it.wire == r.activityWire } ?: AddCardioActivity.RUN
     setDistance(
         r.distanceKm?.let { d ->
-            if (d % 1.0 == 0.0) d.toInt().toString()
+            if (act.usesSwimDistanceAndPace) metersTextFromKm(d)
+            else if (d % 1.0 == 0.0) d.toInt().toString()
             else String.format(Locale.US, "%.2f", d)
         } ?: ""
     )
+    onDistanceApplied(r.distanceKm != null)
     setElev(r.elevationGainM?.toString() ?: "")
     setAvgHr(r.avgHr?.toString() ?: "")
     setMaxHr(r.maxHr?.toString() ?: "")

@@ -256,17 +256,62 @@ struct SharedRoutineFromChatView: View {
 
     private func hyroxStationDetailLines(_ w: HyroxRoutineExerciseWire) -> [String] {
         var out: [String] = []
-        if let d = w.distance_m, d > 0 { out.append(String(localized: "Distance: \(d) m")) }
-        if let r = w.reps, r > 0 { out.append(String(localized: "Reps: \(r)")) }
+        if let d = w.distance_m, d > 0 {
+            out.append(
+                String.localizedStringWithFormat(
+                    String(localized: "hyrox_station_distance_m_format"),
+                    d
+                )
+            )
+        }
+        if let r = w.reps, r > 0 {
+            out.append(
+                String.localizedStringWithFormat(
+                    String(localized: "hyrox_station_reps_format"),
+                    r
+                )
+            )
+        }
         if let kg = w.weight_kg, kg > 0 {
             let s = kg == floor(kg) ? "\(Int(kg))" : String(format: "%.1f", kg)
-            out.append(String(localized: "Weight: \(s) kg"))
+            out.append(
+                String.localizedStringWithFormat(
+                    String(localized: "hyrox_station_weight_kg_format"),
+                    s
+                )
+            )
         }
-        if let sec = w.duration_sec, sec > 0 { out.append(String(localized: "Duration: \(sec) s")) }
-        if let h = w.height_cm, h > 0 { out.append(String(localized: "Height: \(h) cm")) }
-        if let imp = w.implement_count, imp > 0 { out.append(String(localized: "Implements: \(imp)")) }
+        if let sec = w.duration_sec, sec > 0 {
+            out.append(
+                String.localizedStringWithFormat(
+                    String(localized: "hyrox_station_duration_sec_format"),
+                    sec
+                )
+            )
+        }
+        if let h = w.height_cm, h > 0 {
+            out.append(
+                String.localizedStringWithFormat(
+                    String(localized: "hyrox_station_height_cm_format"),
+                    h
+                )
+            )
+        }
+        if let imp = w.implement_count, imp > 0 {
+            out.append(
+                String.localizedStringWithFormat(
+                    String(localized: "hyrox_station_implements_format"),
+                    imp
+                )
+            )
+        }
         if let n = w.notes?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
-            out.append(String(localized: "Notes: \(n)"))
+            out.append(
+                String.localizedStringWithFormat(
+                    String(localized: "hyrox_station_notes_format"),
+                    n
+                )
+            )
         }
         return out
     }

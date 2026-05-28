@@ -44,7 +44,7 @@ struct NutritionProfilePer100g: Hashable {
 }
 
 enum NutritionDisplayTargets {
-    static let caloriesKcal = 2000.0
+    static let caloriesKcal = Double(NutritionMetabolism.fallbackKcalNeutral)
     static let proteinG = 150.0
     static let carbsG = 250.0
     static let fatG = 70.0
@@ -333,8 +333,25 @@ private struct NutritionIngredientInsert: Encodable {
     let is_public: Bool
 }
 
+private struct NutritionIngredientUpdate: Encodable {
+    let name: String
+    let calories_per_100g: Double
+    let protein_per_100g: Double
+    let carbs_per_100g: Double
+    let fat_per_100g: Double
+    let saturated_fat_per_100g: Double
+    let sugars_per_100g: Double
+    let fiber_per_100g: Double
+    let sodium_mg_per_100g: Double
+}
+
 private struct NutritionRecipeInsert: Encodable {
     let user_id: UUID
+    let name: String
+    let description: String?
+}
+
+private struct NutritionRecipeUpdate: Encodable {
     let name: String
     let description: String?
 }
@@ -994,6 +1011,40 @@ enum NutritionManager {
         return try JSONDecoder.supabase().decode(NutritionIngredientRow.self, from: res.data)
     }
 
+    static func updateIngredient(
+        ingredientId: UUID,
+        name: String,
+        profile: NutritionProfilePer100g
+    ) async throws -> NutritionIngredientRow {
+        let payload = NutritionIngredientUpdate(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            calories_per_100g: profile.calories,
+            protein_per_100g: profile.protein,
+            carbs_per_100g: profile.carbs,
+            fat_per_100g: profile.fat,
+            saturated_fat_per_100g: profile.saturatedFat,
+            sugars_per_100g: profile.sugars,
+            fiber_per_100g: profile.fiber,
+            sodium_mg_per_100g: profile.sodiumMg
+        )
+        let res = try await SupabaseManager.shared.client
+            .from("nutrition_ingredients")
+            .update(payload)
+            .eq("id", value: ingredientId.uuidString)
+            .select(ingredientSelectColumns)
+            .single()
+            .execute()
+        return try JSONDecoder.supabase().decode(NutritionIngredientRow.self, from: res.data)
+    }
+
+    static func deleteIngredient(ingredientId: UUID) async throws {
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_ingredients")
+            .delete()
+            .eq("id", value: ingredientId.uuidString)
+            .execute()
+    }
+
     static func createRecipe(
         userId: UUID,
         name: String,
@@ -1028,6 +1079,55 @@ enum NutritionManager {
             .insert(joinPayloads)
             .execute()
         return recipe
+    }
+
+    static func updateRecipe(
+        recipeId: UUID,
+        name: String,
+        description: String?,
+        lines: [NutritionRecipeLineDraft]
+    ) async throws -> NutritionRecipeRow {
+        guard !lines.isEmpty else {
+            throw NSError(domain: "Nutrition", code: 1, userInfo: [NSLocalizedDescriptionKey: "Add at least one ingredient to the recipe."])
+        }
+        let trimmedDesc = description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipePayload = NutritionRecipeUpdate(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: (trimmedDesc?.isEmpty == false) ? trimmedDesc : nil
+        )
+        let recipeRes = try await SupabaseManager.shared.client
+            .from("nutrition_recipes")
+            .update(recipePayload)
+            .eq("id", value: recipeId.uuidString)
+            .select(recipeSelectColumns)
+            .single()
+            .execute()
+        let recipe = try JSONDecoder.supabase().decode(NutritionRecipeRow.self, from: recipeRes.data)
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_recipe_ingredients")
+            .delete()
+            .eq("recipe_id", value: recipeId.uuidString)
+            .execute()
+        let joinPayloads = lines.map {
+            NutritionRecipeIngredientInsert(
+                recipe_id: recipeId,
+                ingredient_id: $0.ingredient.id,
+                weight_g: $0.weightG
+            )
+        }
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_recipe_ingredients")
+            .insert(joinPayloads)
+            .execute()
+        return recipe
+    }
+
+    static func deleteRecipe(recipeId: UUID) async throws {
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_recipes")
+            .delete()
+            .eq("id", value: recipeId.uuidString)
+            .execute()
     }
 
     static func monthTitle(for month: Date) -> String {

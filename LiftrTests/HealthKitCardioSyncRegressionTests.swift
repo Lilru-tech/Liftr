@@ -67,4 +67,31 @@ struct HealthKitCardioSyncRegressionTests {
         )
         #expect(HealthKitCardioImportNotificationPolicy.wasExistingWorkoutBeforeImport(createdAt: boundary, now: now))
     }
+
+    @Test func detectsGlobalHealthKitUuidUniqueViolation() {
+        struct Fake23505: Error, LocalizedError {
+            var errorDescription: String? {
+                "duplicate key value violates unique constraint \"workouts_healthkit_uuid_unique\""
+            }
+        }
+        #expect(HealthKitCardioImportDuplicateDetection.isHealthKitUuidUniqueViolation(Fake23505()))
+    }
+
+    @Test func detectsPerUserHealthKitUuidUniqueViolation() {
+        struct Fake23505: Error, LocalizedError {
+            var errorDescription: String? {
+                "duplicate key value violates unique constraint \"workouts_user_healthkit_uuid_unique\""
+            }
+        }
+        #expect(HealthKitCardioImportDuplicateDetection.isHealthKitUuidUniqueViolation(Fake23505()))
+    }
+
+    @Test func ignoresUnrelatedUniqueViolations() {
+        struct Fake23505: Error, LocalizedError {
+            var errorDescription: String? {
+                "duplicate key value violates unique constraint \"profiles_username_key\""
+            }
+        }
+        #expect(!HealthKitCardioImportDuplicateDetection.isHealthKitUuidUniqueViolation(Fake23505()))
+    }
 }

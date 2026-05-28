@@ -482,12 +482,14 @@ struct NutritionView: View {
                 onDone: { vm.activeSheet = nil; Task { await vm.load(userId: app.userId) } }
             )
         case .createIngredient:
-            NutritionCreateIngredientSheet(
+            NutritionIngredientEditorSheet(
+                mode: .create,
                 userId: app.userId,
                 onDone: { vm.activeSheet = nil; Task { await vm.load(userId: app.userId) } }
             )
         case .createRecipe:
-            NutritionCreateRecipeSheet(
+            NutritionRecipeEditorSheet(
+                mode: .create,
                 userId: app.userId,
                 onDone: { vm.activeSheet = nil; Task { await vm.load(userId: app.userId) } }
             )
@@ -919,10 +921,20 @@ private struct NutritionMaterialTextField: View {
     }
 }
 
-private enum NutritionLogNestedSheet: String, Identifiable {
+private enum NutritionLogNestedSheet: Identifiable {
     case createIngredient
     case createRecipe
-    var id: String { rawValue }
+    case editIngredient(NutritionIngredientRow)
+    case editRecipe(NutritionRecipeRow)
+
+    var id: String {
+        switch self {
+        case .createIngredient: return "createIngredient"
+        case .createRecipe: return "createRecipe"
+        case .editIngredient(let ingredient): return "editIngredient-\(ingredient.id.uuidString)"
+        case .editRecipe(let recipe): return "editRecipe-\(recipe.id.uuidString)"
+        }
+    }
 }
 
 private struct NutritionLogFoodSheet: View {
@@ -955,6 +967,8 @@ private struct NutritionLogFoodSheet: View {
     @State private var favoriteRecipeIds: Set<UUID> = []
     @State private var showShareIngredientToChat = false
     @State private var showShareRecipeToChat = false
+    @State private var showDeleteRecipeConfirm = false
+    @State private var showDeleteIngredientConfirm = false
 
     private var hasLogSelection: Bool {
         selectedIngredient != nil || selectedRecipe != nil
@@ -1064,16 +1078,67 @@ private struct NutritionLogFoodSheet: View {
             .sheet(item: $nestedSheet) { sheet in
                 switch sheet {
                 case .createIngredient:
-                    NutritionCreateIngredientSheet(userId: userId) {
-                        nestedSheet = nil
-                        Task { await runSearch() }
-                    }
+                    NutritionIngredientEditorSheet(
+                        mode: .create,
+                        userId: userId,
+                        onDone: {
+                            nestedSheet = nil
+                            Task { await runSearch() }
+                        }
+                    )
+                    .gradientBG()
+                case .editIngredient(let ingredient):
+                    NutritionIngredientEditorSheet(
+                        mode: .edit(ingredient),
+                        userId: userId,
+                        onDone: {
+                            nestedSheet = nil
+                            Task {
+                                await runSearch()
+                                guard selectedIngredient?.id == ingredient.id else { return }
+                                if let updated = ingredients.first(where: { $0.id == ingredient.id }) {
+                                    selectedIngredient = updated
+                                }
+                            }
+                        },
+                        onDeleted: {
+                            nestedSheet = nil
+                            clearLogSelection()
+                            Task { await runSearch() }
+                        }
+                    )
                     .gradientBG()
                 case .createRecipe:
-                    NutritionCreateRecipeSheet(userId: userId) {
-                        nestedSheet = nil
-                        Task { await runSearch() }
-                    }
+                    NutritionRecipeEditorSheet(
+                        mode: .create,
+                        userId: userId,
+                        onDone: {
+                            nestedSheet = nil
+                            Task { await runSearch() }
+                        }
+                    )
+                    .gradientBG()
+                case .editRecipe(let recipe):
+                    NutritionRecipeEditorSheet(
+                        mode: .edit(recipe),
+                        userId: userId,
+                        onDone: {
+                            nestedSheet = nil
+                            Task {
+                                await runSearch()
+                                guard selectedRecipe?.id == recipe.id else { return }
+                                if let updated = recipes.first(where: { $0.id == recipe.id }) {
+                                    selectedRecipe = updated
+                                }
+                                await loadRecipeComposition(recipeId: recipe.id)
+                            }
+                        },
+                        onDeleted: {
+                            nestedSheet = nil
+                            clearLogSelection()
+                            Task { await runSearch() }
+                        }
+                    )
                     .gradientBG()
                 }
             }
@@ -1094,6 +1159,16 @@ private struct NutritionLogFoodSheet: View {
         }
     }
 
+    private var canManageSelectedRecipe: Bool {
+        guard let userId, let recipe = selectedRecipe else { return false }
+        return recipe.user_id == userId
+    }
+
+    private var canManageSelectedIngredient: Bool {
+        guard let userId, let ingredient = selectedIngredient else { return false }
+        return ingredient.user_id == userId
+    }
+
     private var logFoodConfirmPanel: some View {
         VStack(spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
@@ -1101,6 +1176,31 @@ private struct NutritionLogFoodSheet: View {
                     .font(.headline)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                if canManageSelectedIngredient, let ingredient = selectedIngredient {
+                    Button("Edit") {
+                        nestedSheet = .editIngredient(ingredient)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    Button("Delete") {
+                        showDeleteIngredientConfirm = true
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                } else if canManageSelectedRecipe, let recipe = selectedRecipe {
+                    Button("Edit") {
+                        nestedSheet = .editRecipe(recipe)
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    Button("Delete") {
+                        showDeleteRecipeConfirm = true
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                }
                 Button {
                     clearLogSelection()
                 } label: {
@@ -1156,6 +1256,52 @@ private struct NutritionLogFoodSheet: View {
         .nutritionCard()
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
+        .confirmationDialog(
+            "Delete this recipe?",
+            isPresented: $showDeleteRecipeConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete recipe", role: .destructive) { Task { await deleteSelectedRecipe() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the recipe and any diary entries logged with it.")
+        }
+        .confirmationDialog(
+            "Delete this ingredient?",
+            isPresented: $showDeleteIngredientConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete ingredient", role: .destructive) { Task { await deleteSelectedIngredient() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the ingredient and any diary entries logged with it.")
+        }
+    }
+
+    private func deleteSelectedRecipe() async {
+        guard let recipeId = selectedRecipe?.id else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            try await NutritionManager.deleteRecipe(recipeId: recipeId)
+            clearLogSelection()
+            await runSearch()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func deleteSelectedIngredient() async {
+        guard let ingredientId = selectedIngredient?.id else { return }
+        saving = true
+        defer { saving = false }
+        do {
+            try await NutritionManager.deleteIngredient(ingredientId: ingredientId)
+            clearLogSelection()
+            await runSearch()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     private var sharedIngredientSnapshot: SharedIngredientSnapshot? {
@@ -1512,9 +1658,16 @@ private struct NutritionLogFoodSheet: View {
     }
 }
 
-private struct NutritionCreateIngredientSheet: View {
+private enum NutritionIngredientEditorMode {
+    case create
+    case edit(NutritionIngredientRow)
+}
+
+private struct NutritionIngredientEditorSheet: View {
+    let mode: NutritionIngredientEditorMode
     let userId: UUID?
     let onDone: () -> Void
+    var onDeleted: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -1525,6 +1678,25 @@ private struct NutritionCreateIngredientSheet: View {
     @State private var activePickerSource: ImagePickerBridge.Source?
     @State private var isScanning = false
     @State private var scanBanner: Banner?
+    @State private var showDeleteConfirmation = false
+
+    private var isEdit: Bool {
+        if case .edit = mode { return true }
+        return false
+    }
+
+    private var editingIngredientId: UUID? {
+        if case .edit(let ingredient) = mode { return ingredient.id }
+        return nil
+    }
+
+    private var navigationTitle: String {
+        isEdit ? "Edit ingredient" : "New ingredient"
+    }
+
+    private var saveButtonTitle: String {
+        isEdit ? "Save changes" : "Save ingredient"
+    }
 
     private func formBinding(_ keyPath: WritableKeyPath<NutritionIngredientFormState, String>) -> Binding<String> {
         Binding(
@@ -1540,23 +1712,25 @@ private struct NutritionCreateIngredientSheet: View {
             ScrollView {
                 VStack(spacing: 12) {
                     NutritionMaterialTextField(title: "Name", text: $name)
-                    Button {
-                        showSourceChooser = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "camera.fill")
-                            Text("Scan Nutrition Label")
-                            Spacer()
-                            if isScanning {
-                                ProgressView()
-                                    .controlSize(.small)
+                    if !isEdit {
+                        Button {
+                            showSourceChooser = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "camera.fill")
+                                Text("Scan Nutrition Label")
+                                Spacer()
+                                if isScanning {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                }
                             }
+                            .frame(maxWidth: .infinity)
+                            .padding(12)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(12)
+                        .buttonStyle(.bordered)
+                        .disabled(isScanning || saving)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(isScanning || saving)
                     NutritionMaterialTextField(title: "Calories per 100g", text: formBinding(\.calories), keyboard: .decimalPad)
                     NutritionMaterialTextField(title: "Protein per 100g (g)", text: formBinding(\.protein), keyboard: .decimalPad)
                     NutritionMaterialTextField(title: "Carbs per 100g (g)", text: formBinding(\.carbs), keyboard: .decimalPad)
@@ -1567,21 +1741,27 @@ private struct NutritionCreateIngredientSheet: View {
                     NutritionMaterialTextField(title: "Sodium per 100g (mg)", text: formBinding(\.sodiumMg), keyboard: .decimalPad)
                     NutritionFactsLabel(title: name.isEmpty ? "Preview" : name, profile: form.profilePer100g())
                         .id(form.revision)
+                    if isEdit {
+                        Button(role: .destructive) { showDeleteConfirmation = true } label: {
+                            Text("Delete ingredient").frame(maxWidth: .infinity)
+                        }
+                        .disabled(saving)
+                    }
                     if let error {
                         Text(error).font(.caption).foregroundStyle(.red)
                     }
                     Button { Task { await save() } } label: {
                         Group {
                             if saving { ProgressView() }
-                            else { Text("Save ingredient").frame(maxWidth: .infinity) }
+                            else { Text(saveButtonTitle).frame(maxWidth: .infinity) }
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(saving)
+                    .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding()
             }
-            .navigationTitle("New ingredient")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1589,6 +1769,16 @@ private struct NutritionCreateIngredientSheet: View {
                 }
             }
             .banner($scanBanner)
+            .confirmationDialog(
+                "Delete this ingredient?",
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete ingredient", role: .destructive) { Task { await deleteIngredient() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the ingredient and any diary entries logged with it.")
+            }
             .confirmationDialog("Scan nutrition label", isPresented: $showSourceChooser, titleVisibility: .visible) {
                 Button("Take Photo") {
                     activePickerSource = .camera
@@ -1608,6 +1798,14 @@ private struct NutritionCreateIngredientSheet: View {
                     onCancel: { activePickerSource = nil }
                 )
             }
+            .onAppear { bootstrap() }
+        }
+    }
+
+    private func bootstrap() {
+        if case .edit(let ingredient) = mode {
+            name = ingredient.name
+            form = .from(ingredient: ingredient)
         }
     }
 
@@ -1644,13 +1842,40 @@ private struct NutritionCreateIngredientSheet: View {
         do {
             var profile = form.profilePer100g()
             profile.calories = cals
-            _ = try await NutritionManager.createIngredient(
-                userId: userId,
-                name: name,
-                profile: profile
-            )
+            switch mode {
+            case .create:
+                _ = try await NutritionManager.createIngredient(
+                    userId: userId,
+                    name: name,
+                    profile: profile
+                )
+            case .edit(let ingredient):
+                _ = try await NutritionManager.updateIngredient(
+                    ingredientId: ingredient.id,
+                    name: name,
+                    profile: profile
+                )
+            }
             dismiss()
             onDone()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func deleteIngredient() async {
+        guard let ingredientId = editingIngredientId else { return }
+        saving = true
+        error = nil
+        defer { saving = false }
+        do {
+            try await NutritionManager.deleteIngredient(ingredientId: ingredientId)
+            dismiss()
+            if let onDeleted {
+                onDeleted()
+            } else {
+                onDone()
+            }
         } catch {
             self.error = error.localizedDescription
         }
@@ -1666,9 +1891,16 @@ extension ImagePickerBridge.Source: Identifiable {
     }
 }
 
-private struct NutritionCreateRecipeSheet: View {
+private enum NutritionRecipeEditorMode {
+    case create
+    case edit(NutritionRecipeRow)
+}
+
+private struct NutritionRecipeEditorSheet: View {
+    let mode: NutritionRecipeEditorMode
     let userId: UUID?
     let onDone: () -> Void
+    var onDeleted: (() -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
@@ -1679,12 +1911,36 @@ private struct NutritionCreateRecipeSheet: View {
     @State private var pickWeight: Double = 100
     @State private var selectedPick: NutritionIngredientRow?
     @State private var saving = false
+    @State private var loadingInitial = false
     @State private var error: String?
+    @State private var showDeleteConfirmation = false
+
+    private var isEdit: Bool {
+        if case .edit = mode { return true }
+        return false
+    }
+
+    private var editingRecipeId: UUID? {
+        if case .edit(let recipe) = mode { return recipe.id }
+        return nil
+    }
+
+    private var navigationTitle: String {
+        isEdit ? "Edit recipe" : "New recipe"
+    }
+
+    private var saveButtonTitle: String {
+        isEdit ? "Save changes" : "Save recipe"
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
+                    if loadingInitial {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    }
                     NutritionMaterialTextField(title: "Recipe name", text: $name)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Description")
@@ -1748,6 +2004,12 @@ private struct NutritionCreateRecipeSheet: View {
                         .buttonStyle(.borderedProminent)
                         .frame(maxWidth: .infinity)
                     }
+                    if isEdit {
+                        Button(role: .destructive) { showDeleteConfirmation = true } label: {
+                            Text("Delete recipe").frame(maxWidth: .infinity)
+                        }
+                        .disabled(saving || loadingInitial)
+                    }
                 }
                 .padding()
             }
@@ -1765,11 +2027,11 @@ private struct NutritionCreateRecipeSheet: View {
                     Button { Task { await save() } } label: {
                         Group {
                             if saving { ProgressView() }
-                            else { Text("Save recipe").frame(maxWidth: .infinity) }
+                            else { Text(saveButtonTitle).frame(maxWidth: .infinity) }
                         }
                     }
                     .buttonStyle(.borderedProminent)
-                    .disabled(saving || lines.isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(saving || loadingInitial || lines.isEmpty || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
                 .padding(.horizontal)
                 .padding(.top, 8)
@@ -1782,20 +2044,41 @@ private struct NutritionCreateRecipeSheet: View {
                     alignment: .top
                 )
             }
-            .navigationTitle("New recipe")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss(); onDone() }
                 }
             }
-            .task { await searchPick() }
+            .confirmationDialog(
+                "Delete this recipe?",
+                isPresented: $showDeleteConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Delete recipe", role: .destructive) { Task { await deleteRecipe() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This removes the recipe and any diary entries logged with it.")
+            }
+            .task { await bootstrap() }
         }
     }
 
     private func setLineWeight(_ lineId: UUID, _ weight: Double) {
         guard let index = lines.firstIndex(where: { $0.id == lineId }) else { return }
         lines[index].weightG = min(2000, max(5, weight))
+    }
+
+    private func bootstrap() async {
+        if case .edit(let recipe) = mode {
+            loadingInitial = true
+            name = recipe.name
+            description = recipe.description ?? ""
+            lines = (try? await NutritionManager.fetchRecipeLines(recipeId: recipe.id)) ?? []
+            loadingInitial = false
+        }
+        await searchPick()
     }
 
     private func searchPick() async {
@@ -1809,14 +2092,42 @@ private struct NutritionCreateRecipeSheet: View {
         error = nil
         defer { saving = false }
         do {
-            _ = try await NutritionManager.createRecipe(
-                userId: userId,
-                name: name,
-                description: description,
-                lines: lines
-            )
+            switch mode {
+            case .create:
+                _ = try await NutritionManager.createRecipe(
+                    userId: userId,
+                    name: name,
+                    description: description,
+                    lines: lines
+                )
+            case .edit(let recipe):
+                _ = try await NutritionManager.updateRecipe(
+                    recipeId: recipe.id,
+                    name: name,
+                    description: description,
+                    lines: lines
+                )
+            }
             dismiss()
             onDone()
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func deleteRecipe() async {
+        guard let recipeId = editingRecipeId else { return }
+        saving = true
+        error = nil
+        defer { saving = false }
+        do {
+            try await NutritionManager.deleteRecipe(recipeId: recipeId)
+            dismiss()
+            if let onDeleted {
+                onDeleted()
+            } else {
+                onDone()
+            }
         } catch {
             self.error = error.localizedDescription
         }

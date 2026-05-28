@@ -1187,15 +1187,28 @@ class WorkoutDetailViewModel(
                     buildJsonObject {
                         put("modality", JsonPrimitive(activity.wire))
                         put("activity_code", JsonPrimitive(activity.wire))
-                        distanceKm.trim().replace(",", ".").toDoubleOrNull()?.let {
-                            put("distance_km", JsonPrimitive(it))
+                        val distKm = if (activity.usesSwimDistanceAndPace) {
+                            distanceKmFromMetersText(distanceKm)
+                        } else {
+                            distanceKm.trim().replace(",", ".").toDoubleOrNull()
                         }
+                        distKm?.let { put("distance_km", JsonPrimitive(it)) }
                         if (durationSec != null && durationSec > 0) {
                             put("duration_sec", JsonPrimitive(durationSec))
                         }
                         parseIntLocal(avgHr)?.let { put("avg_hr", JsonPrimitive(it)) }
                         parseIntLocal(maxHr)?.let { put("max_hr", JsonPrimitive(it)) }
-                        parseIntLocal(avgPaceSecPerKm)?.let { put("avg_pace_sec_per_km", JsonPrimitive(it)) }
+                        val paceResolved = parseIntLocal(avgPaceSecPerKm)
+                            ?: if (durationSec != null && durationSec > 0) {
+                                if (activity.usesSwimDistanceAndPace) {
+                                    autoPaceSecPerKmFromMeters(distanceKm, durationSec)
+                                } else {
+                                    distKm?.takeIf { it > 0.0 }?.let { km ->
+                                        (durationSec.toDouble() / km).toInt()
+                                    }
+                                }
+                            } else null
+                        paceResolved?.let { put("avg_pace_sec_per_km", JsonPrimitive(it)) }
                         parseIntLocal(elevationM)?.let { put("elevation_gain_m", JsonPrimitive(it)) }
                     }
                 ) {

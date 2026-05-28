@@ -252,6 +252,15 @@ class AuthViewModel(
         weightKg: Double?
     ) {
         runCatching {
+            val dateOfBirth = dateOfBirthYyyyMmDd?.let { java.time.LocalDate.parse(it) }
+            val metabolicTarget = com.lilru.liftr.nutrition.NutritionMetabolism.resolveDisplayKcal(
+                sex = sex,
+                dateOfBirth = dateOfBirth,
+                heightCm = heightCm,
+                weightKg = weightKg,
+                storedTarget = null,
+                isManual = false
+            )
             supabase.from(BackendContracts.Tables.PROFILES).upsert(
                 buildJsonObject {
                     put("user_id", JsonPrimitive(user.id))
@@ -272,6 +281,8 @@ class AuthViewModel(
                     } else {
                         put("weight_kg", JsonNull)
                     }
+                    put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET, metabolicTarget)
+                    put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET_IS_MANUAL, false)
                 }
             ) {
                 onConflict = "user_id"

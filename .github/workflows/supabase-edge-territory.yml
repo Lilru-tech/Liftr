@@ -39,14 +39,38 @@ jobs:
     steps:
       - name: Drain territory geocode queue
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           TERRITORY_MAINTENANCE_SECRET: ${{ secrets.TERRITORY_MAINTENANCE_SECRET }}
         run: |
-          curl -fsS -X POST \
-            "$SUPABASE_URL/functions/v1/resolve-territory-municipality" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Content-Type: application/json" \
-            -H "x-territory-maintenance-secret: $TERRITORY_MAINTENANCE_SECRET" \
-            -d '{"process_queue":true,"max_items":8,"run_assignment_backfill":true}'
+          set -euo pipefail
+          missing=()
+          if [ -z "${SUPABASE_PROJECT_ID:-}" ]; then
+            missing+=("SUPABASE_PROJECT_ID")
+          fi
+          if [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            missing+=("SUPABASE_SERVICE_ROLE_KEY")
+          fi
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "Missing required GitHub Actions secrets: ${missing[*]}"
+            echo "Add them under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+          SUPABASE_URL="https://${SUPABASE_PROJECT_ID}.supabase.co"
+          endpoint="${SUPABASE_URL}/functions/v1/resolve-territory-municipality"
+          response_file="$(mktemp)"
+          http_code="$(
+            curl -sS -o "$response_file" -w "%{http_code}" -X POST "$endpoint" \
+              -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
+              -H "Content-Type: application/json" \
+              -H "x-territory-maintenance-secret: ${TERRITORY_MAINTENANCE_SECRET:-}" \
+              -d '{"process_queue":true,"max_items":8,"run_assignment_backfill":true}'
+          )"
+          echo "HTTP ${http_code}"
+          cat "$response_file"
+          echo
+          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+            echo "Territory queue drain failed."
+            exit 1
+          fi
