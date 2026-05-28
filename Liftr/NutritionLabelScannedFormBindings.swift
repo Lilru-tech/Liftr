@@ -49,6 +49,20 @@ struct NutritionIngredientFormState: Equatable {
         )
     }
 
+    static func from(ingredient: NutritionIngredientRow) -> NutritionIngredientFormState {
+        NutritionIngredientFormState(
+            revision: UUID(),
+            calories: NutritionLabelParser.formatFieldValue(ingredient.calories_per_100g),
+            protein: NutritionLabelParser.formatFieldValue(ingredient.protein_per_100g),
+            carbs: NutritionLabelParser.formatFieldValue(ingredient.carbs_per_100g),
+            fat: NutritionLabelParser.formatFieldValue(ingredient.fat_per_100g),
+            saturatedFat: NutritionLabelParser.formatFieldValue(ingredient.saturated_fat_per_100g),
+            sugars: NutritionLabelParser.formatFieldValue(ingredient.sugars_per_100g),
+            fiber: NutritionLabelParser.formatFieldValue(ingredient.fiber_per_100g),
+            sodiumMg: NutritionLabelParser.formatFieldValue(ingredient.sodium_mg_per_100g)
+        )
+    }
+
     static func applyingScan(_ parsed: NutritionLabelParseResult) -> NutritionIngredientFormState {
         let values = NutritionLabelScannedFormValues.from(parsed: parsed)
         return NutritionIngredientFormState(

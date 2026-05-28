@@ -523,6 +523,7 @@ fun MainShellScreen(
                         viewedUsername = "",
                         fromNotification = overlayNonNull.fromNotification,
                         initialOpenAchievementCode = overlayNonNull.openAchievementCode,
+                        initialOpenAchievementId = overlayNonNull.openAchievementId,
                         onBack = { clearOverlay() },
                         modifier = Modifier.fillMaxSize()
                     )

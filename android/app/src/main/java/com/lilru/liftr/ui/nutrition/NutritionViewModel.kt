@@ -97,6 +97,8 @@ sealed class NutritionLogNestedOverlay {
     data object None : NutritionLogNestedOverlay()
     data object CreateIngredient : NutritionLogNestedOverlay()
     data object CreateRecipe : NutritionLogNestedOverlay()
+    data object EditRecipe : NutritionLogNestedOverlay()
+    data object EditIngredient : NutritionLogNestedOverlay()
 }
 
 data class NutritionUiState(
@@ -145,6 +147,9 @@ data class NutritionUiState(
     val recipePickResults: List<NutritionIngredientWire> = emptyList(),
     val recipePickIngredientId: String? = null,
     val recipePickGrams: Double = 100.0,
+    val editingRecipeId: String? = null,
+    val editingIngredientId: String? = null,
+    val recipeEditorLoading: Boolean = false,
     val editGrams: Double = 100.0,
     val editMealSlot: String = BackendContracts.NutritionMealSlots.LUNCH,
     val insightsFromDate: LocalDate = LocalDate.now().minusDays(6),
@@ -365,7 +370,10 @@ class NutritionViewModel(
         _uiState.update {
             it.copy(
                 logFoodNestedOverlay = NutritionLogNestedOverlay.None,
-                overlay = NutritionOverlay.AddFood
+                overlay = NutritionOverlay.AddFood,
+                editingRecipeId = null,
+                editingIngredientId = null,
+                recipeEditorLoading = false
             )
         }
         searchAddCatalog()
@@ -377,6 +385,8 @@ class NutritionViewModel(
             NutritionLogNestedOverlay.CreateRecipe -> {
                 _uiState.update {
                     it.copy(
+                        editingRecipeId = null,
+                        recipeEditorLoading = false,
                         recipeName = "",
                         recipeDescription = "",
                         recipeLines = emptyList(),
@@ -387,8 +397,65 @@ class NutritionViewModel(
                 }
                 searchRecipePick()
             }
-            NutritionLogNestedOverlay.CreateIngredient -> Unit
+            NutritionLogNestedOverlay.CreateIngredient -> {
+                _uiState.update { it.copy(editingIngredientId = null) }
+            }
+            NutritionLogNestedOverlay.EditRecipe -> Unit
+            NutritionLogNestedOverlay.EditIngredient -> Unit
             NutritionLogNestedOverlay.None -> Unit
+        }
+    }
+
+    fun openEditIngredient(ingredientId: String) {
+        val ingredient = _uiState.value.ingredientResults.find { it.id == ingredientId } ?: return
+        val form = NutritionIngredientFormState.fromIngredient(ingredient)
+        _uiState.update {
+            it.copy(
+                logFoodNestedOverlay = NutritionLogNestedOverlay.EditIngredient,
+                editingIngredientId = ingredientId,
+                createName = ingredient.name,
+                createCalories = form.calories,
+                createProtein = form.protein,
+                createCarbs = form.carbs,
+                createFat = form.fat,
+                createSaturatedFat = form.saturatedFat,
+                createSugars = form.sugars,
+                createFiber = form.fiber,
+                createSodiumMg = form.sodiumMg
+            )
+        }
+    }
+
+    fun openEditRecipe(recipeId: String) {
+        val recipe = _uiState.value.recipeResults.find { it.id == recipeId } ?: return
+        _uiState.update {
+            it.copy(
+                logFoodNestedOverlay = NutritionLogNestedOverlay.EditRecipe,
+                editingRecipeId = recipeId,
+                recipeName = recipe.name,
+                recipeDescription = recipe.description.orEmpty(),
+                recipeLines = emptyList(),
+                recipeEditorLoading = true,
+                recipePickQuery = "",
+                recipePickIngredientId = null,
+                recipePickGrams = 100.0
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                val lines = fetchRecipeLines(recipeId)
+                _uiState.update { state ->
+                    if (state.editingRecipeId != recipeId) state
+                    else state.copy(recipeLines = lines, recipeEditorLoading = false)
+                }
+            }.onFailure {
+                _uiState.update { state ->
+                    if (state.editingRecipeId == recipeId) {
+                        state.copy(recipeLines = emptyList(), recipeEditorLoading = false)
+                    } else state
+                }
+            }
+            searchRecipePick()
         }
     }
 
@@ -990,30 +1057,128 @@ class NutritionViewModel(
             val cals = s.createCalories.replace(',', '.').toDoubleOrNull() ?: return@launch setErr("Invalid calories")
             _uiState.update { it.copy(saving = true, error = null) }
             runCatching {
-                supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS).insert(
-                    buildJsonObject {
-                        put(BackendContracts.NutritionColumns.USER_ID, userId)
-                        put(BackendContracts.NutritionColumns.NAME, s.createName.trim())
-                        put(BackendContracts.NutritionColumns.CALORIES_PER_100G, cals)
-                        put(BackendContracts.NutritionColumns.PROTEIN_PER_100G, s.createProtein.replace(',', '.').toDoubleOrNull() ?: 0.0)
-                        put(BackendContracts.NutritionColumns.CARBS_PER_100G, s.createCarbs.replace(',', '.').toDoubleOrNull() ?: 0.0)
-                        put(BackendContracts.NutritionColumns.FAT_PER_100G, s.createFat.replace(',', '.').toDoubleOrNull() ?: 0.0)
-                        put(BackendContracts.NutritionColumns.SATURATED_FAT_PER_100G, s.createSaturatedFat.replace(',', '.').toDoubleOrNull() ?: 0.0)
-                        put(BackendContracts.NutritionColumns.SUGARS_PER_100G, s.createSugars.replace(',', '.').toDoubleOrNull() ?: 0.0)
-                        put(BackendContracts.NutritionColumns.FIBER_PER_100G, s.createFiber.replace(',', '.').toDoubleOrNull() ?: 0.0)
-                        put(BackendContracts.NutritionColumns.SODIUM_MG_PER_100G, s.createSodiumMg.replace(',', '.').toDoubleOrNull() ?: 0.0)
-                        put(BackendContracts.NutritionColumns.IS_PUBLIC, false)
+                val payload = buildJsonObject {
+                    put(BackendContracts.NutritionColumns.NAME, s.createName.trim())
+                    put(BackendContracts.NutritionColumns.CALORIES_PER_100G, cals)
+                    put(BackendContracts.NutritionColumns.PROTEIN_PER_100G, s.createProtein.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                    put(BackendContracts.NutritionColumns.CARBS_PER_100G, s.createCarbs.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                    put(BackendContracts.NutritionColumns.FAT_PER_100G, s.createFat.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                    put(BackendContracts.NutritionColumns.SATURATED_FAT_PER_100G, s.createSaturatedFat.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                    put(BackendContracts.NutritionColumns.SUGARS_PER_100G, s.createSugars.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                    put(BackendContracts.NutritionColumns.FIBER_PER_100G, s.createFiber.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                    put(BackendContracts.NutritionColumns.SODIUM_MG_PER_100G, s.createSodiumMg.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                }
+                val editingId = s.editingIngredientId
+                if (editingId != null) {
+                    supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS).update(payload) {
+                        filter { eq(BackendContracts.NutritionColumns.ID, editingId) }
                     }
-                )
-                if (onNestedClose != null) {
-                    dismissLogFoodNestedOverlay()
-                    _uiState.update { it.copy(saving = false) }
-                    onNestedClose()
+                    val fromLogFood = _uiState.value.overlay == NutritionOverlay.AddFood
+                    if (fromLogFood) {
+                        dismissLogFoodNestedOverlay()
+                        _uiState.update { state ->
+                            val base = state.copy(saving = false, editingIngredientId = null)
+                            if (state.selectedIngredientId == editingId) {
+                                base.copy(
+                                    ingredientResults = state.ingredientResults.map { row ->
+                                        if (row.id == editingId) {
+                                            row.copy(
+                                                name = s.createName.trim(),
+                                                caloriesPer100g = cals,
+                                                proteinPer100g = s.createProtein.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                                carbsPer100g = s.createCarbs.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                                fatPer100g = s.createFat.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                                saturatedFatPer100g = s.createSaturatedFat.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                                sugarsPer100g = s.createSugars.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                                fiberPer100g = s.createFiber.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                                sodiumMgPer100g = s.createSodiumMg.replace(',', '.').toDoubleOrNull() ?: 0.0
+                                            )
+                                        } else row
+                                    }
+                                )
+                            } else base
+                        }
+                        searchAddCatalog()
+                    } else {
+                        dismissOverlay()
+                    }
                 } else {
-                    dismissOverlay()
+                    supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS).insert(
+                        buildJsonObject {
+                            put(BackendContracts.NutritionColumns.USER_ID, userId)
+                            put(BackendContracts.NutritionColumns.NAME, s.createName.trim())
+                            put(BackendContracts.NutritionColumns.CALORIES_PER_100G, cals)
+                            put(BackendContracts.NutritionColumns.PROTEIN_PER_100G, s.createProtein.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                            put(BackendContracts.NutritionColumns.CARBS_PER_100G, s.createCarbs.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                            put(BackendContracts.NutritionColumns.FAT_PER_100G, s.createFat.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                            put(BackendContracts.NutritionColumns.SATURATED_FAT_PER_100G, s.createSaturatedFat.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                            put(BackendContracts.NutritionColumns.SUGARS_PER_100G, s.createSugars.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                            put(BackendContracts.NutritionColumns.FIBER_PER_100G, s.createFiber.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                            put(BackendContracts.NutritionColumns.SODIUM_MG_PER_100G, s.createSodiumMg.replace(',', '.').toDoubleOrNull() ?: 0.0)
+                            put(BackendContracts.NutritionColumns.IS_PUBLIC, false)
+                        }
+                    )
+                    if (onNestedClose != null) {
+                        dismissLogFoodNestedOverlay()
+                        _uiState.update { it.copy(saving = false) }
+                        onNestedClose()
+                    } else {
+                        dismissOverlay()
+                    }
                 }
             }.onFailure { e -> _uiState.update { it.copy(saving = false, error = e.message?.take(300)) } }
         }
+    }
+
+    fun deleteIngredient() {
+        viewModelScope.launch {
+            val ingredientId = _uiState.value.editingIngredientId ?: return@launch
+            deleteIngredientById(ingredientId)
+        }
+    }
+
+    fun deleteSelectedIngredient(ingredientId: String) {
+        viewModelScope.launch { deleteIngredientById(ingredientId) }
+    }
+
+    fun deleteSelectedRecipe(recipeId: String) {
+        viewModelScope.launch { deleteRecipeById(recipeId) }
+    }
+
+    private suspend fun deleteIngredientById(ingredientId: String) {
+        _uiState.update { it.copy(saving = true, error = null) }
+        runCatching {
+            supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS).delete {
+                filter { eq(BackendContracts.NutritionColumns.ID, ingredientId) }
+            }
+            val fromLogFood = _uiState.value.overlay == NutritionOverlay.AddFood
+            if (fromLogFood) {
+                clearAddFoodSelection()
+                dismissLogFoodNestedOverlay()
+                _uiState.update { it.copy(saving = false) }
+                searchAddCatalog()
+            } else {
+                dismissOverlay()
+            }
+        }.onFailure { e -> _uiState.update { it.copy(saving = false, error = e.message?.take(300)) } }
+    }
+
+    private suspend fun deleteRecipeById(recipeId: String) {
+        _uiState.update { it.copy(saving = true, error = null) }
+        runCatching {
+            supabase.from(BackendContracts.Tables.NUTRITION_RECIPES).delete {
+                filter { eq(BackendContracts.NutritionColumns.ID, recipeId) }
+            }
+            val fromLogFood = _uiState.value.overlay == NutritionOverlay.AddFood
+            if (fromLogFood) {
+                clearAddFoodSelection()
+                dismissLogFoodNestedOverlay()
+                _uiState.update { it.copy(saving = false) }
+                searchAddCatalog()
+            } else {
+                dismissOverlay()
+            }
+        }.onFailure { e -> _uiState.update { it.copy(saving = false, error = e.message?.take(300)) } }
     }
 
     fun saveRecipe() {
@@ -1024,32 +1189,87 @@ class NutritionViewModel(
             _uiState.update { it.copy(saving = true, error = null) }
             runCatching {
                 val desc = s.recipeDescription.trim().takeIf { it.isNotEmpty() }
-                val recRes = supabase.from(BackendContracts.Tables.NUTRITION_RECIPES).insert(
-                    buildJsonObject {
-                        put(BackendContracts.NutritionColumns.USER_ID, userId)
-                        put(BackendContracts.NutritionColumns.NAME, s.recipeName.trim())
-                        if (desc != null) put(BackendContracts.NutritionColumns.DESCRIPTION, desc)
-                    }
-                ) {
-                    select(Columns.raw("id,user_id,name,description"))
-                }
-                val recipe = SupabaseResponseDecoding.decodeListOrObject<NutritionRecipeWire>(recRes.data).first()
-                s.recipeLines.forEach { line ->
-                    supabase.from(BackendContracts.Tables.NUTRITION_RECIPE_INGREDIENTS).insert(
+                val editingId = s.editingRecipeId
+                if (editingId != null) {
+                    supabase.from(BackendContracts.Tables.NUTRITION_RECIPES).update(
                         buildJsonObject {
-                            put("recipe_id", recipe.id)
-                            put(BackendContracts.NutritionColumns.INGREDIENT_ID, line.ingredient.id)
-                            put(BackendContracts.NutritionColumns.WEIGHT_G, line.weightG)
+                            put(BackendContracts.NutritionColumns.NAME, s.recipeName.trim())
+                            put(BackendContracts.NutritionColumns.DESCRIPTION, desc)
                         }
-                    )
-                }
-                if (_uiState.value.overlay == NutritionOverlay.AddFood) {
-                    dismissLogFoodNestedOverlay()
-                    _uiState.update { it.copy(saving = false) }
+                    ) {
+                        filter { eq(BackendContracts.NutritionColumns.ID, editingId) }
+                    }
+                    supabase.from(BackendContracts.Tables.NUTRITION_RECIPE_INGREDIENTS).delete {
+                        filter { eq("recipe_id", editingId) }
+                    }
+                    s.recipeLines.forEach { line ->
+                        supabase.from(BackendContracts.Tables.NUTRITION_RECIPE_INGREDIENTS).insert(
+                            buildJsonObject {
+                                put("recipe_id", editingId)
+                                put(BackendContracts.NutritionColumns.INGREDIENT_ID, line.ingredient.id)
+                                put(BackendContracts.NutritionColumns.WEIGHT_G, line.weightG)
+                            }
+                        )
+                    }
+                    val fromLogFood = _uiState.value.overlay == NutritionOverlay.AddFood
+                    if (fromLogFood) {
+                        dismissLogFoodNestedOverlay()
+                        _uiState.update { state ->
+                            val updated = state.copy(saving = false, editingRecipeId = null)
+                            if (state.selectedRecipeId == editingId) {
+                                val recipe = state.recipeResults.find { it.id == editingId }
+                                updated.copy(
+                                    recipeResults = state.recipeResults.map {
+                                        if (it.id == editingId) {
+                                            it.copy(
+                                                name = s.recipeName.trim(),
+                                                description = desc
+                                            )
+                                        } else it
+                                    },
+                                    selectedRecipeLines = s.recipeLines
+                                )
+                            } else updated
+                        }
+                        searchAddCatalog()
+                    } else {
+                        dismissOverlay()
+                    }
                 } else {
-                    dismissOverlay()
+                    val recRes = supabase.from(BackendContracts.Tables.NUTRITION_RECIPES).insert(
+                        buildJsonObject {
+                            put(BackendContracts.NutritionColumns.USER_ID, userId)
+                            put(BackendContracts.NutritionColumns.NAME, s.recipeName.trim())
+                            if (desc != null) put(BackendContracts.NutritionColumns.DESCRIPTION, desc)
+                        }
+                    ) {
+                        select(Columns.raw("id,user_id,name,description"))
+                    }
+                    val recipe = SupabaseResponseDecoding.decodeListOrObject<NutritionRecipeWire>(recRes.data).first()
+                    s.recipeLines.forEach { line ->
+                        supabase.from(BackendContracts.Tables.NUTRITION_RECIPE_INGREDIENTS).insert(
+                            buildJsonObject {
+                                put("recipe_id", recipe.id)
+                                put(BackendContracts.NutritionColumns.INGREDIENT_ID, line.ingredient.id)
+                                put(BackendContracts.NutritionColumns.WEIGHT_G, line.weightG)
+                            }
+                        )
+                    }
+                    if (_uiState.value.overlay == NutritionOverlay.AddFood) {
+                        dismissLogFoodNestedOverlay()
+                        _uiState.update { it.copy(saving = false) }
+                    } else {
+                        dismissOverlay()
+                    }
                 }
             }.onFailure { e -> _uiState.update { it.copy(saving = false, error = e.message?.take(300)) } }
+        }
+    }
+
+    fun deleteRecipe() {
+        viewModelScope.launch {
+            val recipeId = _uiState.value.editingRecipeId ?: return@launch
+            deleteRecipeById(recipeId)
         }
     }
 

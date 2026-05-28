@@ -50,7 +50,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             }
         }
 
-        mergeTopLevelStringFields(from: userInfo, into: &data, keys: ["conversation_id", "sender_id"])
+        mergeTopLevelStringFields(from: userInfo, into: &data, keys: ["conversation_id", "sender_id", "achievement_id"])
 
         return (notificationId, type, data)
     }

@@ -170,12 +170,13 @@ struct RootView: View {
                         .gradientBG()
                 }
                 
-            case .achievements:
+            case .achievements(let achievementId):
                 if let currentUserId = app.userId {
                     AchievementsFromNotificationView(
                         userId: currentUserId,
                         viewedUsername: "",
-                        showsCloseButton: true
+                        showsCloseButton: true,
+                        openAchievementId: achievementId
                     )
                     .gradientBG()
                 } else {

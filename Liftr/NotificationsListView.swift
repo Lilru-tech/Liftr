@@ -32,6 +32,15 @@ enum JSONValue: Decodable {
         default: return nil
         }
     }
+
+    var intValue: Int? {
+        switch self {
+        case .int(let i): return i
+        case .string(let s): return Int(s)
+        case .double(let d): return Int(d)
+        default: return nil
+        }
+    }
 }
 
 struct NotificationRow: Decodable, Identifiable {
@@ -276,8 +285,13 @@ struct NotificationsListView: View {
 
         case "achievement_unlocked":
             if let uid = app.userId {
-                AchievementsFromNotificationView(userId: uid, viewedUsername: "", showsCloseButton: false)
-                    .gradientBG()
+                AchievementsFromNotificationView(
+                    userId: uid,
+                    viewedUsername: "",
+                    showsCloseButton: false,
+                    openAchievementId: n.data?["achievement_id"]?.intValue
+                )
+                .gradientBG()
             } else {
                 Text("Achievements")
             }

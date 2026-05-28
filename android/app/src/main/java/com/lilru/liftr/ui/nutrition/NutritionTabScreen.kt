@@ -195,7 +195,7 @@ fun NutritionTabScreen(
             Box(Modifier.liftrAppBackgroundGradientOpaque(sheetTheme)) {
                 when (val overlay = ui.overlay) {
                     NutritionOverlay.AddFood -> NutritionLogFoodSheet(supabase, ui, vm)
-                    NutritionOverlay.CreateIngredient -> NutritionCreateIngredientSheet(ui, vm)
+                    NutritionOverlay.CreateIngredient -> NutritionIngredientEditorSheet(ui, vm, isEdit = false)
                     NutritionOverlay.CreateRecipe -> NutritionCreateRecipeSheet(ui, vm)
                     is NutritionOverlay.EditLog -> NutritionEditLogSheet(ui, vm, overlay.item)
                     NutritionOverlay.None -> Unit
@@ -327,6 +327,15 @@ private fun NutritionLogFoodSheet(supabase: SupabaseClient, ui: NutritionUiState
     val hasSelection = ui.selectedIngredientId != null || ui.selectedRecipeId != null
     val selectedIngredient = ui.ingredientResults.find { it.id == ui.selectedIngredientId }
     val selectedRecipe = ui.recipeResults.find { it.id == ui.selectedRecipeId }
+    val currentUserId = remember(supabase) { supabase.auth.currentUserOrNull()?.id }
+    val canManageSelectedRecipe = selectedRecipe != null &&
+        currentUserId != null &&
+        selectedRecipe.userId == currentUserId
+    val canManageSelectedIngredient = selectedIngredient != null &&
+        currentUserId != null &&
+        selectedIngredient.userId == currentUserId
+    var showDeleteRecipeConfirm by remember { mutableStateOf(false) }
+    var showDeleteIngredientConfirm by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val panelTheme = remember(context) { LiftrPreferences.backgroundTheme(context) }
     val panelBottomPadding = if (hasSelection) 380.dp else 16.dp
@@ -497,6 +506,12 @@ private fun NutritionLogFoodSheet(supabase: SupabaseClient, ui: NutritionUiState
                 mealSlot = ui.addMealSlot,
                 grams = ui.addGrams,
                 saving = ui.saving,
+                canManageIngredient = canManageSelectedIngredient,
+                canManageRecipe = canManageSelectedRecipe,
+                onEditIngredient = { selectedIngredient?.id?.let { vm.openEditIngredient(it) } },
+                onDeleteIngredient = { selectedIngredient?.id?.let { showDeleteIngredientConfirm = true } },
+                onEditRecipe = { selectedRecipe?.id?.let { vm.openEditRecipe(it) } },
+                onDeleteRecipe = { selectedRecipe?.id?.let { showDeleteRecipeConfirm = true } },
                 onDismiss = { vm.clearLogSelection() },
                 onMealSlot = { vm.setAddMealSlot(it) },
                 onGrams = { vm.setAddGramsPreset(it) },
@@ -584,17 +599,75 @@ private fun NutritionLogFoodSheet(supabase: SupabaseClient, ui: NutritionUiState
         }
     }
 
+    if (showDeleteRecipeConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteRecipeConfirm = false },
+            title = { Text(stringResource(R.string.nutrition_delete_recipe)) },
+            text = { Text(stringResource(R.string.nutrition_delete_recipe_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteRecipeConfirm = false
+                        selectedRecipe?.id?.let { vm.deleteSelectedRecipe(it) }
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_recipe), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteRecipeConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+
+    if (showDeleteIngredientConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteIngredientConfirm = false },
+            title = { Text(stringResource(R.string.nutrition_delete_ingredient)) },
+            text = { Text(stringResource(R.string.nutrition_delete_ingredient_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteIngredientConfirm = false
+                        selectedIngredient?.id?.let { vm.deleteSelectedIngredient(it) }
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_ingredient), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteIngredientConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+
     when (ui.logFoodNestedOverlay) {
         NutritionLogNestedOverlay.CreateIngredient -> {
             val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
-                NutritionCreateIngredientSheet(ui, vm, onClose = { vm.dismissLogFoodNestedOverlay() })
+                NutritionIngredientEditorSheet(ui, vm, isEdit = false, onClose = { vm.dismissLogFoodNestedOverlay() })
+            }
+        }
+        NutritionLogNestedOverlay.EditIngredient -> {
+            val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
+                NutritionIngredientEditorSheet(ui, vm, isEdit = true, onClose = { vm.dismissLogFoodNestedOverlay() })
             }
         }
         NutritionLogNestedOverlay.CreateRecipe -> {
             val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
-                NutritionCreateRecipeSheet(ui, vm, onClose = { vm.dismissLogFoodNestedOverlay() })
+                NutritionRecipeEditorSheet(ui, vm, isEdit = false, onClose = { vm.dismissLogFoodNestedOverlay() })
+            }
+        }
+        NutritionLogNestedOverlay.EditRecipe -> {
+            val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
+                NutritionRecipeEditorSheet(ui, vm, isEdit = true, onClose = { vm.dismissLogFoodNestedOverlay() })
             }
         }
         NutritionLogNestedOverlay.None -> Unit
@@ -612,6 +685,12 @@ private fun NutritionLogFoodBottomPanel(
     mealSlot: String,
     grams: Double,
     saving: Boolean,
+    canManageIngredient: Boolean,
+    canManageRecipe: Boolean,
+    onEditIngredient: () -> Unit,
+    onDeleteIngredient: () -> Unit,
+    onEditRecipe: () -> Unit,
+    onDeleteRecipe: () -> Unit,
     onDismiss: () -> Unit,
     onMealSlot: (String) -> Unit,
     onGrams: (Double) -> Unit,
@@ -644,6 +723,27 @@ private fun NutritionLogFoodBottomPanel(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f).padding(end = 8.dp)
             )
+            if (canManageIngredient) {
+                TextButton(onClick = onEditIngredient, enabled = !saving) {
+                    Text(stringResource(R.string.nutrition_edit_ingredient))
+                }
+                TextButton(onClick = onDeleteIngredient, enabled = !saving) {
+                    Text(
+                        stringResource(R.string.nutrition_delete),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            } else if (canManageRecipe) {
+                TextButton(onClick = onEditRecipe, enabled = !saving) {
+                    Text(stringResource(R.string.nutrition_edit_recipe))
+                }
+                TextButton(onClick = onDeleteRecipe, enabled = !saving) {
+                    Text(
+                        stringResource(R.string.nutrition_delete),
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
             IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.nutrition_close))
             }
@@ -752,16 +852,20 @@ private fun NutritionRecipeLineEditor(
 }
 
 @Composable
-private fun NutritionCreateIngredientSheet(
+private fun NutritionIngredientEditorSheet(
     ui: NutritionUiState,
     vm: NutritionViewModel,
+    isEdit: Boolean,
     onClose: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showSourceChooser by rememberSaveable { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var isScanning by remember { mutableStateOf(false) }
     val scanFailedMessage = stringResource(R.string.nutrition_scan_failed)
+    val titleRes = if (isEdit) R.string.nutrition_edit_ingredient_title else R.string.nutrition_new_ingredient
+    val saveLabelRes = if (isEdit) R.string.nutrition_save_ingredient_changes else R.string.nutrition_save_ingredient
 
     val ingredientForm = remember(
         ui.createCalories,
@@ -868,26 +972,51 @@ private fun NutritionCreateIngredientSheet(
         )
     }
 
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.nutrition_delete_ingredient)) },
+            text = { Text(stringResource(R.string.nutrition_delete_ingredient_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        vm.deleteIngredient()
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_ingredient), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+
     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(stringResource(R.string.nutrition_new_ingredient), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(titleRes), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         NutritionMaterialField(ui.createName, { vm.setCreateField(name = it) }, "Name")
-        FilledTonalButton(
-            onClick = { showSourceChooser = true },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isScanning
-        ) {
-            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
-            Text(
-                stringResource(R.string.nutrition_scan_label),
-                modifier = Modifier.padding(start = 8.dp)
-            )
-            if (isScanning) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .padding(start = 12.dp)
-                        .size(20.dp),
-                    strokeWidth = 2.dp
+        if (!isEdit) {
+            FilledTonalButton(
+                onClick = { showSourceChooser = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isScanning
+            ) {
+                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(
+                    stringResource(R.string.nutrition_scan_label),
+                    modifier = Modifier.padding(start = 8.dp)
                 )
+                if (isScanning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
             }
         }
         NutritionMaterialField(ingredientForm.calories, { vm.setCreateField(calories = it) }, "Calories / 100g")
@@ -902,26 +1031,60 @@ private fun NutritionCreateIngredientSheet(
             title = ui.createName.ifBlank { "Preview" },
             profile = previewProfile
         )
+        if (isEdit) {
+            TextButton(
+                onClick = { showDeleteConfirm = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !ui.saving
+            ) {
+                Text(
+                    stringResource(R.string.nutrition_delete_ingredient),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
         Button(
             onClick = { vm.saveIngredient(onClose) },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Save") }
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !ui.saving && ui.createName.isNotBlank()
+        ) { Text(stringResource(saveLabelRes)) }
+        if (onClose != null) {
+            TextButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.nutrition_close))
+            }
+        }
     }
 }
 
 @Composable
-private fun NutritionCreateRecipeSheet(
+private fun NutritionCreateIngredientSheet(
+    ui: NutritionUiState,
+    vm: NutritionViewModel
+) {
+    NutritionIngredientEditorSheet(ui, vm, isEdit = false)
+}
+
+@Composable
+private fun NutritionRecipeEditorSheet(
     ui: NutritionUiState,
     vm: NutritionViewModel,
+    isEdit: Boolean,
     onClose: (() -> Unit)? = null
 ) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val titleRes = if (isEdit) R.string.nutrition_edit_recipe else R.string.nutrition_new_recipe
+    val saveLabelRes = if (isEdit) R.string.nutrition_save_recipe_changes else R.string.nutrition_save_recipe
+
     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(stringResource(R.string.nutrition_new_recipe), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(titleRes), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         Text(
             stringResource(R.string.nutrition_recipe_build_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (ui.recipeEditorLoading) {
+            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        }
         NutritionMaterialField(ui.recipeName, vm::setRecipeName, "Recipe name")
         NutritionMaterialField(ui.recipeDescription, vm::setRecipeDescription, stringResource(R.string.nutrition_description))
         Text(
@@ -969,12 +1132,24 @@ private fun NutritionCreateRecipeSheet(
                 Text(stringResource(R.string.nutrition_add_to_recipe))
             }
         }
+        if (isEdit) {
+            TextButton(
+                onClick = { showDeleteConfirm = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !ui.saving && !ui.recipeEditorLoading
+            ) {
+                Text(
+                    stringResource(R.string.nutrition_delete_recipe),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
         Button(
             onClick = { vm.saveRecipe() },
             modifier = Modifier.fillMaxWidth(),
-            enabled = ui.recipeLines.isNotEmpty() && ui.recipeName.isNotBlank()
+            enabled = !ui.saving && !ui.recipeEditorLoading && ui.recipeLines.isNotEmpty() && ui.recipeName.isNotBlank()
         ) {
-            Text("Save recipe")
+            Text(stringResource(saveLabelRes))
         }
         if (onClose != null) {
             TextButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
@@ -982,6 +1157,38 @@ private fun NutritionCreateRecipeSheet(
             }
         }
     }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.nutrition_delete_recipe)) },
+            text = { Text(stringResource(R.string.nutrition_delete_recipe_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        vm.deleteRecipe()
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_recipe), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun NutritionCreateRecipeSheet(
+    ui: NutritionUiState,
+    vm: NutritionViewModel,
+    onClose: (() -> Unit)? = null
+) {
+    NutritionRecipeEditorSheet(ui, vm, isEdit = false, onClose = onClose)
 }
 
 @Composable

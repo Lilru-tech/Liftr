@@ -83,6 +83,7 @@ fun AchievementsScreen(
     viewedUsername: String,
     fromNotification: Boolean = false,
     initialOpenAchievementCode: String? = null,
+    initialOpenAchievementId: Int? = null,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -108,9 +109,9 @@ fun AchievementsScreen(
             .withLocale(Locale.getDefault())
     }
 
-    LaunchedEffect(initialOpenAchievementCode, ui.loading, ui.items) {
+    LaunchedEffect(initialOpenAchievementCode, initialOpenAchievementId, ui.loading, ui.items) {
         if (appliedInitialOpenCode) return@LaunchedEffect
-        if (initialOpenAchievementCode == null) {
+        if (initialOpenAchievementCode == null && initialOpenAchievementId == null) {
             appliedInitialOpenCode = true
             return@LaunchedEffect
         }
@@ -119,7 +120,13 @@ fun AchievementsScreen(
         vm.setLockFilter(AchievementLockFilter.ALL)
         vm.setCategory(AchievementCategoryFilter.ALL)
         vm.setSearch("")
-        val match = ui.items.find { it.code == initialOpenAchievementCode }
+        val match = when {
+            initialOpenAchievementCode != null ->
+                ui.items.find { it.code == initialOpenAchievementCode }
+            initialOpenAchievementId != null ->
+                ui.items.find { it.achievementId == initialOpenAchievementId }
+            else -> null
+        }
         if (match != null) {
             selected = match
         }

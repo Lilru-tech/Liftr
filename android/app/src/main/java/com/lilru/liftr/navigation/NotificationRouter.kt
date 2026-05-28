@@ -53,6 +53,7 @@ object NotificationRouter {
         map["competition_id"]?.let { merged["competition_id"] = it }
         map["segment_id"]?.let { merged["segment_id"] = it }
         map["challenge_instance_id"]?.let { merged["challenge_instance_id"] = it }
+        map["achievement_id"]?.let { merged["achievement_id"] = it }
         return overlayFromStringMap(type, merged, myUserId)
     }
 
@@ -104,7 +105,10 @@ object NotificationRouter {
                 val w = map["workout_id"]?.toIntOrNull() ?: return null
                 MainOverlay.WorkoutDetail(workoutId = w, ownerId = null) // se resuelve con suspend
             }
-            "achievement_unlocked" -> MainOverlay.Achievements(fromNotification = true)
+            "achievement_unlocked" -> MainOverlay.Achievements(
+                fromNotification = true,
+                openAchievementId = map["achievement_id"]?.trim()?.toIntOrNull()
+            )
             "goal_completed", "goal_almost_done" -> {
                 val u = myUserId ?: return null
                 MainOverlay.Goals(u)

@@ -1271,10 +1271,16 @@
     "Delete from diary" : {
 
     },
+    "Delete recipe" : {
+
+    },
     "Delete segment" : {
 
     },
     "Delete this folder?" : {
+
+    },
+    "Delete this recipe?" : {
 
     },
     "Delete this routine?" : {
@@ -2990,9 +2996,6 @@
     "Save ingredient" : {
 
     },
-    "Save recipe" : {
-
-    },
     "Save routine" : {
       "localizations" : {
         "en" : {
@@ -3692,6 +3695,9 @@
 
     },
     "This removes the exercise from this active workout." : {
+
+    },
+    "This removes the recipe and any diary entries logged with it." : {
 
     },
     "This routine has no exercises to copy." : {

@@ -2,6 +2,7 @@ package com.lilru.liftr.ui.nutrition
 
 import com.lilru.liftr.nutrition.NutritionLabelParseResult
 import com.lilru.liftr.nutrition.NutritionLabelScannedFormValues
+import kotlin.math.roundToInt
 
 data class NutritionIngredientFormState(
     val calories: String = "100",
@@ -35,6 +36,27 @@ data class NutritionIngredientFormState(
             fiber = "0",
             sodiumMg = "0"
         )
+
+        fun fromIngredient(ingredient: NutritionIngredientWire): NutritionIngredientFormState =
+            NutritionIngredientFormState(
+                calories = formatField(ingredient.caloriesPer100g),
+                protein = formatField(ingredient.proteinPer100g),
+                carbs = formatField(ingredient.carbsPer100g),
+                fat = formatField(ingredient.fatPer100g),
+                saturatedFat = formatField(ingredient.saturatedFatPer100g),
+                sugars = formatField(ingredient.sugarsPer100g),
+                fiber = formatField(ingredient.fiberPer100g),
+                sodiumMg = formatField(ingredient.sodiumMgPer100g)
+            )
+
+        private fun formatField(value: Double): String {
+            val rounded = (value * 1000).roundToInt() / 1000.0
+            return if (rounded == rounded.toLong().toDouble()) {
+                rounded.toLong().toString()
+            } else {
+                rounded.toString()
+            }
+        }
 
         fun fromScan(parsed: NutritionLabelParseResult): NutritionIngredientFormState {
             val values = NutritionLabelScannedFormValues.from(parsed)

@@ -15,7 +15,7 @@ final class AppState: ObservableObject {
         case followerProfile(userId: UUID)
         case workout(workoutId: Int, ownerId: UUID?)
         case segmentDetail(segmentId: UUID)
-        case achievements
+        case achievements(achievementId: Int?)
         case goals(userId: UUID)
         case competitionsHub
         case competitionDetail(competitionId: Int)
@@ -430,7 +430,7 @@ final class AppState: ObservableObject {
             }
             
         case "achievement_unlocked":
-            notificationDestination = .achievements
+            notificationDestination = .achievements(achievementId: Self.achievementId(from: data))
             
         case "goal_completed", "goal_almost_done":
             if let uid = self.userId {
@@ -531,6 +531,13 @@ final class AppState: ObservableObject {
         }
     }
     
+    static func achievementId(from data: [String: Any]) -> Int? {
+        if let id = data["achievement_id"] as? Int { return id }
+        if let id = data["achievement_id"] as? NSNumber { return id.intValue }
+        if let s = data["achievement_id"] as? String { return Int(s) }
+        return nil
+    }
+
     private static func workoutKind(fromInactiveNudgeData data: [String: Any]) -> WorkoutKind {
         let raw: String? = {
             if let s = data["workout_kind"] as? String { return s }

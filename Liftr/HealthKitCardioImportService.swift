@@ -20,7 +20,7 @@ enum HealthKitCardioImportDuplicateDetection {
     static func isHealthKitUuidUniqueViolation(_ error: Error) -> Bool {
         if let pe = error as? PostgrestError {
             guard pe.code == "23505" else { return false }
-            let message = (pe.message ?? "").lowercased()
+            let message = (pe.message).lowercased()
             return message.contains("healthkit_uuid")
                 || message.contains("workouts_healthkit_uuid_unique")
                 || message.contains("workouts_user_healthkit_uuid_unique")
