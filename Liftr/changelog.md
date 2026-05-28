@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-05-28
+
+### Added
+- **Nutrition — recipes & ingredients** — Users can **edit** and **delete** their own **recipes** and **ingredients**.
+
+### Changed
+- **Nutrition** — Improved **metabolism** calculation and **nutrition advice** (smart recommendations).
+- **Cardio — swimming** — Updated how **distances** are displayed in **swimming** mode.
+- **Workouts — add & edit** — Improved **UX/UI** for every field in **Add** and **Edit Workout** to match the **strength** field style.
+
+### Fixed
+- **Apple Health — cardio import** — Fixed an issue when **importing** workouts from Apple Health.
+- **Territory** — Fixed **Supabase Edge Function** workflow for territory operations.
+- **Challenges** — Fixed **Challenge CTA** layout.
+- **Notifications — achievements** — Fixed **deeplink redirection** to the specific **achievement** from a notification.
+
 ## [1.15.0] - 2026-05-27
 
 ### Added
