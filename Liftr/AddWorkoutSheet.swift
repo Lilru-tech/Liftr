@@ -4833,6 +4833,7 @@ private struct ParticipantsPickerSheet: View {
                                 .frame(width: 36, height: 36)
                             
                             Text(p.username ?? "Unknown")
+                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                             

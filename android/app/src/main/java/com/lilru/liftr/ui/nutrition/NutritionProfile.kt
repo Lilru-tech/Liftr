@@ -2,7 +2,8 @@ package com.lilru.liftr.ui.nutrition
 
 data class NutritionMonthDayBalance(
     val mealLogCount: Int,
-    val remainingCalories: Double
+    val remainingCalories: Double,
+    val plannedMealCount: Int = 0
 )
 
 data class NutritionProfilePer100g(

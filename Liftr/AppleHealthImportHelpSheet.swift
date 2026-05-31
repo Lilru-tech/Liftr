@@ -38,7 +38,8 @@ struct AppleHealthImportHelpSheet: View {
                     Text(
                         "Runs, walks, hikes, outdoor bike rides, indoor cycling / stationary bike "
                             + "(when Apple marks them indoor or as an indoor cycle workout), swims, and rowing. "
-                            + "Indoor walks and runs are saved as Treadmill. If Apple saved a GPS route, distance, or heart rate, we copy those in when they’re available."
+                            + "If Apple saved a GPS route, distance, or heart rate, we copy those in when they’re available. "
+                            + "For maps to appear, allow Liftr to read Workout Routes in Apple Health (Health app → Sharing → Apps → Liftr)."
                     )
                     .font(.body)
                     .foregroundStyle(.secondary)

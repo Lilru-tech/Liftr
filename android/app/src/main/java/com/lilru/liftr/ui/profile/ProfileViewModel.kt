@@ -115,7 +115,7 @@ data class ProfileUiState(
     val unreadNotifications: Int = 0,
     val level: Int = 1,
     val xp: Long = 0,
-    /** XP necesarios para el siguiente nivel (umbral nivel+1; paridad iOS [ProfileView] `nextLevelXP`). */
+    val currentLevelXp: Long = 0L,
     val nextLevelXp: Long = 120L,
     /** Nombre de usuario con fallback a prefijo de email (cabecera). */
     val displayName: String? = null,
@@ -202,18 +202,17 @@ class ProfileViewModel(
 
                 val currentLevel = level?.level?.takeIf { it > 0 } ?: 1
                 val levelAny: List<Any> = listOf(currentLevel, currentLevel + 1).map { it as Any }
-                val nextLevelXp: Long = runCatching {
+                val thresholdRows = runCatching {
                     supabase.from(BackendContracts.Tables.LEVEL_THRESHOLDS)
                         .select(columns = Columns.raw("level, xp_required")) {
                             filter { isIn("level", levelAny) }
                         }
-                        .let { res ->
-                            val rows = SupabaseResponseDecoding.decodeListOrObject<LevelThresholdRow>(res.data)
-                            val next = rows.firstOrNull { it.level == currentLevel + 1 }?.xpRequired
-                            val fallback = rows.firstOrNull { it.level == currentLevel }?.xpRequired
-                            (next ?: fallback) ?: 120L
-                        }
-                }.getOrDefault(120L)
+                        .let { SupabaseResponseDecoding.decodeListOrObject<LevelThresholdRow>(it.data) }
+                }.getOrDefault(emptyList())
+                val currentLevelXp = thresholdRows.firstOrNull { it.level == currentLevel }?.xpRequired ?: 0L
+                val nextLevelXp = thresholdRows.firstOrNull { it.level == currentLevel + 1 }?.xpRequired
+                    ?: thresholdRows.firstOrNull { it.level == currentLevel }?.xpRequired
+                    ?: 120L
 
                 val unreadNotifications = if (isOwnProfile) {
                     UnreadNotificationCounter.count(supabase)
@@ -265,6 +264,7 @@ class ProfileViewModel(
                     unreadNotifications = unreadNotifications,
                     level = level?.level ?: 1,
                     xp = level?.xp ?: 0,
+                    currentLevelXp = currentLevelXp,
                     nextLevelXp = nextLevelXp,
                     heightCmDraft = profile?.heightCm?.let { v ->
                         if (v == floor(v)) v.toInt().toString() else String.format(Locale.US, "%.1f", v)

@@ -1373,8 +1373,22 @@ struct CompareWorkoutsView: View {
                 setsByExercise[s.workout_exercise_id, default: []].append(s)
             }
 
-            var totalReps = 0
+            struct VolRow: Decodable { let total_volume_kg: Decimal? }
             var totalVolumeKg = 0.0
+            do {
+                let volRes = try await client
+                    .from("vw_workout_volume")
+                    .select("total_volume_kg")
+                    .eq("workout_id", value: workoutId)
+                    .single()
+                    .execute()
+                let volRow = try decoder.decode(VolRow.self, from: volRes.data)
+                totalVolumeKg = volRow.total_volume_kg.map { NSDecimalNumber(decimal: $0).doubleValue } ?? 0
+            } catch {
+                totalVolumeKg = 0
+            }
+
+            var totalReps = 0
             var maxWeightKg: Double? = nil
             var maxSetVolumeKg: Double? = nil
             var rpeWeightedSum = 0.0
@@ -1396,7 +1410,6 @@ struct CompareWorkoutsView: View {
                     totalReps += reps * mult
 
                     let setVol = Double(reps) * w
-                    totalVolumeKg += setVol * Double(mult)
 
                     if w > 0 {
                         if let current = maxWeightKg {

@@ -1,6 +1,7 @@
 package com.lilru.liftr.ui.profile
 
 import android.net.Uri
+import com.lilru.liftr.domain.levelProgressRatio
 import com.lilru.liftr.nutrition.NutritionMetabolism
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -297,8 +298,7 @@ private fun ProfileIosStyleHeader(
                 }
                 if (profileUserId != null) {
                     val xpStr = java.text.NumberFormat.getIntegerInstance().format(ui.xp)
-                    val denom = maxOf(1L, ui.nextLevelXp)
-                    val pr = (ui.xp.toFloat() / denom.toFloat()).coerceIn(0f, 1f)
+                    val pr = levelProgressRatio(ui.xp, ui.currentLevelXp, ui.nextLevelXp).toFloat()
                     Column(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.clickable(onClick = onLevelClick)

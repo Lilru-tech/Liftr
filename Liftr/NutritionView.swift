@@ -15,6 +15,15 @@ private struct NutritionCardModifier: ViewModifier {
 
 private extension View {
     func nutritionCard() -> some View { modifier(NutritionCardModifier()) }
+
+    @ViewBuilder
+    func nutritionCartLineChrome(grouped: Bool) -> some View {
+        if grouped {
+            padding(12).nutritionCard()
+        } else {
+            self
+        }
+    }
 }
 
 private struct NutritionFactsLabel: View {
@@ -227,17 +236,19 @@ private struct NutritionMicroNutrientsSection: View {
 }
 
 enum NutritionSheetRoute: Identifiable {
-    case addFood(mealSlot: NutritionMealSlot)
+    case addFood(mealSlot: NutritionMealSlot, saveMode: NutritionFoodSaveMode = .diary)
     case createIngredient
     case createRecipe
     case editLog(NutritionDiaryItemUI)
+    case editPlannedMeal(NutritionMealPlanItemUI)
 
     var id: String {
         switch self {
-        case .addFood(let mealSlot): return "addFood-\(mealSlot.rawValue)"
+        case .addFood(let mealSlot, let saveMode): return "addFood-\(mealSlot.rawValue)-\(saveMode.rawValue)"
         case .createIngredient: return "createIngredient"
         case .createRecipe: return "createRecipe"
         case .editLog(let item): return "edit-\(item.id.uuidString)"
+        case .editPlannedMeal(let item): return "editPlan-\(item.targetId.uuidString)"
         }
     }
 }
@@ -250,6 +261,8 @@ final class NutritionViewModel: ObservableObject {
     @Published var selectedDate = Date()
     @Published var monthDayBalance: [Date: NutritionMonthDayBalance] = [:]
     @Published var diaryItems: [NutritionDiaryItemUI] = []
+    @Published var plannedItems: [NutritionMealPlanItemUI] = []
+    @Published var pendingInvites: [NutritionMealPlanInviteUI] = []
     @Published var recommendation: DailyNutritionRecommendation?
     @Published var loading = false
     @Published var error: String?
@@ -273,6 +286,8 @@ final class NutritionViewModel: ObservableObject {
     func load(userId: UUID?) async {
         guard let userId else {
             diaryItems = []
+            plannedItems = []
+            pendingInvites = []
             recommendation = nil
             monthDayBalance = [:]
             error = "Sign in to track nutrition."
@@ -285,11 +300,67 @@ final class NutritionViewModel: ObservableObject {
             async let itemsTask = NutritionManager.fetchDiaryItems(for: userId, date: selectedDate)
             async let recTask = NutritionManager.fetchRecommendation(for: userId, date: selectedDate)
             async let monthTask = NutritionManager.fetchMonthBalance(month: monthDate)
+            async let plannedMonthTask = NutritionManager.fetchMonthPlannedMealCounts(userId: userId, month: monthDate)
+            async let plannedTask = NutritionManager.fetchPlannedItems(userId: userId, date: selectedDate)
+            async let invitesTask = NutritionManager.fetchPendingInvites(userId: userId)
             diaryItems = try await itemsTask
             recommendation = try await recTask
-            monthDayBalance = try await monthTask
+            let balance = try await monthTask
+            let plannedCounts = try await plannedMonthTask
+            monthDayBalance = NutritionManager.mergeMonthBalanceWithPlanned(balance, plannedCounts: plannedCounts)
+            plannedItems = try await plannedTask
+            pendingInvites = try await invitesTask
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+
+    func acceptInvite(targetId: UUID, userId: UUID?) async {
+        guard userId != nil else { return }
+        do {
+            try await NutritionManager.acceptMealPlan(targetId: targetId)
+            await load(userId: userId)
+        } catch {
+            self.error = NutritionManager.mealPlanErrorMessage(error)
+        }
+    }
+
+    func rejectInvite(targetId: UUID, userId: UUID?) async {
+        guard userId != nil else { return }
+        do {
+            try await NutritionManager.rejectMealPlan(targetId: targetId)
+            await load(userId: userId)
+        } catch {
+            self.error = NutritionManager.mealPlanErrorMessage(error)
+        }
+    }
+
+    func completePlannedMeal(targetId: UUID, userId: UUID?) async {
+        guard userId != nil else { return }
+        do {
+            try await NutritionManager.completeMealPlanAsEaten(targetId: targetId)
+            await load(userId: userId)
+        } catch {
+            self.error = NutritionManager.mealPlanErrorMessage(error)
+        }
+    }
+
+    func updatePlannedMeal(
+        targetId: UUID,
+        mealSlot: NutritionMealSlot,
+        quantityG: Double,
+        userId: UUID?
+    ) async {
+        guard userId != nil else { return }
+        do {
+            try await NutritionManager.updateMealPlanTarget(
+                targetId: targetId,
+                quantityG: quantityG,
+                mealSlot: mealSlot
+            )
+            await load(userId: userId)
+        } catch {
+            self.error = NutritionManager.mealPlanErrorMessage(error)
         }
     }
 
@@ -414,6 +485,14 @@ struct NutritionView: View {
 
                 dayHeader
 
+                if !vm.pendingInvites.isEmpty {
+                    pendingInvitesSection
+                }
+
+                if !vm.plannedItems.isEmpty {
+                    plannedMealsSection
+                }
+
                 ForEach(vm.groupedItems(), id: \.slot.id) { section in
                     mealSection(slot: section.slot, items: section.items)
                 }
@@ -434,9 +513,14 @@ struct NutritionView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button {
-                        vm.activeSheet = .addFood(mealSlot: .lunch)
+                        vm.activeSheet = .addFood(mealSlot: .lunch, saveMode: .diary)
                     } label: {
                         Label("Log food", systemImage: "plus.circle")
+                    }
+                    Button {
+                        vm.activeSheet = .addFood(mealSlot: .lunch, saveMode: .plan)
+                    } label: {
+                        Label("Plan food", systemImage: "calendar.badge.plus")
                     }
                     Button {
                         vm.activeSheet = .createIngredient
@@ -474,11 +558,12 @@ struct NutritionView: View {
     @ViewBuilder
     private func sheetContent(for route: NutritionSheetRoute) -> some View {
         switch route {
-        case .addFood(let mealSlot):
+        case .addFood(let mealSlot, let saveMode):
             NutritionLogFoodSheet(
                 selectedDate: vm.selectedDate,
                 userId: app.userId,
                 initialMealSlot: mealSlot,
+                saveMode: saveMode,
                 onDone: { vm.activeSheet = nil; Task { await vm.load(userId: app.userId) } }
             )
         case .createIngredient:
@@ -498,6 +583,16 @@ struct NutritionView: View {
                 item: item,
                 onDone: { vm.activeSheet = nil; Task { await vm.load(userId: app.userId) } }
             )
+        case .editPlannedMeal(let item):
+            NutritionEditPlannedMealSheet(
+                item: item,
+                onDone: { vm.activeSheet = nil; Task { await vm.load(userId: app.userId) } },
+                onDecline: { vm.activeSheet = nil; Task { await vm.rejectInvite(targetId: item.targetId, userId: app.userId) } },
+                onMarkEaten: {
+                    vm.activeSheet = nil
+                    Task { await vm.completePlannedMeal(targetId: item.targetId, userId: app.userId) }
+                }
+            )
         }
     }
 
@@ -507,6 +602,102 @@ struct NutritionView: View {
         return Text(df.string(from: vm.selectedDate))
             .font(.subheadline.weight(.semibold))
             .padding(.horizontal)
+    }
+
+    private var pendingInvitesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Meal invitations")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal)
+            ForEach(vm.pendingInvites) { invite in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(invite.foodName)
+                        .font(.subheadline.weight(.semibold))
+                    Text(NutritionManager.formattedPlanDate(invite.planDate))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("\(invite.mealSlot) · \(Int(invite.quantityG.rounded())) g · \(Int(invite.caloriesKcal.rounded())) kcal")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let creator = invite.creatorUsername {
+                        Text("From @\(creator)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Button("Decline") {
+                            Task { await vm.rejectInvite(targetId: invite.targetId, userId: app.userId) }
+                        }
+                        .buttonStyle(.bordered)
+                        Button("Accept") {
+                            Task { await vm.acceptInvite(targetId: invite.targetId, userId: app.userId) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding(12)
+                .nutritionCard()
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    private var plannedMealsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Planned meals")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal)
+            ForEach(vm.plannedItems) { item in
+                Button {
+                    vm.activeSheet = .editPlannedMeal(item)
+                } label: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(item.foodName)
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Text("\(item.mealSlot) · \(Int(item.quantityG.rounded())) g · \(Int(item.caloriesKcal.rounded())) kcal")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let partner = item.partnerLabel {
+                            Text(partner)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let status = item.partnerStatusLabel {
+                            Text(status)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let userId = app.userId, item.canMarkEaten(viewingUserId: userId) || item.canDecline(viewingUserId: userId) {
+                            HStack {
+                                if item.canDecline(viewingUserId: userId) {
+                                    Button("Decline") {
+                                        Task { await vm.rejectInvite(targetId: item.targetId, userId: app.userId) }
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                                if item.canMarkEaten(viewingUserId: userId) {
+                                    Button("Mark as eaten") {
+                                        Task { await vm.completePlannedMeal(targetId: item.targetId, userId: app.userId) }
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .nutritionCard()
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal)
+            }
+        }
     }
 
     private var summaryCard: some View {
@@ -557,13 +748,17 @@ struct NutritionView: View {
                 Text(slot.rawValue)
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Button {
-                    vm.activeSheet = .addFood(mealSlot: slot)
+                Menu {
+                    Button("Log food") {
+                        vm.activeSheet = .addFood(mealSlot: slot, saveMode: .diary)
+                    }
+                    Button("Plan food") {
+                        vm.activeSheet = .addFood(mealSlot: slot, saveMode: .plan)
+                    }
                 } label: {
                     Image(systemName: "plus")
                         .font(.caption.weight(.bold))
                 }
-                .buttonStyle(.borderless)
             }
             .padding(.horizontal)
 
@@ -606,6 +801,7 @@ private enum NutritionCalendarPalette {
     static let noLogs = Color.primary.opacity(0.35)
     static let onBudget = Color.orange
     static let overBudget = Color(red: 0.9, green: 0.27, blue: 0.27)
+    static let planned = WorkoutTint.sport
 }
 
 private struct NutritionCalendarLegend: View {
@@ -614,6 +810,7 @@ private struct NutritionCalendarLegend: View {
             legendItem("No logs", color: NutritionCalendarPalette.noLogs)
             legendItem("On budget", color: NutritionCalendarPalette.onBudget)
             legendItem("Over budget", color: NutritionCalendarPalette.overBudget)
+            legendItem("Planned", color: NutritionCalendarPalette.planned)
         }
         .font(.system(size: 9, weight: .semibold))
         .foregroundStyle(.secondary)
@@ -706,14 +903,18 @@ private struct NutritionMonthCalendar: View {
             let key = cal.startOfDay(for: day)
             let summary = dayBalance[key]
             let count = summary?.mealLogCount ?? 0
+            let plannedCount = summary?.plannedMealCount ?? 0
             let selected = cal.isDate(day, inSameDayAs: selectedDate)
             let today = cal.isDateInToday(day)
             let fillColor: Color = {
-                guard count > 0, let remaining = summary?.remainingCalories else {
-                    return Color.primary.opacity(selected ? 0.12 : 0.05)
+                if count > 0, let remaining = summary?.remainingCalories {
+                    let accent = remaining < 0 ? NutritionCalendarPalette.overBudget : NutritionCalendarPalette.onBudget
+                    return accent.opacity(selected ? 0.55 : 0.32)
                 }
-                let accent = remaining < 0 ? NutritionCalendarPalette.overBudget : NutritionCalendarPalette.onBudget
-                return accent.opacity(selected ? 0.55 : 0.32)
+                if plannedCount > 0 {
+                    return NutritionCalendarPalette.planned.opacity(selected ? 0.55 : 0.32)
+                }
+                return Color.primary.opacity(selected ? 0.12 : 0.05)
             }()
             Button {
                 selectedDate = day
@@ -740,6 +941,13 @@ private struct NutritionMonthCalendar: View {
                         RoundedRectangle(cornerRadius: 10).strokeBorder(Color.mint.opacity(0.8), lineWidth: 1.5)
                     }
                 }
+                .overlay(alignment: .bottom) {
+                    if count > 0, plannedCount > 0 {
+                        RoundedRectangle(cornerRadius: 10)
+                            .strokeBorder(NutritionCalendarPalette.planned, lineWidth: 2)
+                            .padding(1)
+                    }
+                }
             }
             .buttonStyle(.plain)
         } else {
@@ -753,7 +961,10 @@ private struct NutritionRecipeLineEditor: View {
     let weightG: Double
     let onWeightChange: (Double) -> Void
     let onDelete: () -> Void
+    var showsPortionEditor: Bool = true
+    var groupedInCart: Bool = false
 
+    @FocusState private var isWeightFocused: Bool
     @State private var weightText = ""
 
     var body: some View {
@@ -767,8 +978,9 @@ private struct NutritionRecipeLineEditor: View {
                     Image(systemName: "trash")
                 }
             }
+            if showsPortionEditor {
             HStack(spacing: 12) {
-                Button { applyWeight(weightG - 5) } label: {
+                Button { applyWeightCommitted(weightG - 5) } label: {
                     Image(systemName: "minus.circle.fill").font(.title3)
                 }
                 TextField("g", text: $weightText)
@@ -776,13 +988,17 @@ private struct NutritionRecipeLineEditor: View {
                     .multilineTextAlignment(.center)
                     .font(.body.weight(.bold))
                     .frame(width: 88)
+                    .focused($isWeightFocused)
                     .onChange(of: weightText) { _, newValue in
                         let filtered = newValue.filter { $0.isNumber }
                         if filtered != newValue { weightText = filtered }
                         guard let v = Double(filtered), v > 0 else { return }
-                        applyWeight(v)
+                        applyWeightWhileTyping(v)
                     }
-                Button { applyWeight(weightG + 5) } label: {
+                    .onChange(of: isWeightFocused) { _, focused in
+                        if !focused { commitWeightText() }
+                    }
+                Button { applyWeightCommitted(weightG + 5) } label: {
                     Image(systemName: "plus.circle.fill").font(.title3)
                 }
             }
@@ -793,7 +1009,7 @@ private struct NutritionRecipeLineEditor: View {
                 HStack(spacing: 8) {
                     ForEach([5.0, 10.0, 50.0, 100.0, 150.0, 200.0, 250.0], id: \.self) { preset in
                         Button {
-                            applyWeight(preset)
+                            applyWeightCommitted(preset)
                         } label: {
                             Text("\(Int(preset)) g")
                                 .font(.caption2.weight(.semibold))
@@ -808,9 +1024,9 @@ private struct NutritionRecipeLineEditor: View {
                     }
                 }
             }
+            }
         }
-        .padding(12)
-        .nutritionCard()
+        .nutritionCartLineChrome(grouped: !groupedInCart)
     }
 
     private func syncText() {
@@ -818,9 +1034,22 @@ private struct NutritionRecipeLineEditor: View {
         if weightText != t { weightText = t }
     }
 
-    private func applyWeight(_ value: Double) {
+    private func applyWeightWhileTyping(_ value: Double) {
+        onWeightChange(min(2000, value))
+    }
+
+    private func applyWeightCommitted(_ value: Double) {
         onWeightChange(min(2000, max(5, value)))
         syncText()
+    }
+
+    private func commitWeightText() {
+        let filtered = weightText.filter { $0.isNumber }
+        guard let v = Double(filtered), v > 0 else {
+            syncText()
+            return
+        }
+        applyWeightCommitted(v)
     }
 }
 
@@ -829,6 +1058,7 @@ private struct NutritionGramsInput: View {
     var kcalPreview: Double?
 
     private let presets: [Double] = [50, 100, 150, 200, 250]
+    @FocusState private var isGramsFocused: Bool
     @State private var gramsText = ""
 
     var body: some View {
@@ -844,7 +1074,7 @@ private struct NutritionGramsInput: View {
                 }
             }
             HStack(spacing: 12) {
-                Button { applyGrams(grams - 5) } label: {
+                Button { applyGramsCommitted(grams - 5) } label: {
                     Image(systemName: "minus.circle.fill").font(.title2)
                 }
                 TextField("g", text: $gramsText)
@@ -852,13 +1082,17 @@ private struct NutritionGramsInput: View {
                     .multilineTextAlignment(.center)
                     .font(.title3.weight(.bold))
                     .frame(width: 88)
+                    .focused($isGramsFocused)
                     .onChange(of: gramsText) { _, newValue in
                         let filtered = newValue.filter { $0.isNumber }
                         if filtered != newValue { gramsText = filtered }
                         guard let v = Double(filtered), v > 0 else { return }
-                        applyGrams(v)
+                        applyGramsWhileTyping(v)
                     }
-                Button { applyGrams(grams + 5) } label: {
+                    .onChange(of: isGramsFocused) { _, focused in
+                        if !focused { commitGramsText() }
+                    }
+                Button { applyGramsCommitted(grams + 5) } label: {
                     Image(systemName: "plus.circle.fill").font(.title2)
                 }
             }
@@ -869,7 +1103,7 @@ private struct NutritionGramsInput: View {
                 HStack(spacing: 8) {
                     ForEach(presets, id: \.self) { p in
                         Button {
-                            applyGrams(p)
+                            applyGramsCommitted(p)
                         } label: {
                             Text("\(Int(p)) g")
                                 .font(.caption.weight(.semibold))
@@ -893,9 +1127,22 @@ private struct NutritionGramsInput: View {
         if gramsText != t { gramsText = t }
     }
 
-    private func applyGrams(_ value: Double) {
+    private func applyGramsWhileTyping(_ value: Double) {
+        grams = min(2000, value)
+    }
+
+    private func applyGramsCommitted(_ value: Double) {
         grams = min(2000, max(5, value))
         syncTextFromGrams()
+    }
+
+    private func commitGramsText() {
+        let filtered = gramsText.filter { $0.isNumber }
+        guard let v = Double(filtered), v > 0 else {
+            syncTextFromGrams()
+            return
+        }
+        applyGramsCommitted(v)
     }
 }
 
@@ -937,24 +1184,83 @@ private enum NutritionLogNestedSheet: Identifiable {
     }
 }
 
+struct NutritionLogCartItem: Identifiable {
+    let id: UUID
+    enum Kind {
+        case ingredient(NutritionIngredientRow)
+        case recipe(NutritionRecipeRow, lines: [NutritionRecipeLineDraft])
+    }
+    var kind: Kind
+    var grams: Double
+    var isLoadingComposition: Bool
+    var assignedUserIds: Set<UUID> = []
+    var perUserGrams: [UUID: Double] = [:]
+
+    var ingredientId: UUID? {
+        if case .ingredient(let row) = kind { return row.id }
+        return nil
+    }
+
+    var recipeId: UUID? {
+        if case .recipe(let row, _) = kind { return row.id }
+        return nil
+    }
+
+    var displayName: String {
+        switch kind {
+        case .ingredient(let row): return row.name
+        case .recipe(let row, _): return row.name
+        }
+    }
+}
+
+enum NutritionLogCartLogic {
+    static let maxItems = 20
+
+    static func clampGrams(_ grams: Double) -> Double {
+        min(2000, max(5, grams))
+    }
+
+    static func lineKcal(_ item: NutritionLogCartItem) -> Double? {
+        guard !item.isLoadingComposition else { return nil }
+        switch item.kind {
+        case .ingredient(let row):
+            return item.grams * row.calories_per_100g / 100.0
+        case .recipe(_, let lines) where !lines.isEmpty:
+            let profile = NutritionManager.rollupProfilePer100g(lines: lines)
+            return item.grams * profile.calories / 100.0
+        default:
+            return nil
+        }
+    }
+
+    static func totalKcal(_ cart: [NutritionLogCartItem]) -> Int {
+        cart.compactMap { lineKcal($0) }.reduce(0) { $0 + Int($1.rounded()) }
+    }
+
+    static func canSave(_ cart: [NutritionLogCartItem], saving: Bool) -> Bool {
+        !saving && !cart.isEmpty && !cart.contains(where: \.isLoadingComposition)
+    }
+}
+
 private struct NutritionLogFoodSheet: View {
     let selectedDate: Date
     let userId: UUID?
     let initialMealSlot: NutritionMealSlot
+    let saveMode: NutritionFoodSaveMode
     let onDone: () -> Void
 
     @EnvironmentObject private var app: AppState
     @Environment(\.dismiss) private var dismiss
     @State private var nestedSheet: NutritionLogNestedSheet?
+    @State private var planDate: Date
+    @State private var selectedPartners: [LightweightProfile] = []
+    @State private var showParticipantsPicker = false
     @State private var mode: String = "Ingredient"
     @State private var searchText = ""
     @State private var ingredients: [NutritionIngredientRow] = []
     @State private var recipes: [NutritionRecipeRow] = []
-    @State private var selectedIngredient: NutritionIngredientRow?
-    @State private var selectedRecipe: NutritionRecipeRow?
-    @State private var selectedRecipeLines: [NutritionRecipeLineDraft] = []
-    @State private var loadingRecipeComposition = false
-    @State private var grams: Double = 100
+    @State private var cart: [NutritionLogCartItem] = []
     @State private var mealSlot: NutritionMealSlot
     @State private var loading = false
     @State private var loadingMoreIngredients = false
@@ -965,26 +1271,53 @@ private struct NutritionLogFoodSheet: View {
     @State private var listScope: NutritionListScope = .all
     @State private var favoriteIngredientIds: Set<UUID> = []
     @State private var favoriteRecipeIds: Set<UUID> = []
+    @State private var shareIngredientSnapshot: SharedIngredientSnapshot?
+    @State private var shareRecipeSnapshot: SharedRecipeSnapshot?
     @State private var showShareIngredientToChat = false
     @State private var showShareRecipeToChat = false
-    @State private var showDeleteRecipeConfirm = false
-    @State private var showDeleteIngredientConfirm = false
+    @State private var pendingDeleteRecipeId: UUID?
+    @State private var pendingDeleteIngredientId: UUID?
 
-    private var hasLogSelection: Bool {
-        selectedIngredient != nil || selectedRecipe != nil
+    private var hasCart: Bool { !cart.isEmpty }
+
+    private var planDefaultAssigneeIds: Set<UUID> {
+        var ids = Set(selectedPartners.map(\.user_id))
+        if let userId { ids.insert(userId) }
+        return ids
+    }
+
+    private var planAssigneeProfiles: [LightweightProfile] {
+        var profiles = selectedPartners
+        if let userId, !profiles.contains(where: { $0.user_id == userId }) {
+            profiles.insert(LightweightProfile(user_id: userId, username: "You", avatar_url: nil), at: 0)
+        }
+        return profiles
+    }
+
+    private func cartContainsIngredient(_ id: UUID) -> Bool {
+        cart.contains { $0.ingredientId == id }
+    }
+
+    private func cartContainsRecipe(_ id: UUID) -> Bool {
+        cart.contains { $0.recipeId == id }
     }
 
     init(
         selectedDate: Date,
         userId: UUID?,
         initialMealSlot: NutritionMealSlot = .lunch,
+        saveMode: NutritionFoodSaveMode = .diary,
         onDone: @escaping () -> Void
     ) {
         self.selectedDate = selectedDate
         self.userId = userId
         self.initialMealSlot = initialMealSlot
+        self.saveMode = saveMode
         self.onDone = onDone
         _mealSlot = State(initialValue: initialMealSlot)
+        let cal = Calendar.current
+        let defaultPlan = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: selectedDate)) ?? selectedDate
+        _planDate = State(initialValue: defaultPlan)
     }
 
     var body: some View {
@@ -992,13 +1325,53 @@ private struct NutritionLogFoodSheet: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     VStack(spacing: 12) {
+                        if saveMode == .plan {
+                            DatePicker("Plan date", selection: $planDate, in: Date()..., displayedComponents: .date)
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("PARTICIPANTS")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                SectionCard {
+                                    if selectedPartners.isEmpty {
+                                        Text("No participants added")
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.vertical, 4)
+                                    } else {
+                                        ForEach(selectedPartners, id: \.id) { profile in
+                                            HStack {
+                                                Text(profile.username.map { "@\($0)" } ?? "User")
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                                Spacer()
+                                                Button(role: .destructive) {
+                                                    selectedPartners.removeAll { $0.id == profile.id }
+                                                } label: {
+                                                    Image(systemName: "xmark.circle.fill")
+                                                }
+                                                .buttonStyle(.borderless)
+                                            }
+                                            .padding(.vertical, 2)
+                                        }
+                                    }
+                                    Divider().padding(.vertical, 6)
+                                    Button {
+                                        showParticipantsPicker = true
+                                    } label: {
+                                        Label("Add participants", systemImage: "person.crop.circle.badge.plus")
+                                    }
+                                    .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+
                         Picker("Type", selection: $mode) {
                             Text("Ingredient").tag("Ingredient")
                             Text("Recipe").tag("Recipe")
                         }
                         .pickerStyle(.segmented)
                         .onChange(of: mode) { _, _ in
-                            clearLogSelection()
                             Task { await runSearch() }
                         }
 
@@ -1018,6 +1391,11 @@ private struct NutritionLogFoodSheet: View {
                                 .font(.caption.weight(.semibold))
                                 .buttonStyle(.bordered)
                         }
+
+                        Text("Tap items to add. Tap again to remove.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
                         NutritionMaterialTextField(title: "Search", text: $searchText)
                             .onChange(of: searchText) { _, _ in Task { await runSearch() } }
@@ -1057,15 +1435,28 @@ private struct NutritionLogFoodSheet: View {
                     .padding()
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if hasLogSelection {
-                        logFoodConfirmPanel
+                    if hasCart {
+                        logFoodCartPanel
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
-                .animation(.easeInOut(duration: 0.22), value: hasLogSelection)
+                .animation(.easeInOut(duration: 0.22), value: hasCart)
             }
-            .navigationTitle("Log food")
+            .navigationTitle(saveMode == .plan ? "Plan food" : "Log food")
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(isPresented: $showParticipantsPicker) {
+                MealPlanParticipantsPickerSheet(
+                    alreadySelected: Set(selectedPartners),
+                    onPick: { picked in
+                        var merged = selectedPartners
+                        for profile in picked where !merged.contains(where: { $0.id == profile.id }) {
+                            merged.append(profile)
+                        }
+                        selectedPartners = merged
+                    }
+                )
+                .gradientBG()
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss(); onDone() }
@@ -1095,15 +1486,12 @@ private struct NutritionLogFoodSheet: View {
                             nestedSheet = nil
                             Task {
                                 await runSearch()
-                                guard selectedIngredient?.id == ingredient.id else { return }
-                                if let updated = ingredients.first(where: { $0.id == ingredient.id }) {
-                                    selectedIngredient = updated
-                                }
+                                syncCartIngredient(ingredient.id)
                             }
                         },
                         onDeleted: {
                             nestedSheet = nil
-                            clearLogSelection()
+                            removeFromCart(ingredientId: ingredient.id)
                             Task { await runSearch() }
                         }
                     )
@@ -1126,16 +1514,12 @@ private struct NutritionLogFoodSheet: View {
                             nestedSheet = nil
                             Task {
                                 await runSearch()
-                                guard selectedRecipe?.id == recipe.id else { return }
-                                if let updated = recipes.first(where: { $0.id == recipe.id }) {
-                                    selectedRecipe = updated
-                                }
-                                await loadRecipeComposition(recipeId: recipe.id)
+                                syncCartRecipe(recipe.id)
                             }
                         },
                         onDeleted: {
                             nestedSheet = nil
-                            clearLogSelection()
+                            removeFromCart(recipeId: recipe.id)
                             Task { await runSearch() }
                         }
                     )
@@ -1143,14 +1527,14 @@ private struct NutritionLogFoodSheet: View {
                 }
             }
             .sheet(isPresented: $showShareIngredientToChat) {
-                if let snap = sharedIngredientSnapshot {
+                if let snap = shareIngredientSnapshot {
                     ShareIngredientToChatSheet(snapshot: snap) {}
                         .environmentObject(app)
                         .gradientBG()
                 }
             }
             .sheet(isPresented: $showShareRecipeToChat) {
-                if let snap = sharedRecipeSnapshot {
+                if let snap = shareRecipeSnapshot {
                     ShareRecipeToChatSheet(snapshot: snap) {}
                         .environmentObject(app)
                         .gradientBG()
@@ -1159,50 +1543,22 @@ private struct NutritionLogFoodSheet: View {
         }
     }
 
-    private var canManageSelectedRecipe: Bool {
-        guard let userId, let recipe = selectedRecipe else { return false }
-        return recipe.user_id == userId
-    }
-
-    private var canManageSelectedIngredient: Bool {
-        guard let userId, let ingredient = selectedIngredient else { return false }
-        return ingredient.user_id == userId
-    }
-
-    private var logFoodConfirmPanel: some View {
+    private var logFoodCartPanel: some View {
         VStack(spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                Text(logSelectionTitle)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if canManageSelectedIngredient, let ingredient = selectedIngredient {
-                    Button("Edit") {
-                        nestedSheet = .editIngredient(ingredient)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(cart.count) items")
+                        .font(.headline)
+                    let total = NutritionLogCartLogic.totalKcal(cart)
+                    if total > 0 {
+                        Text("\(total) kcal total")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .font(.subheadline.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    Button("Delete") {
-                        showDeleteIngredientConfirm = true
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                } else if canManageSelectedRecipe, let recipe = selectedRecipe {
-                    Button("Edit") {
-                        nestedSheet = .editRecipe(recipe)
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    Button("Delete") {
-                        showDeleteRecipeConfirm = true
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .buttonStyle(.bordered)
-                    .tint(.red)
                 }
+                Spacer()
                 Button {
-                    clearLogSelection()
+                    cart = []
                 } label: {
                     Image(systemName: "xmark")
                         .font(.body.weight(.semibold))
@@ -1212,7 +1568,7 @@ private struct NutritionLogFoodSheet: View {
                         .overlay(Circle().strokeBorder(Color.white.opacity(0.2), lineWidth: 0.8))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Close")
+                .accessibilityLabel("Clear cart")
             }
 
             Picker("Meal", selection: $mealSlot) {
@@ -1223,34 +1579,58 @@ private struct NutritionLogFoodSheet: View {
             .pickerStyle(.segmented)
 
             ScrollView {
-                logFoodConfirmDetails
-            }
-            .frame(maxHeight: 200)
-
-            NutritionGramsInput(grams: $grams, kcalPreview: previewKcal)
-
-            if sharedIngredientSnapshot != nil || sharedRecipeSnapshot != nil {
-                Button {
-                    if sharedIngredientSnapshot != nil {
-                        showShareIngredientToChat = true
-                    } else if sharedRecipeSnapshot != nil {
-                        showShareRecipeToChat = true
+                VStack(spacing: cart.count > 1 ? 14 : 8) {
+                    ForEach(cart) { item in
+                        let groupsCartLines = cart.count > 1
+                        if item.isLoadingComposition {
+                            HStack {
+                                Text(item.displayName)
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                ProgressView()
+                                Button(role: .destructive) {
+                                    cart.removeAll { $0.id == item.id }
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                            }
+                            .nutritionCartLineChrome(grouped: true)
+                        } else {
+                            let kcal = NutritionLogCartLogic.lineKcal(item)
+                            let multiAssigneePlan = saveMode == .plan && planCartSelectedAssigneeCount(item) > 1
+                            VStack(alignment: .leading, spacing: 10) {
+                                NutritionRecipeLineEditor(
+                                    name: multiAssigneePlan
+                                        ? item.displayName
+                                        : item.displayName + (kcal != nil ? " · \(Int(kcal!.rounded())) kcal" : ""),
+                                    weightG: item.grams,
+                                    onWeightChange: { updateCartGrams(itemId: item.id, grams: $0) },
+                                    onDelete: { cart.removeAll { $0.id == item.id } },
+                                    showsPortionEditor: !multiAssigneePlan,
+                                    groupedInCart: groupsCartLines
+                                )
+                                if saveMode == .plan, !planAssigneeProfiles.isEmpty {
+                                    planCartAssigneeRow(itemId: item.id)
+                                }
+                            }
+                            .nutritionCartLineChrome(grouped: groupsCartLines)
+                        }
                     }
-                } label: {
-                    Text("Share via Chat").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .disabled(saving)
             }
+            .frame(maxHeight: 280)
 
-            Button { Task { await save() } } label: {
+            Button { Task { await saveCart() } } label: {
                 Group {
                     if saving { ProgressView() }
-                    else { Text("Add to diary").frame(maxWidth: .infinity) }
+                    else {
+                        Text(saveMode == .plan ? "Plan \(cart.count) meal(s)" : "Add \(cart.count) to diary")
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(saving || (selectedRecipe != nil && (loadingRecipeComposition || selectedRecipeLines.isEmpty)))
+            .disabled(!NutritionLogCartLogic.canSave(cart, saving: saving))
         }
         .padding(16)
         .nutritionCard()
@@ -1258,55 +1638,68 @@ private struct NutritionLogFoodSheet: View {
         .padding(.bottom, 8)
         .confirmationDialog(
             "Delete this recipe?",
-            isPresented: $showDeleteRecipeConfirm,
+            isPresented: Binding(
+                get: { pendingDeleteRecipeId != nil },
+                set: { if !$0 { pendingDeleteRecipeId = nil } }
+            ),
             titleVisibility: .visible
         ) {
-            Button("Delete recipe", role: .destructive) { Task { await deleteSelectedRecipe() } }
-            Button("Cancel", role: .cancel) {}
+            Button("Delete recipe", role: .destructive) {
+                if let id = pendingDeleteRecipeId {
+                    Task { await deleteRecipeById(id) }
+                }
+                pendingDeleteRecipeId = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteRecipeId = nil }
         } message: {
             Text("This removes the recipe and any diary entries logged with it.")
         }
         .confirmationDialog(
             "Delete this ingredient?",
-            isPresented: $showDeleteIngredientConfirm,
+            isPresented: Binding(
+                get: { pendingDeleteIngredientId != nil },
+                set: { if !$0 { pendingDeleteIngredientId = nil } }
+            ),
             titleVisibility: .visible
         ) {
-            Button("Delete ingredient", role: .destructive) { Task { await deleteSelectedIngredient() } }
-            Button("Cancel", role: .cancel) {}
+            Button("Delete ingredient", role: .destructive) {
+                if let id = pendingDeleteIngredientId {
+                    Task { await deleteIngredientById(id) }
+                }
+                pendingDeleteIngredientId = nil
+            }
+            Button("Cancel", role: .cancel) { pendingDeleteIngredientId = nil }
         } message: {
             Text("This removes the ingredient and any diary entries logged with it.")
         }
     }
 
-    private func deleteSelectedRecipe() async {
-        guard let recipeId = selectedRecipe?.id else { return }
+    private func deleteRecipeById(_ recipeId: UUID) async {
         saving = true
         defer { saving = false }
         do {
             try await NutritionManager.deleteRecipe(recipeId: recipeId)
-            clearLogSelection()
+            removeFromCart(recipeId: recipeId)
             await runSearch()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func deleteSelectedIngredient() async {
-        guard let ingredientId = selectedIngredient?.id else { return }
+    private func deleteIngredientById(_ ingredientId: UUID) async {
         saving = true
         defer { saving = false }
         do {
             try await NutritionManager.deleteIngredient(ingredientId: ingredientId)
-            clearLogSelection()
+            removeFromCart(ingredientId: ingredientId)
             await runSearch()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private var sharedIngredientSnapshot: SharedIngredientSnapshot? {
-        guard let ing = selectedIngredient else { return nil }
-        return SharedIngredientSnapshot(
+    private func ingredientShareSnapshot(_ ing: NutritionIngredientRow) -> SharedIngredientSnapshot {
+        SharedIngredientSnapshot(
             v: 1,
             type: "shared_ingredient",
             name: ing.name,
@@ -1321,10 +1714,9 @@ private struct NutritionLogFoodSheet: View {
         )
     }
 
-    private var sharedRecipeSnapshot: SharedRecipeSnapshot? {
-        guard let recipe = selectedRecipe else { return nil }
-        guard !selectedRecipeLines.isEmpty else { return nil }
-        let items = selectedRecipeLines.map { line in
+    private func recipeShareSnapshot(_ recipe: NutritionRecipeRow, lines: [NutritionRecipeLineDraft]) -> SharedRecipeSnapshot? {
+        guard !lines.isEmpty else { return nil }
+        let items = lines.map { line in
             SharedRecipeIngredientSnapshot(
                 name: line.ingredient.name,
                 weight_g: line.weightG,
@@ -1338,7 +1730,7 @@ private struct NutritionLogFoodSheet: View {
                 sodium_mg_per_100g: line.ingredient.sodium_mg_per_100g
             )
         }
-        let profile = NutritionManager.rollupProfilePer100g(lines: selectedRecipeLines)
+        let profile = NutritionManager.rollupProfilePer100g(lines: lines)
         return SharedRecipeSnapshot(
             v: 1,
             type: "shared_recipe",
@@ -1358,57 +1750,201 @@ private struct NutritionLogFoodSheet: View {
         )
     }
 
-    @ViewBuilder
-    private var logFoodConfirmDetails: some View {
-        VStack(spacing: 12) {
-            if let ing = selectedIngredient {
-                NutritionFactsLabel(title: "Nutrition Facts", profile: ing.profilePer100g)
-            } else if let recipe = selectedRecipe {
-                if let desc = recipe.description?.trimmingCharacters(in: .whitespacesAndNewlines), !desc.isEmpty {
-                    DisclosureGroup("Description") {
-                        Text(desc)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .font(.subheadline.weight(.semibold))
-                }
-                if loadingRecipeComposition {
-                    ProgressView()
-                        .frame(maxWidth: .infinity)
-                } else if !selectedRecipeLines.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(selectedRecipeLines, id: \.id) { line in
-                            HStack(spacing: 8) {
-                                Image(systemName: "checkmark.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(.mint)
-                                Text("\(Int(line.weightG.rounded()))g \(line.ingredient.name)")
-                                    .font(.caption)
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    NutritionFactsLabel(
-                        title: "Nutrition Facts",
-                        profile: NutritionManager.rollupProfilePer100g(lines: selectedRecipeLines)
-                    )
-                }
-            }
+    private func clearCart() {
+        cart = []
+    }
+
+    private func removeFromCart(ingredientId: UUID? = nil, recipeId: UUID? = nil) {
+        cart.removeAll { item in
+            if let ingredientId, item.ingredientId == ingredientId { return true }
+            if let recipeId, item.recipeId == recipeId { return true }
+            return false
         }
     }
 
-    private var logSelectionTitle: String {
-        if let ing = selectedIngredient { return ing.name }
-        if let recipe = selectedRecipe { return recipe.name }
-        return ""
+    private func updateCartGrams(itemId: UUID, grams: Double) {
+        guard let index = cart.firstIndex(where: { $0.id == itemId }) else { return }
+        cart[index].grams = NutritionLogCartLogic.clampGrams(grams)
     }
 
-    private func clearLogSelection() {
-        selectedIngredient = nil
-        selectedRecipe = nil
-        selectedRecipeLines = []
-        loadingRecipeComposition = false
+    private func updateCartPerUserGrams(itemId: UUID, userId: UUID, grams: Double) {
+        guard let index = cart.firstIndex(where: { $0.id == itemId }) else { return }
+        cart[index].perUserGrams[userId] = NutritionLogCartLogic.clampGrams(grams)
+    }
+
+    private func cartGramsForUser(item: NutritionLogCartItem, userId: UUID) -> Double {
+        item.perUserGrams[userId] ?? item.grams
+    }
+
+    private func planCartSelectedAssigneeCount(_ item: NutritionLogCartItem) -> Int {
+        let ids = item.assignedUserIds.isEmpty
+            ? Set(planDefaultAssigneeIds)
+            : item.assignedUserIds
+        return planAssigneeProfiles.filter { ids.contains($0.user_id) }.count
+    }
+
+    @ViewBuilder
+    private func planCartAssigneeRow(itemId: UUID) -> some View {
+        if let index = cart.firstIndex(where: { $0.id == itemId }) {
+            let item = cart[index]
+            let selectedProfiles = planAssigneeProfiles.filter {
+                item.assignedUserIds.contains($0.user_id)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("For")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(planAssigneeProfiles, id: \.id) { profile in
+                            let selected = item.assignedUserIds.contains(profile.user_id)
+                            Button {
+                                toggleCartAssignee(itemId: itemId, userId: profile.user_id)
+                            } label: {
+                                Text(profile.username.map { "@\($0)" } ?? "User")
+                                    .font(.caption)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(selected ? Color.accentColor.opacity(0.25) : Color.white.opacity(0.12), in: Capsule())
+                                    .foregroundStyle(selected ? Color.primary : Color.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                if selectedProfiles.count > 1 {
+                    Text("Amount per person")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(selectedProfiles, id: \.id) { profile in
+                        let userGrams = cartGramsForUser(item: item, userId: profile.user_id)
+                        let lineKcal: Double? = {
+                            switch item.kind {
+                            case .ingredient(let ing):
+                                return userGrams * ing.calories_per_100g / 100.0
+                            case .recipe(_, let lines):
+                                let profile100 = NutritionManager.rollupProfilePer100g(lines: lines)
+                                return userGrams * profile100.calories / 100.0
+                            }
+                        }()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(profile.username.map { "@\($0)" } ?? "User")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            NutritionGramsInput(
+                                grams: Binding(
+                                    get: { cartGramsForUser(item: cart[index], userId: profile.user_id) },
+                                    set: { updateCartPerUserGrams(itemId: itemId, userId: profile.user_id, grams: $0) }
+                                ),
+                                kcalPreview: lineKcal
+                            )
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
+    private func toggleCartAssignee(itemId: UUID, userId: UUID) {
+        guard let index = cart.firstIndex(where: { $0.id == itemId }) else { return }
+        if cart[index].assignedUserIds.contains(userId) {
+            cart[index].assignedUserIds.remove(userId)
+            cart[index].perUserGrams.removeValue(forKey: userId)
+        } else {
+            cart[index].assignedUserIds.insert(userId)
+        }
+        if cart[index].assignedUserIds.isEmpty, let selfId = self.userId {
+            cart[index].assignedUserIds.insert(selfId)
+        }
+    }
+
+    private func syncCartIngredient(_ ingredientId: UUID) {
+        guard let updated = ingredients.first(where: { $0.id == ingredientId }) else { return }
+        guard let index = cart.firstIndex(where: { $0.ingredientId == ingredientId }) else { return }
+        cart[index].kind = .ingredient(updated)
+    }
+
+    private func syncCartRecipe(_ recipeId: UUID) {
+        guard let updated = recipes.first(where: { $0.id == recipeId }) else { return }
+        if let index = cart.firstIndex(where: { $0.recipeId == recipeId }) {
+            if case .recipe(_, let lines) = cart[index].kind {
+                cart[index].kind = .recipe(updated, lines: lines)
+            }
+        }
+        Task { await refreshCartRecipeLines(recipeId: recipeId) }
+    }
+
+    private func refreshCartRecipeLines(recipeId: UUID) async {
+        do {
+            let lines = try await NutritionManager.fetchRecipeLines(recipeId: recipeId)
+            guard let updated = recipes.first(where: { $0.id == recipeId }) else { return }
+            guard let index = cart.firstIndex(where: { $0.recipeId == recipeId }) else { return }
+            let total = NutritionManager.totalRecipeWeightG(lines: lines)
+            cart[index].kind = .recipe(updated, lines: lines)
+            cart[index].isLoadingComposition = false
+            if total > 0 {
+                cart[index].grams = total
+            }
+        } catch {
+            removeFromCart(recipeId: recipeId)
+        }
+    }
+
+    private func toggleCartIngredient(_ row: NutritionIngredientRow) {
+        if cartContainsIngredient(row.id) {
+            removeFromCart(ingredientId: row.id)
+            return
+        }
+        guard cart.count < NutritionLogCartLogic.maxItems else {
+            error = "You can add up to \(NutritionLogCartLogic.maxItems) items at once."
+            return
+        }
+        cart.append(
+            NutritionLogCartItem(
+                id: UUID(),
+                kind: .ingredient(row),
+                grams: 100,
+                isLoadingComposition: false,
+                assignedUserIds: planDefaultAssigneeIds
+            )
+        )
+    }
+
+    private func toggleCartRecipe(_ row: NutritionRecipeRow) {
+        if cartContainsRecipe(row.id) {
+            removeFromCart(recipeId: row.id)
+            return
+        }
+        guard cart.count < NutritionLogCartLogic.maxItems else {
+            error = "You can add up to \(NutritionLogCartLogic.maxItems) items at once."
+            return
+        }
+        let itemId = UUID()
+        cart.append(
+            NutritionLogCartItem(
+                id: itemId,
+                kind: .recipe(row, lines: []),
+                grams: 100,
+                isLoadingComposition: true,
+                assignedUserIds: planDefaultAssigneeIds
+            )
+        )
+        Task {
+            do {
+                let lines = try await NutritionManager.fetchRecipeLines(recipeId: row.id)
+                guard let index = cart.firstIndex(where: { $0.id == itemId }) else { return }
+                let total = NutritionManager.totalRecipeWeightG(lines: lines)
+                cart[index].kind = .recipe(row, lines: lines)
+                cart[index].isLoadingComposition = false
+                if total > 0 {
+                    cart[index].grams = total
+                }
+            } catch {
+                cart.removeAll { $0.id == itemId }
+                self.error = error.localizedDescription
+            }
+        }
     }
 
     private var emptySearchHint: some View {
@@ -1468,41 +2004,12 @@ private struct NutritionLogFoodSheet: View {
         }
     }
 
-    private var previewKcal: Double? {
-        if let ing = selectedIngredient {
-            return grams * ing.calories_per_100g / 100.0
-        }
-        if selectedRecipe != nil, !selectedRecipeLines.isEmpty {
-            let profile = NutritionManager.rollupProfilePer100g(lines: selectedRecipeLines)
-            return grams * profile.calories / 100.0
-        }
-        return nil
-    }
-
-    private func loadRecipeComposition(recipeId: UUID) async {
-        loadingRecipeComposition = true
-        defer { loadingRecipeComposition = false }
-        do {
-            let lines = try await NutritionManager.fetchRecipeLines(recipeId: recipeId)
-            guard selectedRecipe?.id == recipeId else { return }
-            selectedRecipeLines = lines
-            let total = NutritionManager.totalRecipeWeightG(lines: lines)
-            if total > 0 {
-                grams = total
-            }
-        } catch {
-            if selectedRecipe?.id == recipeId {
-                selectedRecipeLines = []
-            }
-        }
-    }
-
     private func ingredientRow(_ row: NutritionIngredientRow) -> some View {
-        HStack(spacing: 8) {
+        let inCart = cartContainsIngredient(row.id)
+        let canManage = userId != nil && row.user_id == userId
+        return HStack(spacing: 8) {
             Button {
-                selectedIngredient = row
-                selectedRecipe = nil
-                selectedRecipeLines = []
+                toggleCartIngredient(row)
             } label: {
                 HStack {
                     VStack(alignment: .leading) {
@@ -1512,12 +2019,26 @@ private struct NutritionLogFoodSheet: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if selectedIngredient?.id == row.id {
+                    if inCart {
                         Image(systemName: "checkmark.circle.fill")
                     }
                 }
             }
             .buttonStyle(.plain)
+
+            Menu {
+                Button("Share via Chat") {
+                    shareIngredientSnapshot = ingredientShareSnapshot(row)
+                    showShareIngredientToChat = true
+                }
+                if canManage {
+                    Button("Edit") { nestedSheet = .editIngredient(row) }
+                    Button("Delete", role: .destructive) { pendingDeleteIngredientId = row.id }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.secondary)
+            }
 
             Button {
                 Task { await toggleFavoriteIngredient(row.id) }
@@ -1532,22 +2053,52 @@ private struct NutritionLogFoodSheet: View {
     }
 
     private func recipeRow(_ row: NutritionRecipeRow) -> some View {
-        HStack(spacing: 8) {
+        let inCart = cartContainsRecipe(row.id)
+        let canManage = userId != nil && row.user_id == userId
+        return HStack(spacing: 8) {
             Button {
-                selectedRecipe = row
-                selectedIngredient = nil
-                selectedRecipeLines = []
-                Task { await loadRecipeComposition(recipeId: row.id) }
+                toggleCartRecipe(row)
             } label: {
                 HStack {
                     Text(row.name)
                     Spacer()
-                    if selectedRecipe?.id == row.id {
+                    if inCart {
                         Image(systemName: "checkmark.circle.fill")
                     }
                 }
             }
             .buttonStyle(.plain)
+
+            Menu {
+                Button("Share via Chat") {
+                    Task {
+                        if let item = cart.first(where: { $0.recipeId == row.id }),
+                           case .recipe(_, let lines) = item.kind,
+                           !lines.isEmpty,
+                           let snap = recipeShareSnapshot(row, lines: lines) {
+                            shareRecipeSnapshot = snap
+                            showShareRecipeToChat = true
+                            return
+                        }
+                        do {
+                            let lines = try await NutritionManager.fetchRecipeLines(recipeId: row.id)
+                            if let snap = recipeShareSnapshot(row, lines: lines) {
+                                shareRecipeSnapshot = snap
+                                showShareRecipeToChat = true
+                            }
+                        } catch {
+                            self.error = error.localizedDescription
+                        }
+                    }
+                }
+                if canManage {
+                    Button("Edit") { nestedSheet = .editRecipe(row) }
+                    Button("Delete", role: .destructive) { pendingDeleteRecipeId = row.id }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.secondary)
+            }
 
             Button {
                 Task { await toggleFavoriteRecipe(row.id) }
@@ -1622,33 +2173,52 @@ private struct NutritionLogFoodSheet: View {
         }
     }
 
-    private func save() async {
+    private func saveCart() async {
         guard let userId else { return }
+        guard !cart.isEmpty else {
+            error = "Add at least one item."
+            return
+        }
+        guard !cart.contains(where: \.isLoadingComposition) else { return }
         saving = true
         error = nil
         defer { saving = false }
         do {
-            if let ing = selectedIngredient {
-                try await NutritionManager.insertDiaryLog(
-                    userId: userId,
-                    date: selectedDate,
+            if saveMode == .plan {
+                try await NutritionManager.createMealPlansFromCart(
+                    creatorId: userId,
+                    planDate: planDate,
                     mealSlot: mealSlot,
-                    ingredientId: ing.id,
-                    recipeId: nil,
-                    quantityG: grams
-                )
-            } else if let recipe = selectedRecipe {
-                try await NutritionManager.insertDiaryLog(
-                    userId: userId,
-                    date: selectedDate,
-                    mealSlot: mealSlot,
-                    ingredientId: nil,
-                    recipeId: recipe.id,
-                    quantityG: grams
+                    cart: cart,
+                    partnerUserIds: selectedPartners.map(\.user_id)
                 )
             } else {
-                error = "Select an item."
-                return
+                for item in cart {
+                    let quantity = NutritionLogCartLogic.clampGrams(item.grams)
+                    switch item.kind {
+                    case .ingredient(let ing):
+                        try await NutritionManager.insertDiaryLog(
+                            userId: userId,
+                            date: selectedDate,
+                            mealSlot: mealSlot,
+                            ingredientId: ing.id,
+                            recipeId: nil,
+                            quantityG: quantity
+                        )
+                    case .recipe(let recipe, let lines) where !lines.isEmpty:
+                        try await NutritionManager.insertDiaryLog(
+                            userId: userId,
+                            date: selectedDate,
+                            mealSlot: mealSlot,
+                            ingredientId: nil,
+                            recipeId: recipe.id,
+                            quantityG: quantity
+                        )
+                    default:
+                        error = "Recipe still loading."
+                        return
+                    }
+                }
             }
             dismiss()
             onDone()
@@ -2067,7 +2637,15 @@ private struct NutritionRecipeEditorSheet: View {
 
     private func setLineWeight(_ lineId: UUID, _ weight: Double) {
         guard let index = lines.firstIndex(where: { $0.id == lineId }) else { return }
-        lines[index].weightG = min(2000, max(5, weight))
+        lines[index].weightG = min(2000, weight)
+    }
+
+    private func normalizedRecipeLines() -> [NutritionRecipeLineDraft] {
+        lines.map { line in
+            var copy = line
+            copy.weightG = min(2000, max(5, line.weightG))
+            return copy
+        }
     }
 
     private func bootstrap() async {
@@ -2092,20 +2670,21 @@ private struct NutritionRecipeEditorSheet: View {
         error = nil
         defer { saving = false }
         do {
+            let committedLines = normalizedRecipeLines()
             switch mode {
             case .create:
                 _ = try await NutritionManager.createRecipe(
                     userId: userId,
                     name: name,
                     description: description,
-                    lines: lines
+                    lines: committedLines
                 )
             case .edit(let recipe):
                 _ = try await NutritionManager.updateRecipe(
                     recipeId: recipe.id,
                     name: name,
                     description: description,
-                    lines: lines
+                    lines: committedLines
                 )
             }
             dismiss()
@@ -2197,7 +2776,7 @@ private struct NutritionEditDiarySheet: View {
         error = nil
         defer { saving = false }
         do {
-            try await NutritionManager.updateDiaryLog(logId: item.id, mealSlot: mealSlot, quantityG: grams)
+            try await NutritionManager.updateDiaryLog(logId: item.id, mealSlot: mealSlot, quantityG: min(2000, max(5, grams)))
             dismiss()
             onDone()
         } catch {
@@ -2215,6 +2794,115 @@ private struct NutritionEditDiarySheet: View {
             onDone()
         } catch {
             self.error = error.localizedDescription
+        }
+    }
+}
+
+private struct NutritionEditPlannedMealSheet: View {
+    let item: NutritionMealPlanItemUI
+    let onDone: () -> Void
+    let onDecline: () -> Void
+    let onMarkEaten: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var app: AppState
+    @State private var mealSlot: NutritionMealSlot
+    @State private var grams: Double
+    @State private var saving = false
+    @State private var error: String?
+
+    init(
+        item: NutritionMealPlanItemUI,
+        onDone: @escaping () -> Void,
+        onDecline: @escaping () -> Void,
+        onMarkEaten: @escaping () -> Void
+    ) {
+        self.item = item
+        self.onDone = onDone
+        self.onDecline = onDecline
+        self.onMarkEaten = onMarkEaten
+        _mealSlot = State(initialValue: NutritionMealSlot(rawValue: item.mealSlot) ?? .lunch)
+        _grams = State(initialValue: item.quantityG)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    Text(item.foodName)
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let partner = item.partnerLabel {
+                        Text(partner)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    Picker("Meal", selection: $mealSlot) {
+                        ForEach(NutritionMealSlot.allCases) { slot in
+                            Text(slot.rawValue).tag(slot)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    NutritionGramsInput(
+                        grams: $grams,
+                        kcalPreview: item.caloriesKcal * grams / max(item.quantityG, 1)
+                    )
+                    if let error {
+                        Text(error).font(.caption).foregroundStyle(.red)
+                    }
+                    Button { Task { await save() } } label: {
+                        Group {
+                            if saving { ProgressView() }
+                            else { Text("Save changes").frame(maxWidth: .infinity) }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    if app.userId.map({ item.canMarkEaten(viewingUserId: $0) }) == true {
+                        Button {
+                            dismiss()
+                            onMarkEaten()
+                        } label: {
+                            Text("Mark as eaten").frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    if app.userId.map({ item.canDecline(viewingUserId: $0) }) == true {
+                        Button(role: .destructive) {
+                            dismiss()
+                            onDecline()
+                        } label: {
+                            Text("Decline plan").frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("Planned meal")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss(); onDone() }
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        guard app.userId != nil else { return }
+        saving = true
+        error = nil
+        defer { saving = false }
+        do {
+            try await NutritionManager.updateMealPlanTarget(
+                targetId: item.targetId,
+                quantityG: grams,
+                mealSlot: mealSlot
+            )
+            dismiss()
+            onDone()
+        } catch let err {
+            error = NutritionManager.mealPlanErrorMessage(err)
         }
     }
 }
