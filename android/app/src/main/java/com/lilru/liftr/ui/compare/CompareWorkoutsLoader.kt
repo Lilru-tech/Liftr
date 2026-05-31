@@ -56,6 +56,11 @@ private data class SetRow(
     @SerialName("rest_sec") val restSec: Int? = null
 )
 
+@Serializable
+private data class VolWire(
+    @SerialName("total_volume_kg") val totalVolumeKg: Double? = null
+)
+
 private data class StrengthStats(
     val exercisesCount: Int,
     val setsCount: Int,
@@ -291,8 +296,14 @@ private suspend fun buildStrengthStats(supabase: SupabaseClient, wid: Int): Stre
         }
     val sets = compJson.decodeFromString<List<SetRow>>(setsRes.data)
     val byWe = sets.groupBy { it.workoutExerciseId }
+    val totalVolumeKg = runCatching {
+        val volRes = supabase.from(BackendContracts.Views.VW_WORKOUT_VOLUME)
+            .select(columns = Columns.raw("total_volume_kg")) {
+                filter { eq("workout_id", wid) }
+            }
+        compJson.decodeFromString<List<VolWire>>(volRes.data).firstOrNull()?.totalVolumeKg ?: 0.0
+    }.getOrDefault(0.0)
     var totalReps = 0
-    var totalVolumeKg = 0.0
     var maxWeightKg: Double? = null
     var maxSetVolumeKg: Double? = null
     var rpeWeightedSum = 0.0
@@ -311,7 +322,6 @@ private suspend fun buildStrengthStats(supabase: SupabaseClient, wid: Int): Stre
             val w = s.weightKg ?: 0.0
             totalReps += reps * mult
             val setVol = reps.toDouble() * w
-            totalVolumeKg += setVol * mult
             if (w > 0) {
                 maxWeightKg = (maxWeightKg?.let { maxOf(it, w) } ?: w)
             }

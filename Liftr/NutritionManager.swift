@@ -298,6 +298,13 @@ private struct NutritionMonthBalanceParams: Encodable {
 struct NutritionMonthDayBalance: Equatable {
     let mealLogCount: Int
     let remainingCalories: Double
+    let plannedMealCount: Int
+
+    init(mealLogCount: Int, remainingCalories: Double, plannedMealCount: Int = 0) {
+        self.mealLogCount = mealLogCount
+        self.remainingCalories = remainingCalories
+        self.plannedMealCount = plannedMealCount
+    }
 }
 
 private struct SmartNutritionRecommendationParams: Encodable {
@@ -978,10 +985,34 @@ enum NutritionManager {
             let key = cal.startOfDay(for: d)
             map[key] = NutritionMonthDayBalance(
                 mealLogCount: row.meal_log_count,
-                remainingCalories: row.remaining_calories
+                remainingCalories: row.remaining_calories,
+                plannedMealCount: 0
             )
         }
         return map
+    }
+
+    static func mergeMonthBalanceWithPlanned(
+        _ balance: [Date: NutritionMonthDayBalance],
+        plannedCounts: [Date: Int]
+    ) -> [Date: NutritionMonthDayBalance] {
+        var result = balance
+        for (day, count) in plannedCounts where count > 0 {
+            if let existing = result[day] {
+                result[day] = NutritionMonthDayBalance(
+                    mealLogCount: existing.mealLogCount,
+                    remainingCalories: existing.remainingCalories,
+                    plannedMealCount: count
+                )
+            } else {
+                result[day] = NutritionMonthDayBalance(
+                    mealLogCount: 0,
+                    remainingCalories: 0,
+                    plannedMealCount: count
+                )
+            }
+        }
+        return result
     }
 
     static func createIngredient(

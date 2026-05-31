@@ -179,6 +179,7 @@ struct ProfileView: View {
     @State private var scorePerMinute: Double = 0
     @State private var myLevel: Int = 1
     @State private var myXP: Int64 = 0
+    @State private var currentLevelXP: Int64 = 0
     @State private var nextLevelXP: Int64 = 120
     private enum ProgressSubtab: CaseIterable { case activity, intensity, consistency, weekdaySummary }
     @State private var progressSubtab: ProgressSubtab = .activity
@@ -4222,9 +4223,11 @@ extension ProfileView {
             }
 
             GeometryReader { geo in
-                let total = max(1, Double(self.nextLevelXP))
-                let ratio = Double(self.myXP) / total
-                let prog = min(1.0, max(0.0, ratio))
+                let prog = levelProgressRatio(
+                    totalXp: self.myXP,
+                    currentLevelThresholdXp: self.currentLevelXP,
+                    nextLevelThresholdXp: self.nextLevelXP
+                )
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.12))
                     Capsule().fill(Color.green.opacity(0.35))
@@ -4264,6 +4267,7 @@ extension ProfileView {
             struct Thr: Decodable { let level: Int; let xp_required: Int64 }
             let thrs = try JSONDecoder.supabase().decode([Thr].self, from: thr.data)
             
+            let current = thrs.first(where: { $0.level == level })?.xp_required ?? 0
             let next = thrs.first(where: { $0.level == level + 1 })?.xp_required
             ?? thrs.first(where: { $0.level == level })?.xp_required
             ?? 120
@@ -4271,6 +4275,7 @@ extension ProfileView {
             await MainActor.run {
                 self.myLevel = level
                 self.myXP = xp
+                self.currentLevelXP = current
                 self.nextLevelXP = next
             }
         } catch {

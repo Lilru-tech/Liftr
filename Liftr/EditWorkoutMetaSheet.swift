@@ -3054,6 +3054,7 @@ private struct ParticipantsPickerSheet: View {
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                             Text(p.username ?? "user")
                                 .font(.body)
+                                .foregroundStyle(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                             Spacer()

@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.SupabaseResponseDecoding
+import com.lilru.liftr.domain.NutritionMealPlanInviteUi
+import com.lilru.liftr.domain.NutritionMealPlanItemUi
 import com.lilru.liftr.nutrition.NutritionLabelParseResult
 import com.lilru.liftr.nutrition.NutritionLabelParser
 import com.lilru.liftr.nutrition.NutritionLabelScannedFormValues
@@ -85,6 +87,7 @@ sealed class NutritionOverlay {
     data object CreateIngredient : NutritionOverlay()
     data object CreateRecipe : NutritionOverlay()
     data class EditLog(val item: NutritionDiaryItemUi) : NutritionOverlay()
+    data class EditPlannedMeal(val item: NutritionMealPlanItemUi) : NutritionOverlay()
 }
 
 enum class NutritionListScope {
@@ -121,17 +124,13 @@ data class NutritionUiState(
     val ingredientLoadingMore: Boolean = false,
     val ingredientCatalogPage: Int = 0,
     val recipeResults: List<NutritionRecipeWire> = emptyList(),
-    val selectedIngredientId: String? = null,
-    val selectedRecipeId: String? = null,
-    val selectedRecipeLines: List<NutritionRecipeLineDraft> = emptyList(),
-    val loadingRecipeComposition: Boolean = false,
-    val addGrams: Double = 100.0,
+    val logCart: List<NutritionLogCartItem> = emptyList(),
+    val logCartFocusedLocalId: String? = null,
     val addMealSlot: String = BackendContracts.NutritionMealSlots.LUNCH,
     val saving: Boolean = false,
     val createName: String = "",
     val recipeName: String = "",
     val recipeDescription: String = "",
-    val addFoodHasSelection: Boolean = false,
     val logFoodNestedOverlay: NutritionLogNestedOverlay = NutritionLogNestedOverlay.None,
     val createCalories: String = "100",
     val createProtein: String = "0",
@@ -157,7 +156,14 @@ data class NutritionUiState(
     val insightsQuickPreset: NutritionInsightsQuickPreset? = NutritionInsightsQuickPreset.ONE_WEEK,
     val smartInsightsLoading: Boolean = false,
     val smartInsights: SmartNutritionRecommendationUi? = null,
-    val smartInsightsError: String? = null
+    val smartInsightsError: String? = null,
+    val addFoodIsPlan: Boolean = false,
+    val planDate: LocalDate = LocalDate.now().plusDays(1),
+    val followingForPlan: List<FollowingProfileWire> = emptyList(),
+    val selectedPlanPartners: List<FollowingProfileWire> = emptyList(),
+    val showPlanParticipantsPicker: Boolean = false,
+    val pendingInvites: List<NutritionMealPlanInviteUi> = emptyList(),
+    val plannedItems: List<NutritionMealPlanItemUi> = emptyList()
 )
 
 @Serializable
@@ -198,6 +204,50 @@ data class NutritionRecipeWire(
 @Serializable
 private data class FavoriteIngredientWire(
     @SerialName("ingredient_id") val ingredientId: String
+)
+
+@Serializable
+data class FollowingProfileWire(
+    @SerialName("user_id") val userId: String,
+    val username: String? = null
+)
+
+@Serializable
+private data class MealPlanWire(
+    val id: String,
+    @SerialName("creator_id") val creatorId: String,
+    @SerialName("plan_date") val planDate: String,
+    @SerialName("meal_slot") val mealSlot: String,
+    @SerialName("recipe_id") val recipeId: String? = null,
+    @SerialName("ingredient_id") val ingredientId: String? = null
+)
+
+@Serializable
+private data class MealPlanTargetWire(
+    val id: String,
+    @SerialName("plan_id") val planId: String,
+    @SerialName("target_user_id") val targetUserId: String,
+    @SerialName("quantity_g") val quantityG: Double,
+    val status: String,
+    @SerialName("ingredient_id") val ingredientId: String? = null,
+    @SerialName("recipe_id") val recipeId: String? = null
+)
+
+private const val MEAL_PLAN_TARGET_SELECT =
+    "id,plan_id,target_user_id,quantity_g,status,ingredient_id,recipe_id"
+
+@Serializable
+private data class FollowRowWire(
+    @SerialName("followee_id") val followeeId: String
+)
+
+@Serializable
+private data class IdNameRow(val id: String, val name: String)
+
+@Serializable
+private data class IngredientCaloriesRow(
+    val id: String,
+    @SerialName("calories_per_100g") val caloriesPer100g: Double
 )
 
 @Serializable
@@ -285,23 +335,131 @@ class NutritionViewModel(
         refresh()
     }
 
-    fun openAddFood(mealSlot: String = BackendContracts.NutritionMealSlots.LUNCH) {
+    fun openAddFood(mealSlot: String = BackendContracts.NutritionMealSlots.LUNCH, plan: Boolean = false) {
         _uiState.update {
             it.copy(
                 overlay = NutritionOverlay.AddFood,
                 error = null,
                 addSearchQuery = "",
-                selectedIngredientId = null,
-                selectedRecipeId = null,
-                selectedRecipeLines = emptyList(),
-                loadingRecipeComposition = false,
-                addGrams = 100.0,
+                logCart = emptyList(),
+                logCartFocusedLocalId = null,
                 addMealSlot = mealSlot,
-                addFoodHasSelection = false,
+                addFoodIsPlan = plan,
+                planDate = LocalDate.now().plusDays(1),
+                selectedPlanPartners = emptyList(),
+                showPlanParticipantsPicker = false,
                 logFoodNestedOverlay = NutritionLogNestedOverlay.None
             )
         }
         onAddFoodOpened()
+    }
+
+    fun setPlanDate(date: LocalDate) {
+        _uiState.update { it.copy(planDate = date) }
+    }
+
+    fun setShowPlanParticipantsPicker(show: Boolean) {
+        _uiState.update { it.copy(showPlanParticipantsPicker = show) }
+    }
+
+    fun addPlanPartners(profiles: List<FollowingProfileWire>) {
+        _uiState.update { state ->
+            val merged = state.selectedPlanPartners.toMutableList()
+            for (profile in profiles) {
+                if (merged.none { it.userId == profile.userId }) merged.add(profile)
+            }
+            state.copy(selectedPlanPartners = merged, showPlanParticipantsPicker = false)
+        }
+    }
+
+    fun removePlanPartner(userId: String) {
+        _uiState.update { state ->
+            state.copy(selectedPlanPartners = state.selectedPlanPartners.filter { it.userId != userId })
+        }
+    }
+
+    fun acceptMealPlanInvite(targetId: String) {
+        viewModelScope.launch {
+            runCatching {
+                supabase.postgrest.rpc(
+                    BackendContracts.Rpc.ACCEPT_MEAL_PLAN,
+                    buildJsonObject { put("p_target_id", targetId) }
+                )
+                refresh()
+            }.onFailure { e -> setErr(mealPlanErrorMessage(e)) }
+        }
+    }
+
+    fun rejectMealPlanInvite(targetId: String) {
+        viewModelScope.launch {
+            runCatching {
+                supabase.postgrest.rpc(
+                    BackendContracts.Rpc.REJECT_MEAL_PLAN,
+                    buildJsonObject { put("p_target_id", targetId) }
+                )
+                refresh()
+            }.onFailure { e -> setErr(mealPlanErrorMessage(e)) }
+        }
+    }
+
+    fun completePlannedMeal(targetId: String) {
+        viewModelScope.launch {
+            runCatching {
+                supabase.postgrest.rpc(
+                    BackendContracts.Rpc.COMPLETE_MEAL_PLAN_AS_EATEN,
+                    buildJsonObject { put("p_target_id", targetId) }
+                )
+                refresh()
+            }.onFailure { e -> setErr(mealPlanErrorMessage(e)) }
+        }
+    }
+
+    fun savePlannedMeal(targetId: String) {
+        viewModelScope.launch {
+            val s = _uiState.value
+            _uiState.update { it.copy(saving = true, error = null) }
+            runCatching {
+                supabase.postgrest.rpc(
+                    BackendContracts.Rpc.UPDATE_MEAL_PLAN_TARGET,
+                    buildJsonObject {
+                        put("p_target_id", targetId)
+                        put("p_quantity_g", NutritionLogCartLogic.clampGrams(s.editGrams))
+                        put("p_meal_slot", s.editMealSlot)
+                    }
+                )
+                dismissOverlay()
+            }.onFailure { e ->
+                _uiState.update { it.copy(saving = false, error = mealPlanErrorMessage(e)) }
+            }
+        }
+    }
+
+    fun toggleCartAssignee(localId: String, userId: String) {
+        val selfId = supabase.auth.currentUserOrNull()?.id ?: return
+        _uiState.update {
+            it.copy(
+                logCart = NutritionLogCartLogic.toggleAssignee(it.logCart, localId, userId, selfId)
+            )
+        }
+    }
+
+    private fun planDefaultAssigneeIds(userId: String, state: NutritionUiState): Set<String> {
+        val ids = state.selectedPlanPartners.map { it.userId }.toMutableSet()
+        ids.add(userId)
+        return ids
+    }
+
+    private fun mealPlanErrorMessage(e: Throwable): String {
+        val text = e.message.orEmpty()
+        return when {
+            text.contains("INVITEE_MAY_ONLY_UPDATE", ignoreCase = true) ->
+                "Could not save your planned meal. Please try again."
+            text.contains("FORBIDDEN", ignoreCase = true) || text.contains("42501") ->
+                "You can only update your own planned meal."
+            text.contains("INVALID_STATUS", ignoreCase = true) ->
+                "This meal plan can no longer be changed."
+            else -> text.take(300).ifBlank { "Something went wrong." }
+        }
     }
 
     fun setOverlay(overlay: NutritionOverlay) {
@@ -323,12 +481,8 @@ class NutritionViewModel(
                     overlay = overlay,
                     error = null,
                     addSearchQuery = "",
-                    selectedIngredientId = null,
-                    selectedRecipeId = null,
-                    selectedRecipeLines = emptyList(),
-                    loadingRecipeComposition = false,
-                    addGrams = 100.0,
-                    addFoodHasSelection = false,
+                    logCart = emptyList(),
+                    logCartFocusedLocalId = null,
                     logFoodNestedOverlay = NutritionLogNestedOverlay.None
                 )
             }
@@ -353,6 +507,12 @@ class NutritionViewModel(
                 it.copy(editGrams = item.quantityG, editMealSlot = item.mealSlot)
             }
         }
+        if (overlay is NutritionOverlay.EditPlannedMeal) {
+            val item = overlay.item
+            _uiState.update {
+                it.copy(editGrams = item.quantityG, editMealSlot = item.mealSlot)
+            }
+        }
     }
 
     fun dismissOverlay() {
@@ -360,7 +520,8 @@ class NutritionViewModel(
             it.copy(
                 overlay = NutritionOverlay.None,
                 logFoodNestedOverlay = NutritionLogNestedOverlay.None,
-                addFoodHasSelection = false
+                logCart = emptyList(),
+                logCartFocusedLocalId = null
             )
         }
         refresh()
@@ -462,6 +623,9 @@ class NutritionViewModel(
     fun onAddFoodOpened() {
         viewModelScope.launch {
             runCatching { loadNutritionFavoriteIds() }
+            if (_uiState.value.addFoodIsPlan) {
+                runCatching { loadFollowingForPlan() }
+            }
             searchAddCatalog()
         }
     }
@@ -582,15 +746,7 @@ class NutritionViewModel(
     }
 
     fun setAddModeIngredient(ingredient: Boolean) {
-        _uiState.update {
-            it.copy(
-                addModeIngredient = ingredient,
-                selectedIngredientId = null,
-                selectedRecipeId = null,
-                selectedRecipeLines = emptyList(),
-                loadingRecipeComposition = false
-            )
-        }
+        _uiState.update { it.copy(addModeIngredient = ingredient) }
         searchAddCatalog()
     }
 
@@ -599,62 +755,114 @@ class NutritionViewModel(
         searchAddCatalog()
     }
 
-    fun selectIngredient(id: String) {
-        _uiState.update {
-            it.copy(
-                selectedIngredientId = id,
-                selectedRecipeId = null,
-                selectedRecipeLines = emptyList(),
-                loadingRecipeComposition = false,
-                addFoodHasSelection = true
-            )
+    fun toggleCartIngredient(id: String) {
+        val state = _uiState.value
+        val ing = state.ingredientResults.find { it.id == id } ?: return
+        if (NutritionLogCartLogic.cartContainsIngredient(state.logCart, id)) {
+            _uiState.update {
+                it.copy(
+                    logCart = NutritionLogCartLogic.removeIngredient(it.logCart, id),
+                    logCartFocusedLocalId = null
+                )
+            }
+            return
         }
+        if (state.logCart.size >= NutritionLogCartLogic.MAX_ITEMS) {
+            setErr("You can add up to ${NutritionLogCartLogic.MAX_ITEMS} items at once.")
+            return
+        }
+        val userId = supabase.auth.currentUserOrNull()?.id
+        val assignees = userId?.let { planDefaultAssigneeIds(it, state) } ?: emptySet()
+        val item = NutritionLogCartItem(
+            ingredientId = id,
+            displayName = ing.name,
+            grams = 100.0,
+            caloriesPer100g = ing.caloriesPer100g,
+            assignedUserIds = assignees
+        )
+        _uiState.update { it.copy(logCart = it.logCart + item, logCartFocusedLocalId = item.localId) }
     }
 
-    fun selectRecipe(id: String) {
-        _uiState.update {
-            it.copy(
-                selectedRecipeId = id,
-                selectedIngredientId = null,
-                selectedRecipeLines = emptyList(),
-                loadingRecipeComposition = true,
-                addFoodHasSelection = true
-            )
+    fun toggleCartRecipe(id: String) {
+        val state = _uiState.value
+        if (NutritionLogCartLogic.cartContainsRecipe(state.logCart, id)) {
+            _uiState.update {
+                it.copy(
+                    logCart = NutritionLogCartLogic.removeRecipe(it.logCart, id),
+                    logCartFocusedLocalId = null
+                )
+            }
+            return
         }
+        if (state.logCart.size >= NutritionLogCartLogic.MAX_ITEMS) {
+            setErr("You can add up to ${NutritionLogCartLogic.MAX_ITEMS} items at once.")
+            return
+        }
+        val recipe = state.recipeResults.find { it.id == id } ?: return
+        val localId = java.util.UUID.randomUUID().toString()
+        val userId = supabase.auth.currentUserOrNull()?.id
+        val assignees = userId?.let { planDefaultAssigneeIds(it, state) } ?: emptySet()
+        val placeholder = NutritionLogCartItem(
+            localId = localId,
+            recipeId = id,
+            displayName = recipe.name,
+            grams = 100.0,
+            loadingComposition = true,
+            assignedUserIds = assignees
+        )
+        _uiState.update { it.copy(logCart = it.logCart + placeholder, logCartFocusedLocalId = localId) }
         viewModelScope.launch {
             runCatching {
                 val lines = fetchRecipeLines(id)
-                _uiState.update { state ->
-                    if (state.selectedRecipeId != id) state
-                    else {
-                        val total = lines.sumOf { it.weightG }
-                        state.copy(
-                            selectedRecipeLines = lines,
-                            loadingRecipeComposition = false,
-                            addGrams = if (total > 0) total else state.addGrams
-                        )
-                    }
+                val total = lines.sumOf { it.weightG }
+                _uiState.update { s ->
+                    if (!s.logCart.any { it.localId == localId }) return@update s
+                    s.copy(
+                        logCart = s.logCart.map { item ->
+                            if (item.localId == localId) {
+                                item.copy(
+                                    loadingComposition = false,
+                                    recipeLines = lines,
+                                    grams = if (total > 0) total else 100.0
+                                )
+                            } else item
+                        }
+                    )
                 }
-            }.onFailure {
-                _uiState.update { state ->
-                    if (state.selectedRecipeId == id) {
-                        state.copy(selectedRecipeLines = emptyList(), loadingRecipeComposition = false)
-                    } else state
+            }.onFailure { e ->
+                _uiState.update { s ->
+                    s.copy(
+                        logCart = s.logCart.filter { it.localId != localId },
+                        error = e.message?.take(300) ?: e::class.java.simpleName
+                    )
                 }
             }
         }
     }
 
-    fun adjustGrams(delta: Double) {
-        _uiState.update { it.copy(addGrams = (it.addGrams + delta).coerceIn(5.0, 2000.0)) }
+    fun updateCartItemGrams(localId: String, grams: Double) {
+        _uiState.update {
+            it.copy(logCart = NutritionLogCartLogic.updateGrams(it.logCart, localId, grams))
+        }
     }
 
-    fun setAddGramsPreset(value: Double) {
-        _uiState.update { it.copy(addGrams = value) }
+    fun updateCartPerUserGrams(localId: String, userId: String, grams: Double) {
+        _uiState.update {
+            it.copy(logCart = NutritionLogCartLogic.updatePerUserGrams(it.logCart, localId, userId, grams))
+        }
+    }
+
+    fun removeCartItem(localId: String) {
+        _uiState.update {
+            it.copy(
+                logCart = NutritionLogCartLogic.removeByLocalId(it.logCart, localId),
+                logCartFocusedLocalId = if (it.logCartFocusedLocalId == localId) null else it.logCartFocusedLocalId
+            )
+        }
     }
 
     fun setRecipePickGrams(value: Double) {
-        _uiState.update { it.copy(recipePickGrams = value.coerceIn(5.0, 2000.0)) }
+        _uiState.update { it.copy(recipePickGrams = value.coerceAtMost(2000.0)) }
     }
 
     fun setAddMealSlot(slot: String) {
@@ -669,15 +877,16 @@ class NutritionViewModel(
         _uiState.update { it.copy(recipeDescription = description) }
     }
 
-    fun clearAddFoodSelection() {
-        _uiState.update {
-            it.copy(
-                selectedIngredientId = null,
-                selectedRecipeId = null,
-                selectedRecipeLines = emptyList(),
-                loadingRecipeComposition = false,
-                addFoodHasSelection = false
-            )
+    fun clearLogCart() {
+        _uiState.update { it.copy(logCart = emptyList(), logCartFocusedLocalId = null) }
+    }
+
+    private fun removeCatalogItemFromCart(ingredientId: String? = null, recipeId: String? = null) {
+        _uiState.update { state ->
+            var cart = state.logCart
+            ingredientId?.let { cart = NutritionLogCartLogic.removeIngredient(cart, it) }
+            recipeId?.let { cart = NutritionLogCartLogic.removeRecipe(cart, it) }
+            state.copy(logCart = cart, logCartFocusedLocalId = null)
         }
     }
 
@@ -896,25 +1105,18 @@ class NutritionViewModel(
             if (index !in s.recipeLines.indices) return@update s
             s.copy(
                 recipeLines = s.recipeLines.mapIndexed { i, line ->
-                    if (i == index) line.copy(weightG = grams.coerceIn(5.0, 2000.0)) else line
+                    if (i == index) line.copy(weightG = grams.coerceAtMost(2000.0)) else line
                 }
             )
         }
     }
 
     fun clearLogSelection() {
-        _uiState.update {
-            it.copy(
-                selectedIngredientId = null,
-                selectedRecipeId = null,
-                selectedRecipeLines = emptyList(),
-                loadingRecipeComposition = false
-            )
-        }
+        clearLogCart()
     }
 
     fun setEditGrams(g: Double) {
-        _uiState.update { it.copy(editGrams = g.coerceIn(5.0, 2000.0)) }
+        _uiState.update { it.copy(editGrams = g.coerceAtMost(2000.0)) }
     }
 
     fun setEditMealSlot(slot: String) {
@@ -937,10 +1139,23 @@ class NutritionViewModel(
                 val monthStart = state.month.atDay(1)
                 val rec = fetchRecommendation(dateStr)
                 val diary = fetchDiaryItems(userId, dateStr)
-                val monthBalance = fetchMonthBalance(monthStart)
+                val monthBalance = mergeMonthBalanceWithPlanned(
+                    fetchMonthBalance(monthStart),
+                    fetchMonthPlannedMealCounts(userId, state.month)
+                )
                 val grouped = mealSlotOrder.associateWith { slot -> diary.filter { it.mealSlot == slot } }
+                val planned = fetchPlannedItems(userId, dateStr)
+                val invites = fetchPendingInvites(userId)
                 _uiState.update {
-                    it.copy(loading = false, recommendation = rec, diaryByMeal = grouped, monthDayBalance = monthBalance, error = null)
+                    it.copy(
+                        loading = false,
+                        recommendation = rec,
+                        diaryByMeal = grouped,
+                        monthDayBalance = monthBalance,
+                        plannedItems = planned,
+                        pendingInvites = invites,
+                        error = null
+                    )
                 }
             }.onFailure { e ->
                 _uiState.update { it.copy(loading = false, error = e.message?.take(300) ?: e::class.java.simpleName) }
@@ -1025,24 +1240,41 @@ class NutritionViewModel(
         }
     }
 
-    fun saveDiaryEntry() {
+    suspend fun fetchRecipeLinesForShare(recipeId: String): List<NutritionRecipeLineDraft> =
+        fetchRecipeLines(recipeId)
+
+    fun saveDiaryCart() {
         viewModelScope.launch {
             val userId = supabase.auth.currentUserOrNull()?.id ?: return@launch
             val state = _uiState.value
+            if (state.logCart.isEmpty()) return@launch setErr("Add at least one item.")
+            if (state.logCart.any { it.loadingComposition }) return@launch
             _uiState.update { it.copy(saving = true, error = null) }
             runCatching {
-                val payload = buildJsonObject {
-                    put(BackendContracts.NutritionColumns.USER_ID, userId)
-                    put(BackendContracts.NutritionColumns.LOG_DATE, state.selectedDate.format(dateFormatter))
-                    put(BackendContracts.NutritionColumns.MEAL_SLOT, state.addMealSlot)
-                    put(BackendContracts.NutritionColumns.QUANTITY_G, state.addGrams)
-                    if (state.addModeIngredient) {
-                        put(BackendContracts.NutritionColumns.INGREDIENT_ID, state.selectedIngredientId ?: error("Select ingredient"))
-                    } else {
-                        put(BackendContracts.NutritionColumns.RECIPE_ID, state.selectedRecipeId ?: error("Select recipe"))
-                    }
+                if (state.addFoodIsPlan) {
+                    saveMealPlansFromCart(userId, state)
+                    _uiState.update { it.copy(saving = false) }
+                    dismissOverlay()
+                    return@runCatching
                 }
-                supabase.from(BackendContracts.Tables.NUTRITION_DIARY_LOGS).insert(payload)
+                val dateStr = state.selectedDate.format(dateFormatter)
+                for (item in state.logCart) {
+                    val grams = NutritionLogCartLogic.clampGrams(item.grams)
+                    val payload = buildJsonObject {
+                        put(BackendContracts.NutritionColumns.USER_ID, userId)
+                        put(BackendContracts.NutritionColumns.LOG_DATE, dateStr)
+                        put(BackendContracts.NutritionColumns.MEAL_SLOT, state.addMealSlot)
+                        put(BackendContracts.NutritionColumns.QUANTITY_G, grams)
+                        when {
+                            item.ingredientId != null ->
+                                put(BackendContracts.NutritionColumns.INGREDIENT_ID, item.ingredientId)
+                            item.recipeId != null ->
+                                put(BackendContracts.NutritionColumns.RECIPE_ID, item.recipeId)
+                            else -> error("Invalid cart item")
+                        }
+                    }
+                    supabase.from(BackendContracts.Tables.NUTRITION_DIARY_LOGS).insert(payload)
+                }
                 dismissOverlay()
             }.onFailure { e ->
                 _uiState.update { it.copy(saving = false, error = e.message?.take(300)) }
@@ -1078,25 +1310,31 @@ class NutritionViewModel(
                         dismissLogFoodNestedOverlay()
                         _uiState.update { state ->
                             val base = state.copy(saving = false, editingIngredientId = null)
-                            if (state.selectedIngredientId == editingId) {
-                                base.copy(
-                                    ingredientResults = state.ingredientResults.map { row ->
-                                        if (row.id == editingId) {
-                                            row.copy(
-                                                name = s.createName.trim(),
-                                                caloriesPer100g = cals,
-                                                proteinPer100g = s.createProtein.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                                                carbsPer100g = s.createCarbs.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                                                fatPer100g = s.createFat.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                                                saturatedFatPer100g = s.createSaturatedFat.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                                                sugarsPer100g = s.createSugars.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                                                fiberPer100g = s.createFiber.replace(',', '.').toDoubleOrNull() ?: 0.0,
-                                                sodiumMgPer100g = s.createSodiumMg.replace(',', '.').toDoubleOrNull() ?: 0.0
-                                            )
-                                        } else row
-                                    }
-                                )
-                            } else base
+                            base.copy(
+                                ingredientResults = state.ingredientResults.map { row ->
+                                    if (row.id == editingId) {
+                                        row.copy(
+                                            name = s.createName.trim(),
+                                            caloriesPer100g = cals,
+                                            proteinPer100g = s.createProtein.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                            carbsPer100g = s.createCarbs.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                            fatPer100g = s.createFat.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                            saturatedFatPer100g = s.createSaturatedFat.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                            sugarsPer100g = s.createSugars.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                            fiberPer100g = s.createFiber.replace(',', '.').toDoubleOrNull() ?: 0.0,
+                                            sodiumMgPer100g = s.createSodiumMg.replace(',', '.').toDoubleOrNull() ?: 0.0
+                                        )
+                                    } else row
+                                },
+                                logCart = state.logCart.map { item ->
+                                    if (item.ingredientId == editingId) {
+                                        item.copy(
+                                            displayName = s.createName.trim(),
+                                            caloriesPer100g = cals
+                                        )
+                                    } else item
+                                }
+                            )
                         }
                         searchAddCatalog()
                     } else {
@@ -1153,7 +1391,7 @@ class NutritionViewModel(
             }
             val fromLogFood = _uiState.value.overlay == NutritionOverlay.AddFood
             if (fromLogFood) {
-                clearAddFoodSelection()
+                removeCatalogItemFromCart(ingredientId = ingredientId)
                 dismissLogFoodNestedOverlay()
                 _uiState.update { it.copy(saving = false) }
                 searchAddCatalog()
@@ -1171,7 +1409,7 @@ class NutritionViewModel(
             }
             val fromLogFood = _uiState.value.overlay == NutritionOverlay.AddFood
             if (fromLogFood) {
-                clearAddFoodSelection()
+                removeCatalogItemFromCart(recipeId = recipeId)
                 dismissLogFoodNestedOverlay()
                 _uiState.update { it.copy(saving = false) }
                 searchAddCatalog()
@@ -1207,7 +1445,7 @@ class NutritionViewModel(
                             buildJsonObject {
                                 put("recipe_id", editingId)
                                 put(BackendContracts.NutritionColumns.INGREDIENT_ID, line.ingredient.id)
-                                put(BackendContracts.NutritionColumns.WEIGHT_G, line.weightG)
+                                put(BackendContracts.NutritionColumns.WEIGHT_G, line.weightG.coerceIn(5.0, 2000.0))
                             }
                         )
                     }
@@ -1216,20 +1454,25 @@ class NutritionViewModel(
                         dismissLogFoodNestedOverlay()
                         _uiState.update { state ->
                             val updated = state.copy(saving = false, editingRecipeId = null)
-                            if (state.selectedRecipeId == editingId) {
-                                val recipe = state.recipeResults.find { it.id == editingId }
-                                updated.copy(
-                                    recipeResults = state.recipeResults.map {
-                                        if (it.id == editingId) {
-                                            it.copy(
-                                                name = s.recipeName.trim(),
-                                                description = desc
-                                            )
-                                        } else it
-                                    },
-                                    selectedRecipeLines = s.recipeLines
-                                )
-                            } else updated
+                            updated.copy(
+                                recipeResults = state.recipeResults.map {
+                                    if (it.id == editingId) {
+                                        it.copy(
+                                            name = s.recipeName.trim(),
+                                            description = desc
+                                        )
+                                    } else it
+                                },
+                                logCart = state.logCart.map { item ->
+                                    if (item.recipeId == editingId) {
+                                        item.copy(
+                                            displayName = s.recipeName.trim(),
+                                            recipeLines = s.recipeLines,
+                                            loadingComposition = false
+                                        )
+                                    } else item
+                                }
+                            )
                         }
                         searchAddCatalog()
                     } else {
@@ -1251,7 +1494,7 @@ class NutritionViewModel(
                             buildJsonObject {
                                 put("recipe_id", recipe.id)
                                 put(BackendContracts.NutritionColumns.INGREDIENT_ID, line.ingredient.id)
-                                put(BackendContracts.NutritionColumns.WEIGHT_G, line.weightG)
+                                put(BackendContracts.NutritionColumns.WEIGHT_G, line.weightG.coerceIn(5.0, 2000.0))
                             }
                         )
                     }
@@ -1281,7 +1524,7 @@ class NutritionViewModel(
                 supabase.from(BackendContracts.Tables.NUTRITION_DIARY_LOGS).update(
                     buildJsonObject {
                         put(BackendContracts.NutritionColumns.MEAL_SLOT, s.editMealSlot)
-                        put(BackendContracts.NutritionColumns.QUANTITY_G, s.editGrams)
+                        put(BackendContracts.NutritionColumns.QUANTITY_G, s.editGrams.coerceIn(5.0, 2000.0))
                     }
                 ) {
                     filter { eq(BackendContracts.NutritionColumns.ID, itemId) }
@@ -1457,9 +1700,49 @@ class NutritionViewModel(
         return rows.associate { row ->
             LocalDate.parse(row.logDate) to NutritionMonthDayBalance(
                 mealLogCount = row.mealLogCount,
-                remainingCalories = row.remainingCalories
+                remainingCalories = row.remainingCalories,
+                plannedMealCount = 0
             )
         }
+    }
+
+    private suspend fun fetchMonthPlannedMealCounts(userId: String, month: YearMonth): Map<LocalDate, Int> {
+        val res = supabase.from(BackendContracts.Tables.NUTRITION_MEAL_PLAN_TARGETS)
+            .select(Columns.raw(MEAL_PLAN_TARGET_SELECT)) {
+                filter {
+                    eq("target_user_id", userId)
+                    eq("status", "accepted")
+                }
+            }
+        val targets = SupabaseResponseDecoding.decodeListOrObject<MealPlanTargetWire>(res.data)
+        if (targets.isEmpty()) return emptyMap()
+        val plans = fetchMealPlansByIds(targets.map { it.planId }.distinct())
+        val plansById = plans.associateBy { it.id }
+        val counts = mutableMapOf<LocalDate, Int>()
+        for (target in targets) {
+            val plan = plansById[target.planId] ?: continue
+            val planDate = runCatching { LocalDate.parse(plan.planDate) }.getOrNull() ?: continue
+            if (planDate.year != month.year || planDate.month != month.month) continue
+            counts[planDate] = (counts[planDate] ?: 0) + 1
+        }
+        return counts
+    }
+
+    private fun mergeMonthBalanceWithPlanned(
+        balance: Map<LocalDate, NutritionMonthDayBalance>,
+        plannedCounts: Map<LocalDate, Int>
+    ): Map<LocalDate, NutritionMonthDayBalance> {
+        val result = balance.toMutableMap()
+        for ((day, count) in plannedCounts) {
+            if (count <= 0) continue
+            val existing = result[day]
+            result[day] = if (existing != null) {
+                existing.copy(plannedMealCount = count)
+            } else {
+                NutritionMonthDayBalance(mealLogCount = 0, remainingCalories = 0.0, plannedMealCount = count)
+            }
+        }
+        return result
     }
 
     private data class IngredientPage(val rows: List<NutritionIngredientWire>, val hasMore: Boolean)
@@ -1646,6 +1929,302 @@ class NutritionViewModel(
             }
             NutritionDiaryItemUi(log.id, log.mealSlot, "Unknown", log.quantityG, 0.0, false)
         }
+    }
+
+    private suspend fun loadFollowingForPlan() {
+        val userId = supabase.auth.currentUserOrNull()?.id ?: return
+        val followRes = supabase.from("follows").select(Columns.raw("followee_id")) {
+            filter { eq("follower_id", userId) }
+        }
+        val follows = SupabaseResponseDecoding.decodeListOrObject<FollowRowWire>(followRes.data)
+        val ids = follows.map { it.followeeId }
+        if (ids.isEmpty()) {
+            _uiState.update { it.copy(followingForPlan = emptyList()) }
+            return
+        }
+        val profRes = supabase.from(BackendContracts.Tables.PROFILES).select(Columns.raw("user_id,username")) {
+            filter { isIn("user_id", ids) }
+        }
+        val profiles = SupabaseResponseDecoding.decodeListOrObject<FollowingProfileWire>(profRes.data)
+            .filter { it.userId != userId }
+            .sortedBy { it.username?.lowercase() ?: it.userId }
+        _uiState.update { it.copy(followingForPlan = profiles) }
+    }
+
+    private suspend fun saveMealPlansFromCart(userId: String, state: NutritionUiState) {
+        val dateStr = state.planDate.format(dateFormatter)
+        val defaultAssignees = planDefaultAssigneeIds(userId, state)
+        for (item in state.logCart) {
+            val assignees = if (item.assignedUserIds.isEmpty()) defaultAssignees else item.assignedUserIds
+            if (assignees.isEmpty()) continue
+            val planPayload = buildJsonObject {
+                put("creator_id", userId)
+                put("plan_date", dateStr)
+                put("meal_slot", state.addMealSlot)
+                item.ingredientId?.let { put("ingredient_id", it) }
+                item.recipeId?.let { put("recipe_id", it) }
+            }
+            val planRes = supabase.from(BackendContracts.Tables.NUTRITION_MEAL_PLANS).insert(planPayload) {
+                select(Columns.raw("id"))
+            }
+            val plans = SupabaseResponseDecoding.decodeListOrObject<MealPlanIdWire>(planRes.data)
+            val planId = plans.firstOrNull()?.id ?: error("Plan not created")
+            for (targetUserId in assignees) {
+                val grams = NutritionLogCartLogic.clampGrams(item.perUserGrams[targetUserId] ?: item.grams)
+                val targetPayload = buildJsonObject {
+                    put("plan_id", planId)
+                    put("target_user_id", targetUserId)
+                    put("quantity_g", grams)
+                    item.ingredientId?.let { put("ingredient_id", it) }
+                    item.recipeId?.let { put("recipe_id", it) }
+                }
+                supabase.from(BackendContracts.Tables.NUTRITION_MEAL_PLAN_TARGETS).insert(targetPayload)
+            }
+        }
+    }
+
+    @Serializable
+    private data class MealPlanIdWire(val id: String)
+
+    private suspend fun fetchPendingInvites(userId: String): List<NutritionMealPlanInviteUi> {
+        val res = supabase.from(BackendContracts.Tables.NUTRITION_MEAL_PLAN_TARGETS)
+            .select(Columns.raw(MEAL_PLAN_TARGET_SELECT)) {
+                filter {
+                    eq("target_user_id", userId)
+                    eq("status", "pending")
+                }
+            }
+        val targets = SupabaseResponseDecoding.decodeListOrObject<MealPlanTargetWire>(res.data)
+        return enrichInvites(targets, userId)
+    }
+
+    private suspend fun fetchPlannedItems(userId: String, dateStr: String): List<NutritionMealPlanItemUi> {
+        val res = supabase.from(BackendContracts.Tables.NUTRITION_MEAL_PLAN_TARGETS)
+            .select(Columns.raw(MEAL_PLAN_TARGET_SELECT)) {
+                filter {
+                    eq("target_user_id", userId)
+                    eq("status", "accepted")
+                }
+            }
+        val targets = SupabaseResponseDecoding.decodeListOrObject<MealPlanTargetWire>(res.data)
+        if (targets.isEmpty()) return emptyList()
+        val plans = fetchMealPlansByIds(targets.map { it.planId }.distinct())
+            .filter { it.planDate == dateStr }
+        return enrichPlannedItems(targets, userId, dateStr, plans)
+    }
+
+    private suspend fun enrichInvites(
+        targets: List<MealPlanTargetWire>,
+        inviteeId: String
+    ): List<NutritionMealPlanInviteUi> {
+        if (targets.isEmpty()) return emptyList()
+        val planIds = targets.map { it.planId }.distinct()
+        val plans = fetchMealPlansByIds(planIds)
+        val plansById = plans.associateBy { it.id }
+        val names = foodNamesForPlansAndTargets(plans, targets)
+        val kcal = foodKcalPerGramForPlansAndTargets(plans, targets)
+        val creators = plans.map { it.creatorId }.distinct()
+        val usernames = usernamesFor(creators)
+        return targets.mapNotNull { target ->
+            val plan = plansById[target.planId] ?: return@mapNotNull null
+            if (plan.creatorId == inviteeId) return@mapNotNull null
+            if (target.targetUserId != inviteeId) return@mapNotNull null
+            val foodId = target.ingredientId ?: target.recipeId ?: plan.ingredientId ?: plan.recipeId
+            val name = foodId?.let { names[it] } ?: "Meal"
+            val density = foodId?.let { kcal[it] } ?: 0.0
+            NutritionMealPlanInviteUi(
+                targetId = target.id,
+                planId = plan.id,
+                planDate = plan.planDate,
+                mealSlot = plan.mealSlot,
+                foodName = name,
+                quantityG = target.quantityG,
+                caloriesKcal = target.quantityG * density,
+                creatorUsername = usernames[plan.creatorId]
+            )
+        }
+    }
+
+    private suspend fun enrichPlannedItems(
+        targets: List<MealPlanTargetWire>,
+        userId: String,
+        dateStr: String,
+        plansForDate: List<MealPlanWire>
+    ): List<NutritionMealPlanItemUi> {
+        val plansById = plansForDate.associateBy { it.id }
+        val planIds = plansById.keys.toList()
+        val siblings = if (planIds.isEmpty()) emptyList() else fetchTargetsForPlans(planIds)
+        val siblingsByPlan = siblings.groupBy { it.planId }
+        val names = foodNamesForPlansAndTargets(plansForDate, targets)
+        val kcal = foodKcalPerGramForPlansAndTargets(plansForDate, targets)
+        val userIds = (targets.map { it.targetUserId } + plansForDate.map { it.creatorId } + siblings.map { it.targetUserId }).distinct()
+        val usernames = usernamesFor(userIds)
+        return targets.mapNotNull { target ->
+            if (target.targetUserId != userId) return@mapNotNull null
+            val plan = plansById[target.planId] ?: return@mapNotNull null
+            if (target.status != "accepted") return@mapNotNull null
+            val foodId = target.ingredientId ?: target.recipeId ?: plan.ingredientId ?: plan.recipeId
+            val name = foodId?.let { names[it] } ?: "Meal"
+            val density = foodId?.let { kcal[it] } ?: 0.0
+            val isCreator = plan.creatorId == userId
+            val partnerLabel = if (isCreator) null else usernames[plan.creatorId]?.let { "from @$it" }
+            val statusLabel = if (isCreator) {
+                partnerStatusLabel(userId, siblingsByPlan[target.planId].orEmpty(), usernames)
+            } else null
+            NutritionMealPlanItemUi(
+                targetId = target.id,
+                planId = plan.id,
+                targetUserId = target.targetUserId,
+                mealSlot = plan.mealSlot,
+                foodName = name,
+                quantityG = target.quantityG,
+                caloriesKcal = target.quantityG * density,
+                status = target.status,
+                isCreator = isCreator,
+                partnerLabel = partnerLabel,
+                partnerStatusLabel = statusLabel
+            )
+        }.sortedBy { it.mealSlot }
+    }
+
+    private fun partnerStatusLabel(
+        viewingUserId: String,
+        siblings: List<MealPlanTargetWire>,
+        usernames: Map<String, String>
+    ): String? {
+        val others = siblings.filter { it.targetUserId != viewingUserId }
+        if (others.isEmpty()) return null
+        return others.joinToString(" · ") { row ->
+            val name = usernames[row.targetUserId]?.let { "@$it" } ?: "Partner"
+            "$name · ${row.status.replaceFirstChar { it.uppercase() }}"
+        }
+    }
+
+    private suspend fun fetchTargetsForPlans(planIds: List<String>): List<MealPlanTargetWire> {
+        if (planIds.isEmpty()) return emptyList()
+        val res = supabase.from(BackendContracts.Tables.NUTRITION_MEAL_PLAN_TARGETS)
+            .select(Columns.raw(MEAL_PLAN_TARGET_SELECT)) {
+                filter { isIn("plan_id", planIds) }
+            }
+        return SupabaseResponseDecoding.decodeListOrObject<MealPlanTargetWire>(res.data)
+    }
+
+    private suspend fun foodNamesForPlansAndTargets(
+        plans: List<MealPlanWire>,
+        targets: List<MealPlanTargetWire>
+    ): Map<String, String> {
+        val ingredientIds = (plans.mapNotNull { it.ingredientId } + targets.mapNotNull { it.ingredientId }).distinct()
+        val recipeIds = (plans.mapNotNull { it.recipeId } + targets.mapNotNull { it.recipeId }).distinct()
+        val map = mutableMapOf<String, String>()
+        if (ingredientIds.isNotEmpty()) {
+            val res = supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS).select(Columns.raw("id,name")) {
+                filter { isIn("id", ingredientIds) }
+            }
+            SupabaseResponseDecoding.decodeListOrObject<IdNameRow>(res.data).forEach { map[it.id] = it.name }
+        }
+        if (recipeIds.isNotEmpty()) {
+            val res = supabase.from(BackendContracts.Tables.NUTRITION_RECIPES).select(Columns.raw("id,name")) {
+                filter { isIn("id", recipeIds) }
+            }
+            SupabaseResponseDecoding.decodeListOrObject<IdNameRow>(res.data).forEach { map[it.id] = it.name }
+        }
+        return map
+    }
+
+    private suspend fun foodKcalPerGramForPlansAndTargets(
+        plans: List<MealPlanWire>,
+        targets: List<MealPlanTargetWire>
+    ): Map<String, Double> {
+        val map = mutableMapOf<String, Double>()
+        val ingredientIds = (plans.mapNotNull { it.ingredientId } + targets.mapNotNull { it.ingredientId }).distinct()
+        val recipeIds = (plans.mapNotNull { it.recipeId } + targets.mapNotNull { it.recipeId }).distinct()
+        if (ingredientIds.isNotEmpty()) {
+            val res = supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS)
+                .select(Columns.raw("id,calories_per_100g")) {
+                    filter { isIn("id", ingredientIds) }
+                }
+            SupabaseResponseDecoding.decodeListOrObject<IngredientCaloriesRow>(res.data).forEach {
+                map[it.id] = it.caloriesPer100g / 100.0
+            }
+        }
+        for (recipeId in recipeIds) {
+            if (map.containsKey(recipeId)) continue
+            val lines = fetchRecipeLines(recipeId)
+            val profile = rollupProfilePer100g(lines)
+            map[recipeId] = profile.calories / 100.0
+        }
+        return map
+    }
+
+    private suspend fun fetchMealPlansByIds(ids: List<String>): List<MealPlanWire> {
+        if (ids.isEmpty()) return emptyList()
+        val res = supabase.from(BackendContracts.Tables.NUTRITION_MEAL_PLANS)
+            .select(Columns.raw("id,creator_id,plan_date,meal_slot,recipe_id,ingredient_id")) {
+                filter { isIn("id", ids) }
+            }
+        return SupabaseResponseDecoding.decodeListOrObject<MealPlanWire>(res.data)
+    }
+
+    private suspend fun foodNamesForPlans(plans: List<MealPlanWire>): Map<String, String> {
+        val map = mutableMapOf<String, String>()
+        val ingredientIds = plans.mapNotNull { it.ingredientId }.distinct()
+        val recipeIds = plans.mapNotNull { it.recipeId }.distinct()
+        if (ingredientIds.isNotEmpty()) {
+            val res = supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS).select(Columns.raw("id,name")) {
+                filter { isIn("id", ingredientIds) }
+            }
+            SupabaseResponseDecoding.decodeListOrObject<IdNameRow>(res.data).forEach { map[it.id] = it.name }
+        }
+        if (recipeIds.isNotEmpty()) {
+            val res = supabase.from(BackendContracts.Tables.NUTRITION_RECIPES).select(Columns.raw("id,name")) {
+                filter { isIn("id", recipeIds) }
+            }
+            SupabaseResponseDecoding.decodeListOrObject<IdNameRow>(res.data).forEach { map[it.id] = it.name }
+        }
+        return map
+    }
+
+    private suspend fun foodKcalPerGramForPlans(plans: List<MealPlanWire>): Map<String, Double> {
+        val map = mutableMapOf<String, Double>()
+        for (plan in plans) {
+            plan.ingredientId?.let { id ->
+                val res = supabase.from(BackendContracts.Tables.NUTRITION_INGREDIENTS)
+                    .select(Columns.raw("id,calories_per_100g")) {
+                        filter { eq("id", id) }
+                    }
+                val row = SupabaseResponseDecoding.decodeListOrObject<IngredientCaloriesRow>(res.data).firstOrNull()
+                if (row != null) map[id] = row.caloriesPer100g / 100.0
+            }
+            plan.recipeId?.let { id ->
+                val lines = fetchRecipeLines(id)
+                val profile = rollupProfile(lines)
+                map[id] = profile.calories / 100.0
+            }
+        }
+        return map
+    }
+
+    private suspend fun usernamesFor(userIds: List<String>): Map<String, String> {
+        if (userIds.isEmpty()) return emptyMap()
+        val res = supabase.from(BackendContracts.Tables.PROFILES).select(Columns.raw("user_id,username")) {
+            filter { isIn("user_id", userIds.distinct()) }
+        }
+        return SupabaseResponseDecoding.decodeListOrObject<FollowingProfileWire>(res.data)
+            .mapNotNull { p -> p.username?.takeIf { it.isNotBlank() }?.let { p.userId to it } }
+            .toMap()
+    }
+
+    private data class MacroProfile(val calories: Double)
+
+    private suspend fun rollupProfile(lines: List<NutritionRecipeLineDraft>): MacroProfile {
+        var totalKcal = 0.0
+        var totalWeight = 0.0
+        for (line in lines) {
+            totalKcal += line.weightG * line.ingredient.caloriesPer100g / 100.0
+            totalWeight += line.weightG
+        }
+        val per100 = if (totalWeight > 0) totalKcal / totalWeight * 100.0 else 0.0
+        return MacroProfile(per100)
     }
 }
 

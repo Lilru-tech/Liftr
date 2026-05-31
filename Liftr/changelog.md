@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-05-31
+
+### Added
+- **Nutrition — meal planning** — Plan meals for **yourself** or **other users** (invites, accept/decline, per-user quantities).
+- **Nutrition — log cart** — Add **multiple ingredients and recipes** in one flow before saving to the diary or a meal plan.
+
+### Fixed
+- **Apple Health — cardio import** — Fixed **GPS route / map** import when bringing cardio workouts in from Apple Health (including backfill for sessions that were saved without a route).
+- **Profile — level progress** — Fixed the **current-level progress bar** so it reflects progress **within the active level only**, not XP earned in previous levels.
+- **Nutrition — quantity input** — Fixed a bug where entering an amount whose **first digit was below 5** (e.g. `2` or `30`) could be forced to **5** when adding an ingredient or recipe.
+
+### Notes (database / ops)
+- **Nutrition meal planning** — Apply migrations **`20260531120000_nutrition_meal_planning_social_v1.sql`** through **`20260531210000_nutrition_meal_plan_rpc_guard_bypass_v1.sql`** (and related fix migrations if upgrading an existing deploy) before shipping clients that use meal plans or invites.
+
 ## [1.16.0] - 2026-05-28
 
 ### Added
@@ -166,6 +180,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.17.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.17.0
+[1.16.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.16.0
 [1.15.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.15.0
 [1.14.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.14.0
 [1.13.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.13.0

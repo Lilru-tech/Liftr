@@ -41,6 +41,7 @@ struct UserLevelDetailView: View {
 
     @State private var level: Int = 1
     @State private var xp: Int64 = 0
+    @State private var currentLevelThresholdXP: Int64 = 0
     @State private var nextLevelThresholdXP: Int64?
     @State private var lastActivityAt: Date?
     @State private var milestones: [(level: Int, xpRequired: Int64)] = []
@@ -65,8 +66,12 @@ struct UserLevelDetailView: View {
     private var nextLevelNumber: Int { level + 1 }
 
     private var progressRatio: Double {
-        guard let cap = nextLevelThresholdXP, cap > 0 else { return 0 }
-        return min(1, max(0, Double(xp) / Double(cap)))
+        guard let cap = nextLevelThresholdXP else { return 0 }
+        return levelProgressRatio(
+            totalXp: xp,
+            currentLevelThresholdXp: currentLevelThresholdXP,
+            nextLevelThresholdXp: cap
+        )
     }
 
     private var summaryActivityDate: Date? {
@@ -501,30 +506,26 @@ struct UserLevelDetailView: View {
             let totalXp = row?.xp ?? 0
             let parsedDate = parseLastActivity(row?.last_activity_at)
 
-            let milestoneLevels = [lv + 1, lv + 2, lv + 3]
+            let thresholdLevels = [lv, lv + 1, lv + 2, lv + 3]
             let thrRes = try await SupabaseManager.shared.client
                 .from("level_thresholds")
                 .select("level,xp_required")
-                .in("level", values: milestoneLevels)
+                .in("level", values: thresholdLevels)
                 .order("level", ascending: true)
                 .execute()
             let thrRows = try JSONDecoder.supabase().decode([Thr].self, from: thrRes.data)
-            let ms = thrRows.map { (level: $0.level, xpRequired: $0.xp_required) }
-
-            let nextRow = try await SupabaseManager.shared.client
-                .from("level_thresholds")
-                .select("level,xp_required")
-                .eq("level", value: lv + 1)
-                .limit(1)
-                .execute()
-            let nextArr = try JSONDecoder.supabase().decode([Thr].self, from: nextRow.data)
-            let nextCap: Int64? = nextArr.first?.xp_required
+            let ms = thrRows
+                .filter { $0.level > lv }
+                .map { (level: $0.level, xpRequired: $0.xp_required) }
+            let currentFloor = thrRows.first(where: { $0.level == lv })?.xp_required ?? 0
+            let nextCap: Int64? = thrRows.first(where: { $0.level == lv + 1 })?.xp_required
 
             let events = await fetchXPEventsFirstPage()
 
             await MainActor.run {
                 self.level = lv
                 self.xp = totalXp
+                self.currentLevelThresholdXP = currentFloor
                 self.nextLevelThresholdXP = nextCap
                 self.lastActivityAt = parsedDate
                 self.milestones = ms

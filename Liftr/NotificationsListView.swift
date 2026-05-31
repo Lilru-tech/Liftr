@@ -125,43 +125,7 @@ struct NotificationsListView: View {
                             destinationView(for: n)
                                 .task { await markAsRead(n) }
                         } label: {
-                            HStack(alignment: .top, spacing: 8) {
-                                if !n.is_read {
-                                    Circle()
-                                        .fill(Color.red)
-                                        .frame(width: 8, height: 8)
-                                        .padding(.top, 8)
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(n.title)
-                                        .font(.subheadline.weight(.semibold))
-                                    
-                                    if let body = n.body, !body.isEmpty {
-                                        Text(body)
-                                            .font(.footnote)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    
-                                    HStack {
-                                        Text(shortType(n.type))
-                                            .font(.caption2.weight(.semibold))
-                                            .padding(.vertical, 3)
-                                            .padding(.horizontal, 6)
-                                            .background(
-                                                Capsule()
-                                                    .fill(Color.white.opacity(0.12))
-                                            )
-                                        
-                                        Spacer()
-                                        
-                                        Text(relativeDate(n.created_at))
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 6)
+                            notificationLabel(for: n)
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(Color.clear)
@@ -216,6 +180,19 @@ struct NotificationsListView: View {
     @ViewBuilder
     private func destinationView(for n: NotificationRow) -> some View {
         switch n.type {
+        case "meal_plan_invite":
+            if let targetId = notificationUUID(n.data?["target_id"]) {
+                NutritionMealPlanInviteDetailView(targetId: targetId)
+                    .environmentObject(app)
+                    .gradientBG()
+            } else if let planId = notificationUUID(n.data?["plan_id"]) {
+                NutritionMealPlanInviteDetailView(planId: planId)
+                    .environmentObject(app)
+                    .gradientBG()
+            } else {
+                Text("Invitation not found")
+            }
+
         case "new_follower":
             if let followerId = n.data?["follower_id"]?.stringValue,
                let uid = UUID(uuidString: followerId) {
@@ -444,6 +421,98 @@ struct NotificationsListView: View {
         return UUID(uuidString: s)
     }
 
+    @ViewBuilder
+    private func defaultNotificationLabel(_ n: NotificationRow, isUnread: Bool) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            if isUnread {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 8)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(n.title)
+                    .font(.subheadline.weight(.semibold))
+                if let body = n.body, !body.isEmpty {
+                    Text(body)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text(shortType(n.type))
+                        .font(.caption2.weight(.semibold))
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 6)
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                    Spacer()
+                    Text(relativeDate(n.created_at))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func notificationLabel(for n: NotificationRow) -> some View {
+        if n.type == "meal_plan_invite" {
+            mealPlanInviteNotificationLabel(n, isUnread: !n.is_read)
+        } else {
+            defaultNotificationLabel(n, isUnread: !n.is_read)
+        }
+    }
+
+    @ViewBuilder
+    private func mealPlanInviteNotificationLabel(_ n: NotificationRow, isUnread: Bool) -> some View {
+        let foodName = n.data?["food_name"]?.stringValue
+        let mealSlot = n.data?["meal_slot"]?.stringValue
+        HStack(alignment: .top, spacing: 10) {
+            if isUnread {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+                    .padding(.top, 10)
+            }
+            Image(systemName: "fork.knife.circle.fill")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(n.title)
+                    .font(.subheadline.weight(.semibold))
+                if let foodName, !foodName.isEmpty {
+                    Text(foodName)
+                        .font(.footnote.weight(.medium))
+                }
+                if let body = n.body, !body.isEmpty {
+                    Text(body)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text(mealSlot ?? "Meal plan")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 6)
+                        .background(Capsule().fill(Color.white.opacity(0.12)))
+                    Spacer()
+                    Text(relativeDate(n.created_at))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func notificationUUID(_ value: JSONValue?) -> UUID? {
+        guard let raw = value?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        return UUID(uuidString: raw)
+    }
+
     private func deleteAllNotifications() async {
         guard let uid = app.userId else { return }
         await MainActor.run { deletingAll = true; error = nil }
@@ -626,6 +695,7 @@ struct NotificationsListView: View {
         case "competition_result_win":            return "Result"
         case "competition_result_lose":           return "Result"
         case "workout_kind_inactive":             return "Reminder"
+        case "meal_plan_invite":                  return "Meal plan"
         case "apple_health_cardio_imported":      return "Apple Health"
         case "segment_you_are_first":             return "Segment"
         case "segment_lost_first":                return "Segment"

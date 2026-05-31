@@ -2,13 +2,20 @@ import Foundation
 import HealthKit
 import CoreLocation
 import Supabase
+import UIKit
 
 struct HealthKitImportSummary: Sendable {
     var imported: Int = 0
     var skippedDuplicate: Int = 0
     var mergedDuplicate: Int = 0
     var failed: Int = 0
+    var outdoorWorkoutsMissingRoute: Int = 0
+    var routesBackfilled: Int = 0
     var errorMessages: [String] = []
+
+    var suggestsWorkoutRoutePermissionIssue: Bool {
+        outdoorWorkoutsMissingRoute > 0 && (imported + mergedDuplicate + routesBackfilled) > 0
+    }
 }
 
 enum HealthKitCardioImportMode: Sendable {
@@ -77,12 +84,38 @@ final class HealthKitCardioImportService {
     }
 
     func requestReadAuthorization() async throws {
+        try await performAuthorizationRequest(readTypes: readTypes)
+        let routeOnly: Set<HKObjectType> = [HKSeriesType.workoutRoute()]
+        let shouldRequestRoutes = try await authorizationShouldBeRequested(for: routeOnly)
+        if shouldRequestRoutes {
+            try await performAuthorizationRequest(readTypes: readTypes)
+        }
+    }
+
+    static func openAppleHealthApp() {
+        guard let url = URL(string: "x-apple-health://") else { return }
+        UIApplication.shared.open(url)
+    }
+
+    private func performAuthorizationRequest(readTypes: Set<HKObjectType>) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            store.requestAuthorization(toShare: [], read: readTypes) { ok, error in
+            store.requestAuthorization(toShare: [], read: readTypes) { _, error in
                 if let error {
                     cont.resume(throwing: error)
                 } else {
                     cont.resume()
+                }
+            }
+        }
+    }
+
+    private func authorizationShouldBeRequested(for types: Set<HKObjectType>) async throws -> Bool {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Bool, Error>) in
+            store.getRequestStatusForAuthorization(toShare: [], read: types) { status, error in
+                if let error {
+                    cont.resume(throwing: error)
+                } else {
+                    cont.resume(returning: status == .shouldRequest)
                 }
             }
         }
@@ -101,6 +134,14 @@ final class HealthKitCardioImportService {
             return summary
         }
 
+        do {
+            try await requestReadAuthorization()
+        } catch {
+            summary.errorMessages.append(error.localizedDescription)
+            summary.failed += 1
+            return summary
+        }
+
         let workouts: [HKWorkout]
         do {
             workouts = try await fetchWorkouts(from: fromDate, to: toDate)
@@ -115,135 +156,276 @@ final class HealthKitCardioImportService {
         iso.timeZone = .current
 
         for w in workouts {
-            guard let mapped = mapActivityCode(workout: w) else { continue }
+            let partial = await processHealthKitWorkout(w, userId: userId, mode: mode, iso: iso)
+            summary.absorb(partial)
+        }
 
-            let hkUUID = w.uuid.uuidString.lowercased()
+        let backfill = await backfillMissingHealthKitRoutes(userId: userId, mode: mode)
+        summary.absorb(backfill)
 
-            if await isDuplicateHealthKitUUID(hkUUID, userId: userId) {
-                summary.skippedDuplicate += 1
-                continue
-            }
+        return summary
+    }
 
-            let isTreadmill = mapped.code == CardioActivityType.treadmill.rawValue
+    func backfillMissingHealthKitRoutes(
+        userId: UUID,
+        mode: HealthKitCardioImportMode = .automatic
+    ) async -> HealthKitImportSummary {
+        var summary = HealthKitImportSummary()
+        guard isHealthDataAvailable else { return summary }
 
-            let durationSec = max(1, Int(w.duration.rounded()))
-            var distanceKm = w.totalDistance?.doubleValue(for: HKUnit.meter()) ?? 0
-            if distanceKm > 0 { distanceKm /= 1000.0 }
+        do {
+            try await requestReadAuthorization()
+        } catch {
+            summary.errorMessages.append(error.localizedDescription)
+            summary.failed += 1
+            return summary
+        }
 
-            let (avgHR, maxHR) = await heartRateStats(for: w)
-            let elevationM = elevationGainMeters(workout: w)
-            let activeEnergyKcal = await activeEnergyKilocalories(for: w)
+        let candidates: [RouteBackfillCandidate]
+        do {
+            candidates = try await fetchRouteBackfillCandidates(userId: userId)
+        } catch {
+            summary.errorMessages.append(error.localizedDescription)
+            summary.failed += 1
+            return summary
+        }
 
-            var routeGeoJSON: String?
-            var routeLocations: [CLLocation] = []
-            if !isTreadmill {
-                do {
-                    routeLocations = try await fetchRouteLocations(for: w)
-                    let coords = routeLocations.map(\.coordinate)
-                    if coords.count >= 2 {
-                        let trimmed = RouteLineStringDecimation.decimate(coords)
-                        routeGeoJSON = Self.geoJSONLineString(from: trimmed)
-                        if distanceKm < 0.001 {
-                            let m = Self.polylineLengthMeters(coords)
-                            if m > 0 { distanceKm = m / 1000.0 }
-                        }
-                    }
-                } catch {
-                    routeGeoJSON = nil
-                    routeLocations = []
-                }
-            }
+        guard !candidates.isEmpty else { return summary }
 
-            let paceSecPerKm: Int? = {
-                guard distanceKm > 0.001 else { return nil }
-                return Int(round(Double(durationSec) / distanceKm))
-            }()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        iso.timeZone = .current
 
-            let kmSplitsFromRoute = Self.kmSplitPaceSecFromRoute(
-                locations: routeLocations,
-                workout: w,
-                polylineLengthMeters: routeLocations.count >= 2
-                    ? Self.polylineLengthMeters(routeLocations.map(\.coordinate))
-                    : 0
+        for candidate in candidates {
+            guard let hkUUID = UUID(uuidString: candidate.healthkit_uuid) else { continue }
+            guard let workout = try? await fetchWorkout(byHealthKitUUID: hkUUID) else { continue }
+
+            let partial = await processHealthKitWorkout(workout, userId: userId, mode: mode, iso: iso)
+            summary.absorb(partial)
+        }
+
+        return summary
+    }
+
+    private struct RouteBackfillCandidate {
+        let workoutId: Int
+        let healthkit_uuid: String
+        let activity_code: String?
+    }
+
+    private struct BackfillWorkoutRow: Decodable {
+        let id: Int
+        let healthkit_uuid: String?
+        let created_at: Date
+        let cardio_sessions: [BackfillSessionRow]?
+    }
+
+    private struct BackfillSessionRow: Decodable {
+        let route_geojson: String?
+        let activity_code: String?
+    }
+
+    private func fetchRouteBackfillCandidates(userId: UUID) async throws -> [RouteBackfillCandidate] {
+        let since = Calendar.current.date(
+            byAdding: .day,
+            value: -HealthKitRouteImportPolicy.backfillLookbackDays,
+            to: Date()
+        ) ?? Date()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        iso.timeZone = .current
+
+        let res = try await SupabaseManager.shared.client
+            .from("workouts")
+            .select("id, healthkit_uuid, created_at, cardio_sessions(route_geojson, activity_code)")
+            .eq("user_id", value: userId)
+            .eq("kind", value: "cardio")
+            .gte("created_at", value: iso.string(from: since))
+            .execute()
+
+        let rows = try JSONDecoder.supabase().decode([BackfillWorkoutRow].self, from: res.data)
+        return rows.compactMap { row in
+            guard let hkUUID = row.healthkit_uuid?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !hkUUID.isEmpty,
+                  let session = row.cardio_sessions?.first
+            else { return nil }
+            guard HealthKitRouteImportPolicy.isOutdoorActivityCode(session.activity_code) else { return nil }
+            guard HealthKitRouteImportPolicy.routeGeojsonIsEmpty(session.route_geojson) else { return nil }
+            return RouteBackfillCandidate(
+                workoutId: row.id,
+                healthkit_uuid: hkUUID.lowercased(),
+                activity_code: session.activity_code
             )
+        }
+    }
 
-            let title = "\(mapped.label) · Apple Health"
-            let notes = "Imported from Apple Health."
+    private func processHealthKitWorkout(
+        _ w: HKWorkout,
+        userId: UUID,
+        mode: HealthKitCardioImportMode,
+        iso: ISO8601DateFormatter
+    ) async -> HealthKitImportSummary {
+        var summary = HealthKitImportSummary()
+        guard let mapped = mapActivityCode(workout: w) else { return summary }
 
-            let statsJSON = Self.cardioImportStatsJSON(
-                inclinePct: isTreadmill ? Self.inclinePercentFromWorkoutMetadata(w) : nil,
-                kmSplitPaceSec: kmSplitsFromRoute
-            )
+        let hkUUID = w.uuid.uuidString.lowercased()
+        let existingWorkoutId = try? await fetchWorkoutIdByHealthKitUUID(hkUUID, userId: userId)
+        let isTreadmill = mapped.code == CardioActivityType.treadmill.rawValue
 
-            let params = RPCCardioV2Params(
-                p_user_id: userId,
-                p_activity_code: mapped.code,
-                p_title: title,
-                p_started_at: iso.string(from: w.startDate),
-                p_ended_at: iso.string(from: w.endDate),
-                p_notes: notes,
-                p_distance_km: distanceKm > 0 ? distanceKm : nil,
-                p_duration_sec: durationSec,
-                p_avg_hr: avgHR,
-                p_max_hr: maxHR,
-                p_avg_pace_sec_per_km: paceSecPerKm,
-                p_elevation_gain_m: isTreadmill ? nil : elevationM,
-                p_perceived_intensity: WorkoutIntensity.moderate.rawValue,
-                p_state: "published",
-                p_stats: statsJSON,
-                p_healthkit_uuid: hkUUID,
-                p_route_geojson: isTreadmill ? nil : routeGeoJSON,
-                p_calories_kcal: activeEnergyKcal,
-                p_calories_method: activeEnergyKcal == nil ? nil : "healthkit_active_energy"
-            )
+        let durationSec = max(1, Int(w.duration.rounded()))
+        var distanceKm = w.totalDistance?.doubleValue(for: HKUnit.meter()) ?? 0
+        if distanceKm > 0 { distanceKm /= 1000.0 }
 
+        let (avgHR, maxHR) = await heartRateStats(for: w)
+        let elevationM = elevationGainMeters(workout: w)
+        let activeEnergyKcal = await activeEnergyKilocalories(for: w)
+
+        var routeGeoJSON: String?
+        var routeLocations: [CLLocation] = []
+        if !isTreadmill {
             do {
-                let res = try await SupabaseManager.shared.client
-                    .rpc("create_cardio_workout_v2", params: RPCCardioV2Wrapper(p: params))
-                    .execute()
-
-                var wid = Self.decodeRPCWorkoutId(res.data)
-                if wid == nil {
-                    wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID, userId: userId)
+                routeLocations = try await fetchRouteLocationsWithRetry(for: w)
+                let coords = routeLocations.map(\.coordinate)
+                if coords.count >= 2 {
+                    let trimmed = RouteLineStringDecimation.decimate(coords)
+                    routeGeoJSON = Self.geoJSONLineString(from: trimmed)
+                    if distanceKm < 0.001 {
+                        let m = Self.polylineLengthMeters(coords)
+                        if m > 0 { distanceKm = m / 1000.0 }
+                    }
                 }
-                if let wid {
-                    let merged = await wasMergedIntoExistingWorkout(workoutId: wid)
-                    if merged {
-                        summary.mergedDuplicate += 1
-                    } else {
-                        summary.imported += 1
-                    }
-                    if !isTreadmill, routeGeoJSON != nil {
-                        if let summary = await TerritoryCaptureClient.applyCapture(workoutId: wid),
-                           let message = TerritoryCapturePresentation.message(for: summary) {
-                            TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: summary)
-                            await MainActor.run {
-                                AppState.shared.territoryCaptureToast = message
-                            }
-                        }
-                    }
-                    await MainActor.run {
-                        NotificationCenter.default.post(name: .workoutDidChange, object: wid)
-                    }
-                    if !merged,
-                       mode == .automatic,
-                       HealthKitCardioImportNotificationPolicy.shouldNotifyAutoImport(workoutEndedAt: w.endDate) {
-                        await notifyAutoImportedWorkout(workoutId: wid, title: title)
+            } catch {
+                routeGeoJSON = nil
+                routeLocations = []
+            }
+            if routeGeoJSON == nil, distanceKm > 0.001 {
+                summary.outdoorWorkoutsMissingRoute += 1
+            }
+        }
+
+        if let existingWorkoutId {
+            let missingRoute = await workoutMissingRoute(workoutId: existingWorkoutId)
+            if HealthKitRouteImportPolicy.shouldSkipDuplicateImport(
+                isTreadmill: isTreadmill,
+                missingRouteInDb: missingRoute,
+                hasFetchedRoute: routeGeoJSON != nil
+            ) {
+                summary.skippedDuplicate += 1
+                return summary
+            }
+        }
+
+        let paceSecPerKm: Int? = {
+            guard distanceKm > 0.001 else { return nil }
+            return Int(round(Double(durationSec) / distanceKm))
+        }()
+
+        let kmSplitsFromRoute = Self.kmSplitPaceSecFromRoute(
+            locations: routeLocations,
+            workout: w,
+            polylineLengthMeters: routeLocations.count >= 2
+                ? Self.polylineLengthMeters(routeLocations.map(\.coordinate))
+                : 0
+        )
+
+        let title = "\(mapped.label) · Apple Health"
+        let notes = "Imported from Apple Health."
+
+        let statsJSON = Self.cardioImportStatsJSON(
+            inclinePct: isTreadmill ? Self.inclinePercentFromWorkoutMetadata(w) : nil,
+            kmSplitPaceSec: kmSplitsFromRoute
+        )
+
+        let params = RPCCardioV2Params(
+            p_user_id: userId,
+            p_activity_code: mapped.code,
+            p_title: title,
+            p_started_at: iso.string(from: w.startDate),
+            p_ended_at: iso.string(from: w.endDate),
+            p_notes: notes,
+            p_distance_km: distanceKm > 0 ? distanceKm : nil,
+            p_duration_sec: durationSec,
+            p_avg_hr: avgHR,
+            p_max_hr: maxHR,
+            p_avg_pace_sec_per_km: paceSecPerKm,
+            p_elevation_gain_m: isTreadmill ? nil : elevationM,
+            p_perceived_intensity: WorkoutIntensity.moderate.rawValue,
+            p_state: "published",
+            p_stats: statsJSON,
+            p_healthkit_uuid: hkUUID,
+            p_route_geojson: isTreadmill ? nil : routeGeoJSON,
+            p_calories_kcal: activeEnergyKcal,
+            p_calories_method: activeEnergyKcal == nil ? nil : "healthkit_active_energy"
+        )
+
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("create_cardio_workout_v2", params: RPCCardioV2Wrapper(p: params))
+                .execute()
+
+            var wid = Self.decodeRPCWorkoutId(res.data)
+            if wid == nil {
+                wid = try? await fetchWorkoutIdByHealthKitUUID(hkUUID, userId: userId)
+            }
+            if let wid {
+                let merged = await wasMergedIntoExistingWorkout(workoutId: wid)
+                if merged {
+                    summary.mergedDuplicate += 1
+                    if routeGeoJSON != nil {
+                        summary.routesBackfilled += 1
                     }
                 } else {
                     summary.imported += 1
                 }
-            } catch {
-                if HealthKitCardioImportDuplicateDetection.isHealthKitUuidUniqueViolation(error) {
-                    summary.skippedDuplicate += 1
-                } else {
-                    summary.failed += 1
-                    summary.errorMessages.append("\(mapped.label): \(error.localizedDescription)")
+                if !isTreadmill, routeGeoJSON != nil {
+                    if let captureSummary = await TerritoryCaptureClient.applyCapture(workoutId: wid),
+                       let message = TerritoryCapturePresentation.message(for: captureSummary) {
+                        TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: captureSummary)
+                        await MainActor.run {
+                            AppState.shared.territoryCaptureToast = message
+                        }
+                    }
                 }
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .workoutDidChange, object: wid)
+                }
+                if !merged,
+                   mode == .automatic,
+                   HealthKitCardioImportNotificationPolicy.shouldNotifyAutoImport(workoutEndedAt: w.endDate) {
+                    await notifyAutoImportedWorkout(workoutId: wid, title: title)
+                }
+            } else {
+                summary.imported += 1
+            }
+        } catch {
+            if HealthKitCardioImportDuplicateDetection.isHealthKitUuidUniqueViolation(error) {
+                summary.skippedDuplicate += 1
+            } else {
+                summary.failed += 1
+                summary.errorMessages.append("\(mapped.label): \(error.localizedDescription)")
             }
         }
 
         return summary
+    }
+
+    private func fetchWorkout(byHealthKitUUID uuid: UUID) async throws -> HKWorkout? {
+        let pred = HKQuery.predicateForObjects(with: Set([uuid]))
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<HKWorkout?, Error>) in
+            let q = HKSampleQuery(
+                sampleType: HKObjectType.workoutType(),
+                predicate: pred,
+                limit: 1,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    cont.resume(throwing: error)
+                    return
+                }
+                cont.resume(returning: (samples as? [HKWorkout])?.first)
+            }
+            store.execute(q)
+        }
     }
 
     private static let supportedWorkoutActivityTypes: [HKWorkoutActivityType] = {
@@ -474,13 +656,112 @@ final class HealthKitCardioImportService {
         return (value * 10).rounded() / 10
     }
 
+    private func fetchRouteLocationsWithRetry(for workout: HKWorkout) async throws -> [CLLocation] {
+        var locations = try await fetchRouteLocations(for: workout)
+        guard HealthKitRouteImportPolicy.shouldRetryRouteFetch(
+            workoutEndedAt: workout.endDate,
+            locationCount: locations.count
+        ) else {
+            return locations
+        }
+
+        for delay in HealthKitRouteImportPolicy.routeRetryDelaysNs {
+            try await Task.sleep(nanoseconds: delay)
+            locations = try await fetchRouteLocations(for: workout)
+            if locations.count >= 2 { break }
+        }
+        return locations
+    }
+
     private func fetchRouteLocations(for workout: HKWorkout) async throws -> [CLLocation] {
+        let routes = try await fetchWorkoutRoutes(for: workout)
+        var all: [CLLocation] = []
+        for route in routes {
+            let chunk = try await routeLocations(for: route)
+            all.append(contentsOf: chunk)
+        }
+        return all.sorted { $0.timestamp < $1.timestamp }
+    }
+
+    private func fetchWorkoutRoutes(for workout: HKWorkout) async throws -> [HKWorkoutRoute] {
         let routeType = HKSeriesType.workoutRoute()
         let pred = HKQuery.predicateForObjects(from: workout)
-        let routes: [HKWorkoutRoute] = try await withCheckedThrowingContinuation { cont in
+        let waitNs = HealthKitRouteImportPolicy.anchoredRouteWaitNanoseconds(workoutEndedAt: workout.endDate)
+        let anchored = try await fetchWorkoutRoutesAnchored(
+            routeType: routeType,
+            predicate: pred,
+            waitNanoseconds: waitNs
+        )
+        if !anchored.isEmpty { return anchored }
+        return try await fetchWorkoutRoutesSample(routeType: routeType, predicate: pred)
+    }
+
+    private func fetchWorkoutRoutesAnchored(
+        routeType: HKSampleType,
+        predicate: NSPredicate,
+        waitNanoseconds: UInt64
+    ) async throws -> [HKWorkoutRoute] {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[HKWorkoutRoute], Error>) in
+            let finishGate = HealthKitQueryFinishGate()
+            var queryRef: HKQuery?
+
+            func complete(_ routes: [HKWorkoutRoute]) {
+                guard finishGate.claim() else { return }
+                if let queryRef { store.stop(queryRef) }
+                cont.resume(returning: routes)
+            }
+
+            func fail(_ error: Error) {
+                guard finishGate.claim() else { return }
+                if let queryRef { store.stop(queryRef) }
+                cont.resume(throwing: error)
+            }
+
+            let q = HKAnchoredObjectQuery(
+                type: routeType,
+                predicate: predicate,
+                anchor: nil,
+                limit: HKObjectQueryNoLimit
+            ) { _, samples, _, _, error in
+                if let error {
+                    fail(error)
+                    return
+                }
+                let routes = (samples as? [HKWorkoutRoute]) ?? []
+                if !routes.isEmpty {
+                    complete(routes)
+                }
+            }
+
+            q.updateHandler = { _, samples, _, _, error in
+                if finishGate.isClaimed { return }
+                if let error {
+                    fail(error)
+                    return
+                }
+                let routes = (samples as? [HKWorkoutRoute]) ?? []
+                if !routes.isEmpty {
+                    complete(routes)
+                }
+            }
+
+            queryRef = q
+            store.execute(q)
+
+            Task {
+                try? await Task.sleep(nanoseconds: waitNanoseconds)
+                if !finishGate.isClaimed {
+                    complete([])
+                }
+            }
+        }
+    }
+
+    private func fetchWorkoutRoutesSample(routeType: HKSampleType, predicate: NSPredicate) async throws -> [HKWorkoutRoute] {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[HKWorkoutRoute], Error>) in
             let q = HKSampleQuery(
                 sampleType: routeType,
-                predicate: pred,
+                predicate: predicate,
                 limit: HKObjectQueryNoLimit,
                 sortDescriptors: nil
             ) { _, samples, error in
@@ -492,13 +773,6 @@ final class HealthKitCardioImportService {
             }
             store.execute(q)
         }
-
-        var all: [CLLocation] = []
-        for route in routes {
-            let chunk = try await routeLocations(for: route)
-            all.append(contentsOf: chunk)
-        }
-        return all.sorted { $0.timestamp < $1.timestamp }
     }
 
     private func routeLocations(for route: HKWorkoutRoute) async throws -> [CLLocation] {
@@ -538,12 +812,20 @@ final class HealthKitCardioImportService {
         }
     }
 
-    private func isDuplicateHealthKitUUID(_ uuid: String, userId: UUID) async -> Bool {
-        do {
-            return try await fetchWorkoutIdByHealthKitUUID(uuid, userId: userId) != nil
-        } catch {
-            return false
-        }
+    private func workoutMissingRoute(workoutId: Int) async -> Bool {
+        struct Row: Decodable { let route_geojson: String? }
+        guard let res = try? await SupabaseManager.shared.client
+            .from("cardio_sessions")
+            .select("route_geojson")
+            .eq("workout_id", value: workoutId)
+            .limit(1)
+            .execute(),
+              let row = try? JSONDecoder.supabase().decode([Row].self, from: res.data).first
+        else { return true }
+        guard let route = row.route_geojson?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !route.isEmpty
+        else { return true }
+        return false
     }
 
     private func wasMergedIntoExistingWorkout(workoutId: Int) async -> Bool {
@@ -595,5 +877,24 @@ final class HealthKitCardioImportService {
             d += a.distance(from: b)
         }
         return d
+    }
+}
+
+private final class HealthKitQueryFinishGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+
+    var isClaimed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return claimed
     }
 }

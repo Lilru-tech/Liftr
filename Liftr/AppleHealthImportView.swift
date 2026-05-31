@@ -115,8 +115,29 @@ struct AppleHealthImportView: View {
                                 Divider().opacity(0.15)
                                 LabeledContent("Merged with existing", value: "\(s.mergedDuplicate)")
                             }
+                            if s.routesBackfilled > 0 {
+                                Divider().opacity(0.15)
+                                LabeledContent("Routes backfilled", value: "\(s.routesBackfilled)")
+                            }
                             Divider().opacity(0.15)
                             LabeledContent("Failed", value: "\(s.failed)")
+                            if s.outdoorWorkoutsMissingRoute > 0 {
+                                Divider().opacity(0.15)
+                                LabeledContent("Missing GPS routes", value: "\(s.outdoorWorkoutsMissingRoute)")
+                            }
+                            if s.suggestsWorkoutRoutePermissionIssue {
+                                Divider().opacity(0.15)
+                                Text(
+                                    "Workouts imported without GPS maps. Open Apple Health → Sharing → Apps → Liftr and turn on Workout Routes, then import again."
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                                Button("Open Apple Health") {
+                                    HealthKitCardioImportService.openAppleHealthApp()
+                                }
+                                .font(.caption.weight(.semibold))
+                            }
                             if !s.errorMessages.isEmpty {
                                 Divider().opacity(0.15)
                                 ForEach(Array(s.errorMessages.enumerated()), id: \.offset) { _, msg in
@@ -337,7 +358,9 @@ struct AppleHealthImportView: View {
         await MainActor.run {
             importing = false
             summary = result
-            if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
+            if result.suggestsWorkoutRoutePermissionIssue {
+                banner = "Imported workouts, but GPS routes are missing. Enable Workout Routes for Liftr in Apple Health, then import again."
+            } else if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
                 banner = "No compatible cardio workouts found in this date range."
             }
         }
