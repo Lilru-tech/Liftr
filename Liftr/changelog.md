@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-06-01
+
+### Fixed
+- **Apple Health — automatic import** — Fixed a crash when enabling **automatic cardio import** (Settings → Import cardio workouts) caused by requesting **workout route** authorization without the required **workouts** type; the app now checks both together per HealthKit rules.
+
 ## [1.17.0] - 2026-05-31
 
 ### Added
@@ -180,6 +185,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.17.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.17.1
 [1.17.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.17.0
 [1.16.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.16.0
 [1.15.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.15.0

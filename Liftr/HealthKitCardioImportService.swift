@@ -85,8 +85,11 @@ final class HealthKitCardioImportService {
 
     func requestReadAuthorization() async throws {
         try await performAuthorizationRequest(readTypes: readTypes)
-        let routeOnly: Set<HKObjectType> = [HKSeriesType.workoutRoute()]
-        let shouldRequestRoutes = try await authorizationShouldBeRequested(for: routeOnly)
+        let routeAuthorizationTypes: Set<HKObjectType> = [
+            HKObjectType.workoutType(),
+            HKSeriesType.workoutRoute()
+        ]
+        let shouldRequestRoutes = try await authorizationShouldBeRequested(for: routeAuthorizationTypes)
         if shouldRequestRoutes {
             try await performAuthorizationRequest(readTypes: readTypes)
         }
@@ -110,8 +113,9 @@ final class HealthKitCardioImportService {
     }
 
     private func authorizationShouldBeRequested(for types: Set<HKObjectType>) async throws -> Bool {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Bool, Error>) in
-            store.getRequestStatusForAuthorization(toShare: [], read: types) { status, error in
+        let normalized = typesIncludingRequiredParents(types)
+        return try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Bool, Error>) in
+            store.getRequestStatusForAuthorization(toShare: [], read: normalized) { status, error in
                 if let error {
                     cont.resume(throwing: error)
                 } else {
@@ -119,6 +123,14 @@ final class HealthKitCardioImportService {
                 }
             }
         }
+    }
+
+    private func typesIncludingRequiredParents(_ types: Set<HKObjectType>) -> Set<HKObjectType> {
+        var result = types
+        if types.contains(where: { $0 == HKSeriesType.workoutRoute() }) {
+            result.insert(HKObjectType.workoutType())
+        }
+        return result
     }
 
     func importCardioWorkouts(
