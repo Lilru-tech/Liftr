@@ -390,12 +390,8 @@ final class HealthKitCardioImportService {
                     summary.imported += 1
                 }
                 if !isTreadmill, routeGeoJSON != nil {
-                    if let captureSummary = await TerritoryCaptureClient.applyCapture(workoutId: wid),
-                       let message = TerritoryCapturePresentation.message(for: captureSummary) {
+                    if let captureSummary = await TerritoryCaptureClient.applyCapture(workoutId: wid) {
                         TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: captureSummary)
-                        await MainActor.run {
-                            AppState.shared.territoryCaptureToast = message
-                        }
                     }
                 }
                 await MainActor.run {

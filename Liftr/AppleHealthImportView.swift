@@ -69,9 +69,9 @@ struct AppleHealthImportView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                        DatePicker("From", selection: $fromDate, displayedComponents: [.date])
+                        DatePicker("From", selection: $fromDate, in: ...todayStart, displayedComponents: [.date])
                         Divider().opacity(0.15)
-                        DatePicker("To", selection: $toDate, in: fromDate ... Date(), displayedComponents: [.date])
+                        DatePicker("To", selection: $toDate, in: toDatePickerRange, displayedComponents: [.date])
                     }
                 }
             }
@@ -175,11 +175,36 @@ struct AppleHealthImportView: View {
                 .presentationDetents([.medium, .large])
                 .presentationBackground(.clear)
         }
+        .onAppear {
+            clampImportDates()
+        }
         .onChange(of: fromDate) { _, _ in
+            clampImportDates()
             handleManualDateChangeIfNeeded()
         }
         .onChange(of: toDate) { _, _ in
+            clampImportDates()
             handleManualDateChangeIfNeeded()
+        }
+    }
+
+    private var todayStart: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
+
+    private var toDatePickerRange: ClosedRange<Date> {
+        let end = todayStart
+        let start = min(Calendar.current.startOfDay(for: fromDate), end)
+        return start ... end
+    }
+
+    private func clampImportDates() {
+        let cal = Calendar.current
+        let today = todayStart
+        fromDate = min(cal.startOfDay(for: fromDate), today)
+        toDate = min(cal.startOfDay(for: toDate), today)
+        if fromDate > toDate {
+            fromDate = toDate
         }
     }
 

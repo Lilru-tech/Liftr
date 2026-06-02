@@ -68,11 +68,14 @@
     <string name="auth_reset_email_sent">If an account exists for this email, you will receive a reset link shortly. Open it on this device.</string>
     <string name="auth_reset_password_title">Reset password</string>
     <string name="auth_reset_password_subtitle">Choose a new password for your account.</string>
+    <string name="auth_change_password_title">Change password</string>
+    <string name="auth_current_password">Current password</string>
     <string name="auth_new_password">New password (min. 8)</string>
     <string name="auth_confirm_password">Confirm password</string>
     <string name="auth_update_password">Update password</string>
     <string name="auth_updating_password">Updating…</string>
     <string name="auth_passwords_must_match">Passwords do not match.</string>
+    <string name="auth_validation_password_same_as_old">New password must be different from your current password.</string>
     <string name="auth_ok">OK</string>
     <string name="home_signed_in">Signed in</string>
     <string name="home_welcome">Welcome back!</string>

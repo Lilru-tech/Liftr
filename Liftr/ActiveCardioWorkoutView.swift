@@ -948,12 +948,8 @@ struct ActiveCardioWorkoutView: View {
             NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
 
             if snap.usesGPSTracking, snap.routeGeoJSON != nil {
-                if let summary = await TerritoryCaptureClient.applyCapture(workoutId: workoutId),
-                   let message = TerritoryCapturePresentation.message(for: summary) {
+                if let summary = await TerritoryCaptureClient.applyCapture(workoutId: workoutId) {
                     TerritoryCaptureClient.storeCaptureReferenceCoordinate(from: summary)
-                    await MainActor.run {
-                        app.territoryCaptureToast = message
-                    }
                 }
             }
 

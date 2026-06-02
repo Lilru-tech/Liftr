@@ -81,6 +81,62 @@ private struct NutritionFactsLabel: View {
     }
 }
 
+private struct NutritionTotalsLabel: View {
+    let title: String
+    let grams: Double
+    let totals: NutritionProfilePer100g
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .padding(.bottom, 6)
+            Text("Nutrition Summary")
+                .font(.headline.weight(.heavy))
+            Text("Total for \(Int(grams.rounded()))g")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.bottom, 8)
+            HStack(alignment: .firstTextBaseline) {
+                Text("Calories")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(Int(totals.calories.rounded()))")
+                    .font(.title2.weight(.heavy))
+            }
+            .padding(.vertical, 6)
+            Rectangle().fill(Color.primary.opacity(0.25)).frame(height: 4)
+            factRow("Protein", value: totals.protein, unit: "g")
+            factRow("Carbs", value: totals.carbs, unit: "g")
+            factRow("Fat", value: totals.fat, unit: "g")
+            Rectangle().fill(Color.primary.opacity(0.15)).frame(height: 2)
+                .padding(.vertical, 4)
+            factRow("Sat. fat", value: totals.saturatedFat, unit: "g", indent: true)
+            factRow("Sugars", value: totals.sugars, unit: "g", indent: true)
+            factRow("Fiber", value: totals.fiber, unit: "g", indent: true)
+            factRow("Sodium", value: totals.sodiumMg, unit: "mg", indent: true)
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.2), lineWidth: 1)
+        )
+    }
+
+    private func factRow(_ label: String, value: Double, unit: String, indent: Bool = false) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption.weight(indent ? .regular : .semibold))
+                .padding(.leading, indent ? 8 : 0)
+            Spacer()
+            Text(String(format: "%.1f %@", value, unit))
+                .font(.caption.monospacedDigit())
+        }
+        .padding(.vertical, 3)
+    }
+}
+
 struct NutritionCalorieBudgetStatusRow: View {
     let remainingKcal: Double
     var titleWhenUnder: String = "Remaining budget"
@@ -459,6 +515,9 @@ final class NutritionViewModel: ObservableObject {
 struct NutritionView: View {
     @EnvironmentObject var app: AppState
     @StateObject private var vm = NutritionViewModel()
+    @State private var expandedMealSlots: Set<String> = []
+    @State private var mealTotalsBySlot: [String: (grams: Double, totals: NutritionProfilePer100g)] = [:]
+    @State private var mealTotalsLoadingSlots: Set<String> = []
 
     var body: some View {
         ScrollView {
@@ -507,6 +566,10 @@ struct NutritionView: View {
                 .padding(.top, 4)
             }
             .padding(.vertical, 10)
+        }
+        .onChange(of: vm.diaryItems) { _, _ in
+            mealTotalsBySlot = [:]
+            mealTotalsLoadingSlots = []
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -743,11 +806,55 @@ struct NutritionView: View {
     }
 
     private func mealSection(slot: NutritionMealSlot, items: [NutritionDiaryItemUI]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let mealTotalKcal = items.isEmpty
+            ? nil
+            : Int(items.reduce(0) { $0 + $1.caloriesKcal }.rounded())
+        let slotKey = slot.rawValue
+        let isExpanded = expandedMealSlots.contains(slotKey)
+        return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(slot.rawValue)
-                    .font(.subheadline.weight(.semibold))
+                Button {
+                    let expanding = !isExpanded
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        if expanding { expandedMealSlots.insert(slotKey) } else { expandedMealSlots.remove(slotKey) }
+                    }
+                    guard expanding else { return }
+                    guard !items.isEmpty else { return }
+                    guard mealTotalsBySlot[slotKey] == nil else { return }
+                    guard !mealTotalsLoadingSlots.contains(slotKey) else { return }
+                    mealTotalsLoadingSlots.insert(slotKey)
+                    Task {
+                        defer { mealTotalsLoadingSlots.remove(slotKey) }
+                        do {
+                            let res = try await NutritionManager.fetchMealSlotTotals(items: items)
+                            mealTotalsBySlot[slotKey] = res
+                        } catch {
+                            vm.error = error.localizedDescription
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(slot.rawValue)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.primary)
+                        if let mealTotalKcal {
+                            Text("\(mealTotalKcal) kcal")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(
+                    mealTotalKcal.map { "\(slot.rawValue), \($0) kilocalories" } ?? slot.rawValue
+                )
+
                 Spacer()
+
                 Menu {
                     Button("Log food") {
                         vm.activeSheet = .addFood(mealSlot: slot, saveMode: .diary)
@@ -757,10 +864,24 @@ struct NutritionView: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.caption.weight(.bold))
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.blue)
                 }
             }
             .padding(.horizontal)
+
+            if isExpanded {
+                Group {
+                    if mealTotalsLoadingSlots.contains(slotKey) {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if let cached = mealTotalsBySlot[slotKey] {
+                        NutritionTotalsLabel(title: "Summary", grams: cached.grams, totals: cached.totals)
+                    }
+                }
+                .padding(.horizontal)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
 
             if items.isEmpty {
                 Text("No items logged")
@@ -1280,6 +1401,36 @@ private struct NutritionLogFoodSheet: View {
 
     private var hasCart: Bool { !cart.isEmpty }
 
+    private func cartItemEffectiveGrams(_ item: NutritionLogCartItem) -> Double {
+        if saveMode == .plan, !item.perUserGrams.isEmpty {
+            return item.perUserGrams.values.reduce(0, +)
+        }
+        return item.grams
+    }
+
+    private func cartItemProfilePer100g(_ item: NutritionLogCartItem) -> NutritionProfilePer100g? {
+        guard !item.isLoadingComposition else { return nil }
+        switch item.kind {
+        case .ingredient(let ing):
+            return ing.profilePer100g
+        case .recipe(_, let lines) where !lines.isEmpty:
+            return NutritionManager.rollupProfilePer100g(lines: lines)
+        default:
+            return nil
+        }
+    }
+
+    private func cartTotalsProfile() -> NutritionProfilePer100g? {
+        guard !cart.isEmpty else { return nil }
+        guard !cart.contains(where: \.isLoadingComposition) else { return nil }
+        let totals = cart.compactMap { item -> NutritionProfilePer100g? in
+            guard let per100 = cartItemProfilePer100g(item) else { return nil }
+            return NutritionManager.totalsFromPer100g(per100, grams: cartItemEffectiveGrams(item))
+        }
+        guard !totals.isEmpty else { return nil }
+        return NutritionManager.sumProfiles(totals)
+    }
+
     private var planDefaultAssigneeIds: Set<UUID> {
         var ids = Set(selectedPartners.map(\.user_id))
         if let userId { ids.insert(userId) }
@@ -1615,6 +1766,12 @@ private struct NutritionLogFoodSheet: View {
                             }
                             .nutritionCartLineChrome(grouped: groupsCartLines)
                         }
+                    }
+
+                    if let totals = cartTotalsProfile() {
+                        let grams = cart.reduce(0.0) { $0 + cartItemEffectiveGrams($1) }
+                        NutritionTotalsLabel(title: "Summary", grams: grams, totals: totals)
+                            .nutritionCartLineChrome(grouped: cart.count > 1)
                     }
                 }
             }
@@ -2722,6 +2879,8 @@ private struct NutritionEditDiarySheet: View {
     @State private var grams: Double
     @State private var saving = false
     @State private var error: String?
+    @State private var compositionLoading = false
+    @State private var profilePer100g: NutritionProfilePer100g?
 
     init(item: NutritionDiaryItemUI, onDone: @escaping () -> Void) {
         self.item = item
@@ -2744,6 +2903,13 @@ private struct NutritionEditDiarySheet: View {
                     }
                     .pickerStyle(.segmented)
                     NutritionGramsInput(grams: $grams, kcalPreview: item.caloriesKcal * grams / max(item.quantityG, 1))
+                    if compositionLoading {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else if let profilePer100g {
+                        let totals = NutritionManager.totalsFromPer100g(profilePer100g, grams: grams)
+                        NutritionTotalsLabel(title: "Summary", grams: grams, totals: totals)
+                    }
                     if let error {
                         Text(error).font(.caption).foregroundStyle(.red)
                     }
@@ -2768,6 +2934,26 @@ private struct NutritionEditDiarySheet: View {
                     Button("Close") { dismiss(); onDone() }
                 }
             }
+            .task { await loadCompositionIfNeeded() }
+        }
+    }
+
+    private func loadCompositionIfNeeded() async {
+        guard profilePer100g == nil else { return }
+        guard item.ingredientId != nil || item.recipeId != nil else { return }
+        compositionLoading = true
+        defer { compositionLoading = false }
+        do {
+            if let ingredientId = item.ingredientId {
+                let ing = try await NutritionManager.fetchIngredientById(ingredientId)
+                profilePer100g = ing.profilePer100g
+                return
+            }
+            if let recipeId = item.recipeId {
+                profilePer100g = try await NutritionManager.fetchRecipeProfilePer100g(recipeId: recipeId)
+            }
+        } catch {
+            self.error = error.localizedDescription
         }
     }
 

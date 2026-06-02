@@ -79,6 +79,28 @@ struct ActiveStrengthWorkoutView: View {
         let custom_name: String?
         let target_sets: Int?
         let exercise_name: String?
+
+        init(
+            id: Int,
+            exercise_id: Int64,
+            order_index: Int,
+            superset_group_id: UUID?,
+            superset_position: Int?,
+            notes: String?,
+            custom_name: String?,
+            target_sets: Int?,
+            exercise_name: String?
+        ) {
+            self.id = id
+            self.exercise_id = exercise_id
+            self.order_index = order_index
+            self.superset_group_id = superset_group_id
+            self.superset_position = superset_position
+            self.notes = notes
+            self.custom_name = custom_name
+            self.target_sets = target_sets
+            self.exercise_name = exercise_name
+        }
     }
     
     private struct SetRow: Identifiable, Decodable {
@@ -173,31 +195,6 @@ struct ActiveStrengthWorkoutView: View {
         let restSec: Int?
         let weightSegments: [StrengthWeightSegWire]?
         var segmentsInRow: Int { max(1, weightSegments?.count ?? 1) }
-    }
-
-    private struct ActiveWorkoutExerciseInsert: Encodable {
-        let workout_id: Int
-        let exercise_id: Int
-        let order_index: Int
-        let superset_group_id: UUID?
-        let superset_position: Int?
-        let notes: String?
-        let custom_name: String?
-    }
-
-    private struct ActiveWorkoutExerciseInsertedId: Decodable {
-        let id: Int
-    }
-
-    private struct ActiveWorkoutSetInsert: Encodable {
-        let workout_exercise_id: Int
-        let set_number: Int
-        let order_index: Int
-        let reps: Int?
-        let weight_kg: Double?
-        let rpe: Double?
-        let rest_sec: Int?
-        let weight_segments: [StrengthWeightSegWire]?
     }
 
     private struct ActiveWorkoutExerciseOrderPatch: Encodable {
@@ -301,6 +298,8 @@ struct ActiveStrengthWorkoutView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var startSyncStatus: WorkoutStartSyncStatus = .idle
+    @State private var exerciseAddSyncBannerNonce = 0
+    @State private var loadGeneration = 0
     @State private var guestDataError: String?
     @State private var isSaving = false
     @State private var showCountdown = true
@@ -664,6 +663,21 @@ struct ActiveStrengthWorkoutView: View {
                             .padding(.vertical, 8)
                             .background(.ultraThinMaterial, in: Capsule())
                             .padding(.top, 8)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .zIndex(3)
+                }
+
+                if exerciseAddSyncBannerVisible {
+                    VStack {
+                        Text(exerciseAddSyncBannerText)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .padding(.top, exerciseAddSyncBannerTopPadding)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -1112,6 +1126,7 @@ struct ActiveStrengthWorkoutView: View {
         }
         .onAppear {
             startSyncStatus = WorkoutStartSync.status(for: workoutId)
+            exerciseAddSyncBannerNonce += 1
             #if DEBUG
             dualStrengthDebug(
                 "onAppear showCountdown=\(showCountdown) isDualMode=\(dualGuestWorkoutId != nil) "
@@ -1131,6 +1146,18 @@ struct ActiveStrengthWorkoutView: View {
             case "willRetry": startSyncStatus = .willRetry
             default: startSyncStatus = .idle
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .activeExerciseAddSyncStatusChanged)) { _ in
+            exerciseAddSyncBannerNonce += 1
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .activeExerciseAddDidSync)) { note in
+            guard let localId = note.userInfo?["localExerciseId"] as? Int,
+                  let serverId = note.userInfo?["serverExerciseId"] as? Int,
+                  let laneRaw = note.userInfo?["lane"] as? String,
+                  let lane = laneFromToken(laneRaw)
+            else { return }
+            remapExerciseId(tempId: localId, serverId: serverId, lane: lane)
+            exerciseAddSyncBannerNonce += 1
         }
         .task { await load() }
         .task(id: app.userId) {
@@ -1187,7 +1214,7 @@ struct ActiveStrengthWorkoutView: View {
 
             VStack(spacing: 16) {
                 VStack(spacing: 8) {
-                    Text(ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise"))
+                    Text(exerciseTitle(ex))
                         .font(.system(size: 26, weight: .bold, design: .rounded))
                         .multilineTextAlignment(.center)
                         .lineLimit(3)
@@ -2293,7 +2320,7 @@ struct ActiveStrengthWorkoutView: View {
 
     @ViewBuilder
     private func exercisePeekCard(_ ex: ExerciseRow, edge: PeekEdge) -> some View {
-        let title = ex.custom_name?.isEmpty == false ? ex.custom_name! : (ex.exercise_name ?? "Exercise")
+        let title = exerciseTitle(ex)
 
         VStack(spacing: 10) {
             if edge == .bottom { Spacer(minLength: 0) }
@@ -2789,7 +2816,7 @@ struct ActiveStrengthWorkoutView: View {
                     workout_exercise_id: config.workout_exercise_id,
                     set_number: sequentialNumber,
                     reps: firstSeg?.reps ?? config.reps,
-                    weight_kg: firstSeg != nil ? Decimal(firstSeg!.weight_kg) : config.weight_kg,
+                    weight_kg: firstSeg.map { Decimal($0.weight_kg) } ?? config.weight_kg,
                     rpe: config.rpe,
                     rest_sec: config.rest_sec,
                     weight_segments: config.weight_segments,
@@ -2965,7 +2992,7 @@ struct ActiveStrengthWorkoutView: View {
         let work = DispatchWorkItem { [soundID] in
             for i in 0..<repeats {
                 DispatchQueue.main.asyncAfter(deadline: .now() + (interval * Double(i))) {
-                    guard !beepWorkItem!.isCancelled else { return }
+                    guard let item = beepWorkItem, !item.isCancelled else { return }
                     haptic.notificationOccurred(.success)
                     AudioServicesPlaySystemSound(soundID)
                 }
@@ -3958,13 +3985,9 @@ struct ActiveStrengthWorkoutView: View {
                     Button {
                         Task { await saveConfiguredActiveExercise() }
                     } label: {
-                        if isPersistingActiveExerciseEdit {
-                            ProgressView()
-                        } else {
-                            Text("Add")
-                        }
+                        Text("Add")
                     }
-                    .disabled(isPersistingActiveExerciseEdit || activeExerciseSetupDrafts.isEmpty)
+                    .disabled(activeExerciseSetupDrafts.isEmpty)
                 }
             }
         }
@@ -4365,7 +4388,6 @@ struct ActiveStrengthWorkoutView: View {
 
     @MainActor
     private func saveConfiguredActiveExercise() async {
-        guard !isPersistingActiveExerciseEdit else { return }
         guard !activeExerciseSetupDrafts.isEmpty else { return }
         guard let targetWorkoutId = workoutId(for: activeExerciseSetupLane) else {
             activeExerciseSetupError = "This workout lane is not available."
@@ -4373,6 +4395,7 @@ struct ActiveStrengthWorkoutView: View {
         }
 
         let lane = activeExerciseSetupLane
+        let laneToken = laneToken(for: lane)
         let baseOrderIndex = nextExerciseOrderIndex(for: lane)
         let supersetGroupId = activeExerciseSetupDrafts.count > 1 ? UUID() : nil
         var parsedDrafts: [(draft: ActiveExerciseSetupExercise, sets: [ActiveExerciseSetupParsedSet])] = []
@@ -4381,96 +4404,75 @@ struct ActiveStrengthWorkoutView: View {
             parsedDrafts.append((draft: draft, sets: parsed))
         }
 
-        isPersistingActiveExerciseEdit = true
-        defer { isPersistingActiveExerciseEdit = false }
-        let client = SupabaseManager.shared.client
+        var localRows: [(row: ExerciseRow, sets: [SetRow])] = []
+        var pendingItems: [ActiveExerciseAddSync.PendingExerciseAdd] = []
 
-        do {
-            var localRows: [(row: ExerciseRow, sets: [SetRow])] = []
-            for (draftIndex, parsedDraft) in parsedDrafts.enumerated() {
-                let orderIndex = baseOrderIndex + draftIndex
-                let insertedData = try await client
-                    .from("workout_exercises")
-                    .insert(
-                        ActiveWorkoutExerciseInsert(
-                            workout_id: targetWorkoutId,
-                            exercise_id: Int(parsedDraft.draft.exercise.id),
-                            order_index: orderIndex,
-                            superset_group_id: supersetGroupId,
-                            superset_position: supersetGroupId == nil ? nil : draftIndex + 1,
-                            notes: nil,
-                            custom_name: nil
-                        )
-                    )
-                    .select("id")
-                    .single()
-                    .execute()
-                    .data
-                let inserted = try JSONDecoder.supabase().decode(ActiveWorkoutExerciseInsertedId.self, from: insertedData)
-
-                let setRows = parsedDraft.sets.enumerated().map { idx, set in
-                    ActiveWorkoutSetInsert(
-                        workout_exercise_id: inserted.id,
-                        set_number: 1,
-                        order_index: idx + 1,
-                        reps: set.reps,
-                        weight_kg: set.weightKg.map { NSDecimalNumber(decimal: $0).doubleValue },
-                        rpe: set.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
-                        rest_sec: set.restSec,
-                        weight_segments: set.weightSegments
-                    )
-                }
-
-                _ = try await client
-                    .from("exercise_sets")
-                    .insert(setRows)
-                    .execute()
-
-                let exerciseName = parsedDraft.draft.exercise.localizedName(for: exerciseLanguageFromGlobalStorage())
-                let row = ExerciseRow(
-                    id: inserted.id,
-                    exercise_id: parsedDraft.draft.exercise.id,
-                    order_index: orderIndex,
-                    superset_group_id: supersetGroupId,
-                    superset_position: supersetGroupId == nil ? nil : draftIndex + 1,
-                    notes: nil,
-                    custom_name: nil,
-                    target_sets: nil,
-                    exercise_name: exerciseName
+        for (draftIndex, parsedDraft) in parsedDrafts.enumerated() {
+            let orderIndex = baseOrderIndex + draftIndex
+            let localId = ActiveExerciseAddSync.nextLocalExerciseId()
+            let exerciseName = parsedDraft.draft.exercise.localizedName(for: exerciseLanguageFromGlobalStorage())
+            let row = ExerciseRow(
+                id: localId,
+                exercise_id: parsedDraft.draft.exercise.id,
+                order_index: orderIndex,
+                superset_group_id: supersetGroupId,
+                superset_position: supersetGroupId == nil ? nil : draftIndex + 1,
+                notes: nil,
+                custom_name: nil,
+                target_sets: nil,
+                exercise_name: exerciseName
+            )
+            let localSets = parsedDraft.sets.enumerated().map { idx, set in
+                SetRow(
+                    id: -(localId * 1000 + idx + 1),
+                    workout_exercise_id: localId,
+                    set_number: 1,
+                    order_index: idx + 1,
+                    reps: set.reps,
+                    weight_kg: set.weightKg,
+                    rpe: set.rpe,
+                    rest_sec: set.restSec,
+                    weight_segments: set.weightSegments,
+                    configId: -(localId * 1000 + idx + 1),
+                    segmentsInRow: set.segmentsInRow
                 )
-                let localSets = parsedDraft.sets.enumerated().map { idx, set in
-                    SetRow(
-                        id: -(inserted.id * 1000 + idx + 1),
-                        workout_exercise_id: inserted.id,
-                        set_number: 1,
-                        order_index: idx + 1,
-                        reps: set.reps,
-                        weight_kg: set.weightKg,
-                        rpe: set.rpe,
-                        rest_sec: set.restSec,
-                        weight_segments: set.weightSegments,
-                        configId: -(inserted.id * 1000 + idx + 1),
-                        segmentsInRow: set.segmentsInRow
-                    )
-                }
-                localRows.append((row: row, sets: localSets))
             }
+            localRows.append((row: row, sets: localSets))
+            pendingItems.append(
+                ActiveExerciseAddSync.PendingExerciseAdd(
+                    localExerciseId: localId,
+                    workoutId: targetWorkoutId,
+                    lane: laneToken,
+                    catalogExerciseId: parsedDraft.draft.exercise.id,
+                    orderIndex: orderIndex,
+                    supersetGroupId: supersetGroupId,
+                    supersetPosition: supersetGroupId == nil ? nil : draftIndex + 1,
+                    exerciseName: exerciseName,
+                    sets: parsedDraft.sets.map { set in
+                        ActiveExerciseAddSync.PendingSet(
+                            reps: set.reps,
+                            weightKg: set.weightKg.map { NSDecimalNumber(decimal: $0).doubleValue },
+                            rpe: set.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+                            restSec: set.restSec,
+                            weightSegments: set.weightSegments
+                        )
+                    },
+                    enqueuedAt: Date()
+                )
+            )
+        }
 
-            withAnimation(.easeInOut(duration: 0.25)) {
-                appendActiveExercises(localRows, lane: lane)
-            }
-            persistProgramCacheSnapshot()
-            NotificationCenter.default.post(name: .workoutDidChange, object: targetWorkoutId)
-            resetActiveExerciseSetup()
-            showToast(supersetGroupId == nil ? "Added exercise" : "Added superserie")
-        } catch {
-            logActiveExerciseFailure(error, phase: "saveConfiguredActiveExercise")
-            if isActiveExerciseConnectivityFailure(error) {
-                showToast(activeExerciseConnectionUnstableMessage)
-                activeExerciseSetupError = activeExerciseConnectionUnstableMessage
-            } else {
-                activeExerciseSetupError = error.localizedDescription
-            }
+        withAnimation(.easeInOut(duration: 0.25)) {
+            appendActiveExercises(localRows, lane: lane)
+        }
+        persistProgramCacheSnapshot()
+        resetActiveExerciseSetup()
+        showToast(supersetGroupId == nil ? "Added exercise" : "Added superserie")
+
+        _ = ActiveExerciseAddSync.enqueue(pendingItems)
+        exerciseAddSyncBannerNonce += 1
+        if ActiveExerciseAddSync.isPending(targetWorkoutId) {
+            showToast(String(localized: "Saved locally — will sync when connection improves"))
         }
     }
 
@@ -4527,6 +4529,195 @@ struct ActiveStrengthWorkoutView: View {
         dragOffsetY = 0
     }
 
+    private func mergeSetsPreservingLocalOnly(
+        serverSets: [Int: [SetRow]],
+        existingSets: [Int: [SetRow]],
+        localExerciseIds: Set<Int>
+    ) -> [Int: [SetRow]] {
+        var merged = serverSets
+        for localId in localExerciseIds {
+            if let localSets = existingSets[localId] {
+                merged[localId] = localSets
+            }
+        }
+        return merged
+    }
+
+    private func laneToken(for lane: StrengthLaneKind) -> String {
+        switch lane {
+        case .host: return "host"
+        case .guest: return "guest"
+        case .guest2: return "guest2"
+        }
+    }
+
+    private func laneFromToken(_ token: String) -> StrengthLaneKind? {
+        switch token {
+        case "host": return .host
+        case "guest": return .guest
+        case "guest2": return .guest2
+        default: return nil
+        }
+    }
+
+    private func localOnlyExercises(lane: StrengthLaneKind) -> [ExerciseRow] {
+        orderedExercises(lane: lane).filter { $0.id < 0 }
+    }
+
+    private func mergeServerExercises(_ server: [ExerciseRow], localOnly: [ExerciseRow]) -> [ExerciseRow] {
+        let serverIds = Set(server.map(\.id))
+        let serverKeys = server.map { ($0.order_index, $0.exercise_id) }
+        let extras = localOnly.filter { local in
+            local.id < 0
+                && !serverIds.contains(local.id)
+                && !serverKeys.contains(where: { $0.0 == local.order_index && $0.1 == local.exercise_id })
+        }
+        return (server + extras).sorted { $0.order_index < $1.order_index }
+    }
+
+    private func hasUnsyncedLocalExercises() -> Bool {
+        if exercises.contains(where: { $0.id < 0 }) { return true }
+        if gExercises.contains(where: { $0.id < 0 }) { return true }
+        if g2Exercises.contains(where: { $0.id < 0 }) { return true }
+        var workoutIds = [workoutId]
+        if let gid = dualGuestWorkoutId { workoutIds.append(gid) }
+        if let g2id = dualGuest2WorkoutId { workoutIds.append(g2id) }
+        return workoutIds.contains { ActiveExerciseAddSync.isPending($0) }
+    }
+
+    @MainActor
+    private func remapExerciseId(tempId: Int, serverId: Int, lane: StrengthLaneKind) {
+        guard tempId != serverId else { return }
+
+        func remappedConfigId(_ configId: Int) -> Int {
+            guard configId < 0, tempId < 0 else { return configId }
+            let suffix = (-configId) % 1000
+            guard suffix > 0 else { return configId }
+            return -(serverId * 1000 + suffix)
+        }
+
+        func remapSets(_ sets: [SetRow]) -> [SetRow] {
+            sets.enumerated().map { idx, row in
+                let newConfigId = -(serverId * 1000 + idx + 1)
+                return SetRow(
+                    id: newConfigId,
+                    workout_exercise_id: serverId,
+                    set_number: row.set_number,
+                    order_index: row.order_index,
+                    reps: row.reps,
+                    weight_kg: row.weight_kg,
+                    rpe: row.rpe,
+                    rest_sec: row.rest_sec,
+                    weight_segments: row.weight_segments,
+                    configId: newConfigId,
+                    segmentsInRow: row.segmentsInRow
+                )
+            }
+        }
+
+        func remapPerformed(_ items: [PerformedSet]) -> [PerformedSet] {
+            items.map { item in
+                PerformedSet(
+                    reps: item.reps,
+                    weight_kg: item.weight_kg,
+                    rpe: item.rpe,
+                    rest_sec: item.rest_sec,
+                    configId: remappedConfigId(item.configId),
+                    segmentsInRow: item.segmentsInRow,
+                    weight_segments: item.weight_segments
+                )
+            }
+        }
+
+        func remapDict<T>(_ dict: inout [Int: T], transform: ((T) -> T)? = nil) {
+            guard let value = dict.removeValue(forKey: tempId) else { return }
+            dict[serverId] = transform?(value) ?? value
+        }
+
+        switch lane {
+        case .host:
+            guard let idx = exercises.firstIndex(where: { $0.id == tempId }) else { return }
+            let old = exercises[idx]
+            exercises[idx] = ExerciseRow(
+                id: serverId,
+                exercise_id: old.exercise_id,
+                order_index: old.order_index,
+                superset_group_id: old.superset_group_id,
+                superset_position: old.superset_position,
+                notes: old.notes,
+                custom_name: old.custom_name,
+                target_sets: old.target_sets,
+                exercise_name: old.exercise_name
+            )
+            if let sets = setsByExercise.removeValue(forKey: tempId) {
+                setsByExercise[serverId] = remapSets(sets)
+            }
+            remapDict(&performedSetsByExercise, transform: remapPerformed)
+            remapDict(&currentSetIndexByExercise)
+            remapDict(&visitedSetIndexByExercise)
+            remapDict(&remainingRestByExercise)
+            remapDict(&isRestingByExercise)
+            remapDict(&restEndDateByExercise)
+            remapDict(&restTotalPlannedByExercise)
+            remapDict(&editDraftsByExerciseId)
+            if navEmphasisLockExerciseIdHost == tempId { navEmphasisLockExerciseIdHost = serverId }
+            if editTargetExerciseId == tempId { editTargetExerciseId = serverId }
+        case .guest:
+            guard let idx = gExercises.firstIndex(where: { $0.id == tempId }) else { return }
+            let old = gExercises[idx]
+            gExercises[idx] = ExerciseRow(
+                id: serverId,
+                exercise_id: old.exercise_id,
+                order_index: old.order_index,
+                superset_group_id: old.superset_group_id,
+                superset_position: old.superset_position,
+                notes: old.notes,
+                custom_name: old.custom_name,
+                target_sets: old.target_sets,
+                exercise_name: old.exercise_name
+            )
+            if let sets = gSetsByExercise.removeValue(forKey: tempId) {
+                gSetsByExercise[serverId] = remapSets(sets)
+            }
+            remapDict(&gPerformedSetsByExercise, transform: remapPerformed)
+            remapDict(&gCurrentSetIndexByExercise)
+            remapDict(&gVisitedSetIndexByExercise)
+            remapDict(&gRemainingRestByExercise)
+            remapDict(&gIsRestingByExercise)
+            remapDict(&gRestEndDateByExercise)
+            remapDict(&gRestTotalPlannedByExercise)
+            if navEmphasisLockExerciseIdGuest == tempId { navEmphasisLockExerciseIdGuest = serverId }
+        case .guest2:
+            guard let idx = g2Exercises.firstIndex(where: { $0.id == tempId }) else { return }
+            let old = g2Exercises[idx]
+            g2Exercises[idx] = ExerciseRow(
+                id: serverId,
+                exercise_id: old.exercise_id,
+                order_index: old.order_index,
+                superset_group_id: old.superset_group_id,
+                superset_position: old.superset_position,
+                notes: old.notes,
+                custom_name: old.custom_name,
+                target_sets: old.target_sets,
+                exercise_name: old.exercise_name
+            )
+            if let sets = g2SetsByExercise.removeValue(forKey: tempId) {
+                g2SetsByExercise[serverId] = remapSets(sets)
+            }
+            remapDict(&g2PerformedSetsByExercise, transform: remapPerformed)
+            remapDict(&g2CurrentSetIndexByExercise)
+            remapDict(&g2VisitedSetIndexByExercise)
+            remapDict(&g2RemainingRestByExercise)
+            remapDict(&g2IsRestingByExercise)
+            remapDict(&g2RestEndDateByExercise)
+            remapDict(&g2RestTotalPlannedByExercise)
+            if navEmphasisLockExerciseIdGuest2 == tempId { navEmphasisLockExerciseIdGuest2 = serverId }
+        }
+
+        clampLaneExerciseIndex(lane)
+        persistProgramCacheSnapshot()
+    }
+
     private func requestDeleteActiveExercise(_ ex: ExerciseRow, lane: StrengthLaneKind) {
         guard canModifyActiveExercises else { return }
         deleteExerciseCandidate = ex
@@ -4538,6 +4729,17 @@ struct ActiveStrengthWorkoutView: View {
     private func deleteActiveExercise(_ ex: ExerciseRow, lane: StrengthLaneKind) async {
         guard !isPersistingActiveExerciseEdit else { return }
         guard let targetWorkoutId = workoutId(for: lane) else { return }
+
+        if ex.id < 0 {
+            ActiveExerciseAddSync.remove(localExerciseId: ex.id)
+            _ = removeActiveExerciseLocally(ex, lane: lane)
+            persistProgramCacheSnapshot()
+            deleteExerciseCandidate = nil
+            exerciseAddSyncBannerNonce += 1
+            showToast("Deleted exercise")
+            return
+        }
+
         isPersistingActiveExerciseEdit = true
         defer { isPersistingActiveExerciseEdit = false }
         let client = SupabaseManager.shared.client
@@ -5163,7 +5365,10 @@ struct ActiveStrengthWorkoutView: View {
     @ViewBuilder
     private func exerciseNavColumnView(lane: StrengthLaneKind, index idx: Int, showsRestOverlay: Bool = true) -> some View {
         let list = orderedExercises(lane: lane)
-        let ex = list[idx]
+        if !list.indices.contains(idx) {
+            EmptyView()
+        } else {
+            let ex = list[idx]
         let completed = isExerciseCompleted(ex, lane: lane)
         let isLast = idx == list.count - 1
         let workAnchorExerciseId: Int? = {
@@ -5212,6 +5417,7 @@ struct ActiveStrengthWorkoutView: View {
             onShortTap: { jumpToExercise(lane: lane, index: idx) },
             onLongPress: { navExercisePopoverIndex = popId }
         )
+        }
     }
 
     private func scrollExerciseStrip(proxy: ScrollViewProxy, lane: StrengthLaneKind, to index: Int, animated: Bool) {
@@ -5914,6 +6120,24 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     private func saveAndFinishWorkout() async {
+        await ActiveExerciseAddSync.syncPending(forWorkoutId: workoutId)
+        let guestWid = await MainActor.run { dualGuestWorkoutId }
+        let guest2Wid = await MainActor.run { dualGuest2WorkoutId }
+        if let guestWid {
+            await ActiveExerciseAddSync.syncPending(forWorkoutId: guestWid)
+        }
+        if let guest2Wid {
+            await ActiveExerciseAddSync.syncPending(forWorkoutId: guest2Wid)
+        }
+
+        let stillUnsynced = await MainActor.run { hasUnsyncedLocalExercises() }
+        if stillUnsynced {
+            await MainActor.run {
+                showToast(String(localized: "Still syncing exercises — finish will retry when online"))
+            }
+            return
+        }
+
         var exList: [ExerciseRow] = []
         var performedMap: [Int: [PerformedSet]] = [:]
         var hostSetsMap: [Int: [SetRow]] = [:]
@@ -6291,7 +6515,7 @@ struct ActiveStrengthWorkoutView: View {
         if applyRest {
             let trimmedRest = draft.restText.trimmingCharacters(in: .whitespacesAndNewlines)
             newRestSecRaw = Int(trimmedRest)
-            newRestSec = (newRestSecRaw != nil) ? max(0, newRestSecRaw!) : nil
+            newRestSec = newRestSecRaw.map { max(0, $0) }
         } else {
             newRestSecRaw = nil
             newRestSec = nil
@@ -6313,7 +6537,7 @@ struct ActiveStrengthWorkoutView: View {
                 workout_exercise_id: old.workout_exercise_id,
                 set_number: 1,
                 reps: draft.dropSegments.first?.reps ?? old.reps,
-                weight_kg: draft.dropSegments.first != nil ? Decimal(draft.dropSegments.first!.weight_kg) : old.weight_kg,
+                weight_kg: draft.dropSegments.first.map { Decimal($0.weight_kg) } ?? old.weight_kg,
                 rpe: rpeOut,
                 rest_sec: restOut,
                 weight_segments: draft.dropSegments,
@@ -6696,6 +6920,37 @@ struct ActiveStrengthWorkoutView: View {
         }
     }
 
+    private var exerciseAddSyncBannerVisible: Bool {
+        _ = exerciseAddSyncBannerNonce
+        var workoutIds = [workoutId]
+        if let gid = dualGuestWorkoutId { workoutIds.append(gid) }
+        if let g2id = dualGuest2WorkoutId { workoutIds.append(g2id) }
+        return workoutIds.contains { wid in
+            let status = ActiveExerciseAddSync.status(for: wid)
+            switch status {
+            case .pending, .syncing, .willRetry:
+                return true
+            default:
+                return ActiveExerciseAddSync.hasPending(forWorkoutId: wid)
+            }
+        }
+    }
+
+    private var exerciseAddSyncBannerText: String {
+        _ = exerciseAddSyncBannerNonce
+        var workoutIds = [workoutId]
+        if let gid = dualGuestWorkoutId { workoutIds.append(gid) }
+        if let g2id = dualGuest2WorkoutId { workoutIds.append(g2id) }
+        if workoutIds.contains(where: { ActiveExerciseAddSync.status(for: $0) == .willRetry }) {
+            return String(localized: "Exercises saved locally — will sync when online")
+        }
+        return String(localized: "Syncing exercises…")
+    }
+
+    private var exerciseAddSyncBannerTopPadding: CGFloat {
+        startSyncBannerVisible ? 44 : 8
+    }
+
     @MainActor
     private func hydrateFromProgramCache() -> Bool {
         guard let entry = WorkoutProgramCache.entry(for: workoutId), !entry.exercises.isEmpty else {
@@ -6736,6 +6991,10 @@ struct ActiveStrengthWorkoutView: View {
     }
 
     private func load() async {
+        let generation = await MainActor.run {
+            loadGeneration += 1
+            return loadGeneration
+        }
         let hydratedFromCache = await MainActor.run { hydrateFromProgramCache() }
         if hydratedFromCache {
             await MainActor.run { loading = false }
@@ -6775,28 +7034,69 @@ struct ActiveStrengthWorkoutView: View {
             }
 
             await MainActor.run {
-                self.exercises = hostEx
-                self.setsByExercise = hostSets
-                self.gExercises = guestEx
-                self.gSetsByExercise = guestSets
+                guard generation == loadGeneration else { return }
+
+                let hostLocal = localOnlyExercises(lane: .host)
+                let guestLocal = localOnlyExercises(lane: .guest)
+                let guest2Local = localOnlyExercises(lane: .guest2)
+                let hadHostLocal = !hostLocal.isEmpty
+                let hadGuestLocal = !guestLocal.isEmpty
+                let hadGuest2Local = !guest2Local.isEmpty
+                let priorHostIndex = currentExerciseIndex
+                let priorGuestIndex = guestCurrentExerciseIndex
+                let priorGuest2Index = g2CurrentExerciseIndex
+
+                let mergedHost = mergeServerExercises(hostEx, localOnly: hostLocal)
+                self.exercises = mergedHost
+                self.setsByExercise = mergeSetsPreservingLocalOnly(
+                    serverSets: hostSets,
+                    existingSets: setsByExercise,
+                    localExerciseIds: Set(hostLocal.map(\.id))
+                )
+                self.gExercises = mergeServerExercises(guestEx, localOnly: guestLocal)
+                self.gSetsByExercise = mergeSetsPreservingLocalOnly(
+                    serverSets: guestSets,
+                    existingSets: gSetsByExercise,
+                    localExerciseIds: Set(guestLocal.map(\.id))
+                )
                 self.guestDataError = guestErr
-                self.g2Exercises = guest2Ex
-                self.g2SetsByExercise = guest2Sets
+                self.g2Exercises = mergeServerExercises(guest2Ex, localOnly: guest2Local)
+                self.g2SetsByExercise = mergeSetsPreservingLocalOnly(
+                    serverSets: guest2Sets,
+                    existingSets: g2SetsByExercise,
+                    localExerciseIds: Set(guest2Local.map(\.id))
+                )
                 self.guest2DataError = guest2Err
 
-                self.currentExerciseIndex = 0
-                self.pagerDisplayIndexHost = 0
-                self.pagerDisplayIndexGuest = 0
-                self.pagerDisplayIndexGuest2 = 0
-                self.guestCurrentExerciseIndex = 0
-                self.g2CurrentExerciseIndex = 0
-                self.currentSetIndex = 0
-                self.gCurrentSetIndex = 0
-                self.g2CurrentSetIndex = 0
+                if !hadHostLocal {
+                    self.currentExerciseIndex = 0
+                    self.pagerDisplayIndexHost = 0
+                } else {
+                    self.currentExerciseIndex = min(max(0, priorHostIndex), max(0, mergedHost.count - 1))
+                    self.pagerDisplayIndexHost = pagerAnchorExerciseIndex(for: currentExerciseIndex, lane: .host)
+                }
+                if !hadGuestLocal {
+                    self.pagerDisplayIndexGuest = 0
+                    self.guestCurrentExerciseIndex = 0
+                } else {
+                    self.guestCurrentExerciseIndex = min(max(0, priorGuestIndex), max(0, orderedGuestExercises.count - 1))
+                    self.pagerDisplayIndexGuest = pagerAnchorExerciseIndex(for: guestCurrentExerciseIndex, lane: .guest)
+                }
+                if !hadGuest2Local {
+                    self.pagerDisplayIndexGuest2 = 0
+                    self.g2CurrentExerciseIndex = 0
+                } else {
+                    self.g2CurrentExerciseIndex = min(max(0, priorGuest2Index), max(0, orderedGuest2Exercises.count - 1))
+                    self.pagerDisplayIndexGuest2 = pagerAnchorExerciseIndex(for: g2CurrentExerciseIndex, lane: .guest2)
+                }
 
                 self.navEmphasisLockExerciseIdHost = nil
                 self.navEmphasisLockExerciseIdGuest = nil
                 self.navEmphasisLockExerciseIdGuest2 = nil
+
+                self.currentSetIndex = 0
+                self.gCurrentSetIndex = 0
+                self.g2CurrentSetIndex = 0
 
                 self.isResting = false
                 self.remainingRest = 0
@@ -6819,6 +7119,7 @@ struct ActiveStrengthWorkoutView: View {
         } catch let urlError as URLError where urlError.code == .cancelled {
         } catch {
             await MainActor.run {
+                guard generation == loadGeneration else { return }
                 if exercises.isEmpty {
                     self.error = error.localizedDescription
                 }

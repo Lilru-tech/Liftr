@@ -397,11 +397,11 @@ class ActiveCardioWorkoutViewModel(
                     summary?.let { captured ->
                         TerritoryCaptureClient.storeCaptureReferenceCoordinate(app, captured)
                     }
-                    TerritoryCaptureClient.captureMessage(summary ?: return@let)?.let { message ->
-                        if (summary?.ok == true) {
-                            AppSnackbar.showSuccess(message)
-                        } else {
-                            AppSnackbar.showError(message)
+                    summary?.let { s ->
+                        if (s.ok != true) {
+                            TerritoryCaptureClient.captureMessage(s)?.let { message ->
+                                AppSnackbar.showError(message)
+                            }
                         }
                     }
                 }

@@ -2202,6 +2202,30 @@ struct ProfileView: View {
                                 .stroke(.white.opacity(0.18))
                         )
 
+                    NavigationLink {
+                        ChangePasswordView()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "key")
+                            Text("Change password")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                        }
+                        .padding(12)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+
                     Button(role: .destructive) { showDeleteConfirm = true } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "trash")
