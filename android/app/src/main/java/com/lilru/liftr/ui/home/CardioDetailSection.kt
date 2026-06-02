@@ -139,7 +139,7 @@ fun CardioDetailSection(
         if (detail.distanceKm != null) {
             CardioInfoRow(
                 stringResource(R.string.home_detail_cardio_label_distance),
-                String.format(Locale.US, "%.2f km", detail.distanceKm)
+                formatCardioDistance(detail.distanceKm, act)
             )
         }
         if (detail.durationSec != null && detail.durationSec > 0) {
@@ -151,7 +151,7 @@ fun CardioDetailSection(
         if (detail.avgPaceSecPerKm != null && detail.avgPaceSecPerKm > 0) {
             CardioInfoRow(
                 stringResource(R.string.home_detail_cardio_label_avg_pace),
-                formatPaceMinSecPerKm(detail.avgPaceSecPerKm)
+                formatCardioPace(detail.avgPaceSecPerKm, act)
             )
         }
         val splits = ex?.kmSplitPaceSec

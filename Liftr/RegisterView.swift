@@ -240,14 +240,29 @@ struct RegisterView: View {
             let date_of_birth: String?
             let height_cm: Double?
             let weight_kg: Double?
+            let base_calories_target: Int
+            let base_calories_target_is_manual: Bool
         }
+        let dob = includeDOB ? dateOfBirth : nil
+        let heightCm = parseDouble(height)
+        let weightKg = parseDouble(weight)
+        let metabolicTarget = NutritionMetabolism.resolveDisplayKcal(
+            sex: sex.rawValue,
+            birthDate: dob,
+            heightCm: heightCm,
+            weightKg: weightKg,
+            storedTarget: nil,
+            isManual: false
+        )
         let payload = ProfileUpsert(
             user_id: userId,
             username: cleanUsername.isEmpty ? nil : cleanUsername,
             sex: sex.rawValue,
             date_of_birth: includeDOB ? DateFormatter.yyyyMMdd.string(from: dateOfBirth) : nil,
-            height_cm: parseDouble(height),
-            weight_kg: parseDouble(weight)
+            height_cm: heightCm,
+            weight_kg: weightKg,
+            base_calories_target: metabolicTarget,
+            base_calories_target_is_manual: false
         )
         
         do {

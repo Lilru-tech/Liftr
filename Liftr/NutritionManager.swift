@@ -44,7 +44,7 @@ struct NutritionProfilePer100g: Hashable {
 }
 
 enum NutritionDisplayTargets {
-    static let caloriesKcal = 2000.0
+    static let caloriesKcal = Double(NutritionMetabolism.fallbackKcalNeutral)
     static let proteinG = 150.0
     static let carbsG = 250.0
     static let fatG = 70.0
@@ -236,10 +236,12 @@ struct DailyNutritionRecommendation: Decodable {
     }
 }
 
-struct NutritionDiaryItemUI: Identifiable {
+struct NutritionDiaryItemUI: Identifiable, Equatable {
     let id: UUID
     let mealSlot: String
     let name: String
+    let ingredientId: UUID?
+    let recipeId: UUID?
     let quantityG: Double
     let caloriesKcal: Double
     let isRecipe: Bool
@@ -298,6 +300,13 @@ private struct NutritionMonthBalanceParams: Encodable {
 struct NutritionMonthDayBalance: Equatable {
     let mealLogCount: Int
     let remainingCalories: Double
+    let plannedMealCount: Int
+
+    init(mealLogCount: Int, remainingCalories: Double, plannedMealCount: Int = 0) {
+        self.mealLogCount = mealLogCount
+        self.remainingCalories = remainingCalories
+        self.plannedMealCount = plannedMealCount
+    }
 }
 
 private struct SmartNutritionRecommendationParams: Encodable {
@@ -333,8 +342,25 @@ private struct NutritionIngredientInsert: Encodable {
     let is_public: Bool
 }
 
+private struct NutritionIngredientUpdate: Encodable {
+    let name: String
+    let calories_per_100g: Double
+    let protein_per_100g: Double
+    let carbs_per_100g: Double
+    let fat_per_100g: Double
+    let saturated_fat_per_100g: Double
+    let sugars_per_100g: Double
+    let fiber_per_100g: Double
+    let sodium_mg_per_100g: Double
+}
+
 private struct NutritionRecipeInsert: Encodable {
     let user_id: UUID
+    let name: String
+    let description: String?
+}
+
+private struct NutritionRecipeUpdate: Encodable {
     let name: String
     let description: String?
 }
@@ -463,6 +489,119 @@ enum NutritionManager {
             fiber: fiber * scale,
             sodiumMg: sodiumMg * scale
         )
+    }
+
+    static func totalsFromPer100g(_ profile: NutritionProfilePer100g, grams: Double) -> NutritionProfilePer100g {
+        let g = min(2000, max(0, grams))
+        let scale = g / 100.0
+        return NutritionProfilePer100g(
+            calories: profile.calories * scale,
+            protein: profile.protein * scale,
+            carbs: profile.carbs * scale,
+            fat: profile.fat * scale,
+            saturatedFat: profile.saturatedFat * scale,
+            sugars: profile.sugars * scale,
+            fiber: profile.fiber * scale,
+            sodiumMg: profile.sodiumMg * scale
+        )
+    }
+
+    static func sumProfiles(_ profiles: [NutritionProfilePer100g]) -> NutritionProfilePer100g {
+        profiles.reduce(.zero) { acc, p in
+            NutritionProfilePer100g(
+                calories: acc.calories + p.calories,
+                protein: acc.protein + p.protein,
+                carbs: acc.carbs + p.carbs,
+                fat: acc.fat + p.fat,
+                saturatedFat: acc.saturatedFat + p.saturatedFat,
+                sugars: acc.sugars + p.sugars,
+                fiber: acc.fiber + p.fiber,
+                sodiumMg: acc.sodiumMg + p.sodiumMg
+            )
+        }
+    }
+
+    static func fetchIngredientById(_ ingredientId: UUID) async throws -> NutritionIngredientRow {
+        let res = try await SupabaseManager.shared.client
+            .from("nutrition_ingredients")
+            .select(ingredientSelectColumns)
+            .eq("id", value: ingredientId.uuidString)
+            .single()
+            .execute()
+        return try JSONDecoder.supabase().decode(NutritionIngredientRow.self, from: res.data)
+    }
+
+    static func fetchRecipeProfilePer100g(recipeId: UUID) async throws -> NutritionProfilePer100g {
+        let lines = try await fetchRecipeLines(recipeId: recipeId)
+        return rollupProfilePer100g(lines: lines)
+    }
+
+    static func fetchMealSlotTotals(items: [NutritionDiaryItemUI]) async throws -> (grams: Double, totals: NutritionProfilePer100g) {
+        let grams = items.reduce(0.0) { $0 + $1.quantityG }
+        guard !items.isEmpty else { return (0, .zero) }
+
+        let ingredientIds = Array(Set(items.compactMap(\.ingredientId)))
+        let recipeIds = Array(Set(items.compactMap(\.recipeId)))
+
+        var ingredientsById: [UUID: NutritionIngredientRow] = [:]
+        if !ingredientIds.isEmpty {
+            let ingRes = try await SupabaseManager.shared.client
+                .from("nutrition_ingredients")
+                .select(ingredientSelectColumns)
+                .in("id", values: ingredientIds.map(\.uuidString))
+                .execute()
+            let rows = try JSONDecoder.supabase().decode([NutritionIngredientRow].self, from: ingRes.data)
+            ingredientsById = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        }
+
+        var recipeDensity: [UUID: NutritionProfilePer100g] = [:]
+        if !recipeIds.isEmpty {
+            let joinRes = try await SupabaseManager.shared.client
+                .from("nutrition_recipe_ingredients")
+                .select("id,recipe_id,ingredient_id,weight_g")
+                .in("recipe_id", values: recipeIds.map(\.uuidString))
+                .execute()
+            let joins = try JSONDecoder.supabase().decode([NutritionRecipeIngredientRow].self, from: joinRes.data)
+
+            let joinIngredientIds = Array(Set(joins.map(\.ingredient_id)))
+            if !joinIngredientIds.isEmpty {
+                let missing = joinIngredientIds.filter { ingredientsById[$0] == nil }
+                if !missing.isEmpty {
+                    let extraRes = try await SupabaseManager.shared.client
+                        .from("nutrition_ingredients")
+                        .select(ingredientSelectColumns)
+                        .in("id", values: missing.map(\.uuidString))
+                        .execute()
+                    let extra = try JSONDecoder.supabase().decode([NutritionIngredientRow].self, from: extraRes.data)
+                    for row in extra { ingredientsById[row.id] = row }
+                }
+            }
+
+            let joinsByRecipe = Dictionary(grouping: joins, by: \.recipe_id)
+            for (recipeId, recipeJoins) in joinsByRecipe {
+                let lines: [NutritionRecipeLineDraft] = recipeJoins.compactMap { join in
+                    guard let ing = ingredientsById[join.ingredient_id] else { return nil }
+                    return NutritionRecipeLineDraft(ingredient: ing, weightG: join.weight_g)
+                }
+                guard !lines.isEmpty else { continue }
+                recipeDensity[recipeId] = rollupProfilePer100g(lines: lines)
+            }
+        }
+
+        let totals = items.compactMap { item -> NutritionProfilePer100g? in
+            let per100: NutritionProfilePer100g?
+            if let ingredientId = item.ingredientId, let ing = ingredientsById[ingredientId] {
+                per100 = ing.profilePer100g
+            } else if let recipeId = item.recipeId {
+                per100 = recipeDensity[recipeId]
+            } else {
+                per100 = nil
+            }
+            guard let per100 else { return nil }
+            return totalsFromPer100g(per100, grams: item.quantityG)
+        }
+
+        return (grams, sumProfiles(totals))
     }
 
     static func dateOnlyString(_ d: Date) -> String {
@@ -669,6 +808,8 @@ enum NutritionManager {
                     id: log.id,
                     mealSlot: log.meal_slot,
                     name: ing.name,
+                    ingredientId: ingredientId,
+                    recipeId: nil,
                     quantityG: log.quantity_g,
                     caloriesKcal: kcal,
                     isRecipe: false
@@ -681,6 +822,8 @@ enum NutritionManager {
                     id: log.id,
                     mealSlot: log.meal_slot,
                     name: recipe.name,
+                    ingredientId: nil,
+                    recipeId: recipeId,
                     quantityG: log.quantity_g,
                     caloriesKcal: kcal,
                     isRecipe: true
@@ -690,6 +833,8 @@ enum NutritionManager {
                 id: log.id,
                 mealSlot: log.meal_slot,
                 name: "Unknown item",
+                ingredientId: nil,
+                recipeId: nil,
                 quantityG: log.quantity_g,
                 caloriesKcal: 0,
                 isRecipe: false
@@ -961,10 +1106,34 @@ enum NutritionManager {
             let key = cal.startOfDay(for: d)
             map[key] = NutritionMonthDayBalance(
                 mealLogCount: row.meal_log_count,
-                remainingCalories: row.remaining_calories
+                remainingCalories: row.remaining_calories,
+                plannedMealCount: 0
             )
         }
         return map
+    }
+
+    static func mergeMonthBalanceWithPlanned(
+        _ balance: [Date: NutritionMonthDayBalance],
+        plannedCounts: [Date: Int]
+    ) -> [Date: NutritionMonthDayBalance] {
+        var result = balance
+        for (day, count) in plannedCounts where count > 0 {
+            if let existing = result[day] {
+                result[day] = NutritionMonthDayBalance(
+                    mealLogCount: existing.mealLogCount,
+                    remainingCalories: existing.remainingCalories,
+                    plannedMealCount: count
+                )
+            } else {
+                result[day] = NutritionMonthDayBalance(
+                    mealLogCount: 0,
+                    remainingCalories: 0,
+                    plannedMealCount: count
+                )
+            }
+        }
+        return result
     }
 
     static func createIngredient(
@@ -992,6 +1161,40 @@ enum NutritionManager {
             .single()
             .execute()
         return try JSONDecoder.supabase().decode(NutritionIngredientRow.self, from: res.data)
+    }
+
+    static func updateIngredient(
+        ingredientId: UUID,
+        name: String,
+        profile: NutritionProfilePer100g
+    ) async throws -> NutritionIngredientRow {
+        let payload = NutritionIngredientUpdate(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            calories_per_100g: profile.calories,
+            protein_per_100g: profile.protein,
+            carbs_per_100g: profile.carbs,
+            fat_per_100g: profile.fat,
+            saturated_fat_per_100g: profile.saturatedFat,
+            sugars_per_100g: profile.sugars,
+            fiber_per_100g: profile.fiber,
+            sodium_mg_per_100g: profile.sodiumMg
+        )
+        let res = try await SupabaseManager.shared.client
+            .from("nutrition_ingredients")
+            .update(payload)
+            .eq("id", value: ingredientId.uuidString)
+            .select(ingredientSelectColumns)
+            .single()
+            .execute()
+        return try JSONDecoder.supabase().decode(NutritionIngredientRow.self, from: res.data)
+    }
+
+    static func deleteIngredient(ingredientId: UUID) async throws {
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_ingredients")
+            .delete()
+            .eq("id", value: ingredientId.uuidString)
+            .execute()
     }
 
     static func createRecipe(
@@ -1028,6 +1231,55 @@ enum NutritionManager {
             .insert(joinPayloads)
             .execute()
         return recipe
+    }
+
+    static func updateRecipe(
+        recipeId: UUID,
+        name: String,
+        description: String?,
+        lines: [NutritionRecipeLineDraft]
+    ) async throws -> NutritionRecipeRow {
+        guard !lines.isEmpty else {
+            throw NSError(domain: "Nutrition", code: 1, userInfo: [NSLocalizedDescriptionKey: "Add at least one ingredient to the recipe."])
+        }
+        let trimmedDesc = description?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let recipePayload = NutritionRecipeUpdate(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            description: (trimmedDesc?.isEmpty == false) ? trimmedDesc : nil
+        )
+        let recipeRes = try await SupabaseManager.shared.client
+            .from("nutrition_recipes")
+            .update(recipePayload)
+            .eq("id", value: recipeId.uuidString)
+            .select(recipeSelectColumns)
+            .single()
+            .execute()
+        let recipe = try JSONDecoder.supabase().decode(NutritionRecipeRow.self, from: recipeRes.data)
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_recipe_ingredients")
+            .delete()
+            .eq("recipe_id", value: recipeId.uuidString)
+            .execute()
+        let joinPayloads = lines.map {
+            NutritionRecipeIngredientInsert(
+                recipe_id: recipeId,
+                ingredient_id: $0.ingredient.id,
+                weight_g: $0.weightG
+            )
+        }
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_recipe_ingredients")
+            .insert(joinPayloads)
+            .execute()
+        return recipe
+    }
+
+    static func deleteRecipe(recipeId: UUID) async throws {
+        _ = try await SupabaseManager.shared.client
+            .from("nutrition_recipes")
+            .delete()
+            .eq("id", value: recipeId.uuidString)
+            .execute()
     }
 
     static func monthTitle(for month: Date) -> String {

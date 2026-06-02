@@ -21,7 +21,8 @@ final class HealthKitCardioSyncService {
     private let store = HKHealthStore()
     private let syncEnabledKey = "cardioHealthSyncEnabled"
     private let lastSyncAtKey = "cardioHealthLastSyncAt"
-    private var observerQuery: HKObserverQuery?
+    private var workoutObserverQuery: HKObserverQuery?
+    private var routeObserverQuery: HKObserverQuery?
 
     var isHealthDataAvailable: Bool {
         HKHealthStore.isHealthDataAvailable()
@@ -50,11 +51,16 @@ final class HealthKitCardioSyncService {
 
     func disableBackgroundSync() {
         isSyncEnabled = false
-        if let observerQuery {
-            store.stop(observerQuery)
-            self.observerQuery = nil
+        if let workoutObserverQuery {
+            store.stop(workoutObserverQuery)
+            self.workoutObserverQuery = nil
+        }
+        if let routeObserverQuery {
+            store.stop(routeObserverQuery)
+            self.routeObserverQuery = nil
         }
         store.disableBackgroundDelivery(for: HKObjectType.workoutType()) { _, _ in }
+        store.disableBackgroundDelivery(for: HKSeriesType.workoutRoute()) { _, _ in }
     }
 
     @discardableResult
@@ -82,29 +88,40 @@ final class HealthKitCardioSyncService {
 
     func handleAppForegroundIfNeeded() async {
         guard isSyncEnabled else { return }
-        startObserverIfNeeded()
+        startObserversIfNeeded()
         _ = await syncRecentWorkouts()
     }
 
     private func activateCardioSyncFromHealthKit() async -> HealthKitImportSummary {
         isSyncEnabled = true
-        startObserverIfNeeded()
+        startObserversIfNeeded()
         let from = Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date()
         return await syncWorkouts(from: from, to: Date())
     }
 
     #if !targetEnvironment(simulator)
     private func enableBackgroundDelivery() async throws {
+        try await Self.enableBackgroundDelivery(for: store)
+    }
+
+    private static func enableBackgroundDelivery(for healthStore: HKHealthStore) async throws {
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            store.enableBackgroundDelivery(
+            healthStore.enableBackgroundDelivery(
                 for: HKObjectType.workoutType(),
                 frequency: .immediate
-            ) { ok, error in
-                if let error {
-                    cont.resume(throwing: Self.mapBackgroundDeliveryError(error))
-                } else if !ok {
+            ) { ok, deliveryError in
+                if let deliveryError {
+                    cont.resume(throwing: mapBackgroundDeliveryError(deliveryError))
+                    return
+                }
+                if !ok {
                     cont.resume(throwing: HealthKitCardioSyncError.backgroundDeliveryNotAuthorized)
-                } else {
+                    return
+                }
+                healthStore.enableBackgroundDelivery(
+                    for: HKSeriesType.workoutRoute(),
+                    frequency: .immediate
+                ) { _, _ in
                     cont.resume()
                 }
             }
@@ -112,8 +129,13 @@ final class HealthKitCardioSyncService {
     }
     #endif
 
-    private func startObserverIfNeeded() {
-        guard observerQuery == nil else { return }
+    private func startObserversIfNeeded() {
+        startWorkoutObserverIfNeeded()
+        startRouteObserverIfNeeded()
+    }
+
+    private func startWorkoutObserverIfNeeded() {
+        guard workoutObserverQuery == nil else { return }
         let workoutType = HKObjectType.workoutType()
         let query = HKObserverQuery(sampleType: workoutType, predicate: nil) { [weak self] _, completion, error in
             defer { completion() }
@@ -122,8 +144,31 @@ final class HealthKitCardioSyncService {
                 _ = await self?.syncRecentWorkouts()
             }
         }
-        observerQuery = query
+        workoutObserverQuery = query
         store.execute(query)
+    }
+
+    private func startRouteObserverIfNeeded() {
+        guard routeObserverQuery == nil else { return }
+        let routeType = HKSeriesType.workoutRoute()
+        let query = HKObserverQuery(sampleType: routeType, predicate: nil) { [weak self] _, completion, error in
+            defer { completion() }
+            guard error == nil else { return }
+            Task {
+                await self?.backfillRoutesIfNeeded()
+            }
+        }
+        routeObserverQuery = query
+        store.execute(query)
+    }
+
+    private func backfillRoutesIfNeeded() async {
+        guard isSyncEnabled else { return }
+        guard let userId = SupabaseManager.shared.client.auth.currentUser?.id else { return }
+        _ = await HealthKitCardioImportService.shared.backfillMissingHealthKitRoutes(
+            userId: userId,
+            mode: .automatic
+        )
     }
 
     private static func mapBackgroundDeliveryError(_ error: Error) -> Error {

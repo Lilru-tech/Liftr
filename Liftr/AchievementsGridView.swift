@@ -169,9 +169,10 @@ struct AchievementsGridView: View {
     let viewedUsername: String
     var externalReloadToken: UUID? = nil
     var openAchievementCode: String? = nil
+    var openAchievementId: Int? = nil
 
     @EnvironmentObject private var app: AppState
-    @State private var didApplyOpenCode = false
+    @State private var didApplyOpenTarget = false
     @State private var shareAchievementToken: ShareAchievementChatToken?
 
     enum LockFilter: String, CaseIterable, Identifiable {
@@ -235,7 +236,7 @@ struct AchievementsGridView: View {
                 .gradientBG()
         }
         .task {
-            if openAchievementCode != nil {
+            if openAchievementCode != nil || openAchievementId != nil {
                 lockFilter = .all
                 category = .all
                 search = ""
@@ -250,11 +251,19 @@ struct AchievementsGridView: View {
         .onChange(of: lockFilter) { _, _ in }
         .onChange(of: category) { _, _ in }
         .onChange(of: items) { _, newItems in
-            guard let code = openAchievementCode, !didApplyOpenCode, !newItems.isEmpty else { return }
-            if let match = newItems.first(where: { $0.code == code }) {
-                didApplyOpenCode = true
-                selected = match
-            }
+            guard !didApplyOpenTarget, !newItems.isEmpty else { return }
+            let match: AchievementRow? = {
+                if let code = openAchievementCode {
+                    return newItems.first(where: { $0.code == code })
+                }
+                if let id = openAchievementId {
+                    return newItems.first(where: { $0.achievement_id == id })
+                }
+                return nil
+            }()
+            guard let match else { return }
+            didApplyOpenTarget = true
+            selected = match
         }
     }
 

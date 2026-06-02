@@ -111,21 +111,29 @@ fun ActiveCardioWorkoutScreen(
         if (ui.hasCardioSession && !ui.loading) {
             val sub = if (ui.activityLabel.isNotBlank()) ui.activityLabel
             else ctx.getString(R.string.active_cardio_title)
-            val km = parseDisplayKm(ui.distanceText)
+            val km = parseDisplayKm(ui.distanceText, ui.usesSwimUnits)
             val timerSec = primaryCardioDisplaySec(
                 mode = ui.timerMode,
                 target = ui.targetDurationSec,
                 elapsed = ui.elapsedSec
             )
             val elapsed = formatElapsedCardio(timerSec)
-            val pace = if (km != null && km >= 0.01 && ui.elapsedSec > 0) {
+            val pace = if (km != null && km >= 0.001 && ui.elapsedSec > 0) {
                 val secPerKm = (ui.elapsedSec / km).roundToInt()
-                formatElapsedCardio(secPerKm) + " /km"
+                if (ui.usesSwimUnits) {
+                    com.lilru.liftr.ui.home.formatSwimPaceMinSecPer100m(secPerKm)
+                } else {
+                    formatElapsedCardio(secPerKm) + " /km"
+                }
             } else {
                 "—"
             }
             val kmd = when {
+                km != null && ui.usesSwimUnits ->
+                    com.lilru.liftr.ui.home.formatSwimDistanceKm(km)
                 km != null -> String.format(java.util.Locale.US, "%.2f km", km)
+                ui.distanceText.isNotBlank() && ui.usesSwimUnits ->
+                    ui.distanceText.trim() + " m"
                 ui.distanceText.isNotBlank() -> ui.distanceText.trim() + " km"
                 else -> "—"
             }
@@ -211,10 +219,14 @@ fun ActiveCardioWorkoutScreen(
                     elapsed = ui.elapsedSec
                 )
                 val mainFormatted = formatElapsedCardio(mainSec)
-                val km = parseDisplayKm(ui.distanceText)
-                val paceText = if (km != null && km >= 0.01 && ui.elapsedSec > 0) {
+                val km = parseDisplayKm(ui.distanceText, ui.usesSwimUnits)
+                val paceText = if (km != null && km >= 0.001 && ui.elapsedSec > 0) {
                     val secPerKm = (ui.elapsedSec / km).roundToInt()
-                    formatElapsedCardio(secPerKm) + " /km"
+                    if (ui.usesSwimUnits) {
+                        com.lilru.liftr.ui.home.formatSwimPaceMinSecPer100m(secPerKm)
+                    } else {
+                        formatElapsedCardio(secPerKm) + " /km"
+                    }
                 } else {
                     "—"
                 }
@@ -244,10 +256,17 @@ fun ActiveCardioWorkoutScreen(
                     ) {
                         ui.targetDistanceKm?.let { d ->
                             Text(
-                                stringResource(
-                                    R.string.active_cardio_target_km,
-                                    d.toFloat()
-                                ),
+                                if (ui.usesSwimUnits) {
+                                    stringResource(
+                                        R.string.active_cardio_target_m,
+                                        (d * 1000.0).roundToInt()
+                                    )
+                                } else {
+                                    stringResource(
+                                        R.string.active_cardio_target_km,
+                                        d.toFloat()
+                                    )
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -437,7 +456,17 @@ fun ActiveCardioWorkoutScreen(
                     OutlinedTextField(
                         value = ui.distanceText,
                         onValueChange = vm::setDistanceText,
-                        label = { Text(stringResource(R.string.active_cardio_distance_km)) },
+                        label = {
+                            Text(
+                                stringResource(
+                                    if (ui.usesSwimUnits) {
+                                        R.string.active_cardio_distance_m
+                                    } else {
+                                        R.string.active_cardio_distance_km
+                                    }
+                                )
+                            )
+                        },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -510,8 +539,12 @@ private fun formatElapsedCardio(totalSec: Int): String {
     }
 }
 
-private fun parseDisplayKm(text: String): Double? {
+private fun parseDisplayKm(text: String, swimUnits: Boolean): Double? {
     val trimmed = text.trim().replace(',', '.')
     if (trimmed.isEmpty()) return null
-    return trimmed.toDoubleOrNull()
+    return if (swimUnits) {
+        com.lilru.liftr.ui.home.distanceKmFromMetersText(trimmed)
+    } else {
+        trimmed.toDoubleOrNull()
+    }
 }

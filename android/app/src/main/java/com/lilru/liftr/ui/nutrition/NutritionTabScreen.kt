@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,9 +24,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Star
@@ -36,6 +40,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,6 +52,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
@@ -80,16 +87,27 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.domain.NutritionMealPlanInviteUi
+import com.lilru.liftr.domain.NutritionMealPlanItemUi
 import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.ui.chat.ShareIngredientToChatSheetContent
+import com.lilru.liftr.ui.chat.ShareRecipeToChatSheetContent
+import com.lilru.liftr.ui.chat.SharedIngredientSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeIngredientSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeProfilePer100gSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeSnapshot
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradientOpaque
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import kotlin.math.roundToInt
@@ -104,7 +122,7 @@ fun NutritionTabScreen(
     val vm: NutritionViewModel = viewModel(factory = NutritionViewModelFactory(supabase))
     val ui by vm.uiState.collectAsState()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { newValue ->
-        if (newValue == SheetValue.Hidden && ui.addFoodHasSelection) false else true
+        if (newValue == SheetValue.Hidden && ui.logCart.isNotEmpty()) false else true
     })
     var showInsightsHub by rememberSaveable { mutableStateOf(false) }
 
@@ -120,8 +138,27 @@ fun NutritionTabScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         floatingActionButton = {
-            IconButton(onClick = { vm.openAddFood() }) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.nutrition_add_food))
+            var fabMenuExpanded by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { fabMenuExpanded = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.nutrition_add_food))
+                }
+                DropdownMenu(expanded = fabMenuExpanded, onDismissRequest = { fabMenuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nutrition_add_food)) },
+                        onClick = {
+                            fabMenuExpanded = false
+                            vm.openAddFood(plan = false)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.nutrition_plan_food)) },
+                        onClick = {
+                            fabMenuExpanded = false
+                            vm.openAddFood(plan = true)
+                        }
+                    )
+                }
             }
         }
     ) { padding ->
@@ -153,16 +190,60 @@ fun NutritionTabScreen(
                     fontWeight = FontWeight.SemiBold
                 )
             }
+            if (ui.pendingInvites.isNotEmpty()) {
+                item {
+                    Text(
+                        stringResource(R.string.nutrition_meal_invitations),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                items(ui.pendingInvites, key = { it.targetId }) { invite ->
+                    NutritionMealPlanInviteCard(
+                        invite = invite,
+                        onAccept = { vm.acceptMealPlanInvite(invite.targetId) },
+                        onDecline = { vm.rejectMealPlanInvite(invite.targetId) }
+                    )
+                }
+            }
+            if (ui.plannedItems.isNotEmpty()) {
+                item {
+                    Text(
+                        stringResource(R.string.nutrition_planned_meals),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                items(ui.plannedItems, key = { it.targetId }) { item ->
+                    val userId = supabase.auth.currentUserOrNull()?.id.orEmpty()
+                    NutritionMealPlanItemCard(
+                        item = item,
+                        viewingUserId = userId,
+                        onClick = { vm.setOverlay(NutritionOverlay.EditPlannedMeal(item)) },
+                        onDecline = { vm.rejectMealPlanInvite(item.targetId) },
+                        onMarkEaten = { vm.completePlannedMeal(item.targetId) }
+                    )
+                }
+            }
             vm.mealSlotOrder.forEach { slot ->
+                val mealItems = ui.diaryByMeal[slot].orEmpty()
                 item {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(slot, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        IconButton(onClick = { vm.openAddFood(mealSlot = slot) }) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(slot, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            if (mealItems.isNotEmpty()) {
+                                Text(
+                                    "${mealItems.sumOf { it.caloriesKcal }.roundToInt()} kcal",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        IconButton(onClick = { vm.openAddFood(mealSlot = slot, plan = false) }) {
                             Icon(Icons.Filled.Add, contentDescription = null)
                         }
                     }
                 }
-                val mealItems = ui.diaryByMeal[slot].orEmpty()
                 if (mealItems.isEmpty()) {
                     item {
                         Text(
@@ -188,10 +269,11 @@ fun NutritionTabScreen(
         ModalBottomSheet(onDismissRequest = { vm.dismissOverlay() }, sheetState = sheetState) {
             Box(Modifier.liftrAppBackgroundGradientOpaque(sheetTheme)) {
                 when (val overlay = ui.overlay) {
-                    NutritionOverlay.AddFood -> NutritionLogFoodSheet(ui, vm)
-                    NutritionOverlay.CreateIngredient -> NutritionCreateIngredientSheet(ui, vm)
+                    NutritionOverlay.AddFood -> NutritionLogFoodSheet(supabase, ui, vm)
+                    NutritionOverlay.CreateIngredient -> NutritionIngredientEditorSheet(ui, vm, isEdit = false)
                     NutritionOverlay.CreateRecipe -> NutritionCreateRecipeSheet(ui, vm)
                     is NutritionOverlay.EditLog -> NutritionEditLogSheet(ui, vm, overlay.item)
+                    is NutritionOverlay.EditPlannedMeal -> NutritionEditPlannedMealSheet(ui, vm, overlay.item)
                     NutritionOverlay.None -> Unit
                 }
             }
@@ -239,9 +321,20 @@ private fun NutritionGramsPicker(grams: Double, onChange: (Double) -> Unit, kcal
                     onValueChange = { raw ->
                         val filtered = raw.filter { it.isDigit() }
                         gramsText = filtered
-                        filtered.toDoubleOrNull()?.let { onChange(it.coerceIn(5.0, 2000.0)) }
+                        filtered.toDoubleOrNull()?.let { onChange(it.coerceAtMost(2000.0)) }
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { focusState ->
+                            if (!focusState.isFocused) {
+                                val parsed = gramsText.toDoubleOrNull()
+                                if (parsed == null || parsed <= 0.0) {
+                                    gramsText = grams.roundToInt().toString()
+                                } else {
+                                    onChange(parsed.coerceIn(5.0, 2000.0))
+                                }
+                            }
+                        },
                     singleLine = true,
                     label = { Text("g") }
                 )
@@ -315,15 +408,64 @@ private fun NutritionDiaryRowCard(row: NutritionDiaryItemUi, onClick: () -> Unit
     }
 }
 
+@Composable
+private fun NutritionLogCatalogRowMenu(
+    canManage: Boolean,
+    editLabelRes: Int,
+    onShare: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                Icons.Filled.MoreVert,
+                contentDescription = stringResource(R.string.nutrition_more_actions)
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.nutrition_share_via_chat)) },
+                onClick = {
+                    expanded = false
+                    onShare()
+                }
+            )
+            if (canManage) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(editLabelRes)) },
+                    onClick = {
+                        expanded = false
+                        onEdit()
+                    }
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.nutrition_delete), color = MaterialTheme.colorScheme.error) },
+                    onClick = {
+                        expanded = false
+                        onDelete()
+                    }
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) {
-    val hasSelection = ui.selectedIngredientId != null || ui.selectedRecipeId != null
-    val selectedIngredient = ui.ingredientResults.find { it.id == ui.selectedIngredientId }
-    val selectedRecipe = ui.recipeResults.find { it.id == ui.selectedRecipeId }
+private fun NutritionLogFoodSheet(supabase: SupabaseClient, ui: NutritionUiState, vm: NutritionViewModel) {
+    val hasCart = ui.logCart.isNotEmpty()
+    val currentUserId = remember(supabase) { supabase.auth.currentUserOrNull()?.id }
+    var pendingDeleteIngredientId by remember { mutableStateOf<String?>(null) }
+    var pendingDeleteRecipeId by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val panelTheme = remember(context) { LiftrPreferences.backgroundTheme(context) }
-    val panelBottomPadding = if (hasSelection) 380.dp else 16.dp
+    val panelBottomPadding = if (hasCart) 420.dp else 16.dp
+    var shareIngredientSnap by remember { mutableStateOf<SharedIngredientSnapshot?>(null) }
+    var shareRecipeSnap by remember { mutableStateOf<SharedRecipeSnapshot?>(null) }
+    val shareSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val shareScope = rememberCoroutineScope()
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -334,7 +476,74 @@ private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) 
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             item {
-                Text(stringResource(R.string.nutrition_add_food), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    stringResource(if (ui.addFoodIsPlan) R.string.nutrition_plan_food else R.string.nutrition_add_food),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            if (ui.addFoodIsPlan) {
+                item {
+                    Text(stringResource(R.string.nutrition_plan_date), style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        FilledTonalButton(onClick = { vm.setPlanDate(ui.planDate.minusDays(1)) }) { Text("−") }
+                        Text(ui.planDate.format(DateTimeFormatter.ISO_LOCAL_DATE), fontWeight = FontWeight.Medium)
+                        FilledTonalButton(onClick = { vm.setPlanDate(ui.planDate.plusDays(1)) }) { Text("+") }
+                    }
+                }
+                item {
+                    Text(
+                        stringResource(R.string.nutrition_participants_header),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f))
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            if (ui.selectedPlanPartners.isEmpty()) {
+                                Text(
+                                    stringResource(R.string.nutrition_no_participants),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                ui.selectedPlanPartners.forEach { profile ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = profile.username?.let { "@$it" } ?: "User",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        TextButton(onClick = { vm.removePlanPartner(profile.userId) }) {
+                                            Text(stringResource(R.string.nutrition_remove_participant))
+                                        }
+                                    }
+                                }
+                            }
+                            TextButton(onClick = { vm.setShowPlanParticipantsPicker(true) }) {
+                                Text(stringResource(R.string.nutrition_add_participants))
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                Text(
+                    stringResource(R.string.nutrition_cart_tap_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -386,21 +595,51 @@ private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) 
                     ui.ingredientResults,
                     key = { _, row -> row.id }
                 ) { index, row ->
-                    val sel = ui.selectedIngredientId == row.id
+                    val inCart = NutritionLogCartLogic.cartContainsIngredient(ui.logCart, row.id)
                     val isFav = ui.favoriteIngredientIds.contains(row.id)
+                    val canManage = currentUserId != null && row.userId == currentUserId
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(
-                            onClick = { vm.selectIngredient(row.id) },
+                            onClick = { vm.toggleCartIngredient(row.id) },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Column(Modifier.fillMaxWidth()) {
-                                Text(row.name, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
-                                Text(stringResource(R.string.nutrition_ingredient_kcal_per_100g, row.caloriesPer100g.roundToInt()))
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(row.name, fontWeight = if (inCart) FontWeight.Bold else FontWeight.Normal)
+                                    Text(stringResource(R.string.nutrition_ingredient_kcal_per_100g, row.caloriesPer100g.roundToInt()))
+                                }
+                                if (inCart) {
+                                    Icon(
+                                        Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    )
+                                }
                             }
                         }
+                        NutritionLogCatalogRowMenu(
+                            canManage = canManage,
+                            editLabelRes = R.string.nutrition_edit_ingredient,
+                            onShare = {
+                                shareIngredientSnap = SharedIngredientSnapshot(
+                                    name = row.name,
+                                    caloriesPer100g = row.caloriesPer100g,
+                                    proteinPer100g = row.proteinPer100g,
+                                    carbsPer100g = row.carbsPer100g,
+                                    fatPer100g = row.fatPer100g,
+                                    saturatedFatPer100g = row.saturatedFatPer100g,
+                                    sugarsPer100g = row.sugarsPer100g,
+                                    fiberPer100g = row.fiberPer100g,
+                                    sodiumMgPer100g = row.sodiumMgPer100g
+                                )
+                            },
+                            onEdit = { vm.openEditIngredient(row.id) },
+                            onDelete = { pendingDeleteIngredientId = row.id }
+                        )
                         IconButton(onClick = { vm.toggleFavoriteIngredient(row.id) }) {
                             Icon(
                                 imageVector = if (isFav) Icons.Filled.Star else Icons.Outlined.Star,
@@ -422,18 +661,50 @@ private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) 
                 }
             } else {
                 items(ui.recipeResults, key = { it.id }) { row ->
-                    val sel = ui.selectedRecipeId == row.id
+                    val inCart = NutritionLogCartLogic.cartContainsRecipe(ui.logCart, row.id)
                     val isFav = ui.favoriteRecipeIds.contains(row.id)
+                    val canManage = currentUserId != null && row.userId == currentUserId
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         TextButton(
-                            onClick = { vm.selectRecipe(row.id) },
+                            onClick = { vm.toggleCartRecipe(row.id) },
                             modifier = Modifier.weight(1f)
                         ) {
-                            Text(row.name, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text(row.name, fontWeight = if (inCart) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f))
+                                if (inCart) {
+                                    Icon(
+                                        Icons.Filled.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(start = 8.dp)
+                                    )
+                                }
+                            }
                         }
+                        NutritionLogCatalogRowMenu(
+                            canManage = canManage,
+                            editLabelRes = R.string.nutrition_edit_recipe,
+                            onShare = {
+                                val cartLines = ui.logCart.find { it.recipeId == row.id }?.recipeLines
+                                if (!cartLines.isNullOrEmpty()) {
+                                    shareRecipeSnap = recipeShareSnapshot(row, cartLines)
+                                } else {
+                                    shareScope.launch {
+                                        runCatching { vm.fetchRecipeLinesForShare(row.id) }
+                                            .onSuccess { lines ->
+                                                if (lines.isNotEmpty()) {
+                                                    shareRecipeSnap = recipeShareSnapshot(row, lines)
+                                                }
+                                            }
+                                    }
+                                }
+                            },
+                            onEdit = { vm.openEditRecipe(row.id) },
+                            onDelete = { pendingDeleteRecipeId = row.id }
+                        )
                         IconButton(onClick = { vm.toggleFavoriteRecipe(row.id) }) {
                             Icon(
                                 imageVector = if (isFav) Icons.Filled.Star else Icons.Outlined.Star,
@@ -473,71 +744,376 @@ private fun NutritionLogFoodSheet(ui: NutritionUiState, vm: NutritionViewModel) 
         }
 
         AnimatedVisibility(
-            visible = hasSelection,
+            visible = hasCart,
             enter = slideInVertically { it },
             exit = slideOutVertically { it },
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
-            NutritionLogFoodBottomPanel(
+            NutritionLogFoodCartPanel(
                 themeId = panelTheme,
-                title = selectedIngredient?.name ?: selectedRecipe?.name.orEmpty(),
-                ingredient = selectedIngredient,
-                recipe = selectedRecipe,
-                recipeLines = ui.selectedRecipeLines,
-                loadingRecipeComposition = ui.loadingRecipeComposition,
+                cart = ui.logCart,
                 mealSlot = ui.addMealSlot,
-                grams = ui.addGrams,
                 saving = ui.saving,
-                onDismiss = { vm.clearLogSelection() },
+                isPlan = ui.addFoodIsPlan,
+                currentUserId = currentUserId,
+                planAssignees = remember(currentUserId, ui.selectedPlanPartners) {
+                    val chips = ui.selectedPlanPartners.map { profile ->
+                        NutritionPlanAssigneeChip(
+                            userId = profile.userId,
+                            label = profile.username?.let { "@$it" } ?: "User"
+                        )
+                    }.toMutableList()
+                    val selfId = currentUserId
+                    if (selfId != null && chips.none { it.userId == selfId }) {
+                        chips.add(0, NutritionPlanAssigneeChip(selfId, "You"))
+                    }
+                    chips
+                },
+                onClearCart = { vm.clearLogCart() },
                 onMealSlot = { vm.setAddMealSlot(it) },
-                onGrams = { vm.setAddGramsPreset(it) },
-                onSave = { vm.saveDiaryEntry() }
+                onUpdateGrams = { localId, grams -> vm.updateCartItemGrams(localId, grams) },
+                onUpdatePerUserGrams = { localId, userId, grams -> vm.updateCartPerUserGrams(localId, userId, grams) },
+                onRemoveItem = { vm.removeCartItem(it) },
+                onToggleAssignee = { localId, userId -> vm.toggleCartAssignee(localId, userId) },
+                onSave = { vm.saveDiaryCart() }
             )
         }
+    }
+
+    if (ui.addFoodIsPlan && ui.showPlanParticipantsPicker) {
+        var pickerSelection by remember { mutableStateOf(setOf<String>()) }
+        var pickerQuery by remember { mutableStateOf("") }
+        val alreadySelected = remember(ui.selectedPlanPartners) {
+            ui.selectedPlanPartners.map { it.userId }.toSet()
+        }
+        val filtered = remember(ui.followingForPlan, pickerQuery) {
+            val q = pickerQuery.trim().lowercase()
+            val base = ui.followingForPlan
+            if (q.isEmpty()) base else base.filter {
+                (it.username ?: it.userId).lowercase().contains(q)
+            }
+        }
+        ModalBottomSheet(onDismissRequest = { vm.setShowPlanParticipantsPicker(false) }) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = { vm.setShowPlanParticipantsPicker(false) }) {
+                        Text(stringResource(R.string.add_participants_sheet_cancel))
+                    }
+                    TextButton(
+                        onClick = {
+                            val picked = ui.followingForPlan.filter {
+                                it.userId in pickerSelection && it.userId !in alreadySelected
+                            }
+                            vm.addPlanPartners(picked)
+                            pickerSelection = emptySet()
+                        },
+                        enabled = pickerSelection.isNotEmpty()
+                    ) {
+                        Text(stringResource(R.string.add_participants_sheet_confirm))
+                    }
+                }
+                OutlinedTextField(
+                    value = pickerQuery,
+                    onValueChange = { pickerQuery = it },
+                    placeholder = { Text(stringResource(R.string.add_participants_search_placeholder)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (ui.followingForPlan.isEmpty()) {
+                    Text(
+                        stringResource(R.string.nutrition_follow_to_invite),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp)
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 400.dp)
+                            .padding(top = 8.dp)
+                    ) {
+                        items(filtered, key = { it.userId }) { profile ->
+                            val enabled = profile.userId !in alreadySelected
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = profile.username?.let { "@$it" } ?: "User",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Switch(
+                                    checked = profile.userId in pickerSelection || profile.userId in alreadySelected,
+                                    onCheckedChange = { on ->
+                                        if (!enabled) return@Switch
+                                        pickerSelection = if (on) {
+                                            pickerSelection + profile.userId
+                                        } else {
+                                            pickerSelection - profile.userId
+                                        }
+                                    },
+                                    enabled = enabled
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (shareIngredientSnap != null || shareRecipeSnap != null) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                shareIngredientSnap = null
+                shareRecipeSnap = null
+            },
+            sheetState = shareSheetState
+        ) {
+            shareIngredientSnap?.let { snap ->
+                ShareIngredientToChatSheetContent(
+                    supabase = supabase,
+                    snapshot = snap,
+                    onDone = {
+                        shareIngredientSnap = null
+                        shareRecipeSnap = null
+                    }
+                )
+            }
+            shareRecipeSnap?.let { snap ->
+                ShareRecipeToChatSheetContent(
+                    supabase = supabase,
+                    snapshot = snap,
+                    onDone = {
+                        shareIngredientSnap = null
+                        shareRecipeSnap = null
+                    }
+                )
+            }
+        }
+    }
+
+    pendingDeleteRecipeId?.let { recipeId ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteRecipeId = null },
+            title = { Text(stringResource(R.string.nutrition_delete_recipe)) },
+            text = { Text(stringResource(R.string.nutrition_delete_recipe_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeleteRecipeId = null
+                        vm.deleteSelectedRecipe(recipeId)
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_recipe), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteRecipeId = null }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+
+    pendingDeleteIngredientId?.let { ingredientId ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteIngredientId = null },
+            title = { Text(stringResource(R.string.nutrition_delete_ingredient)) },
+            text = { Text(stringResource(R.string.nutrition_delete_ingredient_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeleteIngredientId = null
+                        vm.deleteSelectedIngredient(ingredientId)
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_ingredient), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteIngredientId = null }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
     }
 
     when (ui.logFoodNestedOverlay) {
         NutritionLogNestedOverlay.CreateIngredient -> {
             val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
-                NutritionCreateIngredientSheet(ui, vm, onClose = { vm.dismissLogFoodNestedOverlay() })
+                NutritionIngredientEditorSheet(ui, vm, isEdit = false, onClose = { vm.dismissLogFoodNestedOverlay() })
+            }
+        }
+        NutritionLogNestedOverlay.EditIngredient -> {
+            val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
+                NutritionIngredientEditorSheet(ui, vm, isEdit = true, onClose = { vm.dismissLogFoodNestedOverlay() })
             }
         }
         NutritionLogNestedOverlay.CreateRecipe -> {
             val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
             ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
-                NutritionCreateRecipeSheet(ui, vm, onClose = { vm.dismissLogFoodNestedOverlay() })
+                NutritionRecipeEditorSheet(ui, vm, isEdit = false, onClose = { vm.dismissLogFoodNestedOverlay() })
+            }
+        }
+        NutritionLogNestedOverlay.EditRecipe -> {
+            val nestedState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            ModalBottomSheet(onDismissRequest = { vm.dismissLogFoodNestedOverlay() }, sheetState = nestedState) {
+                NutritionRecipeEditorSheet(ui, vm, isEdit = true, onClose = { vm.dismissLogFoodNestedOverlay() })
             }
         }
         NutritionLogNestedOverlay.None -> Unit
     }
 }
 
+private fun recipeShareSnapshot(
+    row: NutritionRecipeWire,
+    lines: List<NutritionRecipeLineDraft>
+): SharedRecipeSnapshot {
+    val profile = rollupProfilePer100g(lines)
+    return SharedRecipeSnapshot(
+        name = row.name,
+        description = row.description,
+        ingredients = lines.map { line ->
+            SharedRecipeIngredientSnapshot(
+                name = line.ingredient.name,
+                weightG = line.weightG,
+                caloriesPer100g = line.ingredient.caloriesPer100g,
+                proteinPer100g = line.ingredient.proteinPer100g,
+                carbsPer100g = line.ingredient.carbsPer100g,
+                fatPer100g = line.ingredient.fatPer100g,
+                saturatedFatPer100g = line.ingredient.saturatedFatPer100g,
+                sugarsPer100g = line.ingredient.sugarsPer100g,
+                fiberPer100g = line.ingredient.fiberPer100g,
+                sodiumMgPer100g = line.ingredient.sodiumMgPer100g
+            )
+        },
+        profilePer100g = SharedRecipeProfilePer100gSnapshot(
+            calories = profile.calories,
+            protein = profile.protein,
+            carbs = profile.carbs,
+            fat = profile.fat,
+            saturatedFat = profile.saturatedFat,
+            sugars = profile.sugars,
+            fiber = profile.fiber,
+            sodiumMg = profile.sodiumMg
+        )
+    )
+}
+
 @Composable
-private fun NutritionLogFoodBottomPanel(
+private fun NutritionMealPlanInviteCard(
+    invite: NutritionMealPlanInviteUi,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    val plannedForLabel = runCatching {
+        val date = java.time.LocalDate.parse(invite.planDate)
+        val formatted = date.format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM))
+        stringResource(R.string.nutrition_invite_planned_for, formatted)
+    }.getOrElse { stringResource(R.string.nutrition_invite_planned_for, invite.planDate) }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(invite.foodName, fontWeight = FontWeight.SemiBold)
+            Text(
+                plannedForLabel,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "${invite.mealSlot} · ${invite.quantityG.roundToInt()} g · ${invite.caloriesKcal.roundToInt()} kcal",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            invite.creatorUsername?.let {
+                Text("From @$it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onDecline) { Text(stringResource(R.string.nutrition_decline)) }
+                Button(onClick = onAccept) { Text(stringResource(R.string.nutrition_accept)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NutritionMealPlanItemCard(
+    item: NutritionMealPlanItemUi,
+    viewingUserId: String,
+    onClick: () -> Unit,
+    onDecline: () -> Unit,
+    onMarkEaten: () -> Unit
+) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors()
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(item.foodName, fontWeight = FontWeight.SemiBold)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+            }
+            Text(
+                "${item.mealSlot} · ${item.quantityG.roundToInt()} g · ${item.caloriesKcal.roundToInt()} kcal",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            item.partnerLabel?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            item.partnerStatusLabel?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (item.canDecline(viewingUserId) || item.canMarkEaten(viewingUserId)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (item.canDecline(viewingUserId)) {
+                        TextButton(onClick = onDecline) { Text(stringResource(R.string.nutrition_decline)) }
+                    }
+                    if (item.canMarkEaten(viewingUserId)) {
+                        Button(onClick = onMarkEaten) { Text(stringResource(R.string.nutrition_mark_eaten)) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NutritionLogFoodCartPanel(
     themeId: String,
-    title: String,
-    ingredient: NutritionIngredientWire?,
-    recipe: NutritionRecipeWire?,
-    recipeLines: List<NutritionRecipeLineDraft>,
-    loadingRecipeComposition: Boolean,
+    cart: List<NutritionLogCartItem>,
     mealSlot: String,
-    grams: Double,
     saving: Boolean,
-    onDismiss: () -> Unit,
+    isPlan: Boolean,
+    currentUserId: String?,
+    planAssignees: List<NutritionPlanAssigneeChip>,
+    onClearCart: () -> Unit,
     onMealSlot: (String) -> Unit,
-    onGrams: (Double) -> Unit,
+    onUpdateGrams: (String, Double) -> Unit,
+    onUpdatePerUserGrams: (String, String, Double) -> Unit,
+    onRemoveItem: (String) -> Unit,
+    onToggleAssignee: (String, String) -> Unit,
     onSave: () -> Unit
 ) {
-    val kcalPreview = when {
-        ingredient != null -> (grams * ingredient.caloriesPer100g / 100.0).roundToInt()
-        recipeLines.isNotEmpty() -> {
-            val profile = rollupProfilePer100g(recipeLines)
-            (grams * profile.calories / 100.0).roundToInt()
-        }
-        else -> null
-    }
-    val canSave = !saving && (ingredient != null || (recipeLines.isNotEmpty() && !loadingRecipeComposition))
+    val totalKcal = NutritionLogCartLogic.totalKcal(cart)
+    val canSave = NutritionLogCartLogic.canSave(cart, saving)
 
     Column(
         Modifier
@@ -548,14 +1124,22 @@ private fun NutritionLogFoodBottomPanel(
             .padding(top = 12.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f).padding(end = 8.dp)
-            )
-            IconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    stringResource(R.string.nutrition_cart_items_count, cart.size),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                if (totalKcal > 0) {
+                    Text(
+                        stringResource(R.string.nutrition_cart_total_kcal, totalKcal),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            IconButton(onClick = onClearCart, modifier = Modifier.size(40.dp), enabled = !saving) {
                 Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.nutrition_close))
             }
         }
@@ -567,39 +1151,124 @@ private fun NutritionLogFoodBottomPanel(
         Column(
             Modifier
                 .fillMaxWidth()
-                .heightIn(max = 200.dp)
+                .heightIn(max = 220.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            verticalArrangement = Arrangement.spacedBy(if (cart.size > 1) 14.dp else 8.dp)
         ) {
-            if (ingredient != null) {
-                NutritionFactsCard(title = stringResource(R.string.nutrition_facts_title), profile = ingredient.toProfilePer100g())
-            } else if (loadingRecipeComposition) {
-                CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
-            } else if (recipeLines.isNotEmpty()) {
-                val desc = recipe?.description?.trim().orEmpty()
-                if (desc.isNotEmpty()) {
-                    var descExpanded by remember { mutableStateOf(false) }
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TextButton(onClick = { descExpanded = !descExpanded }) {
-                            Text(stringResource(R.string.nutrition_description))
+            cart.forEach { item ->
+                val groupsCartLines = cart.size > 1
+                if (item.loadingComposition) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text(item.displayName, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                        CircularProgressIndicator(Modifier.size(24.dp))
+                        IconButton(onClick = { onRemoveItem(item.localId) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = null)
                         }
-                        if (descExpanded) {
-                            Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    val lineKcal = NutritionLogCartLogic.lineKcal(item)?.roundToInt()
+                    val selectedAssignees = if (isPlan) {
+                        planAssignees.filter { chip ->
+                            item.assignedUserIds.contains(chip.userId) ||
+                                (item.assignedUserIds.isEmpty() && chip.userId == currentUserId)
+                        }
+                    } else {
+                        emptyList()
+                    }
+                    val multiAssigneePlan = isPlan && selectedAssignees.size > 1
+                    Column(
+                        modifier = if (groupsCartLines) {
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+                                .padding(12.dp)
+                        } else {
+                            Modifier.fillMaxWidth()
+                        },
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(item.displayName, fontWeight = FontWeight.Medium)
+                                if (!multiAssigneePlan && lineKcal != null) {
+                                    Text(
+                                        stringResource(R.string.nutrition_cart_line_kcal, lineKcal),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            IconButton(onClick = { onRemoveItem(item.localId) }) {
+                                Icon(Icons.Filled.Delete, contentDescription = null)
+                            }
+                        }
+                        if (!multiAssigneePlan) {
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f)
+                                ),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Column(Modifier.padding(12.dp)) {
+                                    NutritionGramsPicker(item.grams, { onUpdateGrams(item.localId, it) }, lineKcal)
+                                }
+                            }
+                        }
+                        if (isPlan && planAssignees.isNotEmpty()) {
+                            Text(
+                                stringResource(R.string.nutrition_cart_for_label),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                planAssignees.forEach { profile ->
+                                    val selected = item.assignedUserIds.contains(profile.userId) ||
+                                        (item.assignedUserIds.isEmpty() && profile.userId == currentUserId)
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { onToggleAssignee(item.localId, profile.userId) },
+                                        label = { Text(profile.label) }
+                                    )
+                                }
+                            }
+                            if (selectedAssignees.size > 1) {
+                                Text(
+                                    stringResource(R.string.nutrition_cart_amount_per_person),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                selectedAssignees.forEach { profile ->
+                                    val userGrams = NutritionLogCartLogic.gramsForUser(item, profile.userId)
+                                    val userKcal = lineKcal?.let { userGrams / item.grams.coerceAtLeast(1.0) * it }?.roundToInt()
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(profile.label, style = MaterialTheme.typography.labelSmall)
+                                        NutritionGramsPicker(
+                                            userGrams,
+                                            { onUpdatePerUserGrams(item.localId, profile.userId, it) },
+                                            userKcal
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-                recipeLines.forEach { line ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("✓", color = MaterialTheme.colorScheme.tertiary)
-                        Text("${line.weightG.roundToInt()}g ${line.ingredient.name}", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                NutritionFactsCard(title = recipe?.name ?: title, profile = rollupProfilePer100g(recipeLines))
             }
         }
-        NutritionGramsPicker(grams, onGrams, kcalPreview)
         Button(onClick = onSave, modifier = Modifier.fillMaxWidth(), enabled = canSave) {
-            Text(stringResource(R.string.nutrition_add_to_diary))
+            if (saving) {
+                CircularProgressIndicator(Modifier.size(22.dp))
+            } else {
+                Text(
+                    if (isPlan) {
+                        stringResource(R.string.nutrition_plan_n_meals, cart.size)
+                    } else {
+                        stringResource(R.string.nutrition_add_n_to_diary, cart.size)
+                    }
+                )
+            }
         }
     }
 }
@@ -634,9 +1303,20 @@ private fun NutritionRecipeLineEditor(
                     onValueChange = { raw ->
                         val filtered = raw.filter { it.isDigit() }
                         weightText = filtered
-                        filtered.toDoubleOrNull()?.let { onWeightChange(it.coerceIn(5.0, 2000.0)) }
+                        filtered.toDoubleOrNull()?.let { onWeightChange(it.coerceAtMost(2000.0)) }
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { focusState ->
+                            if (!focusState.isFocused) {
+                                val parsed = weightText.toDoubleOrNull()
+                                if (parsed == null || parsed <= 0.0) {
+                                    weightText = weightG.roundToInt().toString()
+                                } else {
+                                    onWeightChange(parsed.coerceIn(5.0, 2000.0))
+                                }
+                            }
+                        },
                     singleLine = true,
                     label = { Text("g") }
                 )
@@ -656,16 +1336,20 @@ private fun NutritionRecipeLineEditor(
 }
 
 @Composable
-private fun NutritionCreateIngredientSheet(
+private fun NutritionIngredientEditorSheet(
     ui: NutritionUiState,
     vm: NutritionViewModel,
+    isEdit: Boolean,
     onClose: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showSourceChooser by rememberSaveable { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     var isScanning by remember { mutableStateOf(false) }
     val scanFailedMessage = stringResource(R.string.nutrition_scan_failed)
+    val titleRes = if (isEdit) R.string.nutrition_edit_ingredient_title else R.string.nutrition_new_ingredient
+    val saveLabelRes = if (isEdit) R.string.nutrition_save_ingredient_changes else R.string.nutrition_save_ingredient
 
     val ingredientForm = remember(
         ui.createCalories,
@@ -772,26 +1456,51 @@ private fun NutritionCreateIngredientSheet(
         )
     }
 
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.nutrition_delete_ingredient)) },
+            text = { Text(stringResource(R.string.nutrition_delete_ingredient_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        vm.deleteIngredient()
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_ingredient), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+
     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(stringResource(R.string.nutrition_new_ingredient), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(titleRes), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         NutritionMaterialField(ui.createName, { vm.setCreateField(name = it) }, "Name")
-        FilledTonalButton(
-            onClick = { showSourceChooser = true },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !isScanning
-        ) {
-            Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
-            Text(
-                stringResource(R.string.nutrition_scan_label),
-                modifier = Modifier.padding(start = 8.dp)
-            )
-            if (isScanning) {
-                CircularProgressIndicator(
-                    modifier = Modifier
-                        .padding(start = 12.dp)
-                        .size(20.dp),
-                    strokeWidth = 2.dp
+        if (!isEdit) {
+            FilledTonalButton(
+                onClick = { showSourceChooser = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !isScanning
+            ) {
+                Icon(Icons.Default.PhotoCamera, contentDescription = null, modifier = Modifier.size(20.dp))
+                Text(
+                    stringResource(R.string.nutrition_scan_label),
+                    modifier = Modifier.padding(start = 8.dp)
                 )
+                if (isScanning) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
             }
         }
         NutritionMaterialField(ingredientForm.calories, { vm.setCreateField(calories = it) }, "Calories / 100g")
@@ -806,26 +1515,60 @@ private fun NutritionCreateIngredientSheet(
             title = ui.createName.ifBlank { "Preview" },
             profile = previewProfile
         )
+        if (isEdit) {
+            TextButton(
+                onClick = { showDeleteConfirm = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !ui.saving
+            ) {
+                Text(
+                    stringResource(R.string.nutrition_delete_ingredient),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
         Button(
             onClick = { vm.saveIngredient(onClose) },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Save") }
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !ui.saving && ui.createName.isNotBlank()
+        ) { Text(stringResource(saveLabelRes)) }
+        if (onClose != null) {
+            TextButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.nutrition_close))
+            }
+        }
     }
 }
 
 @Composable
-private fun NutritionCreateRecipeSheet(
+private fun NutritionCreateIngredientSheet(
+    ui: NutritionUiState,
+    vm: NutritionViewModel
+) {
+    NutritionIngredientEditorSheet(ui, vm, isEdit = false)
+}
+
+@Composable
+private fun NutritionRecipeEditorSheet(
     ui: NutritionUiState,
     vm: NutritionViewModel,
+    isEdit: Boolean,
     onClose: (() -> Unit)? = null
 ) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val titleRes = if (isEdit) R.string.nutrition_edit_recipe else R.string.nutrition_new_recipe
+    val saveLabelRes = if (isEdit) R.string.nutrition_save_recipe_changes else R.string.nutrition_save_recipe
+
     Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(stringResource(R.string.nutrition_new_recipe), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(titleRes), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         Text(
             stringResource(R.string.nutrition_recipe_build_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (ui.recipeEditorLoading) {
+            CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
+        }
         NutritionMaterialField(ui.recipeName, vm::setRecipeName, "Recipe name")
         NutritionMaterialField(ui.recipeDescription, vm::setRecipeDescription, stringResource(R.string.nutrition_description))
         Text(
@@ -873,12 +1616,24 @@ private fun NutritionCreateRecipeSheet(
                 Text(stringResource(R.string.nutrition_add_to_recipe))
             }
         }
+        if (isEdit) {
+            TextButton(
+                onClick = { showDeleteConfirm = true },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !ui.saving && !ui.recipeEditorLoading
+            ) {
+                Text(
+                    stringResource(R.string.nutrition_delete_recipe),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
         Button(
             onClick = { vm.saveRecipe() },
             modifier = Modifier.fillMaxWidth(),
-            enabled = ui.recipeLines.isNotEmpty() && ui.recipeName.isNotBlank()
+            enabled = !ui.saving && !ui.recipeEditorLoading && ui.recipeLines.isNotEmpty() && ui.recipeName.isNotBlank()
         ) {
-            Text("Save recipe")
+            Text(stringResource(saveLabelRes))
         }
         if (onClose != null) {
             TextButton(onClick = onClose, modifier = Modifier.fillMaxWidth()) {
@@ -886,6 +1641,38 @@ private fun NutritionCreateRecipeSheet(
             }
         }
     }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text(stringResource(R.string.nutrition_delete_recipe)) },
+            text = { Text(stringResource(R.string.nutrition_delete_recipe_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        vm.deleteRecipe()
+                    }
+                ) {
+                    Text(stringResource(R.string.nutrition_delete_recipe), color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun NutritionCreateRecipeSheet(
+    ui: NutritionUiState,
+    vm: NutritionViewModel,
+    onClose: (() -> Unit)? = null
+) {
+    NutritionRecipeEditorSheet(ui, vm, isEdit = false, onClose = onClose)
 }
 
 @Composable
@@ -905,6 +1692,35 @@ private fun NutritionEditLogSheet(ui: NutritionUiState, vm: NutritionViewModel, 
         Button(onClick = { vm.saveEditLog(item.id) }, modifier = Modifier.fillMaxWidth()) { Text("Save changes") }
         TextButton(onClick = { vm.deleteEditLog(item.id) }, modifier = Modifier.fillMaxWidth()) {
             Text("Delete from diary", color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+@Composable
+private fun NutritionEditPlannedMealSheet(ui: NutritionUiState, vm: NutritionViewModel, item: NutritionMealPlanItemUi) {
+    Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(item.foodName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            mealSlots.forEach { slot ->
+                FilterChip(selected = ui.editMealSlot == slot, onClick = { vm.setEditMealSlot(slot) }, label = { Text(slot) })
+            }
+        }
+        NutritionGramsPicker(
+            ui.editGrams,
+            { vm.setEditGrams(it) },
+            (item.caloriesKcal * ui.editGrams / item.quantityG.coerceAtLeast(1.0)).roundToInt()
+        )
+        Button(onClick = { vm.savePlannedMeal(item.targetId) }, modifier = Modifier.fillMaxWidth(), enabled = !ui.saving) {
+            Text(stringResource(R.string.nutrition_save_changes))
+        }
+        TextButton(
+            onClick = {
+                vm.rejectMealPlanInvite(item.targetId)
+                vm.dismissOverlay()
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.nutrition_decline), color = MaterialTheme.colorScheme.error)
         }
     }
 }

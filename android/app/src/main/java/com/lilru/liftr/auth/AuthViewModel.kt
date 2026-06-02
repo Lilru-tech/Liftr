@@ -83,6 +83,54 @@ class AuthViewModel(
         }
     }
 
+    fun changePassword(
+        currentPassword: String,
+        newPassword: String,
+        onSuccess: () -> Unit = {}
+    ) {
+        viewModelScope.launch {
+            _busy.value = true
+            _uiError.value = null
+            val cur = currentPassword
+            val next = newPassword
+            if (cur.isBlank()) {
+                _uiError.value = "Current password is required."
+                _busy.value = false
+                return@launch
+            }
+            if (next.length < PasswordResetValidation.MINIMUM_LENGTH) {
+                _uiError.value = "Password must be at least 8 characters."
+                _busy.value = false
+                return@launch
+            }
+            if (cur == next) {
+                _uiError.value = "New password must be different from your current password."
+                _busy.value = false
+                return@launch
+            }
+            val email = supabase.auth.currentUserOrNull()?.email?.trim().orEmpty()
+            if (email.isEmpty()) {
+                _uiError.value = "Unable to read your account email. Please sign out and sign in again."
+                _busy.value = false
+                return@launch
+            }
+            try {
+                supabase.auth.signInWith(Email) {
+                    this.email = email
+                    this.password = cur
+                }
+                supabase.auth.updateUser {
+                    password = next
+                }
+                onSuccess()
+            } catch (e: Exception) {
+                _uiError.value = e.message?.take(300) ?: e::class.java.simpleName
+            } finally {
+                _busy.value = false
+            }
+        }
+    }
+
     /**
      * @param onSignInSuccess Llamada solo si el inicio de sesión no lanza; para persistir email / banner.
      */
@@ -252,6 +300,15 @@ class AuthViewModel(
         weightKg: Double?
     ) {
         runCatching {
+            val dateOfBirth = dateOfBirthYyyyMmDd?.let { java.time.LocalDate.parse(it) }
+            val metabolicTarget = com.lilru.liftr.nutrition.NutritionMetabolism.resolveDisplayKcal(
+                sex = sex,
+                dateOfBirth = dateOfBirth,
+                heightCm = heightCm,
+                weightKg = weightKg,
+                storedTarget = null,
+                isManual = false
+            )
             supabase.from(BackendContracts.Tables.PROFILES).upsert(
                 buildJsonObject {
                     put("user_id", JsonPrimitive(user.id))
@@ -272,6 +329,8 @@ class AuthViewModel(
                     } else {
                         put("weight_kg", JsonNull)
                     }
+                    put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET, metabolicTarget)
+                    put(BackendContracts.ProfileColumns.BASE_CALORIES_TARGET_IS_MANUAL, false)
                 }
             ) {
                 onConflict = "user_id"

@@ -342,7 +342,10 @@ struct WorkoutRecommendationFlowView: View {
                     LabeledContent("Duration", value: formatDuration(r.durationSec))
                     if let d = r.distanceKm {
                         Divider().padding(.vertical, 6)
-                        LabeledContent("Distance", value: String(format: "%.2f km", d))
+                        let distValue = r.activity.usesSwimDistanceAndPace
+                            ? CardioSwimDisplay.formatSwimDistance(km: d)
+                            : String(format: "%.2f km", d)
+                        LabeledContent("Distance", value: distValue)
                     }
                     if let h = r.avgHr {
                         Divider().padding(.vertical, 6)

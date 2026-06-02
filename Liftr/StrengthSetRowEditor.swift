@@ -48,33 +48,6 @@ extension Array where Element == StrengthEditorSegment {
     }
 }
 
-struct StrengthStyleMetricField<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .center, spacing: 4) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .minimumScaleFactor(0.65)
-                .multilineTextAlignment(.center)
-            content()
-                .font(.subheadline)
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.plain)
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 4)
-                .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
 struct StrengthSetRowEditor: View {
     let lineOrdinal: Int
     @Binding var setNumber: Int

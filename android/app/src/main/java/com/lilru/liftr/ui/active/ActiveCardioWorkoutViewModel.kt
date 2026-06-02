@@ -54,6 +54,8 @@ data class ActiveCardioUiState(
     val workoutId: Int = 0,
     val hasCardioSession: Boolean = true,
     val activityLabel: String = "Cardio",
+    val activityWire: String = "",
+    val usesSwimUnits: Boolean = false,
     val targetDistanceKm: Double? = null,
     val targetDurationSec: Int? = null,
     val distanceText: String = "",
@@ -262,9 +264,12 @@ class ActiveCardioWorkoutViewModel(
                 val label = rawCode.split('_').joinToString(" ") { part ->
                     part.replaceFirstChar { c -> if (c.isLowerCase()) c.titlecase() else c.toString() }
                 }
+                val swimUnits = com.lilru.liftr.ui.home.isSwimCardioActivityCode(rawCode)
                 var dist = ""
                 row.distanceKm?.let { km ->
-                    dist = if (km == km.roundToInt().toDouble()) {
+                    dist = if (swimUnits) {
+                        com.lilru.liftr.ui.home.metersTextFromKm(km)
+                    } else if (km == km.roundToInt().toDouble()) {
                         km.roundToInt().toString()
                     } else {
                         String.format("%.2f", km)
@@ -280,6 +285,8 @@ class ActiveCardioWorkoutViewModel(
                     loadError = null,
                     hasCardioSession = true,
                     activityLabel = label,
+                    activityWire = rawCode,
+                    usesSwimUnits = swimUnits,
                     targetDistanceKm = row.distanceKm,
                     targetDurationSec = dur,
                     distanceText = dist,
@@ -312,7 +319,7 @@ class ActiveCardioWorkoutViewModel(
             runCatching {
                 supabase.auth.currentUserOrNull()?.id ?: error("No session")
                 val ended = Instant.now().toString()
-                val km = parseDistanceKm(_ui.value.distanceText)
+                val km = parseDistanceKm(_ui.value.distanceText, _ui.value.usesSwimUnits)
 
                 val routeJson = routeGeoJsonLineString()
                 supabase.from(BackendContracts.Tables.CARDIO_SESSIONS).update(
@@ -326,7 +333,11 @@ class ActiveCardioWorkoutViewModel(
                 }
 
                 val distTrim = _ui.value.distanceText.trim().replace(',', '.')
-                val manualKm = distTrim.toDoubleOrNull() ?: (routeDistanceM / 1000.0)
+                val manualKm = if (_ui.value.usesSwimUnits) {
+                    com.lilru.liftr.ui.home.distanceKmFromMetersText(distTrim) ?: (routeDistanceM / 1000.0)
+                } else {
+                    distTrim.toDoubleOrNull() ?: (routeDistanceM / 1000.0)
+                }
                 val gpsKm = routeDistanceM / 1000.0
                 val distEdited = initialDistanceText.trim() != _ui.value.distanceText.trim()
                 val usesGps = routePoints.size >= 2
@@ -386,11 +397,11 @@ class ActiveCardioWorkoutViewModel(
                     summary?.let { captured ->
                         TerritoryCaptureClient.storeCaptureReferenceCoordinate(app, captured)
                     }
-                    TerritoryCaptureClient.captureMessage(summary ?: return@let)?.let { message ->
-                        if (summary?.ok == true) {
-                            AppSnackbar.showSuccess(message)
-                        } else {
-                            AppSnackbar.showError(message)
+                    summary?.let { s ->
+                        if (s.ok != true) {
+                            TerritoryCaptureClient.captureMessage(s)?.let { message ->
+                                AppSnackbar.showError(message)
+                            }
                         }
                     }
                 }
@@ -440,10 +451,14 @@ private data class CardioSessionWire(
     @SerialName("duration_sec") val durationSec: Int? = null
 )
 
-private fun parseDistanceKm(text: String): Double? {
+private fun parseDistanceKm(text: String, swimUnits: Boolean): Double? {
     val trimmed = text.trim().replace(',', '.')
     if (trimmed.isEmpty()) return null
-    return trimmed.toDoubleOrNull()
+    return if (swimUnits) {
+        com.lilru.liftr.ui.home.distanceKmFromMetersText(trimmed)
+    } else {
+        trimmed.toDoubleOrNull()
+    }
 }
 
 private const val TAG = "ActiveCardio"

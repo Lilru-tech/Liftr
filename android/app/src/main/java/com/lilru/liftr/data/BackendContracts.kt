@@ -46,6 +46,8 @@ object BackendContracts {
         const val NUTRITION_RECIPES = "nutrition_recipes"
         const val NUTRITION_RECIPE_INGREDIENTS = "nutrition_recipe_ingredients"
         const val NUTRITION_DIARY_LOGS = "nutrition_diary_logs"
+        const val NUTRITION_MEAL_PLANS = "nutrition_meal_plans"
+        const val NUTRITION_MEAL_PLAN_TARGETS = "nutrition_meal_plan_targets"
         const val BODY_WEIGHT_ENTRIES = "body_weight_entries"
         const val PROFILES = "profiles"
         const val USER_NOTIFICATION_SETTINGS = "user_notification_settings"
@@ -133,6 +135,10 @@ object BackendContracts {
         const val GET_USER_PREMIUM_STATUS_V1 = "get_user_premium_status_v1"
         const val GET_USER_LEVEL = "get_user_level"
         const val GET_WEEKLY_GOAL_RECOMMENDATION = "get_weekly_goal_recommendation"
+        const val ACCEPT_MEAL_PLAN = "accept_meal_plan"
+        const val REJECT_MEAL_PLAN = "reject_meal_plan"
+        const val COMPLETE_MEAL_PLAN_AS_EATEN = "complete_meal_plan_as_eaten"
+        const val UPDATE_MEAL_PLAN_TARGET = "update_meal_plan_target"
         const val GET_DAILY_NUTRITION_RECOMMENDATION_V1 = "get_daily_nutrition_recommendation_v1"
         const val GET_NUTRITION_MONTH_BALANCE_V1 = "get_nutrition_month_balance_v1"
         const val GET_SMART_NUTRITION_RECOMMENDATION_V1 = "get_smart_nutrition_recommendation_v1"
@@ -191,6 +197,8 @@ object BackendContracts {
         const val TOGGLE_MESSAGE_REACTION = "toggle_message_reaction"
         const val EDIT_MESSAGE = "edit_message"
         const val DELETE_MESSAGE = "delete_message"
+        const val CLONE_SHARED_INGREDIENT = "clone_shared_ingredient"
+        const val CLONE_SHARED_RECIPE = "clone_shared_recipe"
     }
 
     object ProfileColumns {
@@ -199,14 +207,26 @@ object BackendContracts {
     }
 
     object NutritionMetabolism {
-        const val FALLBACK_KCAL = 2000
+        const val FALLBACK_KCAL_FEMALE = 1500
+        const val FALLBACK_KCAL_MALE = 1900
+        const val FALLBACK_KCAL_NEUTRAL = 1700
         const val MIN_KCAL = 800
         const val MAX_KCAL = 6000
+        const val IMPUTED_AGE_YEARS = 30
+        const val DEFAULT_HEIGHT_MALE_CM = 175.0
+        const val DEFAULT_HEIGHT_FEMALE_CM = 162.0
+        const val DEFAULT_WEIGHT_MALE_KG = 75.0
+        const val DEFAULT_WEIGHT_FEMALE_KG = 60.0
+        const val MULTIPLIER_LOW = 1.2
+        const val MULTIPLIER_MODERATE = 1.375
+        const val MULTIPLIER_ACTIVE = 1.55
+        const val MULTIPLIER_VERY_ACTIVE = 1.725
         const val WEIGHT_FACTOR = 10.0
         const val HEIGHT_FACTOR = 6.25
         const val AGE_FACTOR = 5.0
         const val MALE_OFFSET = 5.0
         const val FEMALE_OFFSET = -161.0
+        const val UNISEX_OFFSET = -80.0
     }
 
     object NutritionColumns {
@@ -254,7 +274,7 @@ object BackendContracts {
     }
 
     object NutritionDisplayTargets {
-        const val CALORIES_KCAL = 2000.0
+        const val CALORIES_KCAL = NutritionMetabolism.FALLBACK_KCAL_NEUTRAL.toDouble()
         const val PROTEIN_G = 150.0
         const val CARBS_G = 250.0
         const val FAT_G = 70.0

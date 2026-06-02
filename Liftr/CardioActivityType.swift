@@ -36,6 +36,10 @@ enum CardioActivityType: String, CaseIterable, Identifiable {
     var showsSplit500m: Bool { self == .rowerg }
     var showsSwimFields: Bool { self == .swim_pool }
 
+    var usesSwimDistanceAndPace: Bool {
+        self == .swim_pool || self == .swim_open_water
+    }
+
     var showsKmPaceSplits: Bool {
         switch self {
         case .swim_pool, .swim_open_water, .rowerg: false

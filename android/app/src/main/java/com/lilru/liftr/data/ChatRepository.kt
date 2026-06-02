@@ -11,6 +11,8 @@ import com.lilru.liftr.ui.chat.ReactionWire
 import com.lilru.liftr.ui.chat.AchievementShareSnapshot
 import com.lilru.liftr.ui.chat.ReplyPreviewWire
 import com.lilru.liftr.ui.chat.RoutineShareSnapshot
+import com.lilru.liftr.ui.chat.SharedIngredientSnapshot
+import com.lilru.liftr.ui.chat.SharedRecipeSnapshot
 import com.lilru.liftr.ui.chat.SegmentShareSnapshot
 import com.lilru.liftr.ui.chat.WorkoutShareSnapshot
 import io.github.jan.supabase.SupabaseClient
@@ -177,6 +179,66 @@ class ChatRepository(private val supabase: SupabaseClient) {
         }
         val res = supabase.postgrest.rpc(BackendContracts.Rpc.SEND_MESSAGE, params) { }
         return parseSingleLong(res.data)
+    }
+
+    suspend fun sendSharedIngredient(
+        conversationId: Long,
+        snapshot: SharedIngredientSnapshot,
+        caption: String? = null,
+        clientMsgId: UUID = UUID.randomUUID(),
+        replyToMessageId: Long? = null
+    ): Long {
+        val metadataElement = shareMetadataOutboundJson.encodeToJsonElement(
+            SharedIngredientSnapshot.serializer(),
+            snapshot
+        )
+        val params = buildJsonObject {
+            put("p_conversation_id", conversationId)
+            put("p_kind", "shared_ingredient")
+            put("p_body", caption?.trim().orEmpty())
+            put("p_metadata", metadataElement)
+            put("p_client_msg_id", clientMsgId.toString())
+            if (replyToMessageId != null) put("p_reply_to_message_id", replyToMessageId)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.SEND_MESSAGE, params) { }
+        return parseSingleLong(res.data)
+    }
+
+    suspend fun sendSharedRecipe(
+        conversationId: Long,
+        snapshot: SharedRecipeSnapshot,
+        caption: String? = null,
+        clientMsgId: UUID = UUID.randomUUID(),
+        replyToMessageId: Long? = null
+    ): Long {
+        val metadataElement = shareMetadataOutboundJson.encodeToJsonElement(
+            SharedRecipeSnapshot.serializer(),
+            snapshot
+        )
+        val params = buildJsonObject {
+            put("p_conversation_id", conversationId)
+            put("p_kind", "shared_recipe")
+            put("p_body", caption?.trim().orEmpty())
+            put("p_metadata", metadataElement)
+            put("p_client_msg_id", clientMsgId.toString())
+            if (replyToMessageId != null) put("p_reply_to_message_id", replyToMessageId)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.SEND_MESSAGE, params) { }
+        return parseSingleLong(res.data)
+    }
+
+    suspend fun cloneSharedIngredient(snapshot: SharedIngredientSnapshot): String {
+        val payload = shareMetadataOutboundJson.encodeToJsonElement(SharedIngredientSnapshot.serializer(), snapshot)
+        val params = buildJsonObject { put("p_snapshot", payload) }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.CLONE_SHARED_INGREDIENT, params) { }
+        return parseSingleUuidString(res.data)
+    }
+
+    suspend fun cloneSharedRecipe(snapshot: SharedRecipeSnapshot): String {
+        val payload = shareMetadataOutboundJson.encodeToJsonElement(SharedRecipeSnapshot.serializer(), snapshot)
+        val params = buildJsonObject { put("p_snapshot", payload) }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.CLONE_SHARED_RECIPE, params) { }
+        return parseSingleUuidString(res.data)
     }
 
     suspend fun markRead(conversationId: Long, lastMessageId: Long) {
@@ -376,6 +438,16 @@ class ChatRepository(private val supabase: SupabaseClient) {
                 arr.firstOrNull()?.toString()?.toLongOrNull()
                     ?: error("Unexpected RPC response: $trimmed")
             }
+    }
+
+    private fun parseSingleUuidString(raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) error("Empty RPC response")
+        val direct = trimmed.trim('"')
+        if (!direct.startsWith("[")) return direct
+        val arr = json.parseToJsonElement(trimmed).jsonArray
+        return arr.firstOrNull()?.toString()?.trim('"')
+            ?: error("Unexpected RPC response: $trimmed")
     }
 
 }

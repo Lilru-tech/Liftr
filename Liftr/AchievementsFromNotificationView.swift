@@ -4,6 +4,7 @@ struct AchievementsFromNotificationView: View {
     let userId: UUID
     let viewedUsername: String
     let showsCloseButton: Bool
+    var openAchievementId: Int? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var reloadToken = UUID()
@@ -13,7 +14,8 @@ struct AchievementsFromNotificationView: View {
             AchievementsGridView(
                 userId: userId,
                 viewedUsername: viewedUsername,
-                externalReloadToken: reloadToken
+                externalReloadToken: reloadToken,
+                openAchievementId: openAchievementId
             )
             .navigationTitle("Achievements")
             .navigationBarTitleDisplayMode(.inline)
