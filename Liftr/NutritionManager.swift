@@ -247,6 +247,152 @@ struct NutritionDiaryItemUI: Identifiable, Equatable {
     let isRecipe: Bool
 }
 
+struct NutritionHighlightsFoodItem: Decodable, Equatable {
+    let id: UUID
+    let name: String
+    let log_count: Int
+    let total_kcal: Double
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, log_count, total_kcal
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        log_count = try c.decodeIfPresent(Int.self, forKey: .log_count) ?? 0
+        total_kcal = try c.decodeIfPresent(Double.self, forKey: .total_kcal) ?? 0
+    }
+}
+
+struct NutritionHighlightsPeakDay: Decodable, Equatable {
+    let date: String
+    let kcal: Double
+}
+
+struct NutritionHighlightsPeakMealSlot: Decodable, Equatable {
+    let date: String
+    let meal_slot: String
+    let kcal: Double
+}
+
+struct NutritionHighlightsMacroSource: Decodable, Equatable {
+    let name: String
+    let total_g: Double
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        total_g = try c.decodeIfPresent(Double.self, forKey: .total_g) ?? 0
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name, total_g
+    }
+}
+
+struct NutritionHighlightsMacroChampions: Decodable, Equatable {
+    let top_protein_source: NutritionHighlightsMacroSource?
+    let top_carb_source: NutritionHighlightsMacroSource?
+
+    private enum CodingKeys: String, CodingKey {
+        case top_protein_source, top_carb_source
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        top_protein_source = try c.decodeIfPresent(NutritionHighlightsMacroSource.self, forKey: .top_protein_source)
+        top_carb_source = try c.decodeIfPresent(NutritionHighlightsMacroSource.self, forKey: .top_carb_source)
+    }
+}
+
+struct NutritionHighlightsCalorieVolatility: Decodable, Equatable {
+    let weekday_avg_kcal: Double
+    let weekend_avg_kcal: Double
+
+    private enum CodingKeys: String, CodingKey {
+        case weekday_avg_kcal, weekend_avg_kcal
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        weekday_avg_kcal = try c.decodeIfPresent(Double.self, forKey: .weekday_avg_kcal) ?? 0
+        weekend_avg_kcal = try c.decodeIfPresent(Double.self, forKey: .weekend_avg_kcal) ?? 0
+    }
+}
+
+struct NutritionHighlightsHeaviestMeal: Decodable, Equatable {
+    let date: String
+    let meal_slot: String
+    let total_weight_g: Double
+}
+
+struct NutritionHighlightsConsistencyStreak: Decodable, Equatable {
+    let current_streak: Int
+    let best_streak: Int
+
+    private enum CodingKeys: String, CodingKey {
+        case current_streak, best_streak
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        current_streak = try c.decodeIfPresent(Int.self, forKey: .current_streak) ?? 0
+        best_streak = try c.decodeIfPresent(Int.self, forKey: .best_streak) ?? 0
+    }
+}
+
+struct NutritionHighlights: Decodable, Equatable {
+    let days_logged: Int
+    let total_log_entries: Int
+    let first_log_date: String?
+    let last_log_date: String?
+    let avg_kcal_per_logged_day: Double
+    let peak_day: NutritionHighlightsPeakDay?
+    let peak_meal_slot: NutritionHighlightsPeakMealSlot?
+    let most_used_meal_slot: String?
+    let top_ingredient: NutritionHighlightsFoodItem?
+    let top_recipe: NutritionHighlightsFoodItem?
+    let top_ingredients: [NutritionHighlightsFoodItem]
+    let top_recipes: [NutritionHighlightsFoodItem]
+    let recipe_log_share_percent: Double
+    let macro_champions: NutritionHighlightsMacroChampions?
+    let calorie_volatility: NutritionHighlightsCalorieVolatility?
+    let heaviest_meal: NutritionHighlightsHeaviestMeal?
+    let consistency_streak: NutritionHighlightsConsistencyStreak?
+
+    var hasAnyLogs: Bool { total_log_entries > 0 }
+
+    enum CodingKeys: String, CodingKey {
+        case days_logged, total_log_entries, first_log_date, last_log_date
+        case avg_kcal_per_logged_day, peak_day, peak_meal_slot, most_used_meal_slot
+        case top_ingredient, top_recipe, top_ingredients, top_recipes, recipe_log_share_percent
+        case macro_champions, calorie_volatility, heaviest_meal, consistency_streak
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        days_logged = try c.decodeIfPresent(Int.self, forKey: .days_logged) ?? 0
+        total_log_entries = try c.decodeIfPresent(Int.self, forKey: .total_log_entries) ?? 0
+        first_log_date = try c.decodeIfPresent(String.self, forKey: .first_log_date)
+        last_log_date = try c.decodeIfPresent(String.self, forKey: .last_log_date)
+        avg_kcal_per_logged_day = try c.decodeIfPresent(Double.self, forKey: .avg_kcal_per_logged_day) ?? 0
+        peak_day = try c.decodeIfPresent(NutritionHighlightsPeakDay.self, forKey: .peak_day)
+        peak_meal_slot = try c.decodeIfPresent(NutritionHighlightsPeakMealSlot.self, forKey: .peak_meal_slot)
+        most_used_meal_slot = try c.decodeIfPresent(String.self, forKey: .most_used_meal_slot)
+        top_ingredient = try c.decodeIfPresent(NutritionHighlightsFoodItem.self, forKey: .top_ingredient)
+        top_recipe = try c.decodeIfPresent(NutritionHighlightsFoodItem.self, forKey: .top_recipe)
+        top_ingredients = try c.decodeIfPresent([NutritionHighlightsFoodItem].self, forKey: .top_ingredients) ?? []
+        top_recipes = try c.decodeIfPresent([NutritionHighlightsFoodItem].self, forKey: .top_recipes) ?? []
+        recipe_log_share_percent = try c.decodeIfPresent(Double.self, forKey: .recipe_log_share_percent) ?? 0
+        macro_champions = try c.decodeIfPresent(NutritionHighlightsMacroChampions.self, forKey: .macro_champions)
+        calorie_volatility = try c.decodeIfPresent(NutritionHighlightsCalorieVolatility.self, forKey: .calorie_volatility)
+        heaviest_meal = try c.decodeIfPresent(NutritionHighlightsHeaviestMeal.self, forKey: .heaviest_meal)
+        consistency_streak = try c.decodeIfPresent(NutritionHighlightsConsistencyStreak.self, forKey: .consistency_streak)
+    }
+}
+
 struct SmartNutritionRecommendation: Decodable {
     let recommendation_text: String
     let alerts: [String]
@@ -625,6 +771,17 @@ enum NutritionManager {
             return first
         }
         return try decoder.decode(SmartNutritionRecommendation.self, from: res.data)
+    }
+
+    static func fetchNutritionHighlights() async throws -> NutritionHighlights {
+        let res = try await SupabaseManager.shared.client
+            .rpc("get_nutrition_highlights_v1")
+            .execute()
+        let decoder = JSONDecoder.supabase()
+        if let rows = try? decoder.decode([NutritionHighlights].self, from: res.data), let first = rows.first {
+            return first
+        }
+        return try decoder.decode(NutritionHighlights.self, from: res.data)
     }
 
     static func fetchRecommendation(for userId: UUID, date: Date) async throws -> DailyNutritionRecommendation {

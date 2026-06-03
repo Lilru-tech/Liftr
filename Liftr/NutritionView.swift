@@ -331,6 +331,10 @@ final class NutritionViewModel: ObservableObject {
     @Published var smartInsights: SmartNutritionRecommendation?
     @Published var smartInsightsError: String?
 
+    @Published var highlightsLoading = false
+    @Published var highlights: NutritionHighlights?
+    @Published var highlightsError: String?
+
     init() {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -509,6 +513,30 @@ final class NutritionViewModel: ObservableObject {
         smartInsightsLoading = false
         smartInsights = nil
         smartInsightsError = nil
+    }
+
+    func loadHighlights() async {
+        highlightsLoading = true
+        highlights = nil
+        highlightsError = nil
+        let started = Date()
+        defer { highlightsLoading = false }
+        do {
+            let result = try await NutritionManager.fetchNutritionHighlights()
+            let elapsed = Date().timeIntervalSince(started)
+            if elapsed < 0.6 {
+                try await Task.sleep(nanoseconds: UInt64((0.6 - elapsed) * 1_000_000_000))
+            }
+            highlights = result
+        } catch {
+            highlightsError = error.localizedDescription
+        }
+    }
+
+    func resetHighlights() {
+        highlightsLoading = false
+        highlights = nil
+        highlightsError = nil
     }
 }
 
