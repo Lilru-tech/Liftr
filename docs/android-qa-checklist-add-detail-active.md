@@ -17,6 +17,7 @@ Objetivo: validar **comportamiento y datos** entre un build **iOS** (referencia)
 | Cuenta atrás | `Liftr/StartWorkoutCountdownView.swift` | `ui/home/StartWorkoutCountdownScreen.kt`, `prefs/LiftrPreferences.kt` (`skipStartCountdown`) |
 | Activos | `ActiveStrengthWorkoutView.swift`, `ActiveCardioWorkoutView.swift`, `ActiveSportWorkoutView.swift` | `ui/active/ActiveStrengthWorkoutScreen.kt`, `ActiveCardioWorkoutScreen.kt`, `ActiveSportWorkoutScreen.kt` + `*ViewModel.kt` |
 | Ayuda Add | `WorkoutHelpSheet` (iOS) | `ui/add/WorkoutHelpScreen.kt` (`WorkoutHelpSheetContent`) |
+| Fuerza avanzada | `StrengthSetRowEditor.swift`, `StrengthRoutineOverwrite.swift` | `ui/add/StrengthExerciseDraftsEditorBlock.kt`, `ui/add/StrengthRoutineOverwrite.kt`, `ui/active/ActiveStrengthWorkoutViewModel.kt` |
 
 Paridad Add detallada (RPC, planned, competición, comentarios): [`android/ADD_WORKOUT_PARITY.md`](../android/ADD_WORKOUT_PARITY.md).
 
@@ -34,6 +35,9 @@ Paridad Add detallada (RPC, planned, competición, comentarios): [`android/ADD_W
 
 - [ ] Añadir ejercicios, series, reps, peso, RPE/notas si aplica: el detalle y el activo reflejan lo guardado.
 - [ ] **Rutinas y carpetas** (sheet de rutinas): crear, aplicar, reemplazar con confirmación; persistencia de carpetas plegadas tras cerrar app (Android: `StrengthRoutinesSheetPreferences`).
+- [ ] **Previsualización de rutina**: tocar una rutina abre detalle/previsualización; aplicar, editar, duplicar y borrar desde esa superficie no corrompe el borrador actual.
+- [ ] **Overwrite de rutina**: crear o terminar un entreno desde una rutina, cambiar reps/peso/descanso/RPE/notas o pasos de drop set, y confirmar que la hoja “Review changes” muestra diferencias antes de actualizar la plantilla. Probar también “Not now” y verificar que el entrenamiento queda guardado.
+- [ ] **Drop set**: convertir una serie normal en drop set con 2+ pasos, añadir/quitar paso, limpiar drop, guardar y reabrir en iOS y Android. El detalle debe mostrar todos los pasos y la BD debe conservar `weight_segments`.
 - [ ] **Grupo / varias personas / same session vs per person**: mismos resultados en número de entrenos vinculados y participantes que en iOS (ver ayuda y strings de *linked* en `ADD_WORKOUT_PARITY.md`).
 
 ### A3. Cardio
@@ -72,7 +76,7 @@ Paridad Add detallada (RPC, planned, competición, comentarios): [`android/ADD_W
 
 ### B3. Acciones de dueño / flujo planned
 
-- [ ] **Editar metadatos** (fuerza/cardio/sport): guardar y ver reflejo en lista y detalle; casos con sesión cardio/sport y solo `workouts` (ver `ADD_WORKOUT_PARITY.md`).
+- [ ] **Editar metadatos** (fuerza/cardio/sport): guardar y ver reflejo en lista y detalle; casos con sesión cardio/sport y solo `workouts` (ver `ADD_WORKOUT_PARITY.md`). En fuerza, incluir una serie normal y una con `weight_segments` para confirmar que no se pierde el drop set al guardar.
 - [ ] **Publicar** planned: pasa a publicado; anotar comportamiento de **competición en Android** vs iOS (tabla en doc de paridad).
 - [ ] **Eliminar** (confirmación, desaparece del feed).
 
@@ -100,6 +104,8 @@ Paridad Add detallada (RPC, planned, competición, comentarios): [`android/ADD_W
 
 - [ ] Temporizador / navegación entre ejercicios; completar series; **finalizar** y ver entreno terminado en detalle.
 - [ ] **Pista de navegación** (banner la primera vez): se muestra o se respeta “ya visto”, según producto.
+- [ ] **Drop set en activo**: convertir una serie durante el entreno, editar pasos, completar, finalizar y reabrir detalle. Verificar que el primer paso se usa como resumen de reps/peso y que todos los pasos se guardan en `weight_segments`.
+- [ ] **Rutina actualizada desde activo**: si el entreno viene de una rutina, cambiar la prescripción durante el activo y validar que el prompt de overwrite aparece solo cuando hay diferencias serializables.
 - [ ] Modo **dual** (si lo probaste): UI de dos entrenos enlazados y cierre sin datos corruptos.
 
 ### C2. Cardio (`ActiveCardioWorkoutScreen`)

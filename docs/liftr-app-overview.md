@@ -56,7 +56,9 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 ### 3. Crear y registrar entrenamientos
 
 - **Modos Add vs Plan**: publicado vs planificado (enum `PublishMode` en [`../Liftr/AddWorkoutSheet.swift`](../Liftr/AddWorkoutSheet.swift)).
-- **Fuerza**: ejercicios del catálogo, series/reps/peso/descansos, plantillas **rutinas** con carpetas, orden, duplicados, hash de contenido (changelog 1.9.x).
+- **Fuerza**: ejercicios del catálogo, series/reps/peso/descansos, plantillas **rutinas** con carpetas, orden, duplicados y hash de contenido. El editor actual soporta **drop sets**: una fila de serie puede tener 2+ pasos `{ reps, weight_kg }` en `weight_segments` (iOS [`../Liftr/StrengthSetRowEditor.swift`](../Liftr/StrengthSetRowEditor.swift); Android `StrengthExerciseDraftsEditorBlock.kt` / `EditStrengthWorkoutMetaSheetContent.kt`).
+- **Rutinas de fuerza**: seleccionar una rutina abre previsualización/detalle antes de aplicarla; editar una rutina usa `StrengthRoutineTemplateEditor` en iOS y `EditStrengthRoutineTemplateSheet` en Android. Si el usuario termina o publica un entrenamiento basado en una rutina y cambió la prescripción, `StrengthRoutineOverwrite` calcula diferencias por ejercicio/serie, incluyendo `weight_segments`, y ofrece actualizar la plantilla sin modificar el entrenamiento ya guardado.
+- **Rutinas Hyrox**: guardado y reutilización de bloques Hyrox desde [`../Liftr/HyroxRoutineTemplates.swift`](../Liftr/HyroxRoutineTemplates.swift) y las pantallas Android `AddHyroxRoutinesSheetContent` / `HyroxExerciseFormatting`.
 - **Grupo / dual en el mismo dispositivo**: participantes, “misma sesión” vs “por persona”, enlaces en BD (changelog 1.8.x; RPC como `plan_strength_squad_programs`, `create_linked_strength_workout_copy` en [backend-contracts.md](backend-contracts.md)).
 - **Cardio**: tipos de actividad, GPS, ruta GeoJSON, splits por km, Live Activity en iOS; foreground service + widget en Android ([android-parity-inventory.md](android-parity-inventory.md)).
 - **Deportes**: muchos deportes con stats específicas (padel, fútbol, Hyrox, ski, etc.); tablas `*_session_stats` listadas en contratos.
@@ -66,6 +68,7 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 ### 4. Entreno activo (en vivo)
 
 - Pantallas dedicadas: fuerza ([`../Liftr/ActiveStrengthWorkoutView.swift`](../Liftr/ActiveStrengthWorkoutView.swift)), cardio ([`../Liftr/ActiveCardioWorkoutView.swift`](../Liftr/ActiveCardioWorkoutView.swift)), deporte ([`../Liftr/ActiveSportWorkoutView.swift`](../Liftr/ActiveSportWorkoutView.swift)).
+- En fuerza, las filas con `weight_segments` se muestran como **Drop set** con sus pasos y se expanden en la UI activa usando el primer paso como resumen de reps/peso. Al finalizar, el cliente vuelve a compactar los pasos en `exercise_sets.weight_segments` y recalcula la rutina pendiente si aplica.
 - iOS: **Live Activities** / Dynamic Island ([`../Liftr/WorkoutLiveActivityManager.swift`](../Liftr/WorkoutLiveActivityManager.swift), targets `LiftrWorkoutLiveActivity*`).
 - Android: tracking GPS, efectos y ViewModels bajo `ui/active/`, widget/refresh en `ongoing/`.
 
@@ -119,6 +122,8 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 
 - iOS: [`../Liftr/NotificationTokenUploader.swift`](../Liftr/NotificationTokenUploader.swift), [`../Liftr/NotificationsListView.swift`](../Liftr/NotificationsListView.swift).
 - Android: FCM en `LiftrAppContent` / `FcmTokenUploader`, [`../android/app/src/main/java/com/lilru/liftr/ui/notifications/NotificationsScreen.kt`](../android/app/src/main/java/com/lilru/liftr/ui/notifications/NotificationsScreen.kt), router de intents.
+- Preferencias por usuario: `user_notification_settings` contiene `push_enabled` y columnas `push_<tipo>` para categorías como mensajes, metas, competición, segmentos, retos e inactividad. La función edge [`../Liftr/supabase/functions/send-notifications/index.ts`](../Liftr/supabase/functions/send-notifications/index.ts) omite el push si la preferencia está desactivada y marca la notificación como procesada.
+- Routing: el payload FCM/APNs incluye `type` más `data`; iOS resuelve destinos desde `AppState` / `AppDelegate` y Android desde `NotificationRouter`. Para tipos de segmento (`segment_you_are_first`, `segment_lost_first`), `data.segment_id` debe abrir el detalle de segmento; para retos, los clientes aceptan `challenge_won` y el legacy `challenge_won_weekly`.
 
 ### 16. Monetización y anuncios
 
@@ -146,7 +151,7 @@ La fuente más útil para una **charla tipo “estamos en las dos plataformas”
 
 1. **Una frase**: app de entrenos multi-modalidad + social + metas + competiciones + rankings, con datos en Supabase.
 2. **Tres pilares**: registrar entreno (fuerza/cardio/deporte) → ver progreso y consistencia → competir / rankear / logros.
-3. **Diferenciadores recientes** (según changelog): grupo en un móvil, rutinas con carpetas, Health import, Live Activity/FGS, comparación avanzada y period compare.
+3. **Diferenciadores recientes** (según changelog): grupo en un móvil, rutinas con carpetas y revisión de cambios, drop sets en fuerza, Health import, Live Activity/FGS, comparación avanzada y period compare.
 4. **Técnico** (si preguntan): clientes nativos, Postgres + RPC con lista congelada en `BackendContracts` / `backend-contracts.md`, RLS, edge functions para notificaciones/borrado.
 
 **Nota de seguridad**: en charlas técnicas, no repitas claves anónimas en claro; revisar configuración de claves (p. ej. `SupabaseManager`) y preferir secretos fuera del control de versiones.
