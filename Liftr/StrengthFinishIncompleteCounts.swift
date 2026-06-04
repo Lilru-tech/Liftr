@@ -38,16 +38,14 @@ enum StrengthFinishIncompleteCounting {
 
 enum StrengthFinishConfirmationCopy {
     static func incompleteWarning(exercises: Int, sets: Int) -> String {
-        let lang = Locale.current.language.languageCode?.identifier ?? ""
-        if lang == "es" {
+        if AppLanguage.isSpanish {
             return "Tienes \(exercises) ejercicios y \(sets) series sin terminar. Si finalizas el entrenamiento ahora, se eliminarán automáticamente de tu historial."
         }
         return "You have \(exercises) exercises and \(sets) sets left unfinished. If you finish now, they will be removed from your history automatically."
     }
 
     static var standardEarlyFinishBody: String {
-        let lang = Locale.current.language.languageCode?.identifier ?? ""
-        if lang == "es" {
+        if AppLanguage.isSpanish {
             return "No has completado todas las series planificadas. El entrenamiento se guardará solo con las series que hayas hecho. Si finalizas ahora, se publicará automáticamente."
         }
         return "You haven't completed all planned sets. The workout will be saved with only the sets you actually performed. If you finish now, it will be published automatically."

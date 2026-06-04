@@ -12,7 +12,8 @@ sealed class MainOverlay {
     data class Goals(val userId: String) : MainOverlay()
     data class Achievements(
         val fromNotification: Boolean = false,
-        val openAchievementCode: String? = null
+        val openAchievementCode: String? = null,
+        val openAchievementId: Int? = null
     ) : MainOverlay()
     data object CompetitionsHub : MainOverlay()
     data class CompetitionDetailById(val competitionId: Int) : MainOverlay()

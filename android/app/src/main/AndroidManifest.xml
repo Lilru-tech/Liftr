@@ -15,7 +15,7 @@
     </queries>
 
     <application
-        android:name=".LiftrApplication"
+        android:name="com.lilru.liftr.LiftrApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"

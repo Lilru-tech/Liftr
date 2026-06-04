@@ -3174,14 +3174,21 @@ private struct CardioDetailBlock: View {
 
     private func cardioMetrics(_ r: CardioRow) -> [DetailMetric] {
         var metrics: [DetailMetric] = []
+        let swimUnits = CardioSwimDisplay.usesSwimUnits(code: r.activity_code)
         if let d = detailPositiveDecimalDouble(r.distance_km) {
-            metrics.append(DetailMetric("Distance", String(format: "%.2f km", d), systemImage: "point.topleft.down.curvedto.point.bottomright.up"))
+            let distLabel = swimUnits
+                ? CardioSwimDisplay.formatSwimDistance(km: d)
+                : String(format: "%.2f km", d)
+            metrics.append(DetailMetric("Distance", distLabel, systemImage: "point.topleft.down.curvedto.point.bottomright.up"))
         }
         if let s = detailPositiveInt(r.duration_sec) {
             metrics.append(DetailMetric("Duration", durationString(Double(s)), systemImage: "clock"))
         }
         if let p = detailPositiveInt(r.avg_pace_sec_per_km) {
-            metrics.append(DetailMetric("Avg pace", paceString(Double(p)), systemImage: "speedometer"))
+            let paceLabel = swimUnits
+                ? CardioSwimDisplay.formatSwimPace(secPerKm: p)
+                : paceString(Double(p))
+            metrics.append(DetailMetric("Avg pace", paceLabel, systemImage: "speedometer"))
         }
         if let ah = detailPositiveInt(r.avg_hr) {
             metrics.append(DetailMetric("Avg HR", "\(ah) bpm", systemImage: "heart"))

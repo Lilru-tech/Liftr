@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
@@ -27,9 +28,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.lilru.liftr.R
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -38,6 +41,7 @@ import java.util.Locale
 
 private val CalendarBudgetUnderColor = Color(0xFFFF9800)
 private val CalendarBudgetOverColor = Color(0xFFE53935)
+private val CalendarPlannedColor = Color(0xFFE07000)
 
 @Composable
 fun NutritionCalendarCard(
@@ -73,6 +77,7 @@ fun NutritionCalendarCard(
                     Icon(Icons.Filled.ChevronRight, contentDescription = null)
                 }
             }
+            NutritionCalendarLegendRow()
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 DayOfWeek.values().forEach { d ->
                     Text(
@@ -103,6 +108,32 @@ fun NutritionCalendarCard(
 }
 
 @Composable
+private fun NutritionCalendarLegendRow() {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+    ) {
+        CalendarLegendItem(stringResource(R.string.nutrition_calendar_no_logs), Color.Gray.copy(alpha = 0.5f))
+        CalendarLegendItem(stringResource(R.string.nutrition_calendar_on_budget), CalendarBudgetUnderColor)
+        CalendarLegendItem(stringResource(R.string.nutrition_calendar_over_budget), CalendarBudgetOverColor)
+        CalendarLegendItem(stringResource(R.string.nutrition_calendar_planned), CalendarPlannedColor)
+    }
+}
+
+@Composable
+private fun CalendarLegendItem(label: String, color: Color) {
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(6.dp)
+                .clip(CircleShape)
+                .background(color)
+        )
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
 private fun NutritionDayCell(
     day: LocalDate?,
     summary: NutritionMonthDayBalance?,
@@ -116,6 +147,7 @@ private fun NutritionDayCell(
         return
     }
     val count = summary?.mealLogCount ?: 0
+    val plannedCount = summary?.plannedMealCount ?: 0
     val bg = when {
         count > 0 -> {
             val accent = if ((summary?.remainingCalories ?: 0.0) < 0) {
@@ -125,6 +157,7 @@ private fun NutritionDayCell(
             }
             accent.copy(alpha = if (selected) 0.55f else 0.32f)
         }
+        plannedCount > 0 -> CalendarPlannedColor.copy(alpha = if (selected) 0.55f else 0.32f)
         selected -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
         else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f)
     }
@@ -138,6 +171,13 @@ private fun NutritionDayCell(
                     selected -> Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
                     today -> Modifier.border(1.5.dp, MaterialTheme.colorScheme.tertiary, RoundedCornerShape(10.dp))
                     else -> Modifier
+                }
+            )
+            .then(
+                if (count > 0 && plannedCount > 0) {
+                    Modifier.border(2.dp, CalendarPlannedColor, RoundedCornerShape(10.dp))
+                } else {
+                    Modifier
                 }
             )
             .clickable(onClick = onClick),

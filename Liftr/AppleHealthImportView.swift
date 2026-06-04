@@ -69,9 +69,9 @@ struct AppleHealthImportView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                        DatePicker("From", selection: $fromDate, displayedComponents: [.date])
+                        DatePicker("From", selection: $fromDate, in: ...todayStart, displayedComponents: [.date])
                         Divider().opacity(0.15)
-                        DatePicker("To", selection: $toDate, in: fromDate ... Date(), displayedComponents: [.date])
+                        DatePicker("To", selection: $toDate, in: toDatePickerRange, displayedComponents: [.date])
                     }
                 }
             }
@@ -115,8 +115,29 @@ struct AppleHealthImportView: View {
                                 Divider().opacity(0.15)
                                 LabeledContent("Merged with existing", value: "\(s.mergedDuplicate)")
                             }
+                            if s.routesBackfilled > 0 {
+                                Divider().opacity(0.15)
+                                LabeledContent("Routes backfilled", value: "\(s.routesBackfilled)")
+                            }
                             Divider().opacity(0.15)
                             LabeledContent("Failed", value: "\(s.failed)")
+                            if s.outdoorWorkoutsMissingRoute > 0 {
+                                Divider().opacity(0.15)
+                                LabeledContent("Missing GPS routes", value: "\(s.outdoorWorkoutsMissingRoute)")
+                            }
+                            if s.suggestsWorkoutRoutePermissionIssue {
+                                Divider().opacity(0.15)
+                                Text(
+                                    "Workouts imported without GPS maps. Open Apple Health → Sharing → Apps → Liftr and turn on Workout Routes, then import again."
+                                )
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
+                                Button("Open Apple Health") {
+                                    HealthKitCardioImportService.openAppleHealthApp()
+                                }
+                                .font(.caption.weight(.semibold))
+                            }
                             if !s.errorMessages.isEmpty {
                                 Divider().opacity(0.15)
                                 ForEach(Array(s.errorMessages.enumerated()), id: \.offset) { _, msg in
@@ -154,11 +175,36 @@ struct AppleHealthImportView: View {
                 .presentationDetents([.medium, .large])
                 .presentationBackground(.clear)
         }
+        .onAppear {
+            clampImportDates()
+        }
         .onChange(of: fromDate) { _, _ in
+            clampImportDates()
             handleManualDateChangeIfNeeded()
         }
         .onChange(of: toDate) { _, _ in
+            clampImportDates()
             handleManualDateChangeIfNeeded()
+        }
+    }
+
+    private var todayStart: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
+
+    private var toDatePickerRange: ClosedRange<Date> {
+        let end = todayStart
+        let start = min(Calendar.current.startOfDay(for: fromDate), end)
+        return start ... end
+    }
+
+    private func clampImportDates() {
+        let cal = Calendar.current
+        let today = todayStart
+        fromDate = min(cal.startOfDay(for: fromDate), today)
+        toDate = min(cal.startOfDay(for: toDate), today)
+        if fromDate > toDate {
+            fromDate = toDate
         }
     }
 
@@ -337,7 +383,9 @@ struct AppleHealthImportView: View {
         await MainActor.run {
             importing = false
             summary = result
-            if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
+            if result.suggestsWorkoutRoutePermissionIssue {
+                banner = "Imported workouts, but GPS routes are missing. Enable Workout Routes for Liftr in Apple Health, then import again."
+            } else if result.imported == 0, result.failed == 0, result.skippedDuplicate == 0, result.mergedDuplicate == 0 {
                 banner = "No compatible cardio workouts found in this date range."
             }
         }

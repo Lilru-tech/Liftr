@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.domain.levelProgressRatio
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
@@ -66,6 +67,7 @@ data class UserLevelDetailUiState(
     val level: Int = 1,
     val xp: Long = 0,
     val lastActivityAtMs: Long? = null,
+    val currentLevelThresholdXp: Long = 0L,
     val nextLevelThresholdXp: Long? = null,
     val milestones: List<LevelMilestone> = emptyList(),
     val xpEvents: List<XpEventUiModel> = emptyList(),
@@ -78,8 +80,7 @@ data class UserLevelDetailUiState(
     val progressRatio: Double
         get() {
             val cap = nextLevelThresholdXp ?: return 0.0
-            if (cap <= 0) return 0.0
-            return min(1.0, max(0.0, xp.toDouble() / cap.toDouble()))
+            return levelProgressRatio(xp, currentLevelThresholdXp, cap)
         }
 
     val xpToNextLevel: Long?
@@ -168,25 +169,20 @@ class UserLevelDetailViewModel(
                 val totalXp = levelRow?.xp ?: 0L
                 val lastMs = parseLastActivityToEpochMs(levelRow?.lastActivityAt)
 
-                val nextRows = supabase
-                    .from(BackendContracts.Tables.LEVEL_THRESHOLDS)
-                    .select(columns = Columns.raw("level,xp_required")) {
-                        filter { eq("level", lv + 1) }
-                        limit(1)
-                    }
-                val nextCap = decodeFlexibleList<LevelThresholdRow>(nextRows.data).firstOrNull()?.xpRequired
-
-                val msLevels = listOf(lv + 1, lv + 2, lv + 3)
-                val levelAny: List<Any> = msLevels.map { it as Any }
-                val msRes = supabase
+                val thresholdLevels = listOf(lv, lv + 1, lv + 2, lv + 3)
+                val levelAny: List<Any> = thresholdLevels.map { it as Any }
+                val thrRes = supabase
                     .from(BackendContracts.Tables.LEVEL_THRESHOLDS)
                     .select(columns = Columns.raw("level,xp_required")) {
                         filter { isIn("level", levelAny) }
                         order("level", Order.ASCENDING)
                     }
-                val milestones = decodeFlexibleList<LevelThresholdRow>(msRes.data).map {
-                    LevelMilestone(it.level, it.xpRequired)
-                }
+                val thrRows = decodeFlexibleList<LevelThresholdRow>(thrRes.data)
+                val currentFloor = thrRows.firstOrNull { it.level == lv }?.xpRequired ?: 0L
+                val nextCap = thrRows.firstOrNull { it.level == lv + 1 }?.xpRequired
+                val milestones = thrRows
+                    .filter { it.level > lv }
+                    .map { LevelMilestone(it.level, it.xpRequired) }
 
                 val (firstPage, evFailed) = runCatching {
                     val r = supabase
@@ -208,6 +204,7 @@ class UserLevelDetailViewModel(
                     level = lv,
                     xp = totalXp,
                     lastActivityAtMs = firstPage.firstOrNull()?.createdAtMs ?: lastMs,
+                    currentLevelThresholdXp = currentFloor,
                     nextLevelThresholdXp = nextCap,
                     milestones = milestones,
                     xpEvents = firstPage,

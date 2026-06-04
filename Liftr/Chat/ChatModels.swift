@@ -15,6 +15,8 @@ enum ChatMessageKind: String, Codable {
     case routineShare      = "routine_share"
     case achievementShare  = "achievement_share"
     case segmentShare      = "segment_share"
+    case sharedIngredient  = "shared_ingredient"
+    case sharedRecipe      = "shared_recipe"
 }
 
 struct ConversationOverview: Decodable, Identifiable, Hashable {
@@ -205,6 +207,53 @@ struct SegmentShareSnapshot: Codable, Hashable {
     let owner_avatar_url: String?
 }
 
+struct SharedIngredientSnapshot: Codable, Hashable {
+    let v: Int
+    let type: String
+    let name: String
+    let calories_per_100g: Double
+    let protein_per_100g: Double
+    let carbs_per_100g: Double
+    let fat_per_100g: Double
+    let saturated_fat_per_100g: Double
+    let sugars_per_100g: Double
+    let fiber_per_100g: Double
+    let sodium_mg_per_100g: Double
+}
+
+struct SharedRecipeIngredientSnapshot: Codable, Hashable {
+    let name: String
+    let weight_g: Double
+    let calories_per_100g: Double
+    let protein_per_100g: Double
+    let carbs_per_100g: Double
+    let fat_per_100g: Double
+    let saturated_fat_per_100g: Double
+    let sugars_per_100g: Double
+    let fiber_per_100g: Double
+    let sodium_mg_per_100g: Double
+}
+
+struct SharedRecipeProfilePer100gSnapshot: Codable, Hashable {
+    let calories: Double
+    let protein: Double
+    let carbs: Double
+    let fat: Double
+    let saturatedFat: Double
+    let sugars: Double
+    let fiber: Double
+    let sodiumMg: Double
+}
+
+struct SharedRecipeSnapshot: Codable, Hashable {
+    let v: Int
+    let type: String
+    let name: String
+    let description: String?
+    let ingredients: [SharedRecipeIngredientSnapshot]
+    let profile_per_100g: SharedRecipeProfilePer100gSnapshot?
+}
+
 extension ChatMessage {
     func workoutShare() -> WorkoutShareSnapshot? {
         guard messageKind == .workoutShare, let metadata else { return nil }
@@ -224,5 +273,15 @@ extension ChatMessage {
     func segmentShare() -> SegmentShareSnapshot? {
         guard messageKind == .segmentShare, let metadata else { return nil }
         return try? metadata.decode(as: SegmentShareSnapshot.self)
+    }
+
+    func sharedIngredient() -> SharedIngredientSnapshot? {
+        guard messageKind == .sharedIngredient, let metadata else { return nil }
+        return try? metadata.decode(as: SharedIngredientSnapshot.self)
+    }
+
+    func sharedRecipe() -> SharedRecipeSnapshot? {
+        guard messageKind == .sharedRecipe, let metadata else { return nil }
+        return try? metadata.decode(as: SharedRecipeSnapshot.self)
     }
 }

@@ -28,7 +28,8 @@ struct RootView: View {
             .tag(Tab.add)
             .tabItem { Label("", systemImage: "plus.circle.fill") }
             
-            NavigationStack { NutritionView().gradientBG() }
+            NutritionView()
+                .gradientBG()
                 .tag(Tab.nutrition)
                 .tabItem { Label("", systemImage: "fork.knife") }
             
@@ -170,12 +171,13 @@ struct RootView: View {
                         .gradientBG()
                 }
                 
-            case .achievements:
+            case .achievements(let achievementId):
                 if let currentUserId = app.userId {
                     AchievementsFromNotificationView(
                         userId: currentUserId,
                         viewedUsername: "",
-                        showsCloseButton: true
+                        showsCloseButton: true,
+                        openAchievementId: achievementId
                     )
                     .gradientBG()
                 } else {

@@ -591,8 +591,11 @@ fun WorkoutDetailScreen(
                     if (c != null) {
                         if (c.distanceKm != null) {
                             item {
+                                val actWire = c.activityCode?.ifBlank { null } ?: c.modality.orEmpty()
                                 Text(
-                                    text = stringResource(R.string.home_detail_cardio_distance_km, c.distanceKm),
+                                    text = stringResource(
+                                        R.string.home_detail_cardio_label_distance
+                                    ) + ": " + formatCardioDistance(c.distanceKm, actWire),
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }
@@ -1134,8 +1137,17 @@ fun WorkoutDetailScreen(
                                 mutableStateOf(intensityFromServerOrDefault(wk.perceivedIntensity))
                             }
                             var activity by remember(wk.id, sessionKey, showEditMeta) { mutableStateOf(act0) }
+                            var swimDistManual by remember(wk.id, sessionKey, showEditMeta) {
+                                mutableStateOf(card.distanceKm != null)
+                            }
                             var dist by remember(wk.id, sessionKey, showEditMeta) {
-                                mutableStateOf(card.distanceKm?.toString() ?: "")
+                                mutableStateOf(
+                                    if (act0.usesSwimDistanceAndPace) {
+                                        metersTextFromKm(card.distanceKm)
+                                    } else {
+                                        card.distanceKm?.toString() ?: ""
+                                    }
+                                )
                             }
                             var durH by remember(wk.id, sessionKey, showEditMeta) { mutableStateOf(dh) }
                             var durM by remember(wk.id, sessionKey, showEditMeta) { mutableStateOf(dm) }
@@ -1183,9 +1195,15 @@ fun WorkoutDetailScreen(
                                 intensity = inten,
                                 onIntensityChange = { inten = it },
                                 activity = activity,
-                                onActivityChange = { activity = it },
+                                onActivityChange = {
+                                    activity = it
+                                    if (!it.showsSwimFields) swimDistManual = false
+                                },
                                 distanceKm = dist,
-                                onDistanceKmChange = { dist = it },
+                                onDistanceKmChange = {
+                                    dist = it
+                                    if (activity.usesSwimDistanceAndPace) swimDistManual = true
+                                },
                                 durH = durH,
                                 durM = durM,
                                 durS = durS,
@@ -1211,9 +1229,19 @@ fun WorkoutDetailScreen(
                                 kmSplitsPaceText = kmSp,
                                 onKmSplitsPaceTextChange = { kmSp = it },
                                 swimLaps = sLap,
-                                onSwimLapsChange = { sLap = it },
+                                onSwimLapsChange = {
+                                    sLap = it
+                                    if (activity.showsSwimFields && !swimDistManual) {
+                                        poolDistanceMetersFromLaps(sLap, pool)?.let { dist = it.toString() }
+                                    }
+                                },
                                 poolLengthM = pool,
-                                onPoolLengthMChange = { pool = it },
+                                onPoolLengthMChange = {
+                                    pool = it
+                                    if (activity.showsSwimFields && !swimDistManual) {
+                                        poolDistanceMetersFromLaps(sLap, pool)?.let { dist = it.toString() }
+                                    }
+                                },
                                 swimStyle = sty,
                                 onSwimStyleChange = { sty = it },
                                 saveLabel = stringResource(R.string.edit_workout_meta_save),

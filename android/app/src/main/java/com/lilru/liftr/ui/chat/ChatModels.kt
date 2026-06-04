@@ -133,7 +133,9 @@ enum class ChatKind(val raw: String) {
     WORKOUT_SHARE("workout_share"),
     ROUTINE_SHARE("routine_share"),
     ACHIEVEMENT_SHARE("achievement_share"),
-    SEGMENT_SHARE("segment_share");
+    SEGMENT_SHARE("segment_share"),
+    SHARED_INGREDIENT("shared_ingredient"),
+    SHARED_RECIPE("shared_recipe");
 
     companion object {
         fun fromRaw(raw: String?): ChatKind =
@@ -207,6 +209,57 @@ data class SegmentShareSnapshot(
     @SerialName("owner_avatar_url") val ownerAvatarUrl: String? = null
 )
 
+@Serializable
+data class SharedIngredientSnapshot(
+    val v: Int = 1,
+    val type: String = "shared_ingredient",
+    val name: String,
+    @SerialName("calories_per_100g") val caloriesPer100g: Double,
+    @SerialName("protein_per_100g") val proteinPer100g: Double = 0.0,
+    @SerialName("carbs_per_100g") val carbsPer100g: Double = 0.0,
+    @SerialName("fat_per_100g") val fatPer100g: Double = 0.0,
+    @SerialName("saturated_fat_per_100g") val saturatedFatPer100g: Double = 0.0,
+    @SerialName("sugars_per_100g") val sugarsPer100g: Double = 0.0,
+    @SerialName("fiber_per_100g") val fiberPer100g: Double = 0.0,
+    @SerialName("sodium_mg_per_100g") val sodiumMgPer100g: Double = 0.0
+)
+
+@Serializable
+data class SharedRecipeIngredientSnapshot(
+    val name: String,
+    @SerialName("weight_g") val weightG: Double,
+    @SerialName("calories_per_100g") val caloriesPer100g: Double,
+    @SerialName("protein_per_100g") val proteinPer100g: Double = 0.0,
+    @SerialName("carbs_per_100g") val carbsPer100g: Double = 0.0,
+    @SerialName("fat_per_100g") val fatPer100g: Double = 0.0,
+    @SerialName("saturated_fat_per_100g") val saturatedFatPer100g: Double = 0.0,
+    @SerialName("sugars_per_100g") val sugarsPer100g: Double = 0.0,
+    @SerialName("fiber_per_100g") val fiberPer100g: Double = 0.0,
+    @SerialName("sodium_mg_per_100g") val sodiumMgPer100g: Double = 0.0
+)
+
+@Serializable
+data class SharedRecipeProfilePer100gSnapshot(
+    val calories: Double,
+    val protein: Double,
+    val carbs: Double,
+    val fat: Double,
+    val saturatedFat: Double,
+    val sugars: Double,
+    val fiber: Double,
+    val sodiumMg: Double
+)
+
+@Serializable
+data class SharedRecipeSnapshot(
+    val v: Int = 1,
+    val type: String = "shared_recipe",
+    val name: String,
+    val description: String? = null,
+    val ingredients: List<SharedRecipeIngredientSnapshot>,
+    @SerialName("profile_per_100g") val profilePer100g: SharedRecipeProfilePer100gSnapshot? = null
+)
+
 private val shareMetadataJson = Json { ignoreUnknownKeys = true }
 
 private fun JsonObject.withDetailJsonCoercedToString(): JsonObject {
@@ -258,6 +311,22 @@ fun ChatMessageWire.decodeSegmentShare(): SegmentShareSnapshot? {
     }.getOrNull()
 }
 
+fun ChatMessageWire.decodeSharedIngredient(): SharedIngredientSnapshot? {
+    if (ChatKind.fromRaw(kind) != ChatKind.SHARED_INGREDIENT) return null
+    val m = metadata ?: return null
+    return runCatching {
+        shareMetadataJson.decodeFromJsonElement(SharedIngredientSnapshot.serializer(), m)
+    }.getOrNull()
+}
+
+fun ChatMessageWire.decodeSharedRecipe(): SharedRecipeSnapshot? {
+    if (ChatKind.fromRaw(kind) != ChatKind.SHARED_RECIPE) return null
+    val m = metadata ?: return null
+    return runCatching {
+        shareMetadataJson.decodeFromJsonElement(SharedRecipeSnapshot.serializer(), m)
+    }.getOrNull()
+}
+
 fun ChatMessageWire.replyComposerSubtitle(): String = when (ChatKind.fromRaw(kind)) {
     ChatKind.ROUTINE_SHARE -> decodeRoutineShare()?.let { r -> "Routine · ${r.name}" } ?: body.orEmpty()
     ChatKind.WORKOUT_SHARE -> decodeWorkoutShare()?.let { w ->
@@ -272,6 +341,8 @@ fun ChatMessageWire.replyComposerSubtitle(): String = when (ChatKind.fromRaw(kin
         val t = s.name.trim().takeIf { it.isNotEmpty() }
         if (t != null) "Segment · $t" else "Segment"
     } ?: body.orEmpty()
+    ChatKind.SHARED_INGREDIENT -> decodeSharedIngredient()?.let { "Ingredient · ${it.name}" } ?: body.orEmpty()
+    ChatKind.SHARED_RECIPE -> decodeSharedRecipe()?.let { "Recipe · ${it.name}" } ?: body.orEmpty()
     else -> body.orEmpty()
 }
 
@@ -300,6 +371,12 @@ fun ChatMessageWire.clipboardTextForCopy(): String = when (ChatKind.fromRaw(kind
             append("Segment: ${s.name}")
             s.ownerUsername?.takeIf { it.isNotBlank() }?.let { append("\nFrom @").append(it) }
         }
+    } ?: body.orEmpty()
+    ChatKind.SHARED_INGREDIENT -> decodeSharedIngredient()?.let { s ->
+        buildString { append("Ingredient: ${s.name}") }
+    } ?: body.orEmpty()
+    ChatKind.SHARED_RECIPE -> decodeSharedRecipe()?.let { s ->
+        buildString { append("Recipe: ${s.name}") }
     } ?: body.orEmpty()
     else -> body.orEmpty()
 }
@@ -341,6 +418,24 @@ fun ReplyPreviewWire.previewText(): String {
             }.getOrNull()?.let { s ->
                 val t = s.name.trim().takeIf { it.isNotEmpty() }
                 if (t != null) "Segment · $t" else "Segment"
+            } ?: body.orEmpty()
+        }
+        ChatKind.SHARED_INGREDIENT -> {
+            val m = metadata ?: return body.orEmpty()
+            runCatching {
+                shareMetadataJson.decodeFromJsonElement(SharedIngredientSnapshot.serializer(), m)
+            }.getOrNull()?.let { s ->
+                val t = s.name.trim().takeIf { it.isNotEmpty() }
+                if (t != null) "Ingredient · $t" else "Ingredient"
+            } ?: body.orEmpty()
+        }
+        ChatKind.SHARED_RECIPE -> {
+            val m = metadata ?: return body.orEmpty()
+            runCatching {
+                shareMetadataJson.decodeFromJsonElement(SharedRecipeSnapshot.serializer(), m)
+            }.getOrNull()?.let { s ->
+                val t = s.name.trim().takeIf { it.isNotEmpty() }
+                if (t != null) "Recipe · $t" else "Recipe"
             } ?: body.orEmpty()
         }
         else -> body.orEmpty()

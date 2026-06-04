@@ -186,6 +186,88 @@ enum ChatService {
         return first
     }
 
+    @discardableResult
+    static func sendSharedIngredient(conversationId: Int64,
+                                     snapshot: SharedIngredientSnapshot,
+                                     caption: String? = nil,
+                                     clientMsgId: UUID = UUID(),
+                                     replyTo: Int64? = nil) async throws -> Int64 {
+        let metadata = try AnyJSON(snapshot)
+        let params = SendMessageParams(
+            p_conversation_id: conversationId,
+            p_kind: ChatMessageKind.sharedIngredient.rawValue,
+            p_body: caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            p_metadata: metadata,
+            p_client_msg_id: clientMsgId,
+            p_reply_to_message_id: replyTo
+        )
+        let res = try await client.rpc("send_message", params: params).execute()
+        if let id = try? JSONDecoder().decode(Int64.self, from: res.data) { return id }
+        let arr = try JSONDecoder().decode([Int64].self, from: res.data)
+        guard let first = arr.first else {
+            throw NSError(domain: "Chat", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Empty send_message response"])
+        }
+        return first
+    }
+
+    @discardableResult
+    static func sendSharedRecipe(conversationId: Int64,
+                                 snapshot: SharedRecipeSnapshot,
+                                 caption: String? = nil,
+                                 clientMsgId: UUID = UUID(),
+                                 replyTo: Int64? = nil) async throws -> Int64 {
+        let metadata = try AnyJSON(snapshot)
+        let params = SendMessageParams(
+            p_conversation_id: conversationId,
+            p_kind: ChatMessageKind.sharedRecipe.rawValue,
+            p_body: caption?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+            p_metadata: metadata,
+            p_client_msg_id: clientMsgId,
+            p_reply_to_message_id: replyTo
+        )
+        let res = try await client.rpc("send_message", params: params).execute()
+        if let id = try? JSONDecoder().decode(Int64.self, from: res.data) { return id }
+        let arr = try JSONDecoder().decode([Int64].self, from: res.data)
+        guard let first = arr.first else {
+            throw NSError(domain: "Chat", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Empty send_message response"])
+        }
+        return first
+    }
+
+    private struct CloneSnapshotParams: Encodable {
+        let p_snapshot: AnyJSON
+    }
+
+    static func cloneSharedIngredient(snapshot: SharedIngredientSnapshot) async throws -> UUID {
+        let res = try await client
+            .rpc("clone_shared_ingredient",
+                 params: CloneSnapshotParams(p_snapshot: try AnyJSON(snapshot)))
+            .execute()
+        if let id = try? JSONDecoder.supabase().decode(UUID.self, from: res.data) { return id }
+        let arr = try JSONDecoder.supabase().decode([UUID].self, from: res.data)
+        guard let first = arr.first else {
+            throw NSError(domain: "Nutrition", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Empty clone_shared_ingredient response"])
+        }
+        return first
+    }
+
+    static func cloneSharedRecipe(snapshot: SharedRecipeSnapshot) async throws -> UUID {
+        let res = try await client
+            .rpc("clone_shared_recipe",
+                 params: CloneSnapshotParams(p_snapshot: try AnyJSON(snapshot)))
+            .execute()
+        if let id = try? JSONDecoder.supabase().decode(UUID.self, from: res.data) { return id }
+        let arr = try JSONDecoder.supabase().decode([UUID].self, from: res.data)
+        guard let first = arr.first else {
+            throw NSError(domain: "Nutrition", code: 0,
+                          userInfo: [NSLocalizedDescriptionKey: "Empty clone_shared_recipe response"])
+        }
+        return first
+    }
+
     private struct MarkReadParams: Encodable {
         let p_conversation_id: Int64
         let p_last_read_message_id: Int64

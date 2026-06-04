@@ -93,20 +93,39 @@ android {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Build stability: prevent stale dex-archive duplicates
+//
+// We’ve seen D8 fail with duplicate classes inside the same dependency
+// dex archive (e.g. `androidx.activity.ktx.R` appearing twice as `..._0.jar`
+// and `..._0 2.jar`). This is typically caused by stale/interrupted dex
+// intermediates. Deleting these intermediates before dex merging makes
+// "Run" reliable without requiring manual clean steps.
+// ---------------------------------------------------------------------------
+
+val cleanDexIntermediates by tasks.registering(Delete::class) {
+    delete(
+        layout.buildDirectory.dir("intermediates/project_dex_archive"),
+        layout.buildDirectory.dir("intermediates/dexBuilder")
+    )
+}
+
+tasks.matching { it.name.startsWith("mergeProjectDex") }
+    .configureEach { dependsOn(cleanDexIntermediates) }
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.10.01")
     implementation(composeBom)
     androidTestImplementation(composeBom)
-    // Evita clases duplicadas (p. ej. androidx.activity.ktx.R) al mezclar DEX: ui trae
-    // activity-ktx y activity-compose también; una sola copia en el classpath.
-    implementation("androidx.compose.ui:ui") {
-        exclude(group = "androidx.activity", module = "activity-ktx")
-    }
+    implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material:material")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.activity:activity-compose:1.9.3") {
+        exclude(group = "androidx.activity", module = "activity-ktx")
+    }
+    implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.fragment:fragment:1.8.5")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")

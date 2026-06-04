@@ -366,6 +366,8 @@ enum class AddCardioActivity(val wire: String) {
         get() = this == ROWERG
     val showsSwimFields: Boolean
         get() = this == SWIM_POOL
+    val usesSwimDistanceAndPace: Boolean
+        get() = this == SWIM_POOL || this == SWIM_OPEN_WATER
     val showsKmPaceSplits: Boolean
         get() = this !in setOf(SWIM_POOL, SWIM_OPEN_WATER, ROWERG)
 }
@@ -3580,7 +3582,12 @@ class AddWorkoutViewModel(
                     if (title.isNotBlank()) put("p_title", title.trim())
                     if (notes.isNotBlank()) put("p_notes", notes.trim())
                     if (endedAt != null) put("p_ended_at", endedAt)
-                    parseDouble(distanceKmText)?.let { put("p_distance_km", it) }
+                    val distKm = if (activity.usesSwimDistanceAndPace) {
+                        com.lilru.liftr.ui.home.distanceKmFromMetersText(distanceKmText)
+                    } else {
+                        parseDouble(distanceKmText)
+                    }
+                    distKm?.let { put("p_distance_km", it) }
                     durationSec?.let { put("p_duration_sec", it) }
                     parseInt(avgHrText)?.let { put("p_avg_hr", it) }
                     parseInt(maxHrText)?.let { put("p_max_hr", it) }

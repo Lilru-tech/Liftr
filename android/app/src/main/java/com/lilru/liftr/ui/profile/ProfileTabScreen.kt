@@ -1,6 +1,8 @@
 package com.lilru.liftr.ui.profile
 
 import android.net.Uri
+import com.lilru.liftr.domain.levelProgressRatio
+import com.lilru.liftr.nutrition.NutritionMetabolism
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -131,6 +133,9 @@ import com.lilru.liftr.ui.bodyweight.BodyWeightHistoryScreen
 import com.lilru.liftr.ui.bodyweight.HealthConnectBodyWeightImportScreen
 import com.lilru.liftr.ui.health.HealthConnectImportScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
+import com.lilru.liftr.ui.auth.ChangePasswordScreen
+import com.lilru.liftr.auth.AuthViewModel
+import com.lilru.liftr.auth.AuthViewModelFactory
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
@@ -296,8 +301,7 @@ private fun ProfileIosStyleHeader(
                 }
                 if (profileUserId != null) {
                     val xpStr = java.text.NumberFormat.getIntegerInstance().format(ui.xp)
-                    val denom = maxOf(1L, ui.nextLevelXp)
-                    val pr = (ui.xp.toFloat() / denom.toFloat()).coerceIn(0f, 1f)
+                    val pr = levelProgressRatio(ui.xp, ui.currentLevelXp, ui.nextLevelXp).toFloat()
                     Column(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.clickable(onClick = onLevelClick)
@@ -484,7 +488,7 @@ private fun ProfileIosStyleHeader(
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.SemiBold,
                                             maxLines = 1,
-                                            overflow = TextOverflow.Clip
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                     }
                                 }
@@ -649,6 +653,7 @@ fun ProfileTabScreen(
     var showCreateCompetition by rememberSaveable { mutableStateOf(false) }
     var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
+    var showChangePassword by rememberSaveable { mutableStateOf(false) }
     var bioDraft by remember { mutableStateOf("") }
     var bioExpanded by rememberSaveable { mutableStateOf(false) }
     var showBioSheet by rememberSaveable { mutableStateOf(false) }
@@ -753,6 +758,15 @@ fun ProfileTabScreen(
             supabase = supabase,
             onBack = { showNotificationSettings = false },
             modifier = modifier
+        )
+        return
+    }
+
+    if (showChangePassword) {
+        val authVm: AuthViewModel = viewModel(factory = AuthViewModelFactory(supabase))
+        ChangePasswordScreen(
+            viewModel = authVm,
+            onComplete = { showChangePassword = false }
         )
         return
     }
@@ -1399,6 +1413,15 @@ fun ProfileTabScreen(
                                     color = MaterialTheme.colorScheme.error
                                 )
                             }
+                            if (ui.isOwnProfile) {
+                                OutlinedButton(
+                                    onClick = { showChangePassword = true },
+                                    enabled = !ui.deleteAccountBusy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(stringResource(R.string.auth_change_password_title))
+                                }
+                            }
                             if (showSignOutButton && ui.isOwnProfile) {
                                 OutlinedButton(
                                     onClick = { if (!ui.deleteAccountBusy) showDeleteAccountDialog = true },
@@ -1656,7 +1679,9 @@ private fun ProfilePersonalInformationCard(
                             style = MaterialTheme.typography.bodyLarge
                         )
                         Text(
-                            text = ui.baseCaloriesTargetDraft.ifBlank { "2000" },
+                            text = ui.baseCaloriesTargetDraft.ifBlank {
+                                NutritionMetabolism.demographicFallbackKcal(ui.profileSex).toString()
+                            },
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium
                         )

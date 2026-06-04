@@ -410,6 +410,9 @@ struct ChatThreadView: View {
     @State private var openSharedRoutine: SharedRoutineNav?
     @State private var openSharedAchievement: SharedAchievementNav?
     @State private var openSharedSegment: SharedSegmentNav?
+    @State private var openSharedIngredient: SharedIngredientNav?
+    @State private var openSharedRecipe: SharedRecipeNav?
+    @State private var banner: Banner?
 
     init(conversationId: Int64, otherProfile: ChatProfile?) {
         self.conversationId = conversationId
@@ -485,6 +488,14 @@ struct ChatThreadView: View {
             SegmentDetailView(segmentId: dest.segmentId, onClose: nil)
                 .environmentObject(app)
         }
+        .navigationDestination(item: $openSharedIngredient) { dest in
+            SharedIngredientFromChatView(snapshot: dest.snapshot)
+                .environmentObject(app)
+        }
+        .navigationDestination(item: $openSharedRecipe) { dest in
+            SharedRecipeFromChatView(snapshot: dest.snapshot)
+                .environmentObject(app)
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -530,6 +541,7 @@ struct ChatThreadView: View {
         } message: {
             Text(model.error ?? "")
         }
+        .banner($banner)
     }
 
     private var otherUsernamePrefix: String {
@@ -613,6 +625,10 @@ struct ChatThreadView: View {
                         messageAchievementShareContent(msg: msg, snapshot: ach, mine: mine)
                     } else if msg.messageKind == .segmentShare, let seg = msg.segmentShare() {
                         messageSegmentShareContent(msg: msg, snapshot: seg, mine: mine)
+                    } else if msg.messageKind == .sharedIngredient, let s = msg.sharedIngredient() {
+                        messageSharedIngredientContent(msg: msg, snapshot: s, mine: mine)
+                    } else if msg.messageKind == .sharedRecipe, let s = msg.sharedRecipe() {
+                        messageSharedRecipeContent(msg: msg, snapshot: s, mine: mine)
                     } else if msg.messageKind == .routineShare {
                         Text(msg.body?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                              ? (msg.body ?? "") : String(localized: "Shared routine"))
@@ -652,6 +668,30 @@ struct ChatThreadView: View {
                     } else if msg.messageKind == .segmentShare {
                         Text(msg.body?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                              ? (msg.body ?? "") : String(localized: "Shared segment"))
+                            .font(.body)
+                            .foregroundStyle(mine ? Color.white : Color.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(mine ? Color.accentColor : Color(.tertiarySystemFill))
+                            )
+                            .frame(maxWidth: 320, alignment: mine ? .trailing : .leading)
+                    } else if msg.messageKind == .sharedIngredient {
+                        Text(msg.body?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                             ? (msg.body ?? "") : String(localized: "Shared ingredient"))
+                            .font(.body)
+                            .foregroundStyle(mine ? Color.white : Color.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                    .fill(mine ? Color.accentColor : Color(.tertiarySystemFill))
+                            )
+                            .frame(maxWidth: 320, alignment: mine ? .trailing : .leading)
+                    } else if msg.messageKind == .sharedRecipe {
+                        Text(msg.body?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                             ? (msg.body ?? "") : String(localized: "Shared recipe"))
                             .font(.body)
                             .foregroundStyle(mine ? Color.white : Color.primary)
                             .padding(.horizontal, 12)
@@ -810,6 +850,16 @@ struct ChatThreadView: View {
         if k == ChatMessageKind.segmentShare.rawValue,
            let meta = target.metadata,
            let snap = try? meta.decode(as: SegmentShareSnapshot.self) {
+            return snap.name
+        }
+        if k == ChatMessageKind.sharedIngredient.rawValue,
+           let meta = target.metadata,
+           let snap = try? meta.decode(as: SharedIngredientSnapshot.self) {
+            return snap.name
+        }
+        if k == ChatMessageKind.sharedRecipe.rawValue,
+           let meta = target.metadata,
+           let snap = try? meta.decode(as: SharedRecipeSnapshot.self) {
             return snap.name
         }
         return ""
@@ -1018,6 +1068,16 @@ struct ChatThreadView: View {
             if !t.isEmpty { return t }
             return msg.segmentShare()?.name ?? String(localized: "Segment")
         }
+        if msg.messageKind == .sharedIngredient {
+            let t = msg.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !t.isEmpty { return t }
+            return msg.sharedIngredient()?.name ?? String(localized: "Ingredient")
+        }
+        if msg.messageKind == .sharedRecipe {
+            let t = msg.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !t.isEmpty { return t }
+            return msg.sharedRecipe()?.name ?? String(localized: "Recipe")
+        }
         return msg.body ?? ""
     }
 
@@ -1046,7 +1106,112 @@ struct ChatThreadView: View {
             if cap.isEmpty { return title }
             return "\(cap)\n\(title)"
         }
+        if msg.messageKind == .sharedIngredient, let s = msg.sharedIngredient() {
+            let cap = msg.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title = s.name
+            if cap.isEmpty { return title }
+            return "\(cap)\n\(title)"
+        }
+        if msg.messageKind == .sharedRecipe, let s = msg.sharedRecipe() {
+            let cap = msg.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let title = s.name
+            if cap.isEmpty { return title }
+            return "\(cap)\n\(title)"
+        }
         return msg.body ?? ""
+    }
+
+    private var saveToLibraryButtonTitle: String {
+        if AppLanguage.isSpanish {
+            return "Añadir a mis elementos"
+        }
+        return "Save to Library"
+    }
+
+    private var sharedIngredientLabel: String {
+        if AppLanguage.isSpanish {
+            return "Ingrediente"
+        }
+        return "Ingredient"
+    }
+
+    private var sharedRecipeLabel: String {
+        if AppLanguage.isSpanish {
+            return "Receta"
+        }
+        return "Recipe"
+    }
+
+    private func macroSummaryLine(calories: Double, protein: Double, carbs: Double, fat: Double) -> String {
+        let c = Int(calories.rounded())
+        let p = Int(protein.rounded())
+        let ca = Int(carbs.rounded())
+        let f = Int(fat.rounded())
+        return "\(c) kcal · P \(p)g · C \(ca)g · F \(f)g"
+    }
+
+    @ViewBuilder
+    private func messageSharedIngredientContent(msg: ChatMessage, snapshot: SharedIngredientSnapshot, mine: Bool) -> some View {
+        VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
+            if let cap = msg.body?.trimmingCharacters(in: .whitespacesAndNewlines), !cap.isEmpty {
+                Text(cap)
+                    .font(.body)
+                    .foregroundStyle(mine ? Color.white : Color.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(mine ? Color.accentColor.opacity(0.92) : Color(.tertiarySystemFill))
+                    )
+                    .frame(maxWidth: 280, alignment: mine ? .trailing : .leading)
+            }
+            SharedNutritionPreviewCard(
+                kindLabel: sharedIngredientLabel,
+                title: snapshot.name,
+                subtitle: macroSummaryLine(
+                    calories: snapshot.calories_per_100g,
+                    protein: snapshot.protein_per_100g,
+                    carbs: snapshot.carbs_per_100g,
+                    fat: snapshot.fat_per_100g
+                ),
+                mine: mine
+            ) {
+                openSharedIngredient = SharedIngredientNav(snapshot: snapshot)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func messageSharedRecipeContent(msg: ChatMessage, snapshot: SharedRecipeSnapshot, mine: Bool) -> some View {
+        let subtitle: String = {
+            if let p = snapshot.profile_per_100g {
+                return macroSummaryLine(calories: p.calories, protein: p.protein, carbs: p.carbs, fat: p.fat)
+            }
+            return "\(snapshot.ingredients.count) ingredients"
+        }()
+
+        VStack(alignment: mine ? .trailing : .leading, spacing: 6) {
+            if let cap = msg.body?.trimmingCharacters(in: .whitespacesAndNewlines), !cap.isEmpty {
+                Text(cap)
+                    .font(.body)
+                    .foregroundStyle(mine ? Color.white : Color.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(mine ? Color.accentColor.opacity(0.92) : Color(.tertiarySystemFill))
+                    )
+                    .frame(maxWidth: 280, alignment: mine ? .trailing : .leading)
+            }
+            SharedNutritionPreviewCard(
+                kindLabel: sharedRecipeLabel,
+                title: snapshot.name,
+                subtitle: subtitle,
+                mine: mine
+            ) {
+                openSharedRecipe = SharedRecipeNav(snapshot: snapshot)
+            }
+        }
     }
 
     @ViewBuilder
@@ -1134,6 +1299,16 @@ private struct SharedAchievementNav: Identifiable, Hashable {
 private struct SharedSegmentNav: Identifiable, Hashable {
     let segmentId: UUID
     var id: UUID { segmentId }
+}
+
+private struct SharedIngredientNav: Identifiable, Hashable {
+    let snapshot: SharedIngredientSnapshot
+    var id: String { "ingredient|\(snapshot.name)|\(snapshot.v)" }
+}
+
+private struct SharedRecipeNav: Identifiable, Hashable {
+    let snapshot: SharedRecipeSnapshot
+    var id: String { "recipe|\(snapshot.name)|\(snapshot.v)" }
 }
 
 private struct SharedAchievementFromChatView: View {
@@ -1318,13 +1493,28 @@ private struct ChatThreadRoutineShareCard: View {
         var lines: [String] = []
         if let n = snapshot.exercise_count, n > 0 {
             if snapshot.routine_kind == "hyrox" {
-                lines.append(String(localized: "\(n) stations"))
+                lines.append(
+                    String.localizedStringWithFormat(
+                        String(localized: "routine_share_stations_count_format"),
+                        n
+                    )
+                )
             } else {
-                lines.append(String(localized: "\(n) exercises"))
+                lines.append(
+                    String.localizedStringWithFormat(
+                        String(localized: "routine_share_exercises_count_format"),
+                        n
+                    )
+                )
             }
         }
         if let ts = snapshot.total_sets, ts > 0, snapshot.routine_kind == "strength" {
-            lines.append(String(localized: "\(ts) sets"))
+            lines.append(
+                String.localizedStringWithFormat(
+                    String(localized: "routine_share_sets_count_format"),
+                    ts
+                )
+            )
         }
         if let p = snapshot.preview_exercise_name?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
             lines.append(p)
@@ -1418,5 +1608,55 @@ private struct ChatThreadWorkoutShareCard: View {
         let r = RelativeDateTimeFormatter()
         r.unitsStyle = .short
         return r.localizedString(for: d, relativeTo: Date())
+    }
+}
+
+private struct SharedNutritionPreviewCard: View {
+    let kindLabel: String
+    let title: String
+    let subtitle: String
+    let mine: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(alignment: .top, spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.14))
+                    Image(systemName: kindLabel.lowercased().contains("rec") ? "fork.knife" : "leaf")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(kindLabel)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(maxWidth: 280, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(Color(.tertiarySystemFill))
+            )
+        }
+        .buttonStyle(.plain)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(mine ? Color.accentColor.opacity(0.45) : Color.clear, lineWidth: mine ? 1 : 0)
+        )
     }
 }

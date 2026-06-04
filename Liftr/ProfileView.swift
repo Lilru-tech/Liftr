@@ -179,6 +179,7 @@ struct ProfileView: View {
     @State private var scorePerMinute: Double = 0
     @State private var myLevel: Int = 1
     @State private var myXP: Int64 = 0
+    @State private var currentLevelXP: Int64 = 0
     @State private var nextLevelXP: Int64 = 120
     private enum ProgressSubtab: CaseIterable { case activity, intensity, consistency, weekdaySummary }
     @State private var progressSubtab: ProgressSubtab = .activity
@@ -197,8 +198,8 @@ struct ProfileView: View {
     @State private var editingProfile = false
     @State private var heightCm: String = ""
     @State private var weightKg: String = ""
-    @State private var baseCaloriesTarget: String = "2000"
-    @State private var baseCaloriesTargetLoadedSnapshot: String = "2000"
+    @State private var baseCaloriesTarget: String = "\(NutritionMetabolism.fallbackKcalNeutral)"
+    @State private var baseCaloriesTargetLoadedSnapshot: String = "\(NutritionMetabolism.fallbackKcalNeutral)"
     @State private var baseCaloriesTargetIsManual: Bool = false
     @State private var profileSex: String?
     @State private var birthDate: Date = Date()
@@ -1192,7 +1193,7 @@ struct ProfileView: View {
     }
     
     private var headerCard: some View {
-        HStack(alignment: .top, spacing: 14) {
+        ZStack(alignment: .topTrailing) {
             HStack(alignment: .center, spacing: 14) {
                 if isOwnProfile {
                     PhotosPicker(selection: $pickedItem, matching: .images) {
@@ -1325,9 +1326,18 @@ struct ProfileView: View {
                                     .padding()
                             }
                         } label: {
-                            Label("Challenge", systemImage: "figure.fencing")
-                                .font(.caption.weight(.semibold))
-                                .frame(maxWidth: .infinity)
+                            Label {
+                                Text("Challenge")
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                    .allowsTightening(true)
+                            } icon: {
+                                Image(systemName: "figure.fencing")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .labelStyle(.titleAndIcon)
+                            .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -1338,6 +1348,7 @@ struct ProfileView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 8) {
                 NavigationLink {
@@ -1415,6 +1426,7 @@ struct ProfileView: View {
             }
             .buttonStyle(.plain)
             }
+            .padding(.top, 2)
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
@@ -2059,12 +2071,12 @@ struct ProfileView: View {
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
                             if editingProfile {
-                                TextField("2000", text: $baseCaloriesTarget)
+                                TextField("\(metabolicTargetPlaceholderKcal)", text: $baseCaloriesTarget)
                                     .keyboardType(.numberPad)
                                     .multilineTextAlignment(.trailing)
                                     .frame(maxWidth: 120)
                             } else {
-                                Text(baseCaloriesTarget.isEmpty ? "2000" : baseCaloriesTarget)
+                                Text(baseCaloriesTarget.isEmpty ? "\(metabolicTargetPlaceholderKcal)" : baseCaloriesTarget)
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }
@@ -2190,6 +2202,30 @@ struct ProfileView: View {
                                 .stroke(.white.opacity(0.18))
                         )
 
+                    NavigationLink {
+                        ChangePasswordView()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "key")
+                            Text("Change password")
+                                .font(.body.weight(.semibold))
+                            Spacer()
+                        }
+                        .padding(12)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                .listRowBackground(Color.clear)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(.white.opacity(0.18))
+                        )
+
                     Button(role: .destructive) { showDeleteConfirm = true } label: {
                         HStack(spacing: 10) {
                             Image(systemName: "trash")
@@ -2258,6 +2294,10 @@ struct ProfileView: View {
         return cal.dateComponents([.year], from: birthDate, to: now).year
     }
     
+    private var metabolicTargetPlaceholderKcal: Int {
+        NutritionMetabolism.demographicFallbackKcal(sex: profileSex)
+    }
+
     private func refreshAutoBmrDraftIfNeeded() {
         guard editingProfile, !baseCaloriesTargetIsManual else { return }
         let resolved = resolvedBaseCaloriesDisplayKcal()
@@ -2310,12 +2350,22 @@ struct ProfileView: View {
             if let baseCal, caloriesChanged {
                 payload["base_calories_target"] = AnyEncodable(baseCal)
                 payload["base_calories_target_is_manual"] = AnyEncodable(true)
+            } else if !baseCaloriesTargetIsManual {
+                payload["base_calories_target"] = AnyEncodable(resolvedBaseCaloriesDisplayKcal())
+                payload["base_calories_target_is_manual"] = AnyEncodable(false)
             }
 
             if hasBirthDate {
                 payload["date_of_birth"] = AnyEncodable(df.string(from: birthDate))
             } else {
                 payload["date_of_birth"] = AnyEncodable(nilValue: ())
+            }
+
+            let wText = weightKg.trimmingCharacters(in: .whitespacesAndNewlines)
+            if wText.isEmpty {
+                payload["weight_kg"] = AnyEncodable(nilValue: ())
+            } else if let weight = Double(wText.replacingOccurrences(of: ",", with: ".")), weight > 0 {
+                payload["weight_kg"] = AnyEncodable(weight)
             }
 
             guard !payload.isEmpty else { return }
@@ -4197,9 +4247,11 @@ extension ProfileView {
             }
 
             GeometryReader { geo in
-                let total = max(1, Double(self.nextLevelXP))
-                let ratio = Double(self.myXP) / total
-                let prog = min(1.0, max(0.0, ratio))
+                let prog = levelProgressRatio(
+                    totalXp: self.myXP,
+                    currentLevelThresholdXp: self.currentLevelXP,
+                    nextLevelThresholdXp: self.nextLevelXP
+                )
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.12))
                     Capsule().fill(Color.green.opacity(0.35))
@@ -4239,6 +4291,7 @@ extension ProfileView {
             struct Thr: Decodable { let level: Int; let xp_required: Int64 }
             let thrs = try JSONDecoder.supabase().decode([Thr].self, from: thr.data)
             
+            let current = thrs.first(where: { $0.level == level })?.xp_required ?? 0
             let next = thrs.first(where: { $0.level == level + 1 })?.xp_required
             ?? thrs.first(where: { $0.level == level })?.xp_required
             ?? 120
@@ -4246,6 +4299,7 @@ extension ProfileView {
             await MainActor.run {
                 self.myLevel = level
                 self.myXP = xp
+                self.currentLevelXP = current
                 self.nextLevelXP = next
             }
         } catch {

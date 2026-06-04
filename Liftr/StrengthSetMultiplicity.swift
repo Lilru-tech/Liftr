@@ -40,6 +40,50 @@ struct StrengthDetailAggregates {
     let avgRpe: Double?
 }
 
+func exerciseSetSegmentVolumeKg(
+    reps: Int?,
+    weightKg: Decimal?,
+    weightSegments: [StrengthWeightSegWire]?
+) -> Double {
+    if let segments = weightSegments, segments.count >= 2 {
+        return segments.reduce(0.0) { partial, segment in
+            partial + Double(max(segment.reps, 0)) * max(segment.weight_kg, 0)
+        }
+    }
+    let repVal = max(reps ?? 0, 0)
+    let weightVal = weightKg.map { NSDecimalNumber(decimal: $0).doubleValue } ?? 0
+    return Double(repVal) * max(weightVal, 0)
+}
+
+func strengthDetailVolumeKg<Row>(
+    setsByExercise: [Int: [Row]],
+    orderIndex: (Row) -> Int?,
+    id: (Row) -> Int,
+    setNumber: (Row) -> Int,
+    reps: (Row) -> Int?,
+    weightKg: (Row) -> Decimal?,
+    weightSegments: (Row) -> [StrengthWeightSegWire]?
+) -> Double {
+    var total = 0.0
+    for rows in setsByExercise.values {
+        let paired = strengthSetRowsWithMultiplicities(
+            rows,
+            orderIndex: orderIndex,
+            id: id,
+            setNumber: setNumber
+        )
+        for (row, mult) in paired {
+            let segmentVolume = exerciseSetSegmentVolumeKg(
+                reps: reps(row),
+                weightKg: weightKg(row),
+                weightSegments: weightSegments(row)
+            )
+            total += segmentVolume * Double(mult)
+        }
+    }
+    return total
+}
+
 func strengthDetailAggregates<Row>(
     setsByExercise: [Int: [Row]],
     orderIndex: (Row) -> Int?,
