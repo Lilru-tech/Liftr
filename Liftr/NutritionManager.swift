@@ -393,6 +393,43 @@ struct NutritionHighlights: Decodable, Equatable {
     }
 }
 
+struct NutritionRankingRow: Decodable, Identifiable {
+    let rank_position: Int
+    let title: String
+    let subtitle: String?
+    let value_numeric: Double
+    let unit_label: String
+    let metadata_json: [String: JSONValue]?
+
+    var id: Int { rank_position }
+
+    private enum CodingKeys: String, CodingKey {
+        case rank_position, title, subtitle, value_numeric, unit_label, metadata_json
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        rank_position = try c.decode(Int.self, forKey: .rank_position)
+        title = try c.decode(String.self, forKey: .title)
+        subtitle = try c.decodeIfPresent(String.self, forKey: .subtitle)
+        if let d = try? c.decode(Double.self, forKey: .value_numeric) {
+            value_numeric = d
+        } else if let i = try? c.decode(Int.self, forKey: .value_numeric) {
+            value_numeric = Double(i)
+        } else {
+            value_numeric = 0
+        }
+        unit_label = try c.decode(String.self, forKey: .unit_label)
+        metadata_json = try c.decodeIfPresent([String: JSONValue].self, forKey: .metadata_json)
+    }
+}
+
+private struct NutritionRankingParams: Encodable {
+    let p_ranking_type: String
+    let p_limit: Int
+    let p_offset: Int
+}
+
 struct SmartNutritionRecommendation: Decodable {
     let recommendation_text: String
     let alerts: [String]
@@ -782,6 +819,25 @@ enum NutritionManager {
             return first
         }
         return try decoder.decode(NutritionHighlights.self, from: res.data)
+    }
+
+    static func fetchNutritionRanking(type: String, limit: Int = 25, offset: Int = 0) async throws -> [NutritionRankingRow] {
+        let params = NutritionRankingParams(
+            p_ranking_type: type,
+            p_limit: limit,
+            p_offset: offset
+        )
+        let res = try await SupabaseManager.shared.client
+            .rpc("get_nutrition_ranking_v1", params: params)
+            .execute()
+        let decoder = JSONDecoder.supabase()
+        if let rows = try? decoder.decode([NutritionRankingRow].self, from: res.data) {
+            return rows
+        }
+        if let single = try? decoder.decode(NutritionRankingRow.self, from: res.data) {
+            return [single]
+        }
+        return []
     }
 
     static func fetchRecommendation(for userId: UUID, date: Date) async throws -> DailyNutritionRecommendation {

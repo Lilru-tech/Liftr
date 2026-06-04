@@ -22,6 +22,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -54,7 +56,21 @@ fun NutritionInsightsHubScreen(
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     var selectedTabIndex by rememberSaveable { mutableIntStateOf(0) }
+    var rankingOverlay by remember { mutableStateOf<NutritionRankingKind?>(null) }
     val tabs = NutritionInsightsHubTab.entries
+
+    if (rankingOverlay != null) {
+        NutritionRankingDetailScreen(
+            vm = vm,
+            kind = rankingOverlay!!,
+            onBack = {
+                vm.resetRanking()
+                rankingOverlay = null
+            },
+            modifier = modifier
+        )
+        return
+    }
 
     val showCoachResults = ui.smartInsightsLoading || ui.smartInsights != null || ui.smartInsightsError != null
 
@@ -62,6 +78,7 @@ fun NutritionInsightsHubScreen(
         onDispose {
             vm.resetSmartInsights()
             vm.resetHighlights()
+            vm.resetRanking()
         }
     }
 
@@ -149,7 +166,10 @@ fun NutritionInsightsHubScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    NutritionHighlightsContent(ui = ui)
+                    NutritionHighlightsContent(
+                        ui = ui,
+                        onRankingClick = { kind -> rankingOverlay = kind }
+                    )
                 }
             }
         }

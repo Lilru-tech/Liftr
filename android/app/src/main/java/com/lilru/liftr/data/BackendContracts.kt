@@ -143,6 +143,7 @@ object BackendContracts {
         const val GET_NUTRITION_MONTH_BALANCE_V1 = "get_nutrition_month_balance_v1"
         const val GET_SMART_NUTRITION_RECOMMENDATION_V1 = "get_smart_nutrition_recommendation_v1"
         const val GET_NUTRITION_HIGHLIGHTS_V1 = "get_nutrition_highlights_v1"
+        const val GET_NUTRITION_RANKING_V1 = "get_nutrition_ranking_v1"
         const val LIST_COMPARABLE_WORKOUTS_V1 = "list_comparable_workouts_v1"
         const val LIST_COMPARE_AVERAGE_POOL_V1 = "list_compare_average_pool_v1"
         const val PLAN_STRENGTH_SQUAD_PROGRAMS = "plan_strength_squad_programs"

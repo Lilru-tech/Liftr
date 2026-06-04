@@ -46,6 +46,7 @@ struct NutritionInsightsEntryCard: View {
 
 struct NutritionInsightsHubView: View {
     @ObservedObject var vm: NutritionViewModel
+    @Binding var insightsPath: NavigationPath
     @State private var selectedTab: NutritionInsightsHubTab = .coach
 
     private var showCoachResults: Bool {
@@ -78,10 +79,6 @@ struct NutritionInsightsHubView: View {
         .gradientBG()
         .navigationTitle("Nutrition insights")
         .navigationBarTitleDisplayMode(.inline)
-        .onDisappear {
-            vm.resetSmartInsights()
-            vm.resetHighlights()
-        }
         .onChange(of: selectedTab) { _, tab in
             if tab == .highlights, vm.highlights == nil, !vm.highlightsLoading, vm.highlightsError == nil {
                 Task { await vm.loadHighlights() }
@@ -92,6 +89,13 @@ struct NutritionInsightsHubView: View {
                 await vm.loadHighlights()
             }
         }
+    }
+
+    private func openRanking(_ kind: NutritionRankingKind) {
+        #if DEBUG
+        print("[NutritionInsights] append ranking kind=\(kind.rawValue) pathCount=\(insightsPath.count)")
+        #endif
+        insightsPath.append(NutritionInsightsRoute.ranking(kind))
     }
 
     @ViewBuilder
@@ -140,7 +144,8 @@ struct NutritionInsightsHubView: View {
             NutritionHighlightsContent(
                 loading: vm.highlightsLoading,
                 highlights: vm.highlights,
-                error: vm.highlightsError
+                error: vm.highlightsError,
+                onOpenRanking: openRanking
             )
         }
         .refreshable {

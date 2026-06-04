@@ -2,7 +2,11 @@ package com.lilru.liftr.ui.nutrition
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -27,6 +31,7 @@ import kotlin.math.roundToInt
 @Composable
 fun NutritionHighlightsContent(
     ui: NutritionUiState,
+    onRankingClick: (NutritionRankingKind) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     when {
@@ -120,17 +125,19 @@ fun NutritionHighlightsContent(
                     title = stringResource(R.string.nutrition_highlights_records),
                     content = {
                         h.peakDay?.let { peak ->
-                            HighlightsRecordRow(
+                            NavigableHighlightsRecordRow(
                                 title = stringResource(R.string.nutrition_highlights_peak_day),
                                 detail = formatHighlightDate(peak.date),
-                                value = stringResource(R.string.nutrition_kcal_format, peak.kcal.roundToInt())
+                                value = stringResource(R.string.nutrition_kcal_format, peak.kcal.roundToInt()),
+                                onClick = { onRankingClick(NutritionRankingKind.HIGHEST_CALORIE_DAYS) }
                             )
                         }
                         h.peakMealSlot?.let { meal ->
-                            HighlightsRecordRow(
+                            NavigableHighlightsRecordRow(
                                 title = stringResource(R.string.nutrition_highlights_peak_meal),
                                 detail = "${meal.mealSlot} · ${formatHighlightDate(meal.date)}",
-                                value = stringResource(R.string.nutrition_kcal_format, meal.kcal.roundToInt())
+                                value = stringResource(R.string.nutrition_kcal_format, meal.kcal.roundToInt()),
+                                onClick = { onRankingClick(NutritionRankingKind.HIGHEST_CALORIE_MEALS) }
                             )
                         }
                     }
@@ -139,19 +146,21 @@ fun NutritionHighlightsContent(
                     title = stringResource(R.string.nutrition_highlights_most_logged),
                     content = {
                         h.topIngredient?.let { ing ->
-                            HighlightsFoodRow(
+                            NavigableHighlightsFoodRow(
                                 kind = stringResource(R.string.nutrition_highlights_ingredient),
                                 name = ing.name,
                                 count = ing.logCount,
-                                totalKcal = ing.totalKcal
+                                totalKcal = ing.totalKcal,
+                                onClick = { onRankingClick(NutritionRankingKind.MOST_LOGGED_INGREDIENTS) }
                             )
                         }
                         h.topRecipe?.let { rec ->
-                            HighlightsFoodRow(
+                            NavigableHighlightsFoodRow(
                                 kind = stringResource(R.string.nutrition_highlights_recipe),
                                 name = rec.name,
                                 count = rec.logCount,
-                                totalKcal = rec.totalKcal
+                                totalKcal = rec.totalKcal,
+                                onClick = { onRankingClick(NutritionRankingKind.MOST_LOGGED_RECIPES) }
                             )
                         }
                     }
@@ -233,10 +242,11 @@ fun NutritionHighlightsContent(
                     HighlightsSectionCard(
                         title = stringResource(R.string.nutrition_highlights_heaviest_meal),
                         content = {
-                            HighlightsRecordRow(
+                            NavigableHighlightsRecordRow(
                                 title = meal.mealSlot,
                                 detail = formatHighlightDate(meal.date),
-                                value = formatHighlightGrams(meal.totalWeightG)
+                                value = formatHighlightGrams(meal.totalWeightG),
+                                onClick = { onRankingClick(NutritionRankingKind.HEAVIEST_MEALS) }
                             )
                         }
                     )
@@ -312,6 +322,80 @@ private fun HighlightsStatPill(label: String, value: String) {
     ) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun NavigableHighlightsRecordRow(
+    title: String,
+    detail: String,
+    value: String?,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            value?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun NavigableHighlightsFoodRow(
+    kind: String,
+    name: String,
+    count: Int,
+    totalKcal: Double,
+    onClick: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(kind, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+            Text(
+                stringResource(
+                    R.string.nutrition_highlights_food_stats,
+                    count,
+                    totalKcal.roundToInt()
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
     }
 }
 

@@ -176,6 +176,13 @@ Vistas:
   - `heaviest_meal`: `{ date, meal_slot, total_weight_g }` or null (max sum of `quantity_g` per day+meal slot)
   - `consistency_streak`: `{ current_streak, best_streak }` (consecutive log days; current ends at latest log if within 1 day of today)
   - Advanced fields: migration `20260604120000_nutrition_highlights_advanced_v1.sql`
+- `get_nutrition_ranking_v1` (`p_ranking_type` text, `p_limit` int, `p_offset` int) → `setof jsonb` paginated all-time rankings from `nutrition_diary_logs` (same kcal/weight math as highlights); `SECURITY DEFINER`; `p_limit` clamped 1–100; ver `20260605120000_nutrition_rankings_v1.sql`. Supported `p_ranking_type`:
+  - `highest_calorie_days` — unique dates by total kcal desc
+  - `highest_calorie_meals` — unique `(log_date, meal_slot)` by total kcal desc
+  - `most_logged_ingredients` — by log count desc, total kcal tiebreak
+  - `most_logged_recipes` — by log count desc, total kcal tiebreak
+  - `heaviest_meals` — unique `(log_date, meal_slot)` by total `quantity_g` desc
+  - Each row: `{ rank_position, title, subtitle, value_numeric, unit_label, metadata_json }` (`unit_label`: `kcal` | `g` | `times`)
 - `list_comparable_workouts_v1`
 - `list_compare_average_pool_v1` (`p_baseline_workout`, `p_scope` `mine`|`global`, `p_limit`) → `workout_id`, `started_at` for compare-average pools (cardio activity / sport / strength exact primary-muscle set); see `Liftr/supabase/migrations/20260521120000_compare_average_pool_v1.sql`
 - `get_home_feed_page_v1` (`p_page`, `p_page_size`, optional `p_kind`) → JSON `{ workouts, scores, likes, participants }` for authenticated home feed (one round-trip); see `Liftr/supabase/migrations/20260522140000_disk_io_optimizations_v1.sql`

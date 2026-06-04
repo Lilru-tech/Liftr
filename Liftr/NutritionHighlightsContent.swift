@@ -4,6 +4,7 @@ struct NutritionHighlightsContent: View {
     let loading: Bool
     let highlights: NutritionHighlights?
     let error: String?
+    var onOpenRanking: (NutritionRankingKind) -> Void = { _ in }
 
     @State private var shimmerPhase = false
 
@@ -101,14 +102,16 @@ struct NutritionHighlightsContent: View {
             Label("Records", systemImage: "flame.fill")
                 .font(.headline)
             if let peak = h.peak_day {
-                recordRow(
+                navigableHighlightRow(
+                    kind: .highestCalorieDays,
                     title: "Highest calorie day",
                     detail: formatDisplayDate(peak.date),
                     value: formatKcal(peak.kcal)
                 )
             }
             if let meal = h.peak_meal_slot {
-                recordRow(
+                navigableHighlightRow(
+                    kind: .highestCalorieMeals,
                     title: "Highest calorie meal",
                     detail: "\(meal.meal_slot) · \(formatDisplayDate(meal.date))",
                     value: formatKcal(meal.kcal)
@@ -125,7 +128,8 @@ struct NutritionHighlightsContent: View {
             Label("Most logged", systemImage: "heart.fill")
                 .font(.headline)
             if let ing = h.top_ingredient {
-                foodRow(
+                navigableFoodRow(
+                    kind: .mostLoggedIngredients,
                     title: "Ingredient",
                     name: ing.name,
                     count: ing.log_count,
@@ -133,7 +137,8 @@ struct NutritionHighlightsContent: View {
                 )
             }
             if let rec = h.top_recipe {
-                foodRow(
+                navigableFoodRow(
+                    kind: .mostLoggedRecipes,
                     title: "Recipe",
                     name: rec.name,
                     count: rec.log_count,
@@ -221,7 +226,8 @@ struct NutritionHighlightsContent: View {
             VStack(alignment: .leading, spacing: 12) {
                 Label("Heaviest meal", systemImage: "scalemass.fill")
                     .font(.headline)
-                recordRow(
+                navigableHighlightRow(
+                    kind: .heaviestMeals,
                     title: meal.meal_slot,
                     detail: formatDisplayDate(meal.date),
                     value: formatWeight(meal.total_weight_g)
@@ -282,6 +288,40 @@ struct NutritionHighlightsContent: View {
         }
     }
 
+    private func navigableHighlightRow(
+        kind: NutritionRankingKind,
+        title: String,
+        detail: String,
+        value: String?
+    ) -> some View {
+        Button {
+            onOpenRanking(kind)
+        } label: {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    if let value {
+                        Text(value)
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.orange)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary.opacity(0.7))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private func foodRow(title: String, name: String, count: Int, kcal: Double) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
@@ -293,6 +333,38 @@ struct NutritionHighlightsContent: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func navigableFoodRow(
+        kind: NutritionRankingKind,
+        title: String,
+        name: String,
+        count: Int,
+        kcal: Double
+    ) -> some View {
+        Button {
+            onOpenRanking(kind)
+        } label: {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                    Text("\(count)× logged · \(formatKcal(kcal)) total")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary.opacity(0.7))
+            }
+        }
+        .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

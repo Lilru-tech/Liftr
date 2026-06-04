@@ -136,6 +136,31 @@ data class NutritionHighlightsUi(
     val hasAnyLogs: Boolean get() = totalLogEntries > 0
 }
 
+enum class NutritionRankingKind(val rpcType: String) {
+    HIGHEST_CALORIE_DAYS("highest_calorie_days"),
+    HIGHEST_CALORIE_MEALS("highest_calorie_meals"),
+    MOST_LOGGED_INGREDIENTS("most_logged_ingredients"),
+    MOST_LOGGED_RECIPES("most_logged_recipes"),
+    HEAVIEST_MEALS("heaviest_meals")
+}
+
+data class NutritionRankingRowUi(
+    val rankPosition: Int,
+    val title: String,
+    val subtitle: String?,
+    val valueNumeric: Double,
+    val unitLabel: String
+)
+
+data class NutritionRankingUiState(
+    val activeKind: NutritionRankingKind? = null,
+    val rows: List<NutritionRankingRowUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val hasMore: Boolean = true,
+    val error: String? = null
+)
+
 enum class NutritionInsightsQuickPreset {
     ONE_DAY,
     ONE_WEEK,
@@ -226,6 +251,7 @@ data class NutritionUiState(
     val highlightsLoading: Boolean = false,
     val highlights: NutritionHighlightsUi? = null,
     val highlightsError: String? = null,
+    val ranking: NutritionRankingUiState = NutritionRankingUiState(),
     val addFoodIsPlan: Boolean = false,
     val planDate: LocalDate = LocalDate.now().plusDays(1),
     val followingForPlan: List<FollowingProfileWire> = emptyList(),
@@ -431,6 +457,15 @@ private data class NutritionHighlightsWire(
     @SerialName("calorie_volatility") val calorieVolatility: NutritionHighlightsCalorieVolatilityWire? = null,
     @SerialName("heaviest_meal") val heaviestMeal: NutritionHighlightsHeaviestMealWire? = null,
     @SerialName("consistency_streak") val consistencyStreak: NutritionHighlightsConsistencyStreakWire? = null
+)
+
+@Serializable
+private data class NutritionRankingRowWire(
+    @SerialName("rank_position") val rankPosition: Int = 0,
+    val title: String = "",
+    val subtitle: String? = null,
+    @SerialName("value_numeric") val valueNumeric: Double = 0.0,
+    @SerialName("unit_label") val unitLabel: String = ""
 )
 
 @Serializable
@@ -1179,6 +1214,90 @@ class NutritionViewModel(
         }
     }
 
+    fun resetRanking() {
+        _uiState.update { it.copy(ranking = NutritionRankingUiState()) }
+    }
+
+    fun loadRanking(kind: NutritionRankingKind) {
+        _uiState.update {
+            it.copy(
+                ranking = NutritionRankingUiState(
+                    activeKind = kind,
+                    isLoading = true,
+                    hasMore = true,
+                    error = null
+                )
+            )
+        }
+        viewModelScope.launch {
+            runCatching { fetchNutritionRanking(kind, limit = 25, offset = 0) }
+                .onSuccess { page ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                rows = page,
+                                isLoading = false,
+                                hasMore = page.size >= 25
+                            )
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                isLoading = false,
+                                hasMore = false,
+                                error = e.message?.take(300)
+                                    ?: "Could not load ranking"
+                            )
+                        )
+                    }
+                }
+        }
+    }
+
+    fun loadMoreRanking(kind: NutritionRankingKind) {
+        val ranking = _uiState.value.ranking
+        if (ranking.activeKind != kind || ranking.isLoading || ranking.isLoadingMore || !ranking.hasMore) {
+            return
+        }
+        _uiState.update {
+            it.copy(ranking = it.ranking.copy(isLoadingMore = true))
+        }
+        viewModelScope.launch {
+            val offset = _uiState.value.ranking.rows.size
+            runCatching { fetchNutritionRanking(kind, limit = 25, offset = offset) }
+                .onSuccess { page ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                rows = state.ranking.rows + page,
+                                isLoadingMore = false,
+                                hasMore = page.size >= 25
+                            )
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                isLoadingMore = false,
+                                hasMore = false,
+                                error = e.message?.take(300)
+                                    ?: "Could not load ranking"
+                            )
+                        )
+                    }
+                }
+        }
+    }
+
     fun loadHighlights() {
         _uiState.update {
             it.copy(
@@ -1783,6 +1902,31 @@ class NutritionViewModel(
                 NutritionHighlightsConsistencyStreakUi(it.currentStreak, it.bestStreak)
             }
         )
+    }
+
+    private suspend fun fetchNutritionRanking(
+        kind: NutritionRankingKind,
+        limit: Int,
+        offset: Int
+    ): List<NutritionRankingRowUi> {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_NUTRITION_RANKING_V1,
+            buildJsonObject {
+                put("p_ranking_type", kind.rpcType)
+                put("p_limit", limit)
+                put("p_offset", offset)
+            }
+        ) { }
+        return SupabaseResponseDecoding.decodeListOrObject<NutritionRankingRowWire>(res.data.trim())
+            .map { wire ->
+                NutritionRankingRowUi(
+                    rankPosition = wire.rankPosition,
+                    title = wire.title,
+                    subtitle = wire.subtitle,
+                    valueNumeric = wire.valueNumeric,
+                    unitLabel = wire.unitLabel
+                )
+            }
     }
 
     private suspend fun fetchSmartRecommendation(

@@ -335,6 +335,13 @@ final class NutritionViewModel: ObservableObject {
     @Published var highlights: NutritionHighlights?
     @Published var highlightsError: String?
 
+    @Published var rankingRows: [NutritionRankingRow] = []
+    @Published var rankingLoading = false
+    @Published var rankingLoadingMore = false
+    @Published var rankingHasMore = true
+    @Published var rankingError: String?
+    private var rankingActiveKind: NutritionRankingKind?
+
     init() {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -538,16 +545,125 @@ final class NutritionViewModel: ObservableObject {
         highlights = nil
         highlightsError = nil
     }
+
+    func beginRankingNavigation(kind: NutritionRankingKind) {
+        rankingActiveKind = kind
+        rankingLoading = true
+        rankingLoadingMore = false
+        rankingHasMore = true
+        rankingRows = []
+        rankingError = nil
+    }
+
+    func loadRanking(kind: NutritionRankingKind) async {
+        beginRankingNavigation(kind: kind)
+        defer { rankingLoading = false }
+        #if DEBUG
+        print("[NutritionRanking] load start kind=\(kind.rawValue)")
+        #endif
+        do {
+            let page = try await NutritionManager.fetchNutritionRanking(
+                type: kind.rpcType,
+                limit: 25,
+                offset: 0
+            )
+            guard rankingActiveKind == kind else { return }
+            rankingRows = page
+            rankingHasMore = page.count == 25
+            #if DEBUG
+            print("[NutritionRanking] load success kind=\(kind.rawValue) count=\(page.count)")
+            #endif
+        } catch {
+            guard rankingActiveKind == kind else { return }
+            rankingError = error.localizedDescription
+            rankingHasMore = false
+            #if DEBUG
+            print("[NutritionRanking] load error kind=\(kind.rawValue): \(error.localizedDescription)")
+            #endif
+        }
+    }
+
+    func loadMoreRanking(kind: NutritionRankingKind) async {
+        guard rankingActiveKind == kind else { return }
+        guard !rankingLoading, !rankingLoadingMore, rankingHasMore else { return }
+        rankingLoadingMore = true
+        defer { rankingLoadingMore = false }
+        do {
+            let page = try await NutritionManager.fetchNutritionRanking(
+                type: kind.rpcType,
+                limit: 25,
+                offset: rankingRows.count
+            )
+            guard rankingActiveKind == kind else { return }
+            rankingRows.append(contentsOf: page)
+            rankingHasMore = page.count == 25
+        } catch {
+            guard rankingActiveKind == kind else { return }
+            rankingError = error.localizedDescription
+            rankingHasMore = false
+        }
+    }
+
+    func resetRanking() {
+        rankingActiveKind = nil
+        rankingRows = []
+        rankingLoading = false
+        rankingLoadingMore = false
+        rankingHasMore = true
+        rankingError = nil
+    }
 }
 
 struct NutritionView: View {
     @EnvironmentObject var app: AppState
     @StateObject private var vm = NutritionViewModel()
+    @State private var insightsPath = NavigationPath()
     @State private var expandedMealSlots: Set<String> = []
     @State private var mealTotalsBySlot: [String: (grams: Double, totals: NutritionProfilePer100g)] = [:]
     @State private var mealTotalsLoadingSlots: Set<String> = []
 
     var body: some View {
+        NavigationStack(path: $insightsPath) {
+            diaryScrollContent
+                .navigationDestination(for: NutritionInsightsRoute.self) { route in
+                    switch route {
+                    case .hub:
+                        NutritionInsightsHubView(vm: vm, insightsPath: $insightsPath)
+                    case .ranking(let kind):
+                        NutritionRankingDetailView(
+                            vm: vm,
+                            config: NutritionRankingConfig(kind: kind)
+                        )
+                    }
+                }
+        }
+        .onChange(of: insightsPath.count) { oldCount, newCount in
+            #if DEBUG
+            print("[NutritionInsights] path count \(oldCount) -> \(newCount)")
+            #endif
+            if newCount == 0 {
+                vm.resetSmartInsights()
+                vm.resetHighlights()
+                vm.resetRanking()
+                #if DEBUG
+                print("[NutritionInsights] reset VM — returned to diary")
+                #endif
+            } else if oldCount == 2 && newCount == 1 {
+                vm.resetRanking()
+                #if DEBUG
+                print("[NutritionInsights] reset ranking — returned to hub")
+                #endif
+            }
+        }
+        .sheet(item: $vm.activeSheet) { route in
+            sheetContent(for: route)
+                .gradientBG()
+                .presentationBackground(.clear)
+                .interactiveDismissDisabled(true)
+        }
+    }
+
+    private var diaryScrollContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 NutritionMonthCalendar(
@@ -584,9 +700,7 @@ struct NutritionView: View {
                     mealSection(slot: section.slot, items: section.items)
                 }
 
-                NavigationLink {
-                    NutritionInsightsHubView(vm: vm)
-                } label: {
+                NavigationLink(value: NutritionInsightsRoute.hub) {
                     NutritionInsightsEntryCard()
                 }
                 .buttonStyle(.plain)
@@ -595,6 +709,9 @@ struct NutritionView: View {
             }
             .padding(.vertical, 10)
         }
+        .scrollContentBackground(.hidden)
+        .gradientBG()
+        .toolbarBackground(.hidden, for: .navigationBar)
         .onChange(of: vm.diaryItems) { _, _ in
             mealTotalsBySlot = [:]
             mealTotalsLoadingSlots = []
@@ -631,12 +748,6 @@ struct NutritionView: View {
         }
         .refreshable { await vm.load(userId: app.userId) }
         .task(id: taskKey) { await vm.load(userId: app.userId) }
-        .sheet(item: $vm.activeSheet) { route in
-            sheetContent(for: route)
-                .gradientBG()
-                .presentationBackground(.clear)
-                .interactiveDismissDisabled(true)
-        }
     }
 
     private var taskKey: String {
