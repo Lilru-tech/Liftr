@@ -46,12 +46,14 @@ enum WorkoutStartSync {
             Task {
                 await syncPending()
                 await WorkoutFinishSync.syncPending()
+                await ActiveExerciseAddSync.syncPending()
             }
         }
         m.start(queue: DispatchQueue(label: "liftr.workout-start-sync"))
         Task {
             await syncPending()
             await WorkoutFinishSync.syncPending()
+            await ActiveExerciseAddSync.syncPending()
         }
     }
 

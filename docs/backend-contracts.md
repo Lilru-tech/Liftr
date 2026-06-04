@@ -162,6 +162,27 @@ Vistas:
 - `update_meal_plan_target` (`p_target_id` uuid, `p_quantity_g` numeric, `p_meal_slot` text opcional) → `void`; solo `target_user_id = auth.uid()`; `status in ('pending','accepted')`; actualiza `quantity_g` y opcionalmente `nutrition_meal_plans.meal_slot` del plan del target; errores: `NOT_AUTHENTICATED`, `TARGET_NOT_FOUND`, `FORBIDDEN`, `INVALID_STATUS`, `INVALID_QUANTITY`
 - `complete_meal_plan_as_eaten` (`p_target_id` uuid) → `uuid` (id del nuevo `nutrition_diary_logs`); solo `target_user_id = auth.uid()`; requiere `accepted`; food desde `coalesce(target.ingredient_id, plan.ingredient_id)` / receta análoga; inserta diario y marca `eaten`; errores adicionales: `ALREADY_EATEN`, `PLAN_NOT_FOUND`; ver `20260531120000` + `20260531150000`
 - `get_smart_nutrition_recommendation_v1` (`p_start_date` date, `p_end_date` date) → `jsonb` con análisis multi-día, alertas heurísticas y promedios diarios; ventana máxima 70 días inclusive (cap silencioso en servidor); `SECURITY DEFINER`; alertas y narrativa en inglés con ejemplos de alimentos embebidos en el texto; ver `20260528260000_smart_nutrition_food_recommendations_v10.sql`
+- `get_nutrition_highlights_v1` () → `jsonb` all-time personal stats from `nutrition_diary_logs` (same kcal math as smart recommendation); `SECURITY DEFINER`; ver `20260603120000_nutrition_highlights_v1.sql`. Response:
+  - `days_logged`, `total_log_entries`, `first_log_date`, `last_log_date` (ISO `yyyy-MM-dd` or null)
+  - `avg_kcal_per_logged_day` (numeric)
+  - `peak_day`: `{ date, kcal }` or null (tie: latest date)
+  - `peak_meal_slot`: `{ date, meal_slot, kcal }` or null (sum per day+slot; tie: latest date)
+  - `most_used_meal_slot` (text or null)
+  - `top_ingredient` / `top_recipe`: `{ id, name, log_count, total_kcal }` or null
+  - `top_ingredients` / `top_recipes`: arrays (max 3) of same object shape
+  - `recipe_log_share_percent` (0–100)
+  - `macro_champions`: `{ top_protein_source, top_carb_source }` each `{ name, total_g }` or null (absolute grams from diary logs; recipes use weighted ingredient density)
+  - `calorie_volatility`: `{ weekday_avg_kcal, weekend_avg_kcal }` (Mon–Fri vs Sat–Sun daily kcal averages on logged days)
+  - `heaviest_meal`: `{ date, meal_slot, total_weight_g }` or null (max sum of `quantity_g` per day+meal slot)
+  - `consistency_streak`: `{ current_streak, best_streak }` (consecutive log days; current ends at latest log if within 1 day of today)
+  - Advanced fields: migration `20260604120000_nutrition_highlights_advanced_v1.sql`
+- `get_nutrition_ranking_v1` (`p_ranking_type` text, `p_limit` int, `p_offset` int) → `setof jsonb` paginated all-time rankings from `nutrition_diary_logs` (same kcal/weight math as highlights); `SECURITY DEFINER`; `p_limit` clamped 1–100; ver `20260605120000_nutrition_rankings_v1.sql`. Supported `p_ranking_type`:
+  - `highest_calorie_days` — unique dates by total kcal desc
+  - `highest_calorie_meals` — unique `(log_date, meal_slot)` by total kcal desc
+  - `most_logged_ingredients` — by log count desc, total kcal tiebreak
+  - `most_logged_recipes` — by log count desc, total kcal tiebreak
+  - `heaviest_meals` — unique `(log_date, meal_slot)` by total `quantity_g` desc
+  - Each row: `{ rank_position, title, subtitle, value_numeric, unit_label, metadata_json }` (`unit_label`: `kcal` | `g` | `times`)
 - `list_comparable_workouts_v1`
 - `list_compare_average_pool_v1` (`p_baseline_workout`, `p_scope` `mine`|`global`, `p_limit`) → `workout_id`, `started_at` for compare-average pools (cardio activity / sport / strength exact primary-muscle set); see `Liftr/supabase/migrations/20260521120000_compare_average_pool_v1.sql`
 - `get_home_feed_page_v1` (`p_page`, `p_page_size`, optional `p_kind`) → JSON `{ workouts, scores, likes, participants }` for authenticated home feed (one round-trip); see `Liftr/supabase/migrations/20260522140000_disk_io_optimizations_v1.sql`

@@ -58,8 +58,8 @@ struct AppleHealthBodyWeightImportView: View {
                                 applyQuickRange(days: 365, preset: .lastYear)
                             }
                         }
-                        DatePicker("From", selection: $fromDate, displayedComponents: [.date])
-                        DatePicker("To", selection: $toDate, in: fromDate ... Date(), displayedComponents: [.date])
+                        DatePicker("From", selection: $fromDate, in: ...todayStart, displayedComponents: [.date])
+                        DatePicker("To", selection: $toDate, in: toDatePickerRange, displayedComponents: [.date])
                     }
                 }
             }
@@ -116,6 +116,35 @@ struct AppleHealthBodyWeightImportView: View {
                     .padding(.top, 8)
             }
         }
+        .onAppear {
+            clampImportDates()
+        }
+        .onChange(of: fromDate) { _, _ in
+            clampImportDates()
+        }
+        .onChange(of: toDate) { _, _ in
+            clampImportDates()
+        }
+    }
+
+    private var todayStart: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
+
+    private var toDatePickerRange: ClosedRange<Date> {
+        let end = todayStart
+        let start = min(Calendar.current.startOfDay(for: fromDate), end)
+        return start ... end
+    }
+
+    private func clampImportDates() {
+        let cal = Calendar.current
+        let today = todayStart
+        fromDate = min(cal.startOfDay(for: fromDate), today)
+        toDate = min(cal.startOfDay(for: toDate), today)
+        if fromDate > toDate {
+            fromDate = toDate
+        }
     }
 
     @ViewBuilder
@@ -144,6 +173,7 @@ struct AppleHealthBodyWeightImportView: View {
         selectedQuickRange = preset
         fromDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         toDate = Date()
+        clampImportDates()
     }
 
     private func setSyncEnabled(_ enabled: Bool) async {

@@ -226,15 +226,24 @@ fun NutritionTabScreen(
                 }
             }
             vm.mealSlotOrder.forEach { slot ->
+                val mealItems = ui.diaryByMeal[slot].orEmpty()
                 item {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(slot, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(slot, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                            if (mealItems.isNotEmpty()) {
+                                Text(
+                                    "${mealItems.sumOf { it.caloriesKcal }.roundToInt()} kcal",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                         IconButton(onClick = { vm.openAddFood(mealSlot = slot, plan = false) }) {
                             Icon(Icons.Filled.Add, contentDescription = null)
                         }
                     }
                 }
-                val mealItems = ui.diaryByMeal[slot].orEmpty()
                 if (mealItems.isEmpty()) {
                     item {
                         Text(

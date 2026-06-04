@@ -70,6 +70,97 @@ data class SmartNutritionRecommendationUi(
     val avgDailyRemainingBudget: Double
 )
 
+data class NutritionHighlightsFoodItemUi(
+    val id: String,
+    val name: String,
+    val logCount: Int,
+    val totalKcal: Double
+)
+
+data class NutritionHighlightsPeakDayUi(
+    val date: String,
+    val kcal: Double
+)
+
+data class NutritionHighlightsPeakMealSlotUi(
+    val date: String,
+    val mealSlot: String,
+    val kcal: Double
+)
+
+data class NutritionHighlightsMacroSourceUi(
+    val name: String,
+    val totalG: Double
+)
+
+data class NutritionHighlightsMacroChampionsUi(
+    val topProteinSource: NutritionHighlightsMacroSourceUi?,
+    val topCarbSource: NutritionHighlightsMacroSourceUi?
+)
+
+data class NutritionHighlightsCalorieVolatilityUi(
+    val weekdayAvgKcal: Double,
+    val weekendAvgKcal: Double
+)
+
+data class NutritionHighlightsHeaviestMealUi(
+    val date: String,
+    val mealSlot: String,
+    val totalWeightG: Double
+)
+
+data class NutritionHighlightsConsistencyStreakUi(
+    val currentStreak: Int,
+    val bestStreak: Int
+)
+
+data class NutritionHighlightsUi(
+    val daysLogged: Int,
+    val totalLogEntries: Int,
+    val firstLogDate: String?,
+    val lastLogDate: String?,
+    val avgKcalPerLoggedDay: Double,
+    val peakDay: NutritionHighlightsPeakDayUi?,
+    val peakMealSlot: NutritionHighlightsPeakMealSlotUi?,
+    val mostUsedMealSlot: String?,
+    val topIngredient: NutritionHighlightsFoodItemUi?,
+    val topRecipe: NutritionHighlightsFoodItemUi?,
+    val topIngredients: List<NutritionHighlightsFoodItemUi>,
+    val topRecipes: List<NutritionHighlightsFoodItemUi>,
+    val recipeLogSharePercent: Double,
+    val macroChampions: NutritionHighlightsMacroChampionsUi?,
+    val calorieVolatility: NutritionHighlightsCalorieVolatilityUi?,
+    val heaviestMeal: NutritionHighlightsHeaviestMealUi?,
+    val consistencyStreak: NutritionHighlightsConsistencyStreakUi?
+) {
+    val hasAnyLogs: Boolean get() = totalLogEntries > 0
+}
+
+enum class NutritionRankingKind(val rpcType: String) {
+    HIGHEST_CALORIE_DAYS("highest_calorie_days"),
+    HIGHEST_CALORIE_MEALS("highest_calorie_meals"),
+    MOST_LOGGED_INGREDIENTS("most_logged_ingredients"),
+    MOST_LOGGED_RECIPES("most_logged_recipes"),
+    HEAVIEST_MEALS("heaviest_meals")
+}
+
+data class NutritionRankingRowUi(
+    val rankPosition: Int,
+    val title: String,
+    val subtitle: String?,
+    val valueNumeric: Double,
+    val unitLabel: String
+)
+
+data class NutritionRankingUiState(
+    val activeKind: NutritionRankingKind? = null,
+    val rows: List<NutritionRankingRowUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val hasMore: Boolean = true,
+    val error: String? = null
+)
+
 enum class NutritionInsightsQuickPreset {
     ONE_DAY,
     ONE_WEEK,
@@ -157,6 +248,10 @@ data class NutritionUiState(
     val smartInsightsLoading: Boolean = false,
     val smartInsights: SmartNutritionRecommendationUi? = null,
     val smartInsightsError: String? = null,
+    val highlightsLoading: Boolean = false,
+    val highlights: NutritionHighlightsUi? = null,
+    val highlightsError: String? = null,
+    val ranking: NutritionRankingUiState = NutritionRankingUiState(),
     val addFoodIsPlan: Boolean = false,
     val planDate: LocalDate = LocalDate.now().plusDays(1),
     val followingForPlan: List<FollowingProfileWire> = emptyList(),
@@ -289,6 +384,88 @@ private data class SmartNutritionRecommendationWire(
     @SerialName(BackendContracts.NutritionRpcKeys.BASE_CALORIES_TARGET) val baseCaloriesTarget: Double? = null,
     @SerialName(BackendContracts.NutritionRpcKeys.AVG_DAILY_ENERGY_OUT) val avgDailyEnergyOut: Double? = null,
     @SerialName(BackendContracts.NutritionRpcKeys.AVG_DAILY_REMAINING_BUDGET) val avgDailyRemainingBudget: Double? = null
+)
+
+@Serializable
+private data class NutritionHighlightsFoodWire(
+    val id: String,
+    val name: String,
+    @SerialName("log_count") val logCount: Int = 0,
+    @SerialName("total_kcal") val totalKcal: Double = 0.0
+)
+
+@Serializable
+private data class NutritionHighlightsPeakDayWire(
+    val date: String,
+    val kcal: Double
+)
+
+@Serializable
+private data class NutritionHighlightsPeakMealSlotWire(
+    val date: String,
+    @SerialName("meal_slot") val mealSlot: String,
+    val kcal: Double
+)
+
+@Serializable
+private data class NutritionHighlightsMacroSourceWire(
+    val name: String,
+    @SerialName("total_g") val totalG: Double = 0.0
+)
+
+@Serializable
+private data class NutritionHighlightsMacroChampionsWire(
+    @SerialName("top_protein_source") val topProteinSource: NutritionHighlightsMacroSourceWire? = null,
+    @SerialName("top_carb_source") val topCarbSource: NutritionHighlightsMacroSourceWire? = null
+)
+
+@Serializable
+private data class NutritionHighlightsCalorieVolatilityWire(
+    @SerialName("weekday_avg_kcal") val weekdayAvgKcal: Double = 0.0,
+    @SerialName("weekend_avg_kcal") val weekendAvgKcal: Double = 0.0
+)
+
+@Serializable
+private data class NutritionHighlightsHeaviestMealWire(
+    val date: String,
+    @SerialName("meal_slot") val mealSlot: String,
+    @SerialName("total_weight_g") val totalWeightG: Double
+)
+
+@Serializable
+private data class NutritionHighlightsConsistencyStreakWire(
+    @SerialName("current_streak") val currentStreak: Int = 0,
+    @SerialName("best_streak") val bestStreak: Int = 0
+)
+
+@Serializable
+private data class NutritionHighlightsWire(
+    @SerialName("days_logged") val daysLogged: Int = 0,
+    @SerialName("total_log_entries") val totalLogEntries: Int = 0,
+    @SerialName("first_log_date") val firstLogDate: String? = null,
+    @SerialName("last_log_date") val lastLogDate: String? = null,
+    @SerialName("avg_kcal_per_logged_day") val avgKcalPerLoggedDay: Double = 0.0,
+    @SerialName("peak_day") val peakDay: NutritionHighlightsPeakDayWire? = null,
+    @SerialName("peak_meal_slot") val peakMealSlot: NutritionHighlightsPeakMealSlotWire? = null,
+    @SerialName("most_used_meal_slot") val mostUsedMealSlot: String? = null,
+    @SerialName("top_ingredient") val topIngredient: NutritionHighlightsFoodWire? = null,
+    @SerialName("top_recipe") val topRecipe: NutritionHighlightsFoodWire? = null,
+    @SerialName("top_ingredients") val topIngredients: List<NutritionHighlightsFoodWire> = emptyList(),
+    @SerialName("top_recipes") val topRecipes: List<NutritionHighlightsFoodWire> = emptyList(),
+    @SerialName("recipe_log_share_percent") val recipeLogSharePercent: Double = 0.0,
+    @SerialName("macro_champions") val macroChampions: NutritionHighlightsMacroChampionsWire? = null,
+    @SerialName("calorie_volatility") val calorieVolatility: NutritionHighlightsCalorieVolatilityWire? = null,
+    @SerialName("heaviest_meal") val heaviestMeal: NutritionHighlightsHeaviestMealWire? = null,
+    @SerialName("consistency_streak") val consistencyStreak: NutritionHighlightsConsistencyStreakWire? = null
+)
+
+@Serializable
+private data class NutritionRankingRowWire(
+    @SerialName("rank_position") val rankPosition: Int = 0,
+    val title: String = "",
+    val subtitle: String? = null,
+    @SerialName("value_numeric") val valueNumeric: Double = 0.0,
+    @SerialName("unit_label") val unitLabel: String = ""
 )
 
 @Serializable
@@ -1027,6 +1204,130 @@ class NutritionViewModel(
         }
     }
 
+    fun resetHighlights() {
+        _uiState.update {
+            it.copy(
+                highlightsLoading = false,
+                highlights = null,
+                highlightsError = null
+            )
+        }
+    }
+
+    fun resetRanking() {
+        _uiState.update { it.copy(ranking = NutritionRankingUiState()) }
+    }
+
+    fun loadRanking(kind: NutritionRankingKind) {
+        _uiState.update {
+            it.copy(
+                ranking = NutritionRankingUiState(
+                    activeKind = kind,
+                    isLoading = true,
+                    hasMore = true,
+                    error = null
+                )
+            )
+        }
+        viewModelScope.launch {
+            runCatching { fetchNutritionRanking(kind, limit = 25, offset = 0) }
+                .onSuccess { page ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                rows = page,
+                                isLoading = false,
+                                hasMore = page.size >= 25
+                            )
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                isLoading = false,
+                                hasMore = false,
+                                error = e.message?.take(300)
+                                    ?: "Could not load ranking"
+                            )
+                        )
+                    }
+                }
+        }
+    }
+
+    fun loadMoreRanking(kind: NutritionRankingKind) {
+        val ranking = _uiState.value.ranking
+        if (ranking.activeKind != kind || ranking.isLoading || ranking.isLoadingMore || !ranking.hasMore) {
+            return
+        }
+        _uiState.update {
+            it.copy(ranking = it.ranking.copy(isLoadingMore = true))
+        }
+        viewModelScope.launch {
+            val offset = _uiState.value.ranking.rows.size
+            runCatching { fetchNutritionRanking(kind, limit = 25, offset = offset) }
+                .onSuccess { page ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                rows = state.ranking.rows + page,
+                                isLoadingMore = false,
+                                hasMore = page.size >= 25
+                            )
+                        )
+                    }
+                }
+                .onFailure { e ->
+                    _uiState.update { state ->
+                        if (state.ranking.activeKind != kind) return@update state
+                        state.copy(
+                            ranking = state.ranking.copy(
+                                isLoadingMore = false,
+                                hasMore = false,
+                                error = e.message?.take(300)
+                                    ?: "Could not load ranking"
+                            )
+                        )
+                    }
+                }
+        }
+    }
+
+    fun loadHighlights() {
+        _uiState.update {
+            it.copy(
+                highlightsLoading = true,
+                highlights = null,
+                highlightsError = null
+            )
+        }
+        viewModelScope.launch {
+            runCatching {
+                coroutineScope {
+                    val fetch = async { fetchNutritionHighlights() }
+                    val minDelay = async { delay(600) }
+                    fetch.await().also { minDelay.await() }
+                }
+            }.onSuccess { result ->
+                _uiState.update {
+                    it.copy(highlightsLoading = false, highlights = result)
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        highlightsLoading = false,
+                        highlightsError = e.message?.take(300) ?: "Failed to load highlights"
+                    )
+                }
+            }
+        }
+    }
+
     fun analyzeSmartInsights() {
         clampInsightsDates()
         _uiState.update {
@@ -1548,6 +1849,84 @@ class NutritionViewModel(
 
     private fun setErr(msg: String) {
         _uiState.update { it.copy(error = msg) }
+    }
+
+    private fun mapHighlightsFood(w: NutritionHighlightsFoodWire) = NutritionHighlightsFoodItemUi(
+        id = w.id,
+        name = w.name,
+        logCount = w.logCount,
+        totalKcal = w.totalKcal
+    )
+
+    private suspend fun fetchNutritionHighlights(): NutritionHighlightsUi {
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_NUTRITION_HIGHLIGHTS_V1) { }
+        val trimmed = res.data.trim()
+        val wire = if (trimmed.startsWith("[")) {
+            SupabaseResponseDecoding.decodeListOrObject<NutritionHighlightsWire>(trimmed).first()
+        } else {
+            SupabaseResponseDecoding.json.decodeFromString<NutritionHighlightsWire>(trimmed)
+        }
+        return NutritionHighlightsUi(
+            daysLogged = wire.daysLogged,
+            totalLogEntries = wire.totalLogEntries,
+            firstLogDate = wire.firstLogDate,
+            lastLogDate = wire.lastLogDate,
+            avgKcalPerLoggedDay = wire.avgKcalPerLoggedDay,
+            peakDay = wire.peakDay?.let { NutritionHighlightsPeakDayUi(it.date, it.kcal) },
+            peakMealSlot = wire.peakMealSlot?.let {
+                NutritionHighlightsPeakMealSlotUi(it.date, it.mealSlot, it.kcal)
+            },
+            mostUsedMealSlot = wire.mostUsedMealSlot,
+            topIngredient = wire.topIngredient?.let { mapHighlightsFood(it) },
+            topRecipe = wire.topRecipe?.let { mapHighlightsFood(it) },
+            topIngredients = wire.topIngredients.map { mapHighlightsFood(it) },
+            topRecipes = wire.topRecipes.map { mapHighlightsFood(it) },
+            recipeLogSharePercent = wire.recipeLogSharePercent,
+            macroChampions = wire.macroChampions?.let { macro ->
+                NutritionHighlightsMacroChampionsUi(
+                    topProteinSource = macro.topProteinSource?.let {
+                        NutritionHighlightsMacroSourceUi(it.name, it.totalG)
+                    },
+                    topCarbSource = macro.topCarbSource?.let {
+                        NutritionHighlightsMacroSourceUi(it.name, it.totalG)
+                    }
+                )
+            },
+            calorieVolatility = wire.calorieVolatility?.let {
+                NutritionHighlightsCalorieVolatilityUi(it.weekdayAvgKcal, it.weekendAvgKcal)
+            },
+            heaviestMeal = wire.heaviestMeal?.let {
+                NutritionHighlightsHeaviestMealUi(it.date, it.mealSlot, it.totalWeightG)
+            },
+            consistencyStreak = wire.consistencyStreak?.let {
+                NutritionHighlightsConsistencyStreakUi(it.currentStreak, it.bestStreak)
+            }
+        )
+    }
+
+    private suspend fun fetchNutritionRanking(
+        kind: NutritionRankingKind,
+        limit: Int,
+        offset: Int
+    ): List<NutritionRankingRowUi> {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_NUTRITION_RANKING_V1,
+            buildJsonObject {
+                put("p_ranking_type", kind.rpcType)
+                put("p_limit", limit)
+                put("p_offset", offset)
+            }
+        ) { }
+        return SupabaseResponseDecoding.decodeListOrObject<NutritionRankingRowWire>(res.data.trim())
+            .map { wire ->
+                NutritionRankingRowUi(
+                    rankPosition = wire.rankPosition,
+                    title = wire.title,
+                    subtitle = wire.subtitle,
+                    valueNumeric = wire.valueNumeric,
+                    unitLabel = wire.unitLabel
+                )
+            }
     }
 
     private suspend fun fetchSmartRecommendation(

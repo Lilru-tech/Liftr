@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-06-04
+
+### Added
+- **Strength — exercise catalog** — Added more exercises to the strength catalog.
+- **Nutrition — meals** — **Total kcal** shown per meal.
+- **Nutrition — selection** — **Nutrient summary** when the user selects an **ingredient**, **recipe**, or **meal**.
+- **Nutrition — summary** — Summary of nutrition data with a **per-category ranking**.
+- **Profile** — **Change password** in profile settings.
+
+### Fixed
+- **Active strength** — Fixed a crash when **adding an exercise** during an active workout under **low signal** conditions.
+- **Workout import** — Fixed a crash when importing a workout if the **month selector** landed on a **future** date.
+- **Workout import** — Removed **map cell** debug logs that appeared in the console when importing workouts.
+
 ## [1.17.1] - 2026-06-01
 
 ### Fixed
@@ -185,6 +199,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **Segments, home anon feed, ranking RPCs, achievements progress** — Other SQL may be maintained **outside this public repository**; apply the current bundle in Supabase from your private ops source. Client contracts remain described in `docs/backend-contracts.md` where applicable.
 - Product notes for segments scope: [`docs/product-opportunities-implementation.md`](docs/product-opportunities-implementation.md) §2.5 (file may be trimmed or moved if you later make `docs/` private).
 
+[1.18.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.18.0
 [1.17.1]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.17.1
 [1.17.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.17.0
 [1.16.0]: https://github.com/Lilru-tech/Liftr/releases/tag/v1.16.0

@@ -28,7 +28,8 @@ struct RootView: View {
             .tag(Tab.add)
             .tabItem { Label("", systemImage: "plus.circle.fill") }
             
-            NavigationStack { NutritionView().gradientBG() }
+            NutritionView()
+                .gradientBG()
                 .tag(Tab.nutrition)
                 .tabItem { Label("", systemImage: "fork.knife") }
             

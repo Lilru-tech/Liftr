@@ -133,6 +133,9 @@ import com.lilru.liftr.ui.bodyweight.BodyWeightHistoryScreen
 import com.lilru.liftr.ui.bodyweight.HealthConnectBodyWeightImportScreen
 import com.lilru.liftr.ui.health.HealthConnectImportScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
+import com.lilru.liftr.ui.auth.ChangePasswordScreen
+import com.lilru.liftr.auth.AuthViewModel
+import com.lilru.liftr.auth.AuthViewModelFactory
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
@@ -650,6 +653,7 @@ fun ProfileTabScreen(
     var showCreateCompetition by rememberSaveable { mutableStateOf(false) }
     var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
+    var showChangePassword by rememberSaveable { mutableStateOf(false) }
     var bioDraft by remember { mutableStateOf("") }
     var bioExpanded by rememberSaveable { mutableStateOf(false) }
     var showBioSheet by rememberSaveable { mutableStateOf(false) }
@@ -754,6 +758,15 @@ fun ProfileTabScreen(
             supabase = supabase,
             onBack = { showNotificationSettings = false },
             modifier = modifier
+        )
+        return
+    }
+
+    if (showChangePassword) {
+        val authVm: AuthViewModel = viewModel(factory = AuthViewModelFactory(supabase))
+        ChangePasswordScreen(
+            viewModel = authVm,
+            onComplete = { showChangePassword = false }
         )
         return
     }
@@ -1399,6 +1412,15 @@ fun ProfileTabScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.error
                                 )
+                            }
+                            if (ui.isOwnProfile) {
+                                OutlinedButton(
+                                    onClick = { showChangePassword = true },
+                                    enabled = !ui.deleteAccountBusy,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(stringResource(R.string.auth_change_password_title))
+                                }
                             }
                             if (showSignOutButton && ui.isOwnProfile) {
                                 OutlinedButton(
