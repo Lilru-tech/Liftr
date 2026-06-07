@@ -62,6 +62,7 @@ fun TerritoryShareLeaderboardSheet(
     var cityPickerOpen by remember { mutableStateOf(false) }
     var pendingRefreshStarted by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val selectedCity = remember(cities, selectedCityKey, initialLatitude, initialLongitude) {
         TerritoryCaptureClient.selectedTerritoryCity(
@@ -74,10 +75,19 @@ fun TerritoryShareLeaderboardSheet(
 
     LaunchedEffect(scope, selectedCityKey, initialLatitude, initialLongitude) {
         loading = true
+        loadError = null
         val citiesStarted = System.currentTimeMillis()
         var fetchedCities = cities
         if (fetchedCities.isEmpty()) {
-            fetchedCities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+            val citiesResult = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+            if (citiesResult.failed) {
+                TerritoryCaptureClient.logTerritoryShare("load leaderboard aborted city regions error")
+                rows = emptyList()
+                loadError = citiesResult.errorMessage
+                loading = false
+                return@LaunchedEffect
+            }
+            fetchedCities = citiesResult.value
             cities = fetchedCities
             val pendingCount = fetchedCities.count { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }
             TerritoryCaptureClient.logTerritoryShare(
@@ -104,14 +114,20 @@ fun TerritoryShareLeaderboardSheet(
         }
         TerritoryCaptureClient.recordRecentTerritoryCityKey(context, cityKey)
         val leaderboardStarted = System.currentTimeMillis()
-        rows = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+        val leaderboardResult = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
             supabase = supabase,
             cityKey = cityKey,
             scope = scope
         )
         TerritoryCaptureClient.logTerritoryShare(
-            "load leaderboard cityKey=$cityKey scope=$scope rows=${rows.size} elapsedMs=${System.currentTimeMillis() - leaderboardStarted}"
+            "load leaderboard cityKey=$cityKey scope=$scope rows=${leaderboardResult.value.size} elapsedMs=${System.currentTimeMillis() - leaderboardStarted}"
         )
+        if (leaderboardResult.failed) {
+            rows = emptyList()
+            loadError = leaderboardResult.errorMessage
+        } else {
+            rows = leaderboardResult.value
+        }
         loading = false
         if (!pendingRefreshStarted && fetchedCities.any { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }) {
             pendingRefreshStarted = true
@@ -187,6 +203,66 @@ fun TerritoryShareLeaderboardSheet(
                             .align(Alignment.CenterHorizontally)
                             .padding(24.dp)
                     )
+                } else if (loadError != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Couldn't load territory",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = loadError.orEmpty(),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        TextButton(
+                            onClick = {
+                                coroutineScope.launch {
+                                    loading = true
+                                    loadError = null
+                                    val citiesResult = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+                                    if (citiesResult.failed) {
+                                        loadError = citiesResult.errorMessage
+                                        loading = false
+                                        return@launch
+                                    }
+                                    cities = citiesResult.value
+                                    val retryCityKey = selectedCityKey
+                                        ?: TerritoryCaptureClient.nearestCityKey(
+                                            latitude = initialLatitude,
+                                            longitude = initialLongitude,
+                                            cities = citiesResult.value
+                                        )
+                                        ?: citiesResult.value.firstOrNull()?.cityKey
+                                    if (retryCityKey.isNullOrBlank()) {
+                                        loading = false
+                                        return@launch
+                                    }
+                                    val leaderboardResult = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+                                        supabase = supabase,
+                                        cityKey = retryCityKey,
+                                        scope = scope
+                                    )
+                                    if (leaderboardResult.failed) {
+                                        loadError = leaderboardResult.errorMessage
+                                        rows = emptyList()
+                                    } else {
+                                        rows = leaderboardResult.value
+                                    }
+                                    loading = false
+                                }
+                            },
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Text("Retry")
+                        }
+                    }
                 } else if (rows.isEmpty()) {
                     Text(
                         text = "No territory yet",

@@ -8,6 +8,7 @@ struct TerritoryShareLeaderboardView: View {
     @State private var cities: [TerritoryCityRegionRow] = []
     @State private var selectedCityKey: String?
     @State private var loading = true
+    @State private var loadError: String?
     @State private var pendingRefreshStarted = false
     @State private var cityPickerOpen = false
     @State private var showMap = false
@@ -62,6 +63,17 @@ struct TerritoryShareLeaderboardView: View {
                     if loading {
                         ProgressView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let loadError {
+                        ContentUnavailableView {
+                            Label("Couldn't load territory", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text(loadError)
+                        } actions: {
+                            Button("Retry") {
+                                Task { await loadLeaderboard() }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if rows.isEmpty {
                         ContentUnavailableView("No territory yet", systemImage: "map")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -138,11 +150,24 @@ struct TerritoryShareLeaderboardView: View {
     }
 
     private func loadLeaderboard() async {
-        await MainActor.run { loading = true }
+        await MainActor.run {
+            loading = true
+            loadError = nil
+        }
         let started = Date()
         let fetchedCities: [TerritoryCityRegionRow]
         if cities.isEmpty {
-            fetchedCities = await TerritoryCaptureClient.fetchTerritoryCityRegions()
+            let citiesResult = await TerritoryCaptureClient.fetchTerritoryCityRegions()
+            if citiesResult.failed {
+                TerritoryCaptureClient.logTerritoryShare("load leaderboard aborted city regions error")
+                await MainActor.run {
+                    rows = []
+                    loadError = citiesResult.errorMessage
+                    loading = false
+                }
+                return
+            }
+            fetchedCities = TerritoryCaptureClient.displayableTerritoryCities(citiesResult.value)
             let pendingCount = fetchedCities.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
             let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
             TerritoryCaptureClient.logTerritoryShare("load cities count=\(fetchedCities.count) pending=\(pendingCount) elapsedMs=\(elapsedMs)")
@@ -172,24 +197,30 @@ struct TerritoryShareLeaderboardView: View {
         TerritoryCaptureClient.recordRecentTerritoryCityKey(cityKey)
         let leaderboardStarted = Date()
         let scopeValue = scope == .global ? "global" : "friends"
-        let fetched = await TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+        let leaderboardResult = await TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
             cityKey: cityKey,
             scope: scopeValue
         )
         let leaderboardElapsedMs = Int(Date().timeIntervalSince(leaderboardStarted) * 1000)
-        TerritoryCaptureClient.logTerritoryShare("load leaderboard cityKey=\(cityKey) scope=\(scopeValue) rows=\(fetched.count) elapsedMs=\(leaderboardElapsedMs)")
+        TerritoryCaptureClient.logTerritoryShare("load leaderboard cityKey=\(cityKey) scope=\(scopeValue) rows=\(leaderboardResult.value.count) elapsedMs=\(leaderboardElapsedMs)")
         await MainActor.run {
-            rows = fetched
+            if leaderboardResult.failed {
+                rows = []
+                loadError = leaderboardResult.errorMessage
+            } else {
+                rows = leaderboardResult.value
+            }
             loading = false
         }
         if !pendingRefreshStarted,
            fetchedCities.contains(where: { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }) {
             pendingRefreshStarted = true
-            TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground { updated in
-                let pendingCount = updated.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
-                TerritoryCaptureClient.logTerritoryShare("background cities count=\(updated.count) pending=\(pendingCount)")
-                cities = updated
-            }
+                TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground { updated in
+                    let displayable = TerritoryCaptureClient.displayableTerritoryCities(updated)
+                    let pendingCount = updated.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
+                    TerritoryCaptureClient.logTerritoryShare("background cities count=\(displayable.count) pending=\(pendingCount)")
+                    cities = displayable
+                }
         }
     }
 

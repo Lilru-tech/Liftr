@@ -32,6 +32,7 @@ struct NotificationSettingsRow: Codable {
     var pushChallengeWon: Bool
     var pushChallengeWonWeekly: Bool
     var pushWorkoutKindInactive: Bool
+    var pushMealPlanInvite: Bool
     var pushAppleHealthCardioImported: Bool
     var appleHealthCardioPushKnownOnServer: Bool
 
@@ -66,6 +67,7 @@ struct NotificationSettingsRow: Codable {
         case pushChallengeWon = "push_challenge_won"
         case pushChallengeWonWeekly = "push_challenge_won_weekly"
         case pushWorkoutKindInactive = "push_workout_kind_inactive"
+        case pushMealPlanInvite = "push_meal_plan_invite"
         case pushAppleHealthCardioImported = "push_apple_health_cardio_imported"
     }
 
@@ -101,6 +103,7 @@ struct NotificationSettingsRow: Codable {
         pushChallengeWon = try c.decode(Bool.self, forKey: .pushChallengeWon)
         pushChallengeWonWeekly = try c.decode(Bool.self, forKey: .pushChallengeWonWeekly)
         pushWorkoutKindInactive = try c.decode(Bool.self, forKey: .pushWorkoutKindInactive)
+        pushMealPlanInvite = try c.decodeIfPresent(Bool.self, forKey: .pushMealPlanInvite) ?? true
         appleHealthCardioPushKnownOnServer = c.contains(.pushAppleHealthCardioImported)
         pushAppleHealthCardioImported = try c.decodeIfPresent(Bool.self, forKey: .pushAppleHealthCardioImported) ?? true
     }
@@ -200,6 +203,14 @@ struct NotificationSettingsView: View {
 
                 Section("Reminders") {
                     toggleCard(title: "Workout reminders", isOn: binding(\.pushWorkoutKindInactive), enabled: pushMaster && !saving)
+                }
+
+                Section("Nutrition") {
+                    toggleCard(
+                        title: "Meal plan invites",
+                        isOn: binding(\.pushMealPlanInvite),
+                        enabled: pushMaster && !saving
+                    )
                 }
 
                 Section("Apple Health") {
@@ -341,6 +352,7 @@ struct NotificationSettingsView: View {
             let push_challenge_won: Bool
             let push_challenge_won_weekly: Bool
             let push_workout_kind_inactive: Bool
+            let push_meal_plan_invite: Bool
             let push_apple_health_cardio_imported: Bool?
 
             enum CodingKeys: String, CodingKey {
@@ -373,6 +385,7 @@ struct NotificationSettingsView: View {
                 case push_challenge_won
                 case push_challenge_won_weekly
                 case push_workout_kind_inactive
+                case push_meal_plan_invite
                 case push_apple_health_cardio_imported
             }
 
@@ -407,6 +420,7 @@ struct NotificationSettingsView: View {
                 try c.encode(push_challenge_won, forKey: .push_challenge_won)
                 try c.encode(push_challenge_won_weekly, forKey: .push_challenge_won_weekly)
                 try c.encode(push_workout_kind_inactive, forKey: .push_workout_kind_inactive)
+                try c.encode(push_meal_plan_invite, forKey: .push_meal_plan_invite)
                 try c.encodeIfPresent(push_apple_health_cardio_imported, forKey: .push_apple_health_cardio_imported)
             }
         }
@@ -441,6 +455,7 @@ struct NotificationSettingsView: View {
             push_challenge_won: row.pushChallengeWon,
             push_challenge_won_weekly: row.pushChallengeWonWeekly,
             push_workout_kind_inactive: row.pushWorkoutKindInactive,
+            push_meal_plan_invite: row.pushMealPlanInvite,
             push_apple_health_cardio_imported: row.appleHealthCardioPushKnownOnServer
                 ? row.pushAppleHealthCardioImported
                 : nil

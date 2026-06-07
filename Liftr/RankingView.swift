@@ -1016,7 +1016,15 @@ final class RankingVM: ObservableObject {
 
     private func fetchTerritoryShareLeaderboard() async {
         let started = Date()
-        let cities = await TerritoryCaptureClient.fetchTerritoryCityRegions()
+        let citiesResult = await TerritoryCaptureClient.fetchTerritoryCityRegions()
+        if citiesResult.failed {
+            await MainActor.run {
+                self.error = citiesResult.errorMessage
+                self.territoryShareRows = []
+            }
+            return
+        }
+        let cities = citiesResult.value
         let pendingCount = cities.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count
         TerritoryCaptureClient.logTerritoryShare("ranking cities count=\(cities.count) pending=\(pendingCount) elapsedMs=\(Int(Date().timeIntervalSince(started) * 1000))")
         let cityKey = await MainActor.run { () -> String? in
@@ -1041,12 +1049,19 @@ final class RankingVM: ObservableObject {
         }
         let scopeValue = scope == .global ? "global" : "friends"
         let leaderboardStarted = Date()
-        let decoded = await TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+        let leaderboardResult = await TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
             cityKey: cityKey,
             scope: scopeValue
         )
-        TerritoryCaptureClient.logTerritoryShare("ranking leaderboard cityKey=\(cityKey) scope=\(scopeValue) rows=\(decoded.count) elapsedMs=\(Int(Date().timeIntervalSince(leaderboardStarted) * 1000))")
-        await MainActor.run { self.territoryShareRows = decoded }
+        TerritoryCaptureClient.logTerritoryShare("ranking leaderboard cityKey=\(cityKey) scope=\(scopeValue) rows=\(leaderboardResult.value.count) elapsedMs=\(Int(Date().timeIntervalSince(leaderboardStarted) * 1000))")
+        await MainActor.run {
+            if leaderboardResult.failed {
+                self.error = leaderboardResult.errorMessage
+                self.territoryShareRows = []
+            } else {
+                self.territoryShareRows = leaderboardResult.value
+            }
+        }
         if pendingCount > 0 {
             TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground { updated in
                 let remainingPending = updated.filter { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }.count

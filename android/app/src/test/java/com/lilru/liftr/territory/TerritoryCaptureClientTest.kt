@@ -323,6 +323,33 @@ class TerritoryCaptureClientTest {
     }
 
     @Test
+    fun displayableTerritoryCitiesHidesPendingRows() {
+        val cities = listOf(
+            TerritoryCityRegionRowWire(
+                cityKey = "osm:relation:1",
+                displayName = "Tarragona",
+                centerLat = 41.12,
+                centerLon = 1.24,
+                capturedCells = 10,
+                totalCaptureCells = 100,
+                myOwnedCells = 5
+            ),
+            TerritoryCityRegionRowWire(
+                cityKey = "pending:41.09:1.24",
+                displayName = "Resolving area · 41.09, 1.24",
+                centerLat = 41.09,
+                centerLon = 1.24,
+                capturedCells = 2,
+                totalCaptureCells = 2,
+                myOwnedCells = 2
+            )
+        )
+        val displayable = TerritoryCaptureClient.displayableTerritoryCities(cities)
+        assertEquals(1, displayable.size)
+        assertEquals("osm:relation:1", displayable.first().cityKey)
+    }
+
+    @Test
     fun filterTerritoryCitiesMatchesDisplayName() {
         val cities = listOf(
             TerritoryCityRegionRowWire(

@@ -44,15 +44,14 @@ struct StrengthProgramItem: Equatable {
             customName: item.custom_name,
             supersetGroupId: editable.supersetGroupId,
             supersetPosition: editable.supersetPosition,
-            sets: item.sets
-                .sorted { $0.set_number < $1.set_number }
-                .map { StrengthProgramSet(from: $0) }
+            sets: item.sets.map { StrengthProgramSet(from: $0) }
         )
     }
 }
 
 struct StrengthProgramSet: Equatable {
     var setNumber: Int
+    var rowOrder: Int
     var reps: Int?
     var weightKg: Double?
     var rpe: Double?
@@ -60,8 +59,18 @@ struct StrengthProgramSet: Equatable {
     var notes: String?
     var weightSegments: [StrengthWeightSegment]?
 
-    init(setNumber: Int, reps: Int?, weightKg: Double?, rpe: Double?, restSec: Int?, notes: String?, weightSegments: [StrengthWeightSegment]? = nil) {
+    init(
+        setNumber: Int,
+        rowOrder: Int? = nil,
+        reps: Int?,
+        weightKg: Double?,
+        rpe: Double?,
+        restSec: Int?,
+        notes: String?,
+        weightSegments: [StrengthWeightSegment]? = nil
+    ) {
         self.setNumber = setNumber
+        self.rowOrder = rowOrder ?? setNumber
         self.reps = reps
         self.weightKg = weightKg
         self.rpe = rpe
@@ -72,6 +81,7 @@ struct StrengthProgramSet: Equatable {
 
     fileprivate init(from s: RPCStrengthParams.StrengthItem.StrengthSet) {
         setNumber = s.set_number
+        rowOrder = s.order_index ?? s.set_number
         reps = s.reps
         weightKg = s.weight_kg
         rpe = s.rpe
@@ -91,7 +101,7 @@ func strengthRoutineContentFingerprint(from exercises: [EditableExercise]) -> St
 }
 
 func strengthRoutineContentFingerprint(from items: [StrengthProgramItem]) -> String {
-    let sorted = items.sorted { $0.orderIndex < $1.orderIndex }
+    let sorted = expandedStrengthProgramItemsForCompare(items).sorted { $0.orderIndex < $1.orderIndex }
     var lines: [String] = []
     for item in sorted {
         let setParts = item.sets.sorted { $0.setNumber < $1.setNumber }.map { s in
@@ -116,19 +126,84 @@ func strengthRoutineContentFingerprint(from items: [StrengthProgramItem]) -> Str
 
 func strengthRoutineStructureFingerprint(from items: [StrengthProgramItem]) -> String {
     let sorted = items.sorted { $0.orderIndex < $1.orderIndex }
-    var lines: [String] = []
-    for item in sorted {
-        let cn = (item.customName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let note = (item.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        lines.append("\(item.exerciseId)|\(item.orderIndex)|\(cn)|\(note)|\(item.sets.count)")
-    }
-    let joined = lines.joined(separator: "\n")
+    let joined = sorted.map { String($0.exerciseId) }.joined(separator: "\n")
     let digest = SHA256.hash(data: Data(joined.utf8))
     return digest.map { String(format: "%02x", $0) }.joined()
 }
 
+private func normalizedProgramItemsForCompare(_ items: [StrengthProgramItem]) -> [StrengthProgramItem] {
+    items
+        .sorted { $0.orderIndex < $1.orderIndex }
+        .enumerated()
+        .map { idx, item in
+            StrengthProgramItem(
+                exerciseId: item.exerciseId,
+                orderIndex: idx + 1,
+                notes: item.notes,
+                customName: item.customName,
+                supersetGroupId: item.supersetGroupId,
+                supersetPosition: item.supersetPosition,
+                sets: item.sets
+            )
+        }
+}
+
 func strengthProgramItems(from exercises: [EditableExercise]) -> [StrengthProgramItem] {
     exercises.compactMap { StrengthProgramItem(from: $0) }.sorted { $0.orderIndex < $1.orderIndex }
+}
+
+func expandedStrengthProgramSetsForCompare(_ sets: [StrengthProgramSet]) -> [StrengthProgramSet] {
+    let sorted = sets.sorted {
+        if $0.rowOrder != $1.rowOrder { return $0.rowOrder < $1.rowOrder }
+        return $0.setNumber < $1.setNumber
+    }
+    guard !sorted.isEmpty else { return [] }
+    let mults = strengthSetMultiplicities(sortedSetNumbers: sorted.map(\.setNumber))
+    var out: [StrengthProgramSet] = []
+    var seq = 1
+    for (row, mult) in zip(sorted, mults) {
+        for _ in 0..<mult {
+            out.append(
+                StrengthProgramSet(
+                    setNumber: seq,
+                    rowOrder: seq,
+                    reps: row.reps,
+                    weightKg: row.weightKg,
+                    rpe: row.rpe,
+                    restSec: row.restSec,
+                    notes: row.notes,
+                    weightSegments: row.weightSegments
+                )
+            )
+            seq += 1
+        }
+    }
+    return out
+}
+
+private let blankStrengthProgramSetForDiff = StrengthProgramSet(
+    setNumber: 0,
+    rowOrder: 0,
+    reps: nil,
+    weightKg: nil,
+    rpe: nil,
+    restSec: nil,
+    notes: nil,
+    weightSegments: nil
+)
+
+func expandedStrengthProgramItemsForCompare(_ items: [StrengthProgramItem]) -> [StrengthProgramItem] {
+    items.map { item in
+        StrengthProgramItem(
+            exerciseId: item.exerciseId,
+            orderIndex: item.orderIndex,
+            notes: item.notes,
+            customName: item.customName,
+            supersetGroupId: item.supersetGroupId,
+            supersetPosition: item.supersetPosition,
+            sets: expandedStrengthProgramSetsForCompare(item.sets)
+        )
+    }
 }
 
 struct StrengthRoutineOverwriteDiffLine: Identifiable, Equatable {
@@ -352,7 +427,8 @@ struct StrengthRoutineOverwriteConfirmSheet: View {
 
     private static func buildGroups(from lines: [StrengthRoutineOverwriteDiffLine]) -> [ExerciseDiffGroup] {
         let fieldRank: [String: Int] = [
-            "Reps": 0, "Weight": 1, "RPE": 2, "Rest": 3, "Drop steps": 4, "Set notes": 5
+            "Reps": 0, "Weight": 1, "RPE": 2, "Rest": 3, "Drop steps": 4,
+            "Sets": 5, "Added set": 6, "Removed set": 7, "Set notes": 8, "Prescription": 9
         ]
         let byExercise = Dictionary(grouping: lines) { $0.exerciseOrderIndex }
         return byExercise.keys.sorted().compactMap { order in
@@ -375,6 +451,45 @@ private struct StrengthRoutineFullRow: Decodable {
     let name: String
     let updated_at: Date?
     let strength_routine_exercises: [StrengthRoutineExerciseWire]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, updated_at, strength_routine_exercises
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int64.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        strength_routine_exercises = try c.decodeIfPresent([StrengthRoutineExerciseWire].self, forKey: .strength_routine_exercises)
+        updated_at = Self.decodeUpdatedAt(from: c)
+    }
+
+    private static func decodeUpdatedAt(from c: KeyedDecodingContainer<CodingKeys>) -> Date? {
+        if (try? c.decodeNil(forKey: .updated_at)) == true { return nil }
+        if let s = try? c.decode(String.self, forKey: .updated_at) {
+            return parseUpdatedAtString(s)
+        }
+        if let d = try? c.decode(Date.self, forKey: .updated_at) {
+            return d
+        }
+        return nil
+    }
+
+    private static func parseUpdatedAtString(_ s: String) -> Date? {
+        let isoFrac = ISO8601DateFormatter()
+        isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = isoFrac.date(from: s) { return d }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: s) { return d }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd HH:mm:ssXXXXX"
+        if let d = f.date(from: s) { return d }
+        f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: s)
+    }
 }
 
 private struct StrengthRoutineExerciseWire: Decodable {
@@ -385,6 +500,27 @@ private struct StrengthRoutineExerciseWire: Decodable {
     let notes: String?
     let custom_name: String?
     let strength_routine_sets: [StrengthRoutineSetWire]?
+
+    enum CodingKeys: String, CodingKey {
+        case exercise_id, order_index, superset_group_id, superset_position, notes, custom_name, strength_routine_sets
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        exercise_id = try c.decode(Int64.self, forKey: .exercise_id)
+        order_index = try c.decode(Int.self, forKey: .order_index)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        custom_name = try c.decodeIfPresent(String.self, forKey: .custom_name)
+        superset_position = try c.decodeIfPresent(Int.self, forKey: .superset_position)
+        strength_routine_sets = try c.decodeIfPresent([StrengthRoutineSetWire].self, forKey: .strength_routine_sets)
+        if let uuid = try? c.decodeIfPresent(UUID.self, forKey: .superset_group_id) {
+            superset_group_id = uuid
+        } else if let raw = try? c.decodeIfPresent(String.self, forKey: .superset_group_id) {
+            superset_group_id = UUID(uuidString: raw)
+        } else {
+            superset_group_id = nil
+        }
+    }
 }
 
 private struct StrengthRoutineSetWire: Decodable {
@@ -395,6 +531,21 @@ private struct StrengthRoutineSetWire: Decodable {
     let rest_sec: Int?
     let notes: String?
     let weight_segments: [StrengthWeightSegWire]?
+
+    enum CodingKeys: String, CodingKey {
+        case set_number, reps, weight_kg, rpe, rest_sec, notes, weight_segments
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        set_number = try c.decode(Int.self, forKey: .set_number)
+        reps = try c.decodeIfPresent(Int.self, forKey: .reps)
+        weight_kg = try c.decodeIfPresent(Double.self, forKey: .weight_kg)
+        rpe = try c.decodeIfPresent(Double.self, forKey: .rpe)
+        rest_sec = try c.decodeIfPresent(Int.self, forKey: .rest_sec)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        weight_segments = try? c.decodeIfPresent([StrengthWeightSegWire].self, forKey: .weight_segments)
+    }
 }
 
 private func strengthRoutineFullDetailSelect() -> String {
@@ -405,39 +556,79 @@ private func strengthRoutineFullDetailSelectLegacy() -> String {
     "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
 }
 
+private func fetchStrengthRoutineFullRows(
+    client: SupabaseClient,
+    userId: UUID,
+    routineId: Int64? = nil
+) async throws -> [StrengthRoutineFullRow] {
+    do {
+        let res: PostgrestResponse<Data>
+        if let routineId {
+            res = try await client
+                .from("strength_routines")
+                .select(strengthRoutineFullDetailSelect())
+                .eq("user_id", value: userId)
+                .eq("id", value: Int(routineId))
+                .execute()
+        } else {
+            res = try await client
+                .from("strength_routines")
+                .select(strengthRoutineFullDetailSelect())
+                .eq("user_id", value: userId)
+                .execute()
+        }
+        return try decodeStrengthRoutineFullRows(from: res.data)
+    } catch {
+        guard strengthRoutineSupersetColumnsUnavailable(error) else { throw error }
+        let res: PostgrestResponse<Data>
+        if let routineId {
+            res = try await client
+                .from("strength_routines")
+                .select(strengthRoutineFullDetailSelectLegacy())
+                .eq("user_id", value: userId)
+                .eq("id", value: Int(routineId))
+                .execute()
+        } else {
+            res = try await client
+                .from("strength_routines")
+                .select(strengthRoutineFullDetailSelectLegacy())
+                .eq("user_id", value: userId)
+                .execute()
+        }
+        return try decodeStrengthRoutineFullRows(from: res.data)
+    }
+}
+
+private func decodeStrengthRoutineFullRows(from data: Data) throws -> [StrengthRoutineFullRow] {
+    let decoder = JSONDecoder.supabase()
+    if let rows = try? decoder.decode([StrengthRoutineFullRow].self, from: data), !rows.isEmpty {
+        return rows
+    }
+    if let row = try? decoder.decode(StrengthRoutineFullRow.self, from: data) {
+        return [row]
+    }
+    return try decoder.decode([StrengthRoutineFullRow].self, from: data)
+}
+
 private func fetchAllStrengthRoutineFullRows(
     client: SupabaseClient,
     userId: UUID
 ) async throws -> [StrengthRoutineFullRow] {
-    do {
-        let res = try await client
-            .from("strength_routines")
-            .select(strengthRoutineFullDetailSelect())
-            .eq("user_id", value: userId)
-            .execute()
-        return try JSONDecoder.supabase().decode([StrengthRoutineFullRow].self, from: res.data)
-    } catch {
-        guard strengthRoutineSupersetColumnsUnavailable(error) else { throw error }
-        let res = try await client
-            .from("strength_routines")
-            .select(strengthRoutineFullDetailSelectLegacy())
-            .eq("user_id", value: userId)
-            .execute()
-        return try JSONDecoder.supabase().decode([StrengthRoutineFullRow].self, from: res.data)
-    }
+    try await fetchStrengthRoutineFullRows(client: client, userId: userId, routineId: nil)
 }
 
-private func programItemsFromRoutineRow(_ row: StrengthRoutineFullRow) -> [StrengthProgramItem] {
-    let exs = (row.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
+private func programItemsFromTemplateDetail(_ detail: StrengthTemplateDetailWire) -> [StrengthProgramItem] {
+    let exs = (detail.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
     return exs.map { ex in
-        let setsSorted = (ex.strength_routine_sets ?? []).sorted { $0.set_number < $1.set_number }
-        let mapped: [StrengthProgramSet] = setsSorted.map { s in
+        let setsInOrder = ex.strength_routine_sets ?? []
+        let mapped: [StrengthProgramSet] = setsInOrder.enumerated().map { idx, s in
             let segs: [StrengthWeightSegment]? = {
                 guard let arr = s.weight_segments, arr.count >= 2 else { return nil }
                 return arr.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
             }()
             return StrengthProgramSet(
                 setNumber: s.set_number,
+                rowOrder: idx + 1,
                 reps: s.reps,
                 weightKg: s.weight_kg,
                 rpe: s.rpe,
@@ -458,8 +649,65 @@ private func programItemsFromRoutineRow(_ row: StrengthRoutineFullRow) -> [Stren
     }
 }
 
-private func structuresMatch(_ a: [StrengthProgramItem], _ b: [StrengthProgramItem]) -> Bool {
+private func programItemsFromRoutineRow(_ row: StrengthRoutineFullRow) -> [StrengthProgramItem] {
+    let exs = (row.strength_routine_exercises ?? []).sorted { $0.order_index < $1.order_index }
+    return exs.map { ex in
+        let setsInOrder = ex.strength_routine_sets ?? []
+        let mapped: [StrengthProgramSet] = setsInOrder.enumerated().map { idx, s in
+            let segs: [StrengthWeightSegment]? = {
+                guard let arr = s.weight_segments, arr.count >= 2 else { return nil }
+                return arr.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
+            }()
+            return StrengthProgramSet(
+                setNumber: s.set_number,
+                rowOrder: idx + 1,
+                reps: s.reps,
+                weightKg: s.weight_kg,
+                rpe: s.rpe,
+                restSec: s.rest_sec,
+                notes: s.notes,
+                weightSegments: segs
+            )
+        }
+        return StrengthProgramItem(
+            exerciseId: ex.exercise_id,
+            orderIndex: ex.order_index,
+            notes: ex.notes,
+            customName: ex.custom_name,
+            supersetGroupId: ex.superset_group_id,
+            supersetPosition: ex.superset_position,
+            sets: mapped
+        )
+    }
+}
+
+private enum StrengthPrescriptionCompare {
+    static let weightEpsilon = 0.0001
+    static let rpeEpsilon = 0.001
+
+    static func repsChanged(_ proposed: Int?, _ routine: Int?) -> Bool {
+        proposed != routine
+    }
+
+    static func optionalDoubleChanged(_ proposed: Double?, _ routine: Double?, epsilon: Double) -> Bool {
+        switch (proposed, routine) {
+        case (nil, nil): return false
+        case (nil, _), (_, nil): return true
+        case let (p?, r?): return abs(p - r) > epsilon
+        }
+    }
+
+    static func restChanged(_ proposed: Int?, _ routine: Int?) -> Bool {
+        proposed != routine
+    }
+}
+
+func exerciseStructureMatch(_ a: [StrengthProgramItem], _ b: [StrengthProgramItem]) -> Bool {
     strengthRoutineStructureFingerprint(from: a) == strengthRoutineStructureFingerprint(from: b)
+}
+
+private func structuresMatch(_ a: [StrengthProgramItem], _ b: [StrengthProgramItem]) -> Bool {
+    exerciseStructureMatch(a, b)
 }
 
 private func displayNameForDiff(exerciseName: String, item: StrengthProgramItem) -> String {
@@ -484,120 +732,322 @@ private func formatRpe(_ d: Double?) -> String {
     return String(d)
 }
 
-private func buildDiffLines(
+func buildStrengthRoutineOverwriteDiffLines(
     proposed: [StrengthProgramItem],
     routine: [StrengthProgramItem],
     exerciseDisplayName: (Int64) -> String
 ) -> [StrengthRoutineOverwriteDiffLine] {
     var lines: [StrengthRoutineOverwriteDiffLine] = []
-    let prop = proposed.sorted { $0.orderIndex < $1.orderIndex }
-    let rout = routine.sorted { $0.orderIndex < $1.orderIndex }
-    for i in prop.indices {
-        let pEx = prop[i]
-        let rEx = rout[i]
+    let prop = expandedStrengthProgramItemsForCompare(normalizedProgramItemsForCompare(proposed))
+    let rout = expandedStrengthProgramItemsForCompare(normalizedProgramItemsForCompare(routine))
+    let maxExercises = max(prop.count, rout.count)
+    for i in 0..<maxExercises {
+        let pEx = i < prop.count ? prop[i] : nil
+        let rEx = i < rout.count ? rout[i] : nil
+        if pEx == nil, let rEx {
+            let exLabel = displayNameForDiff(exerciseName: exerciseDisplayName(rEx.exerciseId), item: rEx)
+            lines.append(StrengthRoutineOverwriteDiffLine(
+                id: "\(rEx.exerciseId)-removed-exercise",
+                exerciseContext: exLabel,
+                exerciseTitle: exLabel,
+                setNumber: 0,
+                exerciseOrderIndex: rEx.orderIndex,
+                fieldTitle: "Removed exercise",
+                oldValue: exLabel,
+                newValue: "—"
+            ))
+            continue
+        }
+        if rEx == nil, let pEx {
+            let exLabel = displayNameForDiff(exerciseName: exerciseDisplayName(pEx.exerciseId), item: pEx)
+            lines.append(StrengthRoutineOverwriteDiffLine(
+                id: "\(pEx.exerciseId)-added-exercise",
+                exerciseContext: exLabel,
+                exerciseTitle: exLabel,
+                setNumber: 0,
+                exerciseOrderIndex: pEx.orderIndex,
+                fieldTitle: "Added exercise",
+                oldValue: "—",
+                newValue: exLabel
+            ))
+            continue
+        }
+        guard let pEx, let rEx else { continue }
+        if pEx.exerciseId != rEx.exerciseId {
+            let pLabel = displayNameForDiff(exerciseName: exerciseDisplayName(pEx.exerciseId), item: pEx)
+            let rLabel = displayNameForDiff(exerciseName: exerciseDisplayName(rEx.exerciseId), item: rEx)
+            lines.append(StrengthRoutineOverwriteDiffLine(
+                id: "\(pEx.exerciseId)-\(rEx.exerciseId)-exercise-swap",
+                exerciseContext: pLabel,
+                exerciseTitle: pLabel,
+                setNumber: 0,
+                exerciseOrderIndex: pEx.orderIndex,
+                fieldTitle: "Exercise",
+                oldValue: rLabel,
+                newValue: pLabel
+            ))
+            continue
+        }
         let exLabel = displayNameForDiff(exerciseName: exerciseDisplayName(pEx.exerciseId), item: pEx)
         let setsP = pEx.sets.sorted { $0.setNumber < $1.setNumber }
         let setsR = rEx.sets.sorted { $0.setNumber < $1.setNumber }
-        for j in setsP.indices {
-            let ps = setsP[j]
-            let rs = setsR[j]
-            let setLabel = "\(exLabel) · Set \(ps.setNumber)"
-            let baseId = "\(pEx.exerciseId)-\(ps.setNumber)"
-            if ps.reps != rs.reps {
+        if setsP.count != setsR.count {
+            lines.append(StrengthRoutineOverwriteDiffLine(
+                id: "\(pEx.exerciseId)-sets-count",
+                exerciseContext: exLabel,
+                exerciseTitle: exLabel,
+                setNumber: 0,
+                exerciseOrderIndex: pEx.orderIndex,
+                fieldTitle: "Sets",
+                oldValue: "\(setsR.count)",
+                newValue: "\(setsP.count)"
+            ))
+        }
+        let prefixMatches = zip(setsP.prefix(setsR.count), setsR.prefix(setsP.count)).allSatisfy { ps, rs in
+            !strengthProgramSetPrescriptionDiffers(proposed: ps, routine: rs)
+        }
+        let isAppendOnly = setsP.count > setsR.count && prefixMatches
+        let maxCount = max(setsP.count, setsR.count)
+        for idx in 0..<maxCount {
+            let setNum = idx + 1
+            let ps = idx < setsP.count ? setsP[idx] : nil
+            let rs = idx < setsR.count ? setsR[idx] : nil
+            let setLabel = "\(exLabel) · Set \(setNum)"
+            let baseId = "\(pEx.exerciseId)-\(setNum)"
+            if ps == nil, rs != nil {
+                if isAppendOnly { continue }
                 lines.append(StrengthRoutineOverwriteDiffLine(
-                    id: "\(baseId)-reps",
+                    id: "\(baseId)-removed",
                     exerciseContext: setLabel,
                     exerciseTitle: exLabel,
-                    setNumber: ps.setNumber,
+                    setNumber: setNum,
                     exerciseOrderIndex: pEx.orderIndex,
-                    fieldTitle: "Reps",
-                    oldValue: rs.reps.map(String.init) ?? "—",
-                    newValue: ps.reps.map(String.init) ?? "—"
+                    fieldTitle: "Removed set",
+                    oldValue: "Set \(setNum)",
+                    newValue: "—"
                 ))
+                continue
             }
-            if ps.weightKg != rs.weightKg {
+            if ps != nil, rs == nil {
                 lines.append(StrengthRoutineOverwriteDiffLine(
-                    id: "\(baseId)-kg",
+                    id: "\(baseId)-added",
                     exerciseContext: setLabel,
                     exerciseTitle: exLabel,
-                    setNumber: ps.setNumber,
+                    setNumber: setNum,
                     exerciseOrderIndex: pEx.orderIndex,
-                    fieldTitle: "Weight",
-                    oldValue: formatWeight(rs.weightKg) + " kg",
-                    newValue: formatWeight(ps.weightKg) + " kg"
+                    fieldTitle: "Added set",
+                    oldValue: "—",
+                    newValue: "Set \(setNum)"
                 ))
+                let routineBaseline = setsR.last
+                let isDuplicateAppend = isAppendOnly
+                    && routineBaseline != nil
+                    && !strengthProgramSetPrescriptionDiffers(proposed: ps!, routine: routineBaseline!)
+                if !isDuplicateAppend {
+                    appendPrescriptionDiffLines(
+                        lines: &lines,
+                        proposed: ps!,
+                        routine: blankStrengthProgramSetForDiff,
+                        exLabel: exLabel,
+                        pEx: pEx,
+                        setNum: setNum,
+                        baseId: baseId,
+                        setLabel: setLabel
+                    )
+                }
+                continue
             }
-            if ps.rpe != rs.rpe {
-                lines.append(StrengthRoutineOverwriteDiffLine(
-                    id: "\(baseId)-rpe",
-                    exerciseContext: setLabel,
-                    exerciseTitle: exLabel,
-                    setNumber: ps.setNumber,
-                    exerciseOrderIndex: pEx.orderIndex,
-                    fieldTitle: "RPE",
-                    oldValue: formatRpe(rs.rpe),
-                    newValue: formatRpe(ps.rpe)
-                ))
-            }
-            if ps.restSec != rs.restSec {
-                lines.append(StrengthRoutineOverwriteDiffLine(
-                    id: "\(baseId)-rest",
-                    exerciseContext: setLabel,
-                    exerciseTitle: exLabel,
-                    setNumber: ps.setNumber,
-                    exerciseOrderIndex: pEx.orderIndex,
-                    fieldTitle: "Rest",
-                    oldValue: rs.restSec.map { "\($0) s" } ?? "—",
-                    newValue: ps.restSec.map { "\($0) s" } ?? "—"
-                ))
-            }
-            let pn = (ps.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let rn = (rs.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if pn != rn {
-                lines.append(StrengthRoutineOverwriteDiffLine(
-                    id: "\(baseId)-notes",
-                    exerciseContext: setLabel,
-                    exerciseTitle: exLabel,
-                    setNumber: ps.setNumber,
-                    exerciseOrderIndex: pEx.orderIndex,
-                    fieldTitle: "Set notes",
-                    oldValue: rn.isEmpty ? "—" : rn,
-                    newValue: pn.isEmpty ? "—" : pn
-                ))
-            }
-            let psSeg = (ps.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
-            let rsSeg = (rs.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
-            if psSeg != rsSeg {
-                lines.append(StrengthRoutineOverwriteDiffLine(
-                    id: "\(baseId)-drop",
-                    exerciseContext: setLabel,
-                    exerciseTitle: exLabel,
-                    setNumber: ps.setNumber,
-                    exerciseOrderIndex: pEx.orderIndex,
-                    fieldTitle: "Drop steps",
-                    oldValue: rsSeg.isEmpty ? "—" : rsSeg,
-                    newValue: psSeg.isEmpty ? "—" : psSeg
-                ))
-            }
+            guard let ps, let rs else { continue }
+            appendPrescriptionDiffLines(
+                lines: &lines,
+                proposed: ps,
+                routine: rs,
+                exLabel: exLabel,
+                pEx: pEx,
+                setNum: setNum,
+                baseId: baseId,
+                setLabel: setLabel
+            )
         }
     }
     return lines
+}
+
+private func strengthProgramSetPrescriptionDiffers(proposed ps: StrengthProgramSet, routine rs: StrengthProgramSet) -> Bool {
+    if StrengthPrescriptionCompare.repsChanged(ps.reps, rs.reps) { return true }
+    if StrengthPrescriptionCompare.optionalDoubleChanged(ps.weightKg, rs.weightKg, epsilon: StrengthPrescriptionCompare.weightEpsilon) { return true }
+    if StrengthPrescriptionCompare.optionalDoubleChanged(ps.rpe, rs.rpe, epsilon: StrengthPrescriptionCompare.rpeEpsilon) { return true }
+    if StrengthPrescriptionCompare.restChanged(ps.restSec, rs.restSec) { return true }
+    let pn = (ps.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let rn = (rs.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if pn != rn { return true }
+    let psSeg = (ps.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
+    let rsSeg = (rs.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
+    return psSeg != rsSeg
+}
+
+private func appendPrescriptionDiffLines(
+    lines: inout [StrengthRoutineOverwriteDiffLine],
+    proposed ps: StrengthProgramSet,
+    routine rs: StrengthProgramSet,
+    exLabel: String,
+    pEx: StrengthProgramItem,
+    setNum: Int,
+    baseId: String,
+    setLabel: String
+) {
+    if StrengthPrescriptionCompare.repsChanged(ps.reps, rs.reps) {
+        lines.append(StrengthRoutineOverwriteDiffLine(
+            id: "\(baseId)-reps",
+            exerciseContext: setLabel,
+            exerciseTitle: exLabel,
+            setNumber: setNum,
+            exerciseOrderIndex: pEx.orderIndex,
+            fieldTitle: "Reps",
+            oldValue: rs.reps.map(String.init) ?? "—",
+            newValue: ps.reps.map(String.init) ?? "—"
+        ))
+    }
+    if StrengthPrescriptionCompare.optionalDoubleChanged(ps.weightKg, rs.weightKg, epsilon: StrengthPrescriptionCompare.weightEpsilon) {
+        lines.append(StrengthRoutineOverwriteDiffLine(
+            id: "\(baseId)-kg",
+            exerciseContext: setLabel,
+            exerciseTitle: exLabel,
+            setNumber: setNum,
+            exerciseOrderIndex: pEx.orderIndex,
+            fieldTitle: "Weight",
+            oldValue: formatWeight(rs.weightKg) + " kg",
+            newValue: formatWeight(ps.weightKg) + " kg"
+        ))
+    }
+    if StrengthPrescriptionCompare.optionalDoubleChanged(ps.rpe, rs.rpe, epsilon: StrengthPrescriptionCompare.rpeEpsilon) {
+        lines.append(StrengthRoutineOverwriteDiffLine(
+            id: "\(baseId)-rpe",
+            exerciseContext: setLabel,
+            exerciseTitle: exLabel,
+            setNumber: setNum,
+            exerciseOrderIndex: pEx.orderIndex,
+            fieldTitle: "RPE",
+            oldValue: formatRpe(rs.rpe),
+            newValue: formatRpe(ps.rpe)
+        ))
+    }
+    if StrengthPrescriptionCompare.restChanged(ps.restSec, rs.restSec) {
+        lines.append(StrengthRoutineOverwriteDiffLine(
+            id: "\(baseId)-rest",
+            exerciseContext: setLabel,
+            exerciseTitle: exLabel,
+            setNumber: setNum,
+            exerciseOrderIndex: pEx.orderIndex,
+            fieldTitle: "Rest",
+            oldValue: rs.restSec.map { "\($0) s" } ?? "—",
+            newValue: ps.restSec.map { "\($0) s" } ?? "—"
+        ))
+    }
+    let pn = (ps.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    let rn = (rs.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if pn != rn {
+        lines.append(StrengthRoutineOverwriteDiffLine(
+            id: "\(baseId)-notes",
+            exerciseContext: setLabel,
+            exerciseTitle: exLabel,
+            setNumber: setNum,
+            exerciseOrderIndex: pEx.orderIndex,
+            fieldTitle: "Set notes",
+            oldValue: rn.isEmpty ? "—" : rn,
+            newValue: pn.isEmpty ? "—" : pn
+        ))
+    }
+    let psSeg = (ps.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
+    let rsSeg = (rs.weightSegments ?? []).map { "\($0.reps)×\(formatWeight($0.weightKg))" }.joined(separator: " → ")
+    if psSeg != rsSeg {
+        lines.append(StrengthRoutineOverwriteDiffLine(
+            id: "\(baseId)-drop",
+            exerciseContext: setLabel,
+            exerciseTitle: exLabel,
+            setNumber: setNum,
+            exerciseOrderIndex: pEx.orderIndex,
+            fieldTitle: "Drop steps",
+            oldValue: rsSeg.isEmpty ? "—" : rsSeg,
+            newValue: psSeg.isEmpty ? "—" : psSeg
+        ))
+    }
+}
+
+private func strengthRoutineOverwritePromptIfContentDiffers(
+    routineId: Int64,
+    routineName: String,
+    routineItems: [StrengthProgramItem],
+    proposed: [StrengthProgramItem],
+    proposedContent: String,
+    exerciseDisplayName: (Int64) -> String
+) -> StrengthRoutineOverwriteCandidate {
+    let normalizedRoutine = normalizedProgramItemsForCompare(routineItems)
+    guard !normalizedRoutine.isEmpty else { return .none }
+    let routineContent = strengthRoutineContentFingerprint(from: normalizedRoutine)
+    if routineContent == proposedContent { return .none }
+    var diff = buildStrengthRoutineOverwriteDiffLines(
+        proposed: proposed,
+        routine: normalizedRoutine,
+        exerciseDisplayName: exerciseDisplayName
+    )
+    if diff.isEmpty {
+        diff = [
+            StrengthRoutineOverwriteDiffLine(
+                id: "prescription-fallback",
+                exerciseContext: routineName,
+                exerciseTitle: routineName,
+                setNumber: 0,
+                exerciseOrderIndex: 0,
+                fieldTitle: "Prescription",
+                oldValue: "Saved template",
+                newValue: "Updated workout"
+            )
+        ]
+    }
+    guard !diff.isEmpty else { return .none }
+    return .prompt(StrengthRoutineOverwritePrompt(
+        routineId: routineId,
+        routineName: routineName,
+        diffLines: diff
+    ))
 }
 
 func fetchStrengthRoutineOverwriteCandidate(
     client: SupabaseClient,
     userId: UUID,
     proposed: [StrengthProgramItem],
-    exerciseDisplayName: @escaping (Int64) -> String
+    exerciseDisplayName: @escaping (Int64) -> String,
+    preferredRoutineId: Int64? = nil
 ) async throws -> StrengthRoutineOverwriteCandidate {
     guard !proposed.isEmpty else { return .none }
-    let proposedContent = strengthRoutineContentFingerprint(from: proposed)
+    let proposedNormalized = normalizedProgramItemsForCompare(proposed)
+    let proposedContent = strengthRoutineContentFingerprint(from: proposedNormalized)
 
-    let rows = try await fetchAllStrengthRoutineFullRows(client: client, userId: userId)
+    if let preferredRoutineId {
+        let detail = try await fetchStrengthRoutineTemplateDetail(client: client, routineId: preferredRoutineId)
+        let items = programItemsFromTemplateDetail(detail)
+        return strengthRoutineOverwritePromptIfContentDiffers(
+            routineId: detail.id,
+            routineName: detail.name,
+            routineItems: items,
+            proposed: proposedNormalized,
+            proposedContent: proposedContent,
+            exerciseDisplayName: exerciseDisplayName
+        )
+    }
+
+    let rows = try await fetchStrengthRoutineFullRows(
+        client: client,
+        userId: userId,
+        routineId: nil
+    )
+    guard !rows.isEmpty else { return .none }
+
     var matches: [(row: StrengthRoutineFullRow, items: [StrengthProgramItem], contentHash: String)] = []
     for row in rows {
-        let items = programItemsFromRoutineRow(row)
-        guard !items.isEmpty, structuresMatch(proposed, items) else { continue }
+        let items = normalizedProgramItemsForCompare(programItemsFromRoutineRow(row))
+        guard !items.isEmpty, structuresMatch(proposedNormalized, items) else { continue }
         let ch = strengthRoutineContentFingerprint(from: items)
         if ch == proposedContent { continue }
         matches.append((row, items, ch))
@@ -610,17 +1060,14 @@ func fetchStrengthRoutineOverwriteCandidate(
         if da != db { return da < db }
         return a.row.id < b.row.id
     }!
-    let diff = buildDiffLines(
-        proposed: proposed,
-        routine: best.items,
-        exerciseDisplayName: exerciseDisplayName
-    )
-    guard !diff.isEmpty else { return .none }
-    return .prompt(StrengthRoutineOverwritePrompt(
+    return strengthRoutineOverwritePromptIfContentDiffers(
         routineId: best.row.id,
         routineName: best.row.name,
-        diffLines: diff
-    ))
+        routineItems: best.items,
+        proposed: proposedNormalized,
+        proposedContent: proposedContent,
+        exerciseDisplayName: exerciseDisplayName
+    )
 }
 
 func applyStrengthRoutinePrescriptionUpdate(

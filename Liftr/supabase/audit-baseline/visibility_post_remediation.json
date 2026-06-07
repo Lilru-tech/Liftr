@@ -1,0 +1,20 @@
+{
+  "captured_at": "2026-06-05",
+  "project_ref": "rjzhaafvkxmvlnpsikbi",
+  "scenarios": {
+    "profiles_b": 1,
+    "workouts_b": 0,
+    "workout_scores_b": 0,
+    "personal_records_b": 0,
+    "territory_cells_b": 0,
+    "notifications_a": 4
+  },
+  "matches_baseline": true,
+  "security_lints_before": 747,
+  "security_lints_after": 703,
+  "deferred_per_safety_plan": [
+    "RLS policy consolidation on follows/workout_scores/profiles",
+    "107 unused index review",
+    "34 unindexed FK indexes"
+  ]
+}

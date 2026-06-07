@@ -1,0 +1,17 @@
+{
+  "captured_at": "2026-06-05",
+  "project_ref": "rjzhaafvkxmvlnpsikbi",
+  "test_users": {
+    "user_a": "1cdad29f-541b-4772-a10b-e78104328de3",
+    "user_b": "268b2f7f-e36c-4df4-aee3-b11335120be3"
+  },
+  "scenarios": {
+    "profiles_b": 1,
+    "workouts_b": 0,
+    "workout_scores_b": 0,
+    "personal_records_b": 0,
+    "territory_cells_b": 0,
+    "notifications_a": 4
+  },
+  "branch_note": "Preview branch db-audit-remediation (syxsgzeguszuszkdqpom) failed at migration 20260509130000 because spatial_ref_sys does not exist before PostGIS init. Remediation applied to prod with per-migration regression snapshots."
+}

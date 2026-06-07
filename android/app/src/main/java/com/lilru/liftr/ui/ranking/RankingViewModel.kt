@@ -328,7 +328,12 @@ class RankingViewModel(
 
     private suspend fun fetchTerritoryShare(st: RankingUiState): List<RankingUserRow> {
         val citiesStarted = System.currentTimeMillis()
-        val cities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+        val citiesResult = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+        if (citiesResult.failed) {
+            _uiState.value = _uiState.value.copy(error = citiesResult.errorMessage)
+            return emptyList()
+        }
+        val cities = citiesResult.value
         val pendingCount = cities.count { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }
         TerritoryCaptureClient.logTerritoryShare(
             "ranking cities count=${cities.size} pending=$pendingCount elapsedMs=${System.currentTimeMillis() - citiesStarted}"
@@ -347,11 +352,16 @@ class RankingViewModel(
             territoryCityKey = cityKey
         )
         val leaderboardStarted = System.currentTimeMillis()
-        val rows = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
+        val leaderboardResult = TerritoryCaptureClient.fetchTerritoryCityShareLeaderboard(
             supabase = supabase,
             cityKey = cityKey,
             scope = mapScope(st.scope)
-        ).map { row ->
+        )
+        if (leaderboardResult.failed) {
+            _uiState.value = _uiState.value.copy(error = leaderboardResult.errorMessage)
+            return emptyList()
+        }
+        val rows = leaderboardResult.value.map { row ->
             RankingUserRow(
                 rank = row.rank,
                 userId = row.userId,

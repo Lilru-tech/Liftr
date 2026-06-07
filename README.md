@@ -7,5 +7,9 @@ iOS app to track workouts, progress and gym performance.
 ## Publicación
 Guía de **App Store (iOS)** y **Google Play (Android)**: [docs/publishing.md](docs/publishing.md). Detalle AAB, claves y pistas: [docs/android-play-release.md](docs/android-play-release.md).
 
+**iOS CI (Xcode Cloud):** un solo workflow **Devel** en rama `devel` — [docs/xcode-cloud-workflows.md](docs/xcode-cloud-workflows.md).
+
+**Protección de `main`:** [docs/github-branch-protection.md](docs/github-branch-protection.md) — script `scripts/protect-main-branch.sh`.
+
 ## Stakeholder materials
 Executive deck, 5-minute demo script, and technical API appendix: [docs/stakeholder/](docs/stakeholder/).

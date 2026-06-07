@@ -29,22 +29,75 @@ enum WorkoutProgramCache {
         let cachedAt: Date
         let exercises: [CachedExercise]
         let setsByExerciseId: [Int: [CachedSet]]
+        let sourceRoutineId: Int64?
+
+        init(
+            workoutId: Int,
+            cachedAt: Date,
+            exercises: [CachedExercise],
+            setsByExerciseId: [Int: [CachedSet]],
+            sourceRoutineId: Int64? = nil
+        ) {
+            self.workoutId = workoutId
+            self.cachedAt = cachedAt
+            self.exercises = exercises
+            self.setsByExerciseId = setsByExerciseId
+            self.sourceRoutineId = sourceRoutineId
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            workoutId = try c.decode(Int.self, forKey: .workoutId)
+            cachedAt = try c.decode(Date.self, forKey: .cachedAt)
+            exercises = try c.decode([CachedExercise].self, forKey: .exercises)
+            setsByExerciseId = try c.decode([Int: [CachedSet]].self, forKey: .setsByExerciseId)
+            sourceRoutineId = try c.decodeIfPresent(Int64.self, forKey: .sourceRoutineId)
+        }
     }
 
     private static let storageKeyPrefix = "liftr.workoutProgramCache.v1."
     private static var memory: [Int: Entry] = [:]
 
-    static func store(workoutId: Int, exercises: [CachedExercise], setsByExerciseId: [Int: [CachedSet]]) {
+    static func store(
+        workoutId: Int,
+        exercises: [CachedExercise],
+        setsByExerciseId: [Int: [CachedSet]],
+        sourceRoutineId: Int64? = nil
+    ) {
+        let preservedRoutineId = sourceRoutineId ?? entry(for: workoutId)?.sourceRoutineId
         let entry = Entry(
             workoutId: workoutId,
             cachedAt: Date(),
             exercises: exercises,
-            setsByExerciseId: setsByExerciseId
+            setsByExerciseId: setsByExerciseId,
+            sourceRoutineId: preservedRoutineId
         )
         memory[workoutId] = entry
         if let data = try? JSONEncoder().encode(entry) {
             UserDefaults.standard.set(data, forKey: storageKeyPrefix + String(workoutId))
         }
+    }
+
+    static func storeSourceRoutineId(_ routineId: Int64?, for workoutId: Int) {
+        if let existing = entry(for: workoutId) {
+            store(
+                workoutId: workoutId,
+                exercises: existing.exercises,
+                setsByExerciseId: existing.setsByExerciseId,
+                sourceRoutineId: routineId
+            )
+            return
+        }
+        store(
+            workoutId: workoutId,
+            exercises: [],
+            setsByExerciseId: [:],
+            sourceRoutineId: routineId
+        )
+    }
+
+    static func sourceRoutineId(for workoutId: Int) -> Int64? {
+        entry(for: workoutId)?.sourceRoutineId
     }
 
     static func entry(for workoutId: Int) -> Entry? {
