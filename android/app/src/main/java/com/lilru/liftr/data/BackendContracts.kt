@@ -175,6 +175,7 @@ object BackendContracts {
         const val GET_MY_TERRITORY_SUMMARY_V1 = "get_my_territory_summary_v1"
         const val GET_TERRITORY_SHARE_LEADERBOARD_V1 = "get_territory_share_leaderboard_v1"
         const val LIST_TERRITORY_CITY_REGIONS_V1 = "list_territory_city_regions_v1"
+        const val RECONCILE_UNASSIGNED_TERRITORY_CELLS_V1 = "reconcile_unassigned_territory_cells_v1"
         const val GET_TERRITORY_CITY_SHARE_LEADERBOARD_V1 = "get_territory_city_share_leaderboard_v1"
         const val GET_TERRITORY_TOTAL_CELLS_LEADERBOARD_V1 = "get_territory_total_cells_leaderboard_v1"
         const val BACKFILL_MY_TERRITORY_CAPTURES_V1 = "backfill_my_territory_captures_v1"

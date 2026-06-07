@@ -1,5 +1,6 @@
 package com.lilru.liftr.ui.notifications
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,11 +9,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -148,38 +152,72 @@ fun NotificationsScreen(
                                 }
                             }
                     ) {
-                        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(
-                                text = n.title,
-                                style = MaterialTheme.typography.titleSmall
-                            )
-                            if (!n.body.isNullOrBlank()) {
-                                Text(
-                                    text = n.body,
-                                    style = MaterialTheme.typography.bodyMedium
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            if (!n.isRead) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 10.dp)
+                                        .size(8.dp)
+                                        .background(
+                                            color = MaterialTheme.colorScheme.error,
+                                            shape = CircleShape
+                                        )
                                 )
                             }
-                            Text(
-                                text = "${n.type} • ${n.createdAt?.substringBefore("T") ?: "-"}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (n.isRead) {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                }
+                            Icon(
+                                imageVector = notificationIcon(n.type),
+                                contentDescription = notificationTypeLabel(n.type),
+                                modifier = Modifier
+                                    .padding(top = 2.dp)
+                                    .size(28.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            OutlinedButton(
-                                onClick = { vm.deleteNotification(n.id) },
-                                enabled = !ui.deletingIds.contains(n.id),
-                                modifier = Modifier.fillMaxWidth()
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 Text(
-                                    if (ui.deletingIds.contains(n.id)) {
-                                        stringResource(R.string.notifications_delete_busy)
-                                    } else {
-                                        stringResource(R.string.notifications_delete_one)
-                                    }
+                                    text = n.title,
+                                    style = MaterialTheme.typography.titleSmall
                                 )
+                                if (!n.body.isNullOrBlank()) {
+                                    Text(
+                                        text = n.body,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = notificationTypeLabel(n.type),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = n.createdAt?.substringBefore("T") ?: "-",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                OutlinedButton(
+                                    onClick = { vm.deleteNotification(n.id) },
+                                    enabled = !ui.deletingIds.contains(n.id),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        if (ui.deletingIds.contains(n.id)) {
+                                            stringResource(R.string.notifications_delete_busy)
+                                        } else {
+                                            stringResource(R.string.notifications_delete_one)
+                                        }
+                                    )
+                                }
                             }
                         }
                     }

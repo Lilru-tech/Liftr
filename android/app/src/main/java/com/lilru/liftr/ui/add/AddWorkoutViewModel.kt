@@ -114,6 +114,7 @@ data class AddWorkoutUiState(
      */
     val postPublishHomeNonce: Int = 0,
     val strengthRoutineOverwritePending: StrengthRoutineOverwritePending? = null,
+    val appliedStrengthRoutineId: Long? = null,
     /** Edición in-place del contenido de una plantilla (menú ⋯ → Edit); el nombre sigue en Rename. */
     val strengthRoutineTemplateEdit: StrengthRoutineTemplateEdit? = null,
     val hyroxRoutineTemplateEdit: HyroxRoutineTemplateEdit? = null
@@ -517,6 +518,7 @@ class AddWorkoutViewModel(
     }
 
     fun clearAllStrengthExercises() {
+        _uiState.value = _uiState.value.copy(appliedStrengthRoutineId = null)
         updateActiveExercises { listOf(StrengthExerciseDraft()) }
     }
 
@@ -1665,6 +1667,7 @@ class AddWorkoutViewModel(
                     if (laneId != null) {
                         current.copy(
                             applyingRoutine = false,
+                            appliedStrengthRoutineId = routineId,
                             laneExercisesByUser = current.laneExercisesByUser.toMutableMap().apply {
                                 put(laneId, mapped)
                             },
@@ -1677,6 +1680,7 @@ class AddWorkoutViewModel(
                 } else {
                     current.copy(
                         applyingRoutine = false,
+                        appliedStrengthRoutineId = routineId,
                         selectedExercises = mapped,
                         message = "Routine applied.",
                         error = null
@@ -3260,13 +3264,15 @@ class AddWorkoutViewModel(
                             fetchStrengthRoutineOverwriteCandidate(
                                 supabase,
                                 uid,
-                                items
-                            ) { eid ->
-                                val ex = snap.exercises.firstOrNull { it.id == eid }
-                                ex?.nameEn?.takeIf { it.isNotBlank() }
-                                    ?: ex?.nameEs?.takeIf { it.isNotBlank() }
-                                    ?: ex?.name.orEmpty()
-                            }
+                                items,
+                                exerciseDisplayName = { eid ->
+                                    val ex = snap.exercises.firstOrNull { it.id == eid }
+                                    ex?.nameEn?.takeIf { it.isNotBlank() }
+                                        ?: ex?.nameEs?.takeIf { it.isNotBlank() }
+                                        ?: ex?.name.orEmpty()
+                                },
+                                preferredRoutineId = snap.appliedStrengthRoutineId
+                            )
                         }.getOrNull() ?: StrengthRoutineOverwriteCandidate.None
                         if (candidate is StrengthRoutineOverwriteCandidate.Prompt) {
                             _uiState.value = snap.copy(
@@ -3309,7 +3315,7 @@ class AddWorkoutViewModel(
     }
 
     fun dismissStrengthRoutineOverwrite() {
-        _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
+        confirmStrengthRoutineOverwrite(updateRoutine = false)
     }
 
     fun confirmStrengthRoutineOverwrite(updateRoutine: Boolean) {

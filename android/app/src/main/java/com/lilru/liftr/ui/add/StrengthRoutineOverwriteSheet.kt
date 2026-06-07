@@ -62,7 +62,12 @@ private fun buildOverwriteDiffGroups(lines: List<StrengthRoutineOverwriteDiffLin
         "Weight" to 1,
         "RPE" to 2,
         "Rest" to 3,
-        "Set notes" to 4
+        "Drop steps" to 4,
+        "Sets" to 5,
+        "Added set" to 6,
+        "Removed set" to 7,
+        "Set notes" to 8,
+        "Prescription" to 9
     )
     return lines.groupBy { it.exerciseOrderIndex }
         .toSortedMap()

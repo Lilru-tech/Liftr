@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.1] - 2026-06-07
+
+### Added
+- **Notifications** — Icons for every notification type in the notifications list.
+- **Notifications — settings** — Toggle to enable or disable **meal plan invite** push notifications.
+
+### Fixed
+- **Strength — routines** — Fixed the **auto-update** option when changing any value on an already saved routine.
+- **Territory** — Fixed an issue caused by recent **RLS** changes in the database.
+
+### Notes (database / ops)
+- **Notifications — meal plan invites** — Apply migration **`20260607190000_meal_plan_invite_push_settings_v1.sql`** before shipping clients that expose the meal plan invite notification toggle.
+
 ## [1.18.0] - 2026-06-04
 
 ### Added

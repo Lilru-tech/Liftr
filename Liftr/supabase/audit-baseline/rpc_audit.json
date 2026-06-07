@@ -1,0 +1,21 @@
+{
+  "captured_at": "2026-06-05",
+  "client_called_rpcs": [
+    "accept_meal_plan", "add_workout_participant", "apply_territory_capture_v1",
+    "backfill_my_territory_captures_v1", "check_and_unlock_achievements_for",
+    "clear_conversation", "clone_shared_ingredient", "clone_shared_recipe",
+    "complete_meal_plan_as_eaten", "create_cardio_workout_v2", "create_linked_strength_workout_copy",
+    "create_sport_workout_v2", "create_strength_workout", "delete_message", "delete_my_account",
+    "edit_message", "fetch_dual_linked_strength_workout_data", "finish_strength_workout_v1",
+    "get_conversations_overview", "get_daily_nutrition_recommendation_v1", "get_messages",
+    "get_my_territory_summary_v1", "get_nutrition_highlights_v1", "get_nutrition_month_balance_v1",
+    "get_nutrition_ranking_v1", "get_recommended_expansion_cells_v1", "get_smart_nutrition_recommendation_v1",
+    "get_territory_map_v1", "get_territory_summary_v1", "get_user_achievements", "get_user_level",
+    "get_user_prs", "get_workout_territory_display_v1", "list_my_segments_v1", "mark_conversation_read",
+    "plan_strength_squad_programs", "precheck_signup", "preview_territory_capture_v1", "reject_meal_plan",
+    "send_message", "set_conversation_muted", "start_direct_conversation", "start_workout_v1",
+    "toggle_message_reaction", "update_meal_plan_target", "update_sport_workout_v2",
+    "update_strength_workout_v1"
+  ],
+  "revoke_candidates": "All public functions prefixed with _, trg_, and trigger-only helpers with zero Swift .rpc() references"
+}

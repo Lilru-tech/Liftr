@@ -239,6 +239,7 @@ struct AddWorkoutSheet: View {
     @State private var loadingHyroxRoutineOnly = false
     @State private var strengthRoutineOverwritePrompt: StrengthRoutineOverwritePrompt?
     @State private var pendingStrengthRoutineOverwriteExercises: [EditableExercise] = []
+    @State private var appliedStrengthRoutineId: Int64? = nil
     @AppStorage("addWorkoutPlanTooltipSeen") private var addWorkoutPlanTooltipSeen = false
 
     var body: some View { addWorkoutRoot }
@@ -562,7 +563,8 @@ struct AddWorkoutSheet: View {
                 catalog: catalog,
                 loadingCatalog: loadingCatalog,
                 exerciseLanguage: exerciseLanguage,
-                onApply: { loaded in
+                onApply: { routineId, loaded in
+                    appliedStrengthRoutineId = routineId
                     applyLoadedStrengthRoutine(loaded)
                 }
             )
@@ -772,6 +774,7 @@ struct AddWorkoutSheet: View {
                 }
                 confirmRemoveStrengthExercise = nil
                 recentlyAddedExerciseId = nil
+                appliedStrengthRoutineId = nil
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -1818,23 +1821,26 @@ struct AddWorkoutSheet: View {
                 let tpl = strengthExercisesForRoutineTemplate()
                 let items = strengthProgramItems(from: tpl)
                 if !items.isEmpty {
-                    let candidate = (
-                        try? await fetchStrengthRoutineOverwriteCandidate(
+                    do {
+                        let candidate = try await fetchStrengthRoutineOverwriteCandidate(
                             client: client,
                             userId: userId,
                             proposed: items,
                             exerciseDisplayName: { eid in
                                 catalog.first(where: { $0.id == eid })?.localizedName(for: exerciseLanguage) ?? ""
-                            }
+                            },
+                            preferredRoutineId: appliedStrengthRoutineId
                         )
-                    ) ?? .none
-                    if case .prompt(let pr) = candidate {
-                        let copied = tpl.map { $0.deepCopied() }
-                        await MainActor.run {
-                            pendingStrengthRoutineOverwriteExercises = copied
-                            strengthRoutineOverwritePrompt = pr
+                        if case .prompt(let pr) = candidate {
+                            let copied = tpl.map { $0.deepCopied() }
+                            await MainActor.run {
+                                pendingStrengthRoutineOverwriteExercises = copied
+                                strengthRoutineOverwritePrompt = pr
+                            }
+                            return
                         }
-                        return
+                    } catch {
+                        print("[StrengthRoutine][OVERWRITE_CHECK]", error.localizedDescription)
                     }
                 }
             }
@@ -2294,6 +2300,9 @@ struct AddWorkoutSheet: View {
                     print("[StrengthRoutine][OVERWRITE]", error.localizedDescription)
                 }
             }
+            if kind == .strength, let wid = newWorkoutId, let routineId = appliedStrengthRoutineId {
+                WorkoutProgramCache.storeSourceRoutineId(routineId, for: Int(wid))
+            }
             await showSuccessAndGoHome(successMessage + routineSaveSuffix)
     }
     
@@ -2327,6 +2336,7 @@ struct AddWorkoutSheet: View {
         replaceHyroxRoutinePendingId = nil
         showReplaceHyroxRoutineConfirm = false
         replaceHyroxPendingIsRoutineOnly = false
+        appliedStrengthRoutineId = nil
     }
     
     @MainActor
@@ -3619,7 +3629,7 @@ private struct StrengthRoutinesPickerSheet: View {
     let catalog: [Exercise]
     let loadingCatalog: Bool
     let exerciseLanguage: ExerciseLanguage
-    let onApply: ([EditableExercise]) -> Void
+    let onApply: (Int64, [EditableExercise]) -> Void
 
     @State private var routines: [StrengthRoutineListRow] = []
     @State private var folders: [StrengthRoutineFolderRow] = []
@@ -4604,7 +4614,7 @@ private struct StrengthRoutinesPickerSheet: View {
                 return
             }
             await MainActor.run {
-                onApply(built)
+                onApply(id, built)
                 if dismissRoutinesPicker {
                     dismiss()
                 }

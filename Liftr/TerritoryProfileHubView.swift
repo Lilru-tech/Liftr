@@ -79,7 +79,7 @@ struct TerritoryProfileHubView: View {
                 async let citiesLoad = TerritoryCaptureClient.fetchTerritoryCityRegions()
                 async let takeoversLoad = TerritoryCaptureClient.fetchRecentTakeovers(userId: nil, limit: 3)
                 summary = await summaryLoad
-                let loadedCities = await citiesLoad
+                let loadedCities = await citiesLoad.value
                 cities = loadedCities
                 takeovers = await takeoversLoad
                 if loadedCities.contains(where: { TerritoryCaptureClient.isPendingTerritoryCityKey($0.city_key) }) {

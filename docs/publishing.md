@@ -19,6 +19,13 @@ Este documento aplica a **Liftr**: repositorio con app **iOS** en **Swift** / **
 
 ## 2. Si publicas en el App Store (iOS) — aplica a este repo
 
+### CI en `devel` (Xcode Cloud)
+
+- Un solo workflow activo: **Devel**, con **Start Condition → Push → rama `devel`**.
+- No mantener el workflow **Default** (ni otro duplicado) con el mismo push en `devel`; si no, cada merge dispara dos archives.
+- Tras cada push a `devel`, GitHub Actions puede actualizar `main` ([`main.yml`](../.github/workflows/main.yml)); el workflow **Devel** no debe dispararse también en `main` salvo que lo queráis explícitamente.
+- Detalle y checklist: [xcode-cloud-workflows.md](xcode-cloud-workflows.md).
+
 Resumen de alto nivel (sujeto a la documentación actual de Apple):
 
 1. Cuenta del **Apple Developer Program**.

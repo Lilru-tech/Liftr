@@ -69,6 +69,16 @@
         }
       }
     },
+    "%@ · %lld g · %lld kcal" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$@ · %2$lld g · %3$lld kcal"
+          }
+        }
+      }
+    },
     "%@ · %lld kcal" : {
       "localizations" : {
         "en" : {
@@ -213,6 +223,9 @@
         }
       }
     },
+    "%lld items" : {
+
+    },
     "%lld kcal" : {
 
     },
@@ -223,6 +236,9 @@
 
     },
     "%lld kcal over" : {
+
+    },
+    "%lld kcal total" : {
 
     },
     "%lld kilocalories remaining in today's budget" : {
@@ -401,21 +417,21 @@
         }
       }
     },
+    "%lld× logged · %@ total" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld× logged · %2$@ total"
+          }
+        }
+      }
+    },
     "%lldd" : {
 
     },
     "%lldg" : {
 
-    },
-    "%lldg %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lldg %2$@"
-          }
-        }
-      }
     },
     "%llds" : {
 
@@ -570,6 +586,9 @@
     "Add" : {
 
     },
+    "Add %lld to diary" : {
+
+    },
     "Add a comment" : {
 
     },
@@ -604,9 +623,6 @@
 
     },
     "Add superserie exercise" : {
-
-    },
-    "Add to diary" : {
 
     },
     "Add to recipe" : {
@@ -651,19 +667,22 @@
     "All time…" : {
 
     },
+    "All-time stats from your nutrition diary — peak days, favorite foods, and logging habits." : {
+
+    },
     "Allowed: time limit only, performance goal only, or both. Not allowed: multiple performance goals." : {
 
     },
     "Already in Liftr" : {
 
     },
+    "Amount per person" : {
+
+    },
     "Analysis" : {
 
     },
     "Analyze & View Recommendations" : {
-
-    },
-    "Analyze nutrition and workouts over a custom date range." : {
 
     },
     "Appearance" : {
@@ -892,6 +911,9 @@
     "Challenges" : {
 
     },
+    "Change password" : {
+
+    },
     "Changes" : {
 
     },
@@ -950,6 +972,9 @@
 
     },
     "Clear all recent searches?" : {
+
+    },
+    "Clear cart" : {
 
     },
     "Clear conversation" : {
@@ -1046,6 +1071,9 @@
 
     },
     "Consistency chart" : {
+
+    },
+    "Consistency streak" : {
 
     },
     "Contact" : {
@@ -1194,6 +1222,9 @@
     "Creating…" : {
 
     },
+    "Current password" : {
+
+    },
     "Current streak: %lld week%@ with a completed goal" : {
       "localizations" : {
         "en" : {
@@ -1229,6 +1260,9 @@
 
     },
     "Decline" : {
+
+    },
+    "Decline plan" : {
 
     },
     "Default" : {
@@ -1271,6 +1305,9 @@
     "Delete from diary" : {
 
     },
+    "Delete ingredient" : {
+
+    },
     "Delete recipe" : {
 
     },
@@ -1278,6 +1315,9 @@
 
     },
     "Delete this folder?" : {
+
+    },
+    "Delete this ingredient?" : {
 
     },
     "Delete this recipe?" : {
@@ -1501,6 +1541,9 @@
     "EXERCISES" : {
 
     },
+    "Exercises saved locally — will sync when online" : {
+
+    },
     "Expand all" : {
 
     },
@@ -1618,6 +1661,9 @@
     "Forgot password?" : {
 
     },
+    "Forgot your password? Reset it here." : {
+
+    },
     "Fouls" : {
 
     },
@@ -1625,6 +1671,9 @@
 
     },
     "From" : {
+
+    },
+    "From @%@" : {
 
     },
     "g" : {
@@ -1699,6 +1748,12 @@
 
     },
     "Group workout" : {
+
+    },
+    "Habits" : {
+
+    },
+    "Heaviest meal" : {
 
     },
     "Height" : {
@@ -1869,6 +1924,9 @@
     "Invalid email format." : {
 
     },
+    "Invitation not found" : {
+
+    },
     "Ir arriba" : {
 
     },
@@ -1977,6 +2035,9 @@
     "Loading challenges…" : {
 
     },
+    "Loading invitation…" : {
+
+    },
     "Loading notifications…" : {
 
     },
@@ -2013,6 +2074,9 @@
     "Log in to submit requests or vote." : {
 
     },
+    "Log meals in your diary to unlock personal nutrition highlights." : {
+
+    },
     "Log meals to see your calorie balance." : {
 
     },
@@ -2032,10 +2096,16 @@
     "LV %lld" : {
 
     },
+    "Macro champions" : {
+
+    },
     "Mantén pulsado para ver el nombre y las series" : {
 
     },
     "Mark all as read" : {
+
+    },
+    "Mark as eaten" : {
 
     },
     "Match score" : {
@@ -2064,6 +2134,12 @@
 
     },
     "Meal" : {
+
+    },
+    "Meal invitation" : {
+
+    },
+    "Meal invitations" : {
 
     },
     "Measured %@" : {
@@ -2109,6 +2185,9 @@
     "Midnight" : {
 
     },
+    "Missing GPS routes" : {
+
+    },
     "Mono" : {
 
     },
@@ -2122,6 +2201,9 @@
 
     },
     "Most challenged" : {
+
+    },
+    "Most logged" : {
 
     },
     "Move down" : {
@@ -2193,6 +2275,9 @@
     "New password (min. 8)" : {
 
     },
+    "New password must be different from your current password." : {
+
+    },
     "New recipe" : {
 
     },
@@ -2254,6 +2339,9 @@
     "No entries in this range yet." : {
 
     },
+    "No entries yet" : {
+
+    },
     "No exercises found" : {
 
     },
@@ -2293,6 +2381,9 @@
 
     },
     "No goals yet" : {
+
+    },
+    "No highlights yet" : {
 
     },
     "No Hyrox exercises added" : {
@@ -2444,6 +2535,12 @@
     "Nutrition Facts" : {
 
     },
+    "Nutrition insights" : {
+
+    },
+    "Nutrition Summary" : {
+
+    },
     "Ocean" : {
 
     },
@@ -2476,6 +2573,9 @@
 
     },
     "OPEN APPLE EULA" : {
+
+    },
+    "Open Apple Health" : {
 
     },
     "Open existing segment" : {
@@ -2515,6 +2615,9 @@
 
     },
     "Overall" : {
+
+    },
+    "Overview" : {
 
     },
     "OVERVIEW" : {
@@ -2618,6 +2721,24 @@
 
     },
     "Pick any sport in the add form—this is only a time target." : {
+
+    },
+    "Plan %lld meal(s)" : {
+
+    },
+    "Plan date" : {
+
+    },
+    "Plan food" : {
+
+    },
+    "Planned by @%@" : {
+
+    },
+    "Planned meal" : {
+
+    },
+    "Planned meals" : {
 
     },
     "Plus and minus change how many times this row counts, not the row number." : {
@@ -2732,7 +2853,7 @@
     "Recommendation reflects your recent activity (about the last 8 weeks). If you’re new, we use a typical average." : {
 
     },
-    "Recovery insights" : {
+    "Records" : {
 
     },
     "Red cards" : {
@@ -2881,6 +3002,9 @@
     "Route" : {
 
     },
+    "Routes backfilled" : {
+
+    },
     "Routine" : {
       "localizations" : {
         "en" : {
@@ -2993,9 +3117,6 @@
       "comment" : "A button to save changes to a diary entry.",
       "isCommentAutoGenerated" : true
     },
-    "Save ingredient" : {
-
-    },
     "Save routine" : {
       "localizations" : {
         "en" : {
@@ -3007,6 +3128,9 @@
       }
     },
     "Save without logging a workout" : {
+
+    },
+    "Saved locally — will sync when connection improves" : {
 
     },
     "saved routine template" : {
@@ -3077,6 +3201,9 @@
 
     },
     "Second partner workout has no exercises." : {
+
+    },
+    "Section" : {
 
     },
     "See frequently asked questions" : {
@@ -3424,6 +3551,9 @@
         }
       }
     },
+    "Still syncing exercises — finish will retry when online" : {
+
+    },
     "Streak" : {
 
     },
@@ -3550,6 +3680,9 @@
     "Sync body-weight samples from Apple Health." : {
 
     },
+    "Syncing exercises…" : {
+
+    },
     "Syncing start…" : {
       "localizations" : {
         "en" : {
@@ -3598,6 +3731,9 @@
 
     },
     "Tap + to start a chat, then send this workout." : {
+
+    },
+    "Tap items to add. Tap again to remove." : {
 
     },
     "Tap the route or drag the green pin for start" : {
@@ -3697,6 +3833,9 @@
     "This removes the exercise from this active workout." : {
 
     },
+    "This removes the ingredient and any diary entries logged with it." : {
+
+    },
     "This removes the recipe and any diary entries logged with it." : {
 
     },
@@ -3782,16 +3921,32 @@
     "Total energy out (target + activity): %lld kcal/day" : {
 
     },
+    "Total for %lldg" : {
+
+    },
     "Track changes over time and log manual entries." : {
 
     },
     "Track your objectives" : {
 
     },
+    "Tracking since %@ · latest %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Tracking since %1$@ · latest %2$@"
+          }
+        }
+      }
+    },
     "Train together on this phone. Each person keeps their own weight, reps, and rest timers, with separate workout results." : {
 
     },
     "Training & recovery insights" : {
+
+    },
+    "Training coach and all-time personal highlights from your diary." : {
 
     },
     "Trend" : {
@@ -3874,6 +4029,9 @@
     "Update superserie sets?" : {
 
     },
+    "Update your account password." : {
+
+    },
     "Updated" : {
       "localizations" : {
         "en" : {
@@ -3897,6 +4055,9 @@
 
     },
     "Use the arrows on each exercise to change order." : {
+
+    },
+    "User" : {
 
     },
     "User not found" : {
@@ -3992,6 +4153,9 @@
     "Weekly goals" : {
 
     },
+    "Weekly habits" : {
+
+    },
     "Weight" : {
 
     },
@@ -4048,6 +4212,9 @@
 
     },
     "Workouts" : {
+
+    },
+    "Workouts imported without GPS maps. Open Apple Health → Sharing → Apps → Liftr and turn on Workout Routes, then import again." : {
 
     },
     "Write a comment…" : {

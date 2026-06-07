@@ -57,6 +57,7 @@ import com.lilru.liftr.ui.add.StrengthSegmentPayload
 import com.lilru.liftr.ui.add.StrengthSetDraft
 import com.lilru.liftr.ui.add.StrengthSegmentDraft
 import com.lilru.liftr.ui.add.applyStrengthRoutinePrescriptionUpdate
+import com.lilru.liftr.ui.add.expandedStrengthProgramSetsForCompare
 import com.lilru.liftr.ui.add.fetchStrengthRoutineOverwriteCandidate
 import com.lilru.liftr.ui.add.weightSegmentsToJsonArray
 import kotlinx.serialization.json.buildJsonArray
@@ -1144,8 +1145,7 @@ class ActiveStrengthWorkoutViewModel(
     }
 
     fun dismissStrengthRoutineOverwrite() {
-        pendingFinishOnDone = null
-        _ui.value = _ui.value.copy(strengthRoutineOverwritePrompt = null)
+        confirmStrengthRoutineOverwrite(updateRoutine = false)
     }
 
     fun confirmStrengthRoutineOverwrite(updateRoutine: Boolean) {
@@ -1171,12 +1171,13 @@ class ActiveStrengthWorkoutViewModel(
                         fetchStrengthRoutineOverwriteCandidate(
                             supabase,
                             uid,
-                            proposed
-                        ) { eid ->
-                            val we = hostWeRows.firstOrNull { it.exerciseId == eid }
-                            we?.customName?.trim()?.takeIf { it.isNotEmpty() }
-                                ?: "Exercise ${we?.exerciseId ?: eid}"
-                        }
+                            proposed,
+                            exerciseDisplayName = { eid ->
+                                val we = hostWeRows.firstOrNull { it.exerciseId == eid }
+                                we?.customName?.trim()?.takeIf { it.isNotEmpty() }
+                                    ?: "Exercise ${we?.exerciseId ?: eid}"
+                            }
+                        )
                     }.getOrNull() ?: StrengthRoutineOverwriteCandidate.None
                     if (candidate is StrengthRoutineOverwriteCandidate.Prompt) {
                         pendingFinishOnDone = onDone
@@ -1275,34 +1276,44 @@ class ActiveStrengthWorkoutViewModel(
 
     private fun programItemsForRoutineOverwrite(): List<StrengthProgramItem>? {
         if (hostWeRows.isEmpty()) return null
+        val s = _ui.value
         val items = mutableListOf<StrengthProgramItem>()
         for (we in hostWeRows.sortedBy { it.orderIndex }) {
-            val lines = completedSetLines.filter { it.workoutExerciseId == we.id }
-            if (lines.isEmpty()) return null
-            val rows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
-            val sets = rows.mapIndexed { idx, row ->
-                val segList = row.weightSegments?.takeIf { it.size >= 2 }?.mapNotNull { el ->
-                    val o = el.jsonObject
-                    val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                    val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
-                    StrengthSegmentPayload(r, w)
-                }?.takeIf { it.size >= 2 }
-                StrengthProgramSet(
-                    setNumber = idx + 1,
-                    reps = row.reps,
-                    weightKg = row.weightKg,
-                    rpe = row.rpe,
-                    restSec = row.restSec,
-                    notes = null,
-                    weightSegments = segList
-                )
+            val exLine = s.exercises.firstOrNull { it.workoutExerciseId == we.id }
+            val completed = completedSetLines.filter { it.workoutExerciseId == we.id }
+            val rawSets = if (exLine != null && exLine.sets.isNotEmpty()) {
+                programSetsFromExpandedPlanned(exLine.sets, completed)
+            } else {
+                if (completed.isEmpty()) continue
+                val rows = chunkCompletedLines(completed).flatMap { chunkToPersistRows(it) }
+                rows.map { row ->
+                    val segList = row.weightSegments?.takeIf { it.size >= 2 }?.mapNotNull { el ->
+                        val o = el.jsonObject
+                        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+                        StrengthSegmentPayload(r, w)
+                    }?.takeIf { it.size >= 2 }
+                    StrengthProgramSet(
+                        setNumber = row.count.coerceIn(1, 99),
+                        reps = row.reps,
+                        weightKg = row.weightKg,
+                        rpe = row.rpe,
+                        restSec = row.restSec,
+                        notes = null,
+                        weightSegments = segList
+                    )
+                }
             }
+            if (rawSets.isEmpty()) continue
+            val sets = expandedStrengthProgramSetsForCompare(rawSets)
             items.add(
                 StrengthProgramItem(
                     exerciseId = we.exerciseId,
                     orderIndex = we.orderIndex,
                     notes = we.notes,
                     customName = we.customName,
+                    supersetGroupId = we.supersetGroupId,
+                    supersetPosition = we.supersetPosition,
                     sets = sets
                 )
             )
@@ -1311,10 +1322,32 @@ class ActiveStrengthWorkoutViewModel(
     }
 
     private fun draftsForRoutineUpdateFromPerformed(): List<StrengthExerciseDraft> {
+        val s = _ui.value
         return hostWeRows.sortedBy { it.orderIndex }.map { we ->
-            val lines = completedSetLines.filter { it.workoutExerciseId == we.id }
+            val exLine = s.exercises.firstOrNull { it.workoutExerciseId == we.id }
+            val completed = completedSetLines.filter { it.workoutExerciseId == we.id }
             val custom = we.customName?.trim().orEmpty()
-            val rows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
+            val programSets = if (exLine != null && exLine.sets.isNotEmpty()) {
+                programSetsFromExpandedPlanned(exLine.sets, completed)
+            } else {
+                val rows = chunkCompletedLines(completed).flatMap { chunkToPersistRows(it) }
+                rows.map { row ->
+                    StrengthProgramSet(
+                        setNumber = row.count.coerceIn(1, 99),
+                        reps = row.reps,
+                        weightKg = row.weightKg,
+                        rpe = row.rpe,
+                        restSec = row.restSec,
+                        notes = null,
+                        weightSegments = row.weightSegments?.takeIf { it.size >= 2 }?.mapNotNull { el ->
+                            val o = el.jsonObject
+                            val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                            val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+                            StrengthSegmentPayload(r, w)
+                        }?.takeIf { it.size >= 2 }
+                    )
+                }
+            }
             StrengthExerciseDraft(
                 exerciseId = we.exerciseId,
                 customName = custom,
@@ -1322,9 +1355,33 @@ class ActiveStrengthWorkoutViewModel(
                 notes = we.notes.orEmpty(),
                 supersetGroupId = we.supersetGroupId,
                 supersetPosition = we.supersetPosition,
-                sets = rows.map { row -> strengthSetDraftFromPersistRow(row) }
+                sets = programSets.map { ps -> strengthSetDraftFromProgramSet(ps) }
             )
         }
+    }
+
+    private fun strengthSetDraftFromProgramSet(ps: StrengthProgramSet): StrengthSetDraft {
+        val segs = ps.weightSegments.orEmpty()
+        val segDrafts = if (segs.size >= 2) {
+            segs.map { seg ->
+                StrengthSegmentDraft(
+                    repsText = seg.reps.toString(),
+                    weightText = formatDoubleField(seg.weightKg)
+                )
+            }
+        } else {
+            emptyList()
+        }
+        return StrengthSetDraft(
+            setNumber = ps.setNumber.coerceIn(1, 99),
+            repsText = ps.reps?.toString().orEmpty(),
+            weightText = ps.weightKg?.let { formatDoubleField(it) }.orEmpty(),
+            rpeText = ps.rpe?.let { r ->
+                if (r == r.toInt().toDouble()) r.toInt().toString() else String.format(Locale.US, "%.1f", r)
+            }.orEmpty(),
+            restSecText = ps.restSec?.toString().orEmpty(),
+            segments = segDrafts
+        )
     }
 
     private fun strengthSetDraftFromPersistRow(row: CollapsedPersistRow): StrengthSetDraft {

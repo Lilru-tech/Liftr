@@ -101,8 +101,11 @@ struct TerritoryCitySearchSheet: View {
         .presentationBackground(.clear)
         .task {
             await loadCities(query: nil)
-            TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground { updated in
-                cities = updated
+            let refreshed = await TerritoryCaptureClient.refreshPendingTerritoryCityRegions { updated in
+                cities = TerritoryCaptureClient.displayableTerritoryCities(updated)
+            }
+            await MainActor.run {
+                cities = TerritoryCaptureClient.displayableTerritoryCities(refreshed)
             }
         }
         .onChange(of: searchText) { _, newValue in
@@ -187,12 +190,13 @@ struct TerritoryCitySearchSheet: View {
         let fetched = await TerritoryCaptureClient.fetchTerritoryCityRegions(
             query: query,
             ownedFirst: true
-        )
+        ).value
+        let displayable = TerritoryCaptureClient.displayableTerritoryCities(fetched)
         await MainActor.run {
-            cities = fetched
-            if selectedCityKey == nil || !fetched.contains(where: { $0.city_key == selectedCityKey }) {
+            cities = displayable
+            if selectedCityKey == nil || !displayable.contains(where: { $0.city_key == selectedCityKey }) {
                 selectedCityKey = TerritoryCaptureClient.selectedTerritoryCity(
-                    from: fetched,
+                    from: displayable,
                     preferredKey: selectedCityKey,
                     referenceLatitude: referenceLatitude,
                     referenceLongitude: referenceLongitude

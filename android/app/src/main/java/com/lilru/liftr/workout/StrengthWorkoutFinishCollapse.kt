@@ -47,20 +47,24 @@ internal object StrengthWorkoutFinishCollapse {
     ): List<StrengthFinishExercisePayload> {
         return workoutExerciseIds.map { weId ->
             val lines = completedByExerciseId[weId].orEmpty()
-            val sets = chunkCompletedLines(lines)
-                .flatMap { chunkToPersistRows(it) }
-                .map { row ->
-                    StrengthFinishSetPayload(
-                        setNumber = row.count,
-                        reps = row.reps,
-                        weightKg = row.weightKg,
-                        rpe = row.rpe,
-                        restSec = row.restSec,
-                        weightSegments = row.weightSegments
-                    )
-                }
+            val sets = collapseCompletedLinesForCompare(lines)
             StrengthFinishExercisePayload(workoutExerciseId = weId, sets = sets)
         }
+    }
+
+    fun collapseCompletedLinesForCompare(lines: List<CompletedSetLine>): List<StrengthFinishSetPayload> {
+        return chunkCompletedLines(lines)
+            .flatMap { chunkToPersistRows(it) }
+            .map { row ->
+                StrengthFinishSetPayload(
+                    setNumber = row.count.coerceIn(1, 99),
+                    reps = row.reps,
+                    weightKg = row.weightKg,
+                    rpe = row.rpe,
+                    restSec = row.restSec,
+                    weightSegments = row.weightSegments
+                )
+            }
     }
 
     fun exerciseToJsonObject(exercise: StrengthFinishExercisePayload) = buildJsonObject {

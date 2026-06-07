@@ -1,6 +1,7 @@
 package com.lilru.liftr.ui.add
 
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.domain.strengthSetMultiplicities
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Columns
@@ -24,6 +25,7 @@ import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 internal data class StrengthProgramSet(
     val setNumber: Int,
+    val rowOrder: Int = setNumber,
     val reps: Int?,
     val weightKg: Double?,
     val rpe: Double?,
@@ -122,9 +124,10 @@ internal fun draftSetToStrengthPayload(set: StrengthSetDraft): StrengthSetPayloa
     )
 }
 
-internal fun strengthProgramSetFromPayload(p: StrengthSetPayload): StrengthProgramSet =
+internal fun strengthProgramSetFromPayload(p: StrengthSetPayload, rowOrder: Int = p.setNumber): StrengthProgramSet =
     StrengthProgramSet(
         setNumber = p.setNumber,
+        rowOrder = rowOrder,
         reps = p.reps,
         weightKg = p.weightKg,
         rpe = p.rpe,
@@ -176,7 +179,7 @@ fun strengthRoutineContentFingerprintFromDrafts(exercises: List<StrengthExercise
 }
 
 internal fun strengthRoutineContentFingerprintFromItems(items: List<StrengthProgramItem>): String {
-    val sorted = items.sortedBy { it.orderIndex }
+    val sorted = expandedStrengthProgramItemsForCompare(items).sortedBy { it.orderIndex }
     val lines = sorted.map { item ->
         val setParts = item.sets.sortedBy { it.setNumber }.map { s ->
             val w = s.weightKg?.toString() ?: ""
@@ -198,21 +201,31 @@ internal fun strengthRoutineContentFingerprintFromItems(items: List<StrengthProg
 
 internal fun strengthRoutineStructureFingerprintFromItems(items: List<StrengthProgramItem>): String {
     val sorted = items.sortedBy { it.orderIndex }
-    val lines = sorted.map { item ->
-        val cn = (item.customName ?: "").trim()
-        val note = (item.notes ?: "").trim()
-        "${item.exerciseId}|${item.orderIndex}|$cn|${note}|${item.sets.size}"
-    }
-    return sha256Hex(lines.joinToString("\n"))
+    return sha256Hex(sorted.joinToString("\n") { it.exerciseId.toString() })
 }
+
+internal fun normalizedProgramItemsForCompare(items: List<StrengthProgramItem>): List<StrengthProgramItem> =
+    items.sortedBy { it.orderIndex }.mapIndexed { idx, item ->
+        StrengthProgramItem(
+            exerciseId = item.exerciseId,
+            orderIndex = idx + 1,
+            notes = item.notes,
+            customName = item.customName,
+            supersetGroupId = item.supersetGroupId,
+            supersetPosition = item.supersetPosition,
+            sets = item.sets
+        )
+    }
 
 internal fun strengthProgramItemsFromDrafts(exercises: List<StrengthExerciseDraft>): List<StrengthProgramItem>? {
     if (exercises.any { it.exerciseId == null }) return null
     val out = mutableListOf<StrengthProgramItem>()
     exercises.forEachIndexed { exerciseIndex, exercise ->
         val exId = exercise.exerciseId ?: return null
-        val validSets = exercise.sets.mapNotNull { set ->
-            draftSetToStrengthPayload(set)?.let { strengthProgramSetFromPayload(it) }
+        val validSets = exercise.sets.mapIndexedNotNull { setIdx, set ->
+            draftSetToStrengthPayload(set)?.let { payload ->
+                strengthProgramSetFromPayload(payload, rowOrder = setIdx + 1)
+            }
         }
         if (validSets.isEmpty()) return null
         val cn = customNameForFingerprint(exercise).ifBlank { null }
@@ -232,8 +245,76 @@ internal fun strengthProgramItemsFromDrafts(exercises: List<StrengthExerciseDraf
     return out
 }
 
-private fun structuresMatch(a: List<StrengthProgramItem>, b: List<StrengthProgramItem>): Boolean =
+internal fun expandedStrengthProgramSetsForCompare(sets: List<StrengthProgramSet>): List<StrengthProgramSet> {
+    val sorted = sets.sortedWith(compareBy({ it.rowOrder }, { it.setNumber }))
+    if (sorted.isEmpty()) return emptyList()
+    val mults = strengthSetMultiplicities(sorted.map { it.setNumber })
+    val out = mutableListOf<StrengthProgramSet>()
+    var seq = 1
+    for ((row, mult) in sorted.zip(mults)) {
+        repeat(mult) {
+            out.add(
+                StrengthProgramSet(
+                    setNumber = seq,
+                    rowOrder = seq,
+                    reps = row.reps,
+                    weightKg = row.weightKg,
+                    rpe = row.rpe,
+                    restSec = row.restSec,
+                    notes = row.notes,
+                    weightSegments = row.weightSegments
+                )
+            )
+            seq += 1
+        }
+    }
+    return out
+}
+
+private val blankStrengthProgramSetForDiff = StrengthProgramSet(
+    setNumber = 0,
+    rowOrder = 0,
+    reps = null,
+    weightKg = null,
+    rpe = null,
+    restSec = null,
+    notes = null,
+    weightSegments = null
+)
+
+internal fun expandedStrengthProgramItemsForCompare(items: List<StrengthProgramItem>): List<StrengthProgramItem> =
+    items.map { item ->
+        StrengthProgramItem(
+            exerciseId = item.exerciseId,
+            orderIndex = item.orderIndex,
+            notes = item.notes,
+            customName = item.customName,
+            supersetGroupId = item.supersetGroupId,
+            supersetPosition = item.supersetPosition,
+            sets = expandedStrengthProgramSetsForCompare(item.sets)
+        )
+    }
+
+private object StrengthPrescriptionCompare {
+    const val WEIGHT_EPSILON = 0.0001
+    const val RPE_EPSILON = 0.001
+
+    fun repsChanged(proposed: Int?, routine: Int?): Boolean = proposed != routine
+
+    fun optionalDoubleChanged(proposed: Double?, routine: Double?, epsilon: Double): Boolean {
+        if (proposed == null && routine == null) return false
+        if (proposed == null || routine == null) return true
+        return kotlin.math.abs(proposed - routine) > epsilon
+    }
+
+    fun restChanged(proposed: Int?, routine: Int?): Boolean = proposed != routine
+}
+
+internal fun exerciseStructureMatch(a: List<StrengthProgramItem>, b: List<StrengthProgramItem>): Boolean =
     strengthRoutineStructureFingerprintFromItems(a) == strengthRoutineStructureFingerprintFromItems(b)
+
+private fun structuresMatch(a: List<StrengthProgramItem>, b: List<StrengthProgramItem>): Boolean =
+    exerciseStructureMatch(a, b)
 
 private fun displayNameForDiff(exerciseName: String, item: StrengthProgramItem): String {
     val cn = (item.customName ?: "").trim()
@@ -254,116 +335,261 @@ private fun formatRpe(d: Double?): String {
     return String.format(Locale.US, "%.1f", d)
 }
 
-private fun buildDiffLines(
+internal fun buildStrengthRoutineOverwriteDiffLines(
     proposed: List<StrengthProgramItem>,
     routine: List<StrengthProgramItem>,
     exerciseDisplayName: (Long) -> String
 ): List<StrengthRoutineOverwriteDiffLine> {
     val lines = mutableListOf<StrengthRoutineOverwriteDiffLine>()
-    val prop = proposed.sortedBy { it.orderIndex }
-    val rout = routine.sortedBy { it.orderIndex }
-    for (i in prop.indices) {
-        val pEx = prop[i]
-        val rEx = rout[i]
+    val prop = expandedStrengthProgramItemsForCompare(normalizedProgramItemsForCompare(proposed))
+    val rout = expandedStrengthProgramItemsForCompare(normalizedProgramItemsForCompare(routine))
+    val maxExercises = maxOf(prop.size, rout.size)
+    for (i in 0 until maxExercises) {
+        val pEx = prop.getOrNull(i)
+        val rEx = rout.getOrNull(i)
+        if (pEx == null && rEx != null) {
+            val exLabel = displayNameForDiff(exerciseDisplayName(rEx.exerciseId), rEx)
+            lines.add(
+                StrengthRoutineOverwriteDiffLine(
+                    id = "${rEx.exerciseId}-removed-exercise",
+                    exerciseContext = exLabel,
+                    exerciseTitle = exLabel,
+                    setNumber = 0,
+                    exerciseOrderIndex = rEx.orderIndex,
+                    fieldTitle = "Removed exercise",
+                    oldValue = exLabel,
+                    newValue = "—"
+                )
+            )
+            continue
+        }
+        if (rEx == null && pEx != null) {
+            val exLabel = displayNameForDiff(exerciseDisplayName(pEx.exerciseId), pEx)
+            lines.add(
+                StrengthRoutineOverwriteDiffLine(
+                    id = "${pEx.exerciseId}-added-exercise",
+                    exerciseContext = exLabel,
+                    exerciseTitle = exLabel,
+                    setNumber = 0,
+                    exerciseOrderIndex = pEx.orderIndex,
+                    fieldTitle = "Added exercise",
+                    oldValue = "—",
+                    newValue = exLabel
+                )
+            )
+            continue
+        }
+        if (pEx == null || rEx == null) continue
+        if (pEx.exerciseId != rEx.exerciseId) {
+            val pLabel = displayNameForDiff(exerciseDisplayName(pEx.exerciseId), pEx)
+            val rLabel = displayNameForDiff(exerciseDisplayName(rEx.exerciseId), rEx)
+            lines.add(
+                StrengthRoutineOverwriteDiffLine(
+                    id = "${pEx.exerciseId}-${rEx.exerciseId}-exercise-swap",
+                    exerciseContext = pLabel,
+                    exerciseTitle = pLabel,
+                    setNumber = 0,
+                    exerciseOrderIndex = pEx.orderIndex,
+                    fieldTitle = "Exercise",
+                    oldValue = rLabel,
+                    newValue = pLabel
+                )
+            )
+            continue
+        }
         val exLabel = displayNameForDiff(exerciseDisplayName(pEx.exerciseId), pEx)
         val setsP = pEx.sets.sortedBy { it.setNumber }
         val setsR = rEx.sets.sortedBy { it.setNumber }
-        for (j in setsP.indices) {
-            val ps = setsP[j]
-            val rs = setsR[j]
-            val setLabel = "$exLabel · Set ${ps.setNumber}"
-            val baseId = "${pEx.exerciseId}-${ps.setNumber}"
-            if (ps.reps != rs.reps) {
+        if (setsP.size != setsR.size) {
+            lines.add(
+                StrengthRoutineOverwriteDiffLine(
+                    id = "${pEx.exerciseId}-sets-count",
+                    exerciseContext = exLabel,
+                    exerciseTitle = exLabel,
+                    setNumber = 0,
+                    exerciseOrderIndex = pEx.orderIndex,
+                    fieldTitle = "Sets",
+                    oldValue = setsR.size.toString(),
+                    newValue = setsP.size.toString()
+                )
+            )
+        }
+        val prefixMatches = setsP.take(setsR.size).zip(setsR.take(setsP.size)).all { (ps, rs) ->
+            !strengthProgramSetPrescriptionDiffers(ps, rs)
+        }
+        val isAppendOnly = setsP.size > setsR.size && prefixMatches
+        val maxCount = maxOf(setsP.size, setsR.size)
+        for (idx in 0 until maxCount) {
+            val setNum = idx + 1
+            val ps = setsP.getOrNull(idx)
+            val rs = setsR.getOrNull(idx)
+            val setLabel = "$exLabel · Set $setNum"
+            val baseId = "${pEx.exerciseId}-$setNum"
+            if (ps == null && rs != null) {
+                if (isAppendOnly) continue
                 lines.add(
                     StrengthRoutineOverwriteDiffLine(
-                        id = "$baseId-reps",
+                        id = "$baseId-removed",
                         exerciseContext = setLabel,
                         exerciseTitle = exLabel,
-                        setNumber = ps.setNumber,
+                        setNumber = setNum,
                         exerciseOrderIndex = pEx.orderIndex,
-                        fieldTitle = "Reps",
-                        oldValue = rs.reps?.toString() ?: "—",
-                        newValue = ps.reps?.toString() ?: "—"
+                        fieldTitle = "Removed set",
+                        oldValue = "Set $setNum",
+                        newValue = "—"
                     )
                 )
+                continue
             }
-            if (ps.weightKg != rs.weightKg) {
+            if (ps != null && rs == null) {
                 lines.add(
                     StrengthRoutineOverwriteDiffLine(
-                        id = "$baseId-kg",
+                        id = "$baseId-added",
                         exerciseContext = setLabel,
                         exerciseTitle = exLabel,
-                        setNumber = ps.setNumber,
+                        setNumber = setNum,
                         exerciseOrderIndex = pEx.orderIndex,
-                        fieldTitle = "Weight",
-                        oldValue = "${formatWeight(rs.weightKg)} kg",
-                        newValue = "${formatWeight(ps.weightKg)} kg"
+                        fieldTitle = "Added set",
+                        oldValue = "—",
+                        newValue = "Set $setNum"
                     )
                 )
-            }
-            if (ps.rpe != rs.rpe) {
-                lines.add(
-                    StrengthRoutineOverwriteDiffLine(
-                        id = "$baseId-rpe",
-                        exerciseContext = setLabel,
-                        exerciseTitle = exLabel,
-                        setNumber = ps.setNumber,
-                        exerciseOrderIndex = pEx.orderIndex,
-                        fieldTitle = "RPE",
-                        oldValue = formatRpe(rs.rpe),
-                        newValue = formatRpe(ps.rpe)
+                val routineBaseline = setsR.lastOrNull()
+                val isDuplicateAppend = isAppendOnly
+                    && routineBaseline != null
+                    && !strengthProgramSetPrescriptionDiffers(ps, routineBaseline)
+                if (!isDuplicateAppend) {
+                    appendPrescriptionDiffLines(
+                        lines,
+                        ps,
+                        blankStrengthProgramSetForDiff,
+                        exLabel,
+                        pEx,
+                        setNum,
+                        baseId,
+                        setLabel
                     )
-                )
+                }
+                continue
             }
-            if (ps.restSec != rs.restSec) {
-                lines.add(
-                    StrengthRoutineOverwriteDiffLine(
-                        id = "$baseId-rest",
-                        exerciseContext = setLabel,
-                        exerciseTitle = exLabel,
-                        setNumber = ps.setNumber,
-                        exerciseOrderIndex = pEx.orderIndex,
-                        fieldTitle = "Rest",
-                        oldValue = rs.restSec?.let { "$it s" } ?: "—",
-                        newValue = ps.restSec?.let { "$it s" } ?: "—"
-                    )
-                )
-            }
-            val psSeg = ps.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
-            val rsSeg = rs.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
-            if (psSeg != rsSeg) {
-                lines.add(
-                    StrengthRoutineOverwriteDiffLine(
-                        id = "$baseId-seg",
-                        exerciseContext = setLabel,
-                        exerciseTitle = exLabel,
-                        setNumber = ps.setNumber,
-                        exerciseOrderIndex = pEx.orderIndex,
-                        fieldTitle = "Drop steps",
-                        oldValue = rsSeg.ifBlank { "—" },
-                        newValue = psSeg.ifBlank { "—" }
-                    )
-                )
-            }
-            val pn = (ps.notes ?: "").trim()
-            val rn = (rs.notes ?: "").trim()
-            if (pn != rn) {
-                lines.add(
-                    StrengthRoutineOverwriteDiffLine(
-                        id = "$baseId-notes",
-                        exerciseContext = setLabel,
-                        exerciseTitle = exLabel,
-                        setNumber = ps.setNumber,
-                        exerciseOrderIndex = pEx.orderIndex,
-                        fieldTitle = "Set notes",
-                        oldValue = if (rn.isEmpty()) "—" else rn,
-                        newValue = if (pn.isEmpty()) "—" else pn
-                    )
-                )
-            }
+            if (ps == null || rs == null) continue
+            appendPrescriptionDiffLines(lines, ps, rs, exLabel, pEx, setNum, baseId, setLabel)
         }
     }
     return lines
+}
+
+private fun strengthProgramSetPrescriptionDiffers(proposed: StrengthProgramSet, routine: StrengthProgramSet): Boolean {
+    if (StrengthPrescriptionCompare.repsChanged(proposed.reps, routine.reps)) return true
+    if (StrengthPrescriptionCompare.optionalDoubleChanged(proposed.weightKg, routine.weightKg, StrengthPrescriptionCompare.WEIGHT_EPSILON)) return true
+    if (StrengthPrescriptionCompare.optionalDoubleChanged(proposed.rpe, routine.rpe, StrengthPrescriptionCompare.RPE_EPSILON)) return true
+    if (StrengthPrescriptionCompare.restChanged(proposed.restSec, routine.restSec)) return true
+    val pn = (proposed.notes ?: "").trim()
+    val rn = (routine.notes ?: "").trim()
+    if (pn != rn) return true
+    val psSeg = proposed.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
+    val rsSeg = routine.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
+    return psSeg != rsSeg
+}
+
+private fun appendPrescriptionDiffLines(
+    lines: MutableList<StrengthRoutineOverwriteDiffLine>,
+    ps: StrengthProgramSet,
+    rs: StrengthProgramSet,
+    exLabel: String,
+    pEx: StrengthProgramItem,
+    setNum: Int,
+    baseId: String,
+    setLabel: String
+) {
+    if (StrengthPrescriptionCompare.repsChanged(ps.reps, rs.reps)) {
+        lines.add(
+            StrengthRoutineOverwriteDiffLine(
+                id = "$baseId-reps",
+                exerciseContext = setLabel,
+                exerciseTitle = exLabel,
+                setNumber = setNum,
+                exerciseOrderIndex = pEx.orderIndex,
+                fieldTitle = "Reps",
+                oldValue = rs.reps?.toString() ?: "—",
+                newValue = ps.reps?.toString() ?: "—"
+            )
+        )
+    }
+    if (StrengthPrescriptionCompare.optionalDoubleChanged(ps.weightKg, rs.weightKg, StrengthPrescriptionCompare.WEIGHT_EPSILON)) {
+        lines.add(
+            StrengthRoutineOverwriteDiffLine(
+                id = "$baseId-kg",
+                exerciseContext = setLabel,
+                exerciseTitle = exLabel,
+                setNumber = setNum,
+                exerciseOrderIndex = pEx.orderIndex,
+                fieldTitle = "Weight",
+                oldValue = "${formatWeight(rs.weightKg)} kg",
+                newValue = "${formatWeight(ps.weightKg)} kg"
+            )
+        )
+    }
+    if (StrengthPrescriptionCompare.optionalDoubleChanged(ps.rpe, rs.rpe, StrengthPrescriptionCompare.RPE_EPSILON)) {
+        lines.add(
+            StrengthRoutineOverwriteDiffLine(
+                id = "$baseId-rpe",
+                exerciseContext = setLabel,
+                exerciseTitle = exLabel,
+                setNumber = setNum,
+                exerciseOrderIndex = pEx.orderIndex,
+                fieldTitle = "RPE",
+                oldValue = formatRpe(rs.rpe),
+                newValue = formatRpe(ps.rpe)
+            )
+        )
+    }
+    if (StrengthPrescriptionCompare.restChanged(ps.restSec, rs.restSec)) {
+        lines.add(
+            StrengthRoutineOverwriteDiffLine(
+                id = "$baseId-rest",
+                exerciseContext = setLabel,
+                exerciseTitle = exLabel,
+                setNumber = setNum,
+                exerciseOrderIndex = pEx.orderIndex,
+                fieldTitle = "Rest",
+                oldValue = rs.restSec?.let { "$it s" } ?: "—",
+                newValue = ps.restSec?.let { "$it s" } ?: "—"
+            )
+        )
+    }
+    val psSeg = ps.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
+    val rsSeg = rs.weightSegments?.joinToString(" → ") { "${it.reps}×${it.weightKg}" } ?: ""
+    if (psSeg != rsSeg) {
+        lines.add(
+            StrengthRoutineOverwriteDiffLine(
+                id = "$baseId-seg",
+                exerciseContext = setLabel,
+                exerciseTitle = exLabel,
+                setNumber = setNum,
+                exerciseOrderIndex = pEx.orderIndex,
+                fieldTitle = "Drop steps",
+                oldValue = rsSeg.ifBlank { "—" },
+                newValue = psSeg.ifBlank { "—" }
+            )
+        )
+    }
+    val pn = (ps.notes ?: "").trim()
+    val rn = (rs.notes ?: "").trim()
+    if (pn != rn) {
+        lines.add(
+            StrengthRoutineOverwriteDiffLine(
+                id = "$baseId-notes",
+                exerciseContext = setLabel,
+                exerciseTitle = exLabel,
+                setNumber = setNum,
+                exerciseOrderIndex = pEx.orderIndex,
+                fieldTitle = "Set notes",
+                oldValue = if (rn.isEmpty()) "—" else rn,
+                newValue = if (pn.isEmpty()) "—" else pn
+            )
+        )
+    }
 }
 
 @Serializable
@@ -399,7 +625,7 @@ private data class RoutineSetWire(
 private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgramItem> {
     val exs = (row.exercises ?: emptyList()).sortedBy { it.orderIndex }
     return exs.map { ex ->
-        val setsSorted = (ex.sets ?: emptyList()).sortedBy { it.setNumber }
+        val setsInOrder = ex.sets ?: emptyList()
         StrengthProgramItem(
             exerciseId = ex.exerciseId,
             orderIndex = ex.orderIndex,
@@ -407,7 +633,7 @@ private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgra
             customName = ex.customName,
             supersetGroupId = ex.supersetGroupId,
             supersetPosition = ex.supersetPosition,
-            sets = setsSorted.map { s ->
+            sets = setsInOrder.mapIndexed { idx, s ->
                 val arr = s.weightSegments
                 val segPayload = if (arr == null || arr.size < 2) {
                     null
@@ -422,6 +648,7 @@ private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgra
                 }
                 StrengthProgramSet(
                     setNumber = s.setNumber,
+                    rowOrder = idx + 1,
                     reps = s.reps,
                     weightKg = s.weightKg,
                     rpe = s.rpe,
@@ -435,22 +662,70 @@ private fun programItemsFromRoutineRow(row: RoutineFullRow): List<StrengthProgra
 }
 
 
+private fun strengthRoutineOverwritePromptIfContentDiffers(
+    row: RoutineFullRow,
+    routineItems: List<StrengthProgramItem>,
+    proposed: List<StrengthProgramItem>,
+    proposedContent: String,
+    exerciseDisplayName: (Long) -> String
+): StrengthRoutineOverwriteCandidate {
+    val normalizedRoutine = normalizedProgramItemsForCompare(routineItems)
+    if (normalizedRoutine.isEmpty()) return StrengthRoutineOverwriteCandidate.None
+    val routineContent = strengthRoutineContentFingerprintFromItems(normalizedRoutine)
+    if (routineContent == proposedContent) return StrengthRoutineOverwriteCandidate.None
+    var diff = buildStrengthRoutineOverwriteDiffLines(proposed, normalizedRoutine, exerciseDisplayName)
+    if (diff.isEmpty()) {
+        diff = listOf(
+            StrengthRoutineOverwriteDiffLine(
+                id = "prescription-fallback",
+                exerciseContext = row.name,
+                exerciseTitle = row.name,
+                setNumber = 0,
+                exerciseOrderIndex = 0,
+                fieldTitle = "Prescription",
+                oldValue = "Saved template",
+                newValue = "Updated workout"
+            )
+        )
+    }
+    if (diff.isEmpty()) return StrengthRoutineOverwriteCandidate.None
+    return StrengthRoutineOverwriteCandidate.Prompt(
+        StrengthRoutineOverwritePrompt(
+            routineId = row.id,
+            routineName = row.name,
+            diffLines = diff
+        )
+    )
+}
+
 internal suspend fun fetchStrengthRoutineOverwriteCandidate(
     supabase: SupabaseClient,
     userId: String,
     proposed: List<StrengthProgramItem>,
-    exerciseDisplayName: (Long) -> String
+    exerciseDisplayName: (Long) -> String,
+    preferredRoutineId: Long? = null
 ): StrengthRoutineOverwriteCandidate {
     if (proposed.isEmpty()) return StrengthRoutineOverwriteCandidate.None
-    val proposedContent = strengthRoutineContentFingerprintFromItems(proposed)
+    val proposedNormalized = normalizedProgramItemsForCompare(proposed)
+    val proposedContent = strengthRoutineContentFingerprintFromItems(proposedNormalized)
     val res = runCatching {
         supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(columns = Columns.raw(STRENGTH_ROUTINE_FULL_SELECT)) {
-            filter { eq("user_id", userId) }
+            filter {
+                eq("user_id", userId)
+                if (preferredRoutineId != null) {
+                    eq("id", preferredRoutineId)
+                }
+            }
         }
     }.getOrElse { err ->
         if (!strengthRoutineSupersetColumnsUnavailable(err)) throw err
         supabase.from(BackendContracts.Tables.STRENGTH_ROUTINES).select(columns = Columns.raw(STRENGTH_ROUTINE_FULL_SELECT_LEGACY)) {
-            filter { eq("user_id", userId) }
+            filter {
+                eq("user_id", userId)
+                if (preferredRoutineId != null) {
+                    eq("id", preferredRoutineId)
+                }
+            }
         }
     }
     val dec = Json { ignoreUnknownKeys = true }
@@ -463,12 +738,24 @@ internal suspend fun fetchStrengthRoutineOverwriteCandidate(
     }.getOrElse { emptyList() }
     if (rows.isEmpty()) return StrengthRoutineOverwriteCandidate.None
 
+    if (preferredRoutineId != null) {
+        val row = rows.firstOrNull { it.id == preferredRoutineId } ?: rows.first()
+        val items = programItemsFromRoutineRow(row)
+        return strengthRoutineOverwritePromptIfContentDiffers(
+            row = row,
+            routineItems = items,
+            proposed = proposedNormalized,
+            proposedContent = proposedContent,
+            exerciseDisplayName = exerciseDisplayName
+        )
+    }
+
     data class Match(val row: RoutineFullRow, val items: List<StrengthProgramItem>, val contentHash: String)
     val matches = mutableListOf<Match>()
     for (row in rows) {
-        val items = programItemsFromRoutineRow(row)
+        val items = normalizedProgramItemsForCompare(programItemsFromRoutineRow(row))
         if (items.isEmpty()) continue
-        if (!structuresMatch(proposed, items)) continue
+        if (!structuresMatch(proposedNormalized, items)) continue
         val ch = strengthRoutineContentFingerprintFromItems(items)
         if (ch == proposedContent) continue
         matches.add(Match(row, items, ch))
@@ -479,14 +766,12 @@ internal suspend fun fetchStrengthRoutineOverwriteCandidate(
         m.row.updatedAt?.let { runCatching { Instant.parse(it) }.getOrNull() } ?: Instant.EPOCH
     }.thenBy { it.row.id })
 
-    val diff = buildDiffLines(proposed, best.items, exerciseDisplayName)
-    if (diff.isEmpty()) return StrengthRoutineOverwriteCandidate.None
-    return StrengthRoutineOverwriteCandidate.Prompt(
-        StrengthRoutineOverwritePrompt(
-            routineId = best.row.id,
-            routineName = best.row.name,
-            diffLines = diff
-        )
+    return strengthRoutineOverwritePromptIfContentDiffers(
+        row = best.row,
+        routineItems = best.items,
+        proposed = proposedNormalized,
+        proposedContent = proposedContent,
+        exerciseDisplayName = exerciseDisplayName
     )
 }
 

@@ -53,22 +53,24 @@ fun TerritoryCitySearchSheet(
 
     suspend fun loadCities(query: String?) {
         loading = true
-        cities = TerritoryCaptureClient.fetchTerritoryCityRegions(
+        val fetched = TerritoryCaptureClient.fetchTerritoryCityRegions(
             supabase = supabase,
             query = query,
             ownedFirst = true
-        )
+        ).value
+        cities = TerritoryCaptureClient.displayableTerritoryCities(fetched)
         loading = false
     }
 
     LaunchedEffect(Unit) {
         loadCities(null)
-        TerritoryCaptureClient.refreshPendingTerritoryCityRegionsInBackground(
+        val refreshed = TerritoryCaptureClient.refreshPendingTerritoryCityRegions(
             supabase = supabase,
-            scope = coroutineScope
-        ) { updated ->
-            cities = updated
-        }
+            onUpdate = { updated ->
+                cities = TerritoryCaptureClient.displayableTerritoryCities(updated)
+            }
+        )
+        cities = TerritoryCaptureClient.displayableTerritoryCities(refreshed)
     }
 
     LaunchedEffect(searchText) {

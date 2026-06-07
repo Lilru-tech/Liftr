@@ -323,6 +323,34 @@ struct TerritoryCaptureRegressionTests {
         #expect(!TerritoryCaptureClient.isPendingTerritoryCityKey(nil))
     }
 
+    @Test func displayableTerritoryCitiesHidesPendingRows() {
+        let cities = [
+            TerritoryCityRegionRow(
+                city_key: "osm:relation:1",
+                display_name: "Tarragona",
+                center_lat: 41.12,
+                center_lon: 1.24,
+                captured_cells: 10,
+                total_capture_cells: 100,
+                my_owned_cells: 5,
+                owned_cells: 5
+            ),
+            TerritoryCityRegionRow(
+                city_key: "pending:41.09:1.24",
+                display_name: "Resolving area · 41.09, 1.24",
+                center_lat: 41.09,
+                center_lon: 1.24,
+                captured_cells: 2,
+                total_capture_cells: 2,
+                my_owned_cells: 2,
+                owned_cells: 2
+            )
+        ]
+        let displayable = TerritoryCaptureClient.displayableTerritoryCities(cities)
+        #expect(displayable.count == 1)
+        #expect(displayable.first?.city_key == "osm:relation:1")
+    }
+
     @Test func filterTerritoryCitiesMatchesDisplayName() {
         let cities = [
             TerritoryCityRegionRow(
