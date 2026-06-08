@@ -604,6 +604,9 @@
     "Add feature request" : {
 
     },
+    "Add missing GPS routes" : {
+
+    },
     "Add multiple ingredients. Set grams before adding, then adjust each line with +/− or presets." : {
 
     },
@@ -707,6 +710,9 @@
 
     },
     "Apple HealthKit" : {
+
+    },
+    "Applied" : {
 
     },
     "Apply" : {
@@ -1057,6 +1063,9 @@
     "Confirm password" : {
 
     },
+    "Connect Garmin and add missing GPS routes to Apple Health and Liftr." : {
+
+    },
     "Connection issue. You can start offline; we'll sync when you're back online." : {
       "localizations" : {
         "en" : {
@@ -1154,6 +1163,9 @@
 
     },
     "Couldn’t load settings" : {
+
+    },
+    "Couldn't load territory" : {
 
     },
     "Couldn’t load XP events (table or permissions may differ)." : {
@@ -1685,6 +1697,9 @@
     "Games won" : {
 
     },
+    "Garmin Connect" : {
+
+    },
     "GENERAL" : {
 
     },
@@ -1726,6 +1741,9 @@
 
     },
     "GPS mode" : {
+
+    },
+    "GPS routes for Apple Health" : {
 
     },
     "Great job! Move on when ready." : {
@@ -2532,6 +2550,9 @@
     "Numbers by training type in one place. The chart above shows workout mix as percentages." : {
 
     },
+    "Nutrition" : {
+
+    },
     "Nutrition Facts" : {
 
     },
@@ -3002,6 +3023,9 @@
     "Route" : {
 
     },
+    "Routes applied: %lld" : {
+
+    },
     "Routes backfilled" : {
 
     },
@@ -3461,6 +3485,9 @@
     "Skip rest" : {
 
     },
+    "Skipped" : {
+
+    },
     "Skipped duplicates: %lld" : {
 
     },
@@ -3678,6 +3705,9 @@
 
     },
     "Sync body-weight samples from Apple Health." : {
+
+    },
+    "Sync pending routes now" : {
 
     },
     "Syncing exercises…" : {
@@ -4133,6 +4163,9 @@
 
     },
     "We’ll use your account email to contact you if we need more details." : {
+
+    },
+    "Wearable routes" : {
 
     },
     "Weather" : {

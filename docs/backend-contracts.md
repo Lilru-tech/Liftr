@@ -225,6 +225,16 @@ Migración: [`Liftr/supabase/migrations/20260522160000_cardio_workout_dedupe_v1.
 - Si hay candidato, `merge_cardio_workout_from_import` enriquece el entreno existente (HR, ruta, calorías HealthKit, `healthkit_uuid`, stats) sin sobrescribir título/notas/distancia ya rellenados.
 - El RPC sigue devolviendo `integer` (id del workout); clientes iOS detectan merge por `created_at` antiguo (>120s).
 
+## Wearable GPS route sync (Garmin / external)
+
+Migración: [`Liftr/supabase/migrations/20260608120000_wearable_route_jobs_v1.sql`](../Liftr/supabase/migrations/20260608120000_wearable_route_jobs_v1.sql).
+
+- **`wearable_connections`**: tokens OAuth por `user_id` + `provider` (`garmin` | `fitbit` | `polar`). Escritura solo vía Edge Functions (`service_role`); el cliente autenticado puede `select` la fila propia.
+- **`external_workout_route_jobs`**: cola de rutas GPS normalizadas (`route_points` jsonb). Unique `(user_id, provider, provider_activity_id)`. Estados: `pending`, `applied_healthkit`, `applied_liftr`, `skipped`, `failed`.
+- **`apply_external_route_to_cardio_workout`**: rellena `cardio_sessions.route_geojson` solo si está vacío; usa `find_cardio_workout_duplicate` con `p_healthkit_uuid` y ventana temporal. No modifica calorías.
+- **`update_external_route_job_status`**: el cliente iOS marca jobs tras escribir `HKWorkoutRoute` en HealthKit.
+- Edge Functions: `wearable-oauth-start` (JWT), `wearable-oauth-callback`, `garmin-activity-webhook` (`verify_jwt = false`). Setup: [`docs/garmin-connect-developer-setup.md`](garmin-connect-developer-setup.md).
+
 ## Retos (Challenges MVP)
 
 - **Diferencia vs logros:** los logros son hitos personales permanentes (`achievements` / `user_achievements`). Los retos son **eventos de ventana** con **plazas limitadas** (`max_winners`) e instancias por `period_start` / `period_end`. La plantilla define **`cadence`**: `week`, `month` o `once` (ventana larga para retos tipo evergreen).

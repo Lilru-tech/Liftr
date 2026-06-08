@@ -440,6 +440,14 @@ final class HealthKitCardioImportService {
         [.running, .walking, .hiking, .cycling, .swimming, .rowing]
     }()
 
+    func fetchWorkoutsForRouteMatching(from: Date, to: Date) async throws -> [HKWorkout] {
+        try await fetchWorkouts(from: from, to: to)
+    }
+
+    func workoutRoutes(for workout: HKWorkout) async throws -> [HKWorkoutRoute] {
+        try await fetchWorkoutRoutes(for: workout)
+    }
+
     private func fetchWorkouts(from: Date, to: Date) async throws -> [HKWorkout] {
         let datePred = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
         let activityPredicates = Self.supportedWorkoutActivityTypes.map {

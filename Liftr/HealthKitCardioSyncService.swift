@@ -82,14 +82,19 @@ final class HealthKitCardioSyncService {
             userId: userId,
             mode: .automatic
         )
+        _ = await ExternalRouteSyncService.shared.processPendingJobs(userId: userId)
         UserDefaults.standard.set(Date(), forKey: lastSyncAtKey)
         return summary
     }
 
     func handleAppForegroundIfNeeded() async {
-        guard isSyncEnabled else { return }
         startObserversIfNeeded()
-        _ = await syncRecentWorkouts()
+        if isSyncEnabled {
+            _ = await syncRecentWorkouts()
+        } else if ExternalRouteSyncService.shared.isSyncEnabled,
+                  let userId = SupabaseManager.shared.client.auth.currentUser?.id {
+            _ = await ExternalRouteSyncService.shared.processPendingJobs(userId: userId)
+        }
     }
 
     private func activateCardioSyncFromHealthKit() async -> HealthKitImportSummary {
