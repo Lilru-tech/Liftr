@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.18.2] - 2026-06-08
+
+### Added
+- **Wearable routes** — Connect **Garmin Connect** and add **missing GPS routes** to workouts already synced into **Apple Health** (when Garmin’s Health sync omits the map). Liftr writes the route to Health via `HKWorkoutRoute` and backfills the **Liftr workout map**; workout calories and duration are not modified.
+- **Profile — settings** — New **Wearable routes** screen (Garmin connect, route-sync toggle, manual sync).
+
+### Fixed
+- **Wearable routes — Apple Health** — Fixed a crash when enabling **Add missing GPS routes** caused by requesting **workout route** write authorization without also requesting **workout** write authorization (required by HealthKit).
+- **Wearable routes — UI** — Wearable routes screen now uses the same **gradient background** as other settings screens.
+
+### Notes (database / ops)
+- **Wearable route sync** — Apply migration **`20260608120000_wearable_route_jobs_v1.sql`** (`wearable_connections`, `external_workout_route_jobs`, `apply_external_route_to_cardio_workout`, `update_external_route_job_status`) before shipping.
+- **Edge Functions** — Deploy **`wearable-oauth-start`**, **`wearable-oauth-callback`**, and **`garmin-activity-webhook`**; set secrets **`WEARABLE_OAUTH_STATE_SECRET`**, **`GARMIN_WEBHOOK_SECRET`**, **`GARMIN_CONSUMER_KEY`**, **`GARMIN_CONSUMER_SECRET`** (Garmin Connect Developer Program). Setup: `docs/garmin-connect-developer-setup.md`.
+- **Garmin OAuth** — Full connect flow requires **Garmin developer approval** and API keys; until then the app shows a clear configuration message instead of a generic edge-function error.
+
 ## [1.18.1] - 2026-06-07
 
 ### Added

@@ -33,7 +33,7 @@ struct AppleHealthImportView: View {
 
                         Text(
                             "Imports compatible cardio workouts (run, walk, hike, cycling, swimming, rowing) from Apple Health. "
-                                + "With automatic import on, new sessions sync in the background. Nothing is written back to Health, and already imported sessions are skipped."
+                                + "With automatic import on, new sessions sync in the background. Optionally, connect Garmin in Wearable routes to add missing GPS maps to Health and Liftr."
                         )
                         .font(.footnote)
                         .foregroundStyle(.secondary)
