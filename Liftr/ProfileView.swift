@@ -137,6 +137,7 @@ struct ProfileView: View {
         self.userId = userId
     }
     @State private var counts: ProfileCounts?
+    @State private var coinsBalance: Int = 0
     @State private var username: String = ""
     @State private var avatarURL: String?
     @State private var loading = false
@@ -1251,6 +1252,18 @@ struct ProfileView: View {
                                 .overlay(Capsule().stroke(Color.white.opacity(0.12)))
                         }
                         .buttonStyle(.plain)
+
+                        if isOwnProfile {
+                            NavigationLink {
+                                CoinTransactionsView()
+                                    .gradientBG()
+                            } label: {
+                                CoinsBalanceBadge(balance: coinsBalance)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            CoinsBalanceBadge(balance: coinsBalance)
+                        }
                     }
                     .foregroundStyle(.secondary)
 
@@ -1371,6 +1384,13 @@ struct ProfileView: View {
                             .gradientBG()
                     } label: {
                         Label(notificationsMenuTitle, systemImage: "bell.fill")
+                    }
+
+                    NavigationLink {
+                        MarketView()
+                            .gradientBG()
+                    } label: {
+                        Label("Market", systemImage: "cart.fill")
                     }
                 }
 
@@ -2521,6 +2541,28 @@ struct ProfileView: View {
         return rows.filter { ($0.state ?? "published") != "planned" }.count
     }
     
+    private struct CoinsProfileRow: Decodable {
+        let coins_balance: Int?
+    }
+
+    private func loadCoinsBalance(userId: UUID) async {
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("profiles")
+                .select("coins_balance")
+                .eq("user_id", value: userId.uuidString)
+                .single()
+                .execute()
+            let row = try JSONDecoder.supabase().decode(CoinsProfileRow.self, from: res.data)
+            coinsBalance = row.coins_balance ?? 0
+            if isOwnProfile {
+                CoinManager.shared.syncBalance(coinsBalance)
+            }
+        } catch {
+            coinsBalance = 0
+        }
+    }
+
     private func loadProfileHeader() async {
         guard let uid = viewingUserId else { return }
         loading = true; defer { loading = false }
@@ -2560,6 +2602,7 @@ struct ProfileView: View {
             self.baseCaloriesTargetLoadedSnapshot = "\(displayKcal)"
             self.hasBirthDate = profile.birth_date != nil
             self.birthDate = profile.birth_date ?? Date()
+            await loadCoinsBalance(userId: uid)
             let res2 = try await SupabaseManager.shared.client
                 .from("vw_profile_counts")
                 .select()
@@ -3242,6 +3285,7 @@ struct ProfileView: View {
 
             await refreshFollowState()
             await loadProfileHeader()
+            await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
         } catch {
             await MainActor.run { self.error = "Follow failed: \(error.localizedDescription)" }
             print("[Follow][ERROR]", error.localizedDescription)

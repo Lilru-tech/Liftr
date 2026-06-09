@@ -106,6 +106,9 @@ flowchart LR
 |-------|---------|
 | `achievements`, `user_achievements` | Badge catalog and unlocks |
 | `xp_events` | XP ledger |
+| `coin_transactions` | Liftr Coins ledger (earn/spend; signed `amount`) |
+| `coin_reward_rules` | Configurable coin reward amounts per `action_type` |
+| `profiles.coins_balance` | Cached wallet balance (server-managed) |
 | `level_thresholds` | Level curve (public read) |
 | `weekly_goals`, `weekly_goal_results` | Weekly targets |
 | `challenge_templates`, `challenge_instances`, `challenge_claims` | Time-boxed community challenges |
@@ -204,6 +207,9 @@ Full list with parameters: [backend-contracts.md § Inventario de RPC](../backen
 | `get_goals_completed_leaderboard_v1` | Weekly goals completed |
 | `get_duels_won_leaderboard_v1` | Duels won |
 | `get_level_leaderboard_v1` | User level |
+| `get_coins_leaderboard_v1` | Liftr Coins balance |
+| `list_my_coin_transactions_v1` | Own coin transaction history |
+| `clear_my_coin_history_v1` | Clear own coin ledger (balance unchanged) |
 | `get_territory_total_cells_leaderboard_v1` | Territory cells |
 | `get_territory_city_share_leaderboard_v1` | City share % |
 

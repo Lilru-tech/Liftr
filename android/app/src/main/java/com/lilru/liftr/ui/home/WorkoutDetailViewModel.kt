@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.territory.TerritoryCaptureClient
 import com.lilru.liftr.territory.TerritoryWorkoutTakeoverRowWire
 import com.lilru.liftr.ui.compare.CompareCandidateLoader
@@ -612,6 +613,7 @@ class WorkoutDetailViewModel(
                 // Paridad con iOS [WorkoutDetailView] `publishWorkout`: solo update de `workouts`, sin RPC competición.
                 refresh(showBlockingLoader = false)
                 notifyHomeFeedUpdated()
+                CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
             } else {
                 val e = result.exceptionOrNull()!!
                 Log.e(TAG, "publish failed", e)
@@ -1303,6 +1305,9 @@ class WorkoutDetailViewModel(
                     likeBusy = false
                 )
                 notifyHomeFeedUpdated()
+                if (nowLiked) {
+                    CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
+                }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     likeBusy = false,
@@ -1390,6 +1395,7 @@ class WorkoutDetailViewModel(
                     commentCount = count
                 )
                 onSent()
+                CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     commentBusy = false,

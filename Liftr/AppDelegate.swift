@@ -172,6 +172,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let (_, type, _) = Self.notificationPayload(from: notification.request.content.userInfo)
+        if type == "pet_hatched" {
+            Task { @MainActor in
+                PetHatchEventHandler.handleHatchEvent(navigateToProfile: false)
+            }
+        }
 
         completionHandler([.banner, .list, .sound])
     }

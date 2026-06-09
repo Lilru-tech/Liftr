@@ -42,6 +42,11 @@ object BackendContracts {
         const val MESSAGE_ATTACHMENTS = "message_attachments"
         const val MESSAGE_REACTIONS = "message_reactions"
         const val NOTIFICATIONS = "notifications"
+        const val PET_INSTANCES = "pet_instances"
+        const val PET_INSTANCE_STATS = "pet_instance_stats"
+        const val PET_MARKET_ITEMS = "pet_market_items"
+        const val PET_LOGS = "pet_logs"
+        const val USER_INVENTORY = "user_inventory"
         const val NUTRITION_INGREDIENTS = "nutrition_ingredients"
         const val NUTRITION_RECIPES = "nutrition_recipes"
         const val NUTRITION_RECIPE_INGREDIENTS = "nutrition_recipe_ingredients"
@@ -79,6 +84,8 @@ object BackendContracts {
         const val WORKOUT_PARTICIPANTS = "workout_participants"
         const val WORKOUT_SCORES = "workout_scores"
         const val XP_EVENTS = "xp_events"
+        const val COIN_TRANSACTIONS = "coin_transactions"
+        const val COIN_REWARD_RULES = "coin_reward_rules"
     }
 
     object Views {
@@ -122,6 +129,18 @@ object BackendContracts {
         const val GET_PERIOD_TRAINING_COMPARE_V1 = "get_period_training_compare_v1"
         const val GET_LEADERBOARD_V1 = "get_leaderboard_v1"
         const val GET_LEVEL_LEADERBOARD_V1 = "get_level_leaderboard_v1"
+        const val GET_COINS_LEADERBOARD_V1 = "get_coins_leaderboard_v1"
+        const val LIST_MY_COIN_TRANSACTIONS_V1 = "list_my_coin_transactions_v1"
+        const val GET_MY_PET_V1 = "get_my_pet_v1"
+        const val LIST_PET_MARKET_ITEMS_V1 = "list_pet_market_items_v1"
+        const val BUY_PET_MARKET_ITEM_V1 = "buy_pet_market_item_v1"
+        const val START_PET_INCUBATION_V1 = "start_pet_incubation_v1"
+        const val FEED_PET_V1 = "feed_pet_v1"
+        const val CONFIRM_PET_EVOLUTION_V1 = "confirm_pet_evolution_v1"
+        const val UPDATE_PET_CUSTOM_NAME_V1 = "update_pet_custom_name_v1"
+        const val REROLL_PET_EGG_V1 = "reroll_pet_egg_v1"
+        const val UPGRADE_PET_RARITY_V1 = "upgrade_pet_rarity_v1"
+        const val CLEAR_MY_COIN_HISTORY_V1 = "clear_my_coin_history_v1"
         const val GET_WORKOUT_LIKES_RECEIVED_LEADERBOARD_V1 = "get_workout_likes_received_leaderboard_v1"
         const val GET_WORKOUT_COMMENTS_RECEIVED_LEADERBOARD_V1 = "get_workout_comments_received_leaderboard_v1"
         const val GET_GROUP_WORKOUT_SESSIONS_LEADERBOARD_V1 = "get_group_workout_sessions_leaderboard_v1"
@@ -152,6 +171,13 @@ object BackendContracts {
         const val RECORD_SEARCH = "record_search"
         const val REVIEW_COMPETITION_WORKOUT = "review_competition_workout"
         const val SUBMIT_WORKOUT_TO_COMPETITION = "submit_workout_to_competition"
+        const val RPC_CREATE_COMPETITION = "rpc_create_competition"
+        const val ACCEPT_COMPETITION = "accept_competition"
+        const val DECLINE_COMPETITION = "decline_competition"
+        const val CANCEL_COMPETITION_INVITE = "cancel_competition_invite"
+        const val COMPETITION_GET_MAX_BET_V1 = "competition_get_max_bet_v1"
+        const val GET_MY_COMPETITION_ESCROW_SUMMARY_V1 = "get_my_competition_escrow_summary_v1"
+        const val EXPIRE_STALE_COMPETITION_INVITES_V1 = "expire_stale_competition_invites_v1"
         const val TRENDING_SEARCH_QUERIES_24H = "trending_search_queries_24h"
         const val UPDATE_SPORT_WORKOUT_V2 = "update_sport_workout_v2"
         const val UPSERT_BODY_WEIGHT_ENTRY = "upsert_body_weight_entry"
@@ -207,6 +233,7 @@ object BackendContracts {
     object ProfileColumns {
         const val BASE_CALORIES_TARGET = "base_calories_target"
         const val BASE_CALORIES_TARGET_IS_MANUAL = "base_calories_target_is_manual"
+        const val COINS_BALANCE = "coins_balance"
     }
 
     object NutritionMetabolism {

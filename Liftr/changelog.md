@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Pets — hatch notifications & passive coins** — Server hatching inserts `pet_hatched` notifications (FCM via `send-notifications`); hourly `pet_coins_generated` cron; hatch-on-read restored in `get_my_pet_v1` with `image_url`; local hatch alarms on iOS/Android; profile pet sprite refreshes on push/foreground hatch events.
+- **Competitions — Liftr Coins betting** — Optional coin stake on 1v1 challenge creation; server-side escrow via `coin_transactions`; winner receives `2×` stake, draw refunds both, decline/cancel/expire refunds creator; 7-day invite expiry when staked; hub shows coins in play.
+- **Competitions — RPC mutations** — iOS/Android create/accept/decline/cancel/expire via `rpc_create_competition`, `accept_competition`, `decline_competition`, `cancel_competition_invite`, `expire_stale_competition_invites_v1` (direct table writes revoked).
+
+### Notes (database / ops)
+- **Competition bet escrow** — Apply migration **`20260612120000_competition_bet_escrow_v1.sql`** before shipping clients. Schedules pg_cron job `expire_pending_competition_bets_hourly`. Verify: `supabase/verify/competition_bet_escrow_v1.sql`.
+- **Pets hatch + passive coins** — Apply migration **`20260609170000_liftr_pets_hatch_notify_coins_v1.sql`**. Schedules pg_cron `liftr_generate_pet_coins_job` (hourly). Hatch push uses existing `notifications` → `send-notifications` edge function; confirm that worker is scheduled in Supabase Dashboard. Verify: `supabase/verify/liftr_pets_ecosystem_v1.sql`.
+
 ## [1.18.2] - 2026-06-08
 
 ### Added

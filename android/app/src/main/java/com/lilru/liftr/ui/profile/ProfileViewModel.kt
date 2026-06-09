@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.data.loadProfileAvatarUrl
 import com.lilru.liftr.data.SupabaseResponseDecoding
 import com.lilru.liftr.nutrition.NutritionMetabolism
@@ -135,7 +136,8 @@ data class ProfileUiState(
     val weeklyGoalsDone: Int = 0,
     val weeklyGoalsTotal: Int = 0,
     val achievementsUnlocked: Int = 0,
-    val achievementsTotal: Int = 0
+    val achievementsTotal: Int = 0,
+    val coinsBalance: Int = 0
 )
 
 class ProfileViewModel(
@@ -248,6 +250,7 @@ class ProfileViewModel(
                             null
                         }
                 val headerSnippets = runCatching { loadProfileHeaderSnippets(supabase, uid) }.getOrNull()
+                val coinsBalance = loadCoinsBalance(supabase, uid)
                 _uiState.value = ProfileUiState(
                     loading = false,
                     isRefreshing = false,
@@ -279,7 +282,10 @@ class ProfileViewModel(
                     weeklyGoalsDone = headerSnippets?.goalsDone ?: 0,
                     weeklyGoalsTotal = headerSnippets?.goalsTotal ?: 0,
                     achievementsUnlocked = headerSnippets?.achUnlocked ?: 0,
-                    achievementsTotal = headerSnippets?.achTotal ?: 0
+                    achievementsTotal = headerSnippets?.achTotal ?: 0,
+                    coinsBalance = coinsBalance.also {
+                        if (isOwnProfile) CoinManager.syncBalance(it)
+                    }
                 )
             } catch (e: Throwable) {
                 _uiState.value = _uiState.value.copy(
@@ -545,6 +551,9 @@ class ProfileViewModel(
                     isFollowing = newFollowing,
                     followers = newFollowers
                 )
+                if (newFollowing) {
+                    CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
+                }
             }.onFailure { e ->
                 _uiState.value = _uiState.value.copy(
                     followBusy = false,
@@ -659,6 +668,24 @@ class ProfileViewModel(
         return copy(
             baseCaloriesTargetDraft = resolved.toString()
         )
+    }
+
+    @Serializable
+    private data class CoinsProfileRow(
+        @SerialName("coins_balance") val coinsBalance: Int? = null
+    )
+
+    private suspend fun loadCoinsBalance(supabase: SupabaseClient, userId: String): Int {
+        return runCatching {
+            supabase.from(BackendContracts.Tables.PROFILES)
+                .select(columns = Columns.raw(BackendContracts.ProfileColumns.COINS_BALANCE)) {
+                    filter { eq("user_id", userId) }
+                    limit(1)
+                }
+                .let { SupabaseResponseDecoding.decodeListOrObject<CoinsProfileRow>(it.data).firstOrNull() }
+                ?.coinsBalance
+                ?: 0
+        }.getOrDefault(0)
     }
 
 }

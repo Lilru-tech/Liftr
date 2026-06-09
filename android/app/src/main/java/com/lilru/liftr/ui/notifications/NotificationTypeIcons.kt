@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.filled.Mail
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.RateReview
 import androidx.compose.material.icons.filled.Reply
@@ -54,6 +55,7 @@ fun notificationIcon(type: String): ImageVector {
         "territory_capture_from_user", "territory_lost_to_user" -> Icons.Filled.Map
         "challenge_won", "challenge_won_weekly" -> Icons.Filled.Star
         "workout_kind_inactive" -> Icons.Filled.Notifications
+        "pet_hatched" -> Icons.Filled.Pets
         else -> Icons.Filled.Notifications
     }
 }

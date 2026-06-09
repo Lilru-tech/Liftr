@@ -47,6 +47,7 @@ final class AppState: ObservableObject {
     @Published private(set) var unreadNotificationsCount: Int = 0
     @Published private(set) var unreadChatMessagesCount: Int = 0
     @Published var territoryCaptureToast: String?
+    @Published var coinEarnToast: String?
     @Published var territoryReferenceCoordinate: CLLocationCoordinate2D?
     
     private var authTask: Task<Void, Never>?
@@ -326,7 +327,9 @@ final class AppState: ObservableObject {
         return drawn.withRenderingMode(.alwaysOriginal)
     }
     
+    @MainActor
     func signOut() {
+        CoinManager.shared.resetSession()
         Task {
             try? await SupabaseManager.shared.client.auth.signOut()
         }
@@ -525,6 +528,10 @@ final class AppState: ObservableObject {
             } else {
                 notificationDestination = .none
             }
+
+        case "pet_hatched":
+            notificationDestination = .none
+            PetHatchEventHandler.handleHatchEvent(navigateToProfile: true)
 
         default:
             notificationDestination = .none

@@ -251,6 +251,7 @@ data class NutritionUiState(
     val highlightsLoading: Boolean = false,
     val highlights: NutritionHighlightsUi? = null,
     val highlightsError: String? = null,
+    val coinsBalance: Int = 0,
     val ranking: NutritionRankingUiState = NutritionRankingUiState(),
     val addFoodIsPlan: Boolean = false,
     val planDate: LocalDate = LocalDate.now().plusDays(1),
@@ -1209,9 +1210,29 @@ class NutritionViewModel(
             it.copy(
                 highlightsLoading = false,
                 highlights = null,
-                highlightsError = null
+                highlightsError = null,
+                coinsBalance = 0
             )
         }
+    }
+
+    @Serializable
+    private data class CoinsProfileRow(
+        @SerialName("coins_balance") val coinsBalance: Int? = null
+    )
+
+    private suspend fun loadCoinsBalance(): Int {
+        val uid = supabase.auth.currentUserOrNull()?.id ?: return 0
+        return runCatching {
+            supabase.from(BackendContracts.Tables.PROFILES)
+                .select(columns = Columns.raw(BackendContracts.ProfileColumns.COINS_BALANCE)) {
+                    filter { eq("user_id", uid) }
+                    limit(1)
+                }
+                .let { SupabaseResponseDecoding.decodeListOrObject<CoinsProfileRow>(it.data).firstOrNull() }
+                ?.coinsBalance
+                ?: 0
+        }.getOrDefault(0)
     }
 
     fun resetRanking() {
@@ -1310,12 +1331,16 @@ class NutritionViewModel(
             runCatching {
                 coroutineScope {
                     val fetch = async { fetchNutritionHighlights() }
+                    val coins = async { loadCoinsBalance() }
                     val minDelay = async { delay(600) }
-                    fetch.await().also { minDelay.await() }
+                    val result = fetch.await()
+                    val balance = coins.await()
+                    minDelay.await()
+                    result to balance
                 }
-            }.onSuccess { result ->
+            }.onSuccess { (result, balance) ->
                 _uiState.update {
-                    it.copy(highlightsLoading = false, highlights = result)
+                    it.copy(highlightsLoading = false, highlights = result, coinsBalance = balance)
                 }
             }.onFailure { e ->
                 _uiState.update {

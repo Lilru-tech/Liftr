@@ -157,6 +157,7 @@ object NotificationRouter {
                 val sender = map["sender_id"]?.trim()?.takeIf { it.isNotEmpty() && looksLikeUuid(it) }
                 MainOverlay.ChatThread(cid, sender)
             }
+            "pet_hatched" -> MainOverlay.PetHatched
             "legacy" -> {
                 if (map["workout_id"] != null) {
                     val w = map["workout_id"]?.toIntOrNull() ?: return null

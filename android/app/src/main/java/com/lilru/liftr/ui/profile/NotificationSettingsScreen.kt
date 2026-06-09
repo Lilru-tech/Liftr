@@ -74,7 +74,8 @@ private data class NotificationSettingsRow(
     @SerialName("push_challenge_won_weekly") val pushChallengeWonWeekly: Boolean,
     @SerialName("push_workout_kind_inactive") val pushWorkoutKindInactive: Boolean,
     @SerialName("push_meal_plan_invite") val pushMealPlanInvite: Boolean = true,
-    @SerialName("push_apple_health_cardio_imported") val pushAppleHealthCardioImported: Boolean = true
+    @SerialName("push_apple_health_cardio_imported") val pushAppleHealthCardioImported: Boolean = true,
+    @SerialName("push_pet_hatched") val pushPetHatched: Boolean = true
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -398,6 +399,15 @@ fun NotificationSettingsScreen(
                     checked = r.pushMealPlanInvite,
                     enabled = enabled,
                     onToggle = { v -> save(mapOf("push_meal_plan_invite" to v)) }
+                )
+
+                SectionHeader(stringResource(R.string.notifications_settings_pets))
+                SettingsCard(
+                    title = stringResource(R.string.notifications_settings_pet_hatched),
+                    subtitle = null,
+                    checked = r.pushPetHatched,
+                    enabled = enabled,
+                    onToggle = { v -> save(mapOf("push_pet_hatched" to v)) }
                 )
 
                 SectionHeader(stringResource(R.string.notifications_settings_apple_health))

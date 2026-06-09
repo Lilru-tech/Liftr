@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.data.PremiumStatusStore
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -198,6 +199,7 @@ class HomeViewModel(
                         ) { }
                     }
                 }.onSuccess {
+                    var earnedLike = false
                     _uiState.update { st ->
                         st.copy(
                             workouts = st.workouts.map { row ->
@@ -205,6 +207,7 @@ class HomeViewModel(
                                     row
                                 } else {
                                     val nowLiked = !row.isLikedByMe
+                                    if (nowLiked) earnedLike = true
                                     row.copy(
                                         isLikedByMe = nowLiked,
                                         likeCount = (row.likeCount + if (nowLiked) 1 else -1)
@@ -213,6 +216,9 @@ class HomeViewModel(
                                 }
                             }
                         )
+                    }
+                    if (earnedLike) {
+                        CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
                     }
                 }
             } finally {

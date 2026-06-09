@@ -41,6 +41,7 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material.icons.filled.SportsMartialArts
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapHoriz
@@ -89,6 +90,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -109,6 +111,7 @@ import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.lilru.liftr.ui.components.CoinsBalanceBadge
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.territory.TerritoryMapScreen
@@ -195,10 +198,12 @@ private fun ProfileIosStyleHeader(
     profileMenuExpanded: Boolean,
     onProfileMenuExpandedChange: (Boolean) -> Unit,
     onMenuNotifications: () -> Unit,
+    onMenuMarket: () -> Unit,
     onMenuAchievements: () -> Unit,
     onMenuGoals: () -> Unit,
     onMenuCompetitions: () -> Unit,
     onOpenRanking: () -> Unit,
+    onOpenCoinTransactions: (() -> Unit)? = null,
     showUsernameInCard: Boolean = true,
     toggleFollow: () -> Unit
 ) {
@@ -297,6 +302,14 @@ private fun ProfileIosStyleHeader(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
+                    }
+                    if (ui.isOwnProfile) {
+                        CoinsBalanceBadge(
+                            balance = ui.coinsBalance,
+                            onClick = onOpenCoinTransactions
+                        )
+                    } else {
+                        CoinsBalanceBadge(balance = ui.coinsBalance)
                     }
                 }
                 if (profileUserId != null) {
@@ -560,6 +573,20 @@ private fun ProfileIosStyleHeader(
                                 )
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.profile_menu_market)) },
+                            onClick = {
+                                onProfileMenuExpandedChange(false)
+                                onMenuMarket()
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.ShoppingCart,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        )
                     }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.profile_menu_achievements)) },
@@ -649,9 +676,12 @@ fun ProfileTabScreen(
     var showDeleteAccountDialog by rememberSaveable { mutableStateOf(false) }
     var showCompetitions by rememberSaveable { mutableStateOf(false) }
     var showRanking by rememberSaveable { mutableStateOf(false) }
+    var showCoinTransactions by rememberSaveable { mutableStateOf(false) }
     var showTerritoryMap by rememberSaveable { mutableStateOf(false) }
     var showCreateCompetition by rememberSaveable { mutableStateOf(false) }
     var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
+    var showMarket by rememberSaveable { mutableStateOf(false) }
+    var showUserItems by rememberSaveable { mutableStateOf(false) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
     var showChangePassword by rememberSaveable { mutableStateOf(false) }
     var bioDraft by remember { mutableStateOf("") }
@@ -713,6 +743,15 @@ fun ProfileTabScreen(
         return
     }
 
+    if (showCoinTransactions) {
+        com.lilru.liftr.ui.coins.CoinTransactionsScreen(
+            supabase = supabase,
+            onBack = { showCoinTransactions = false },
+            modifier = modifier
+        )
+        return
+    }
+
     if (showRanking) {
         RankingTabScreen(
             supabase = supabase,
@@ -757,6 +796,25 @@ fun ProfileTabScreen(
         NotificationSettingsScreen(
             supabase = supabase,
             onBack = { showNotificationSettings = false },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showUserItems) {
+        com.lilru.liftr.ui.pets.PetUserItemsScreen(
+            supabase = supabase,
+            onBack = { showUserItems = false },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showMarket) {
+        com.lilru.liftr.ui.pets.MarketScreen(
+            supabase = supabase,
+            onBack = { showMarket = false },
+            onOpenMyItems = { showUserItems = true },
             modifier = modifier
         )
         return
@@ -996,6 +1054,7 @@ fun ProfileTabScreen(
                 profileMenuExpanded = profileMenuExpanded,
                 onProfileMenuExpandedChange = { profileMenuExpanded = it },
                 onMenuNotifications = { showNotifications = true },
+                onMenuMarket = { showMarket = true },
                 onMenuAchievements = { if (profileUserId != null) showAchievements = true },
                 onMenuGoals = { if (profileUserId != null) showGoals = true },
                 onMenuCompetitions = {
@@ -1003,6 +1062,11 @@ fun ProfileTabScreen(
                     showCompetitions = true
                 },
                 onOpenRanking = { showRanking = true },
+                onOpenCoinTransactions = if (ui.isOwnProfile) {
+                    { showCoinTransactions = true }
+                } else {
+                    null
+                },
                 showUsernameInCard = onBack == null,
                 toggleFollow = vm::toggleFollow
             )
@@ -1470,6 +1534,15 @@ fun ProfileTabScreen(
             state = pullState,
             modifier = Modifier.align(Alignment.TopCenter)
         )
+
+        if (ui.isOwnProfile) {
+            val bottomInsetDp = if (profileNoAds) 18 else 70
+            com.lilru.liftr.ui.pets.ProfilePetFloatingOverlay(
+                supabase = supabase,
+                bottomInsetDp = bottomInsetDp,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 
     if (showDeleteAccountDialog && ui.isOwnProfile) {

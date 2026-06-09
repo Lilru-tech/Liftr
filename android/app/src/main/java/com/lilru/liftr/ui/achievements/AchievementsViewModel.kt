@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinManager
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -181,6 +182,7 @@ class AchievementsViewModel(
                 val params = buildJsonObject { put("p_user_id", targetUserId) }
                 supabase.postgrest.rpc(BackendContracts.Rpc.CHECK_AND_UNLOCK_ACHIEVEMENTS_FOR, params) { }
             }
+            CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
             _uiState.update { it.copy(recomputeBusy = false) }
             load()
         }

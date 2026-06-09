@@ -334,6 +334,7 @@ final class NutritionViewModel: ObservableObject {
     @Published var highlightsLoading = false
     @Published var highlights: NutritionHighlights?
     @Published var highlightsError: String?
+    @Published var coinsBalance: Int = 0
 
     @Published var rankingRows: [NutritionRankingRow] = []
     @Published var rankingLoading = false
@@ -529,6 +530,9 @@ final class NutritionViewModel: ObservableObject {
         let started = Date()
         defer { highlightsLoading = false }
         do {
+            if let userId = try? await SupabaseManager.shared.client.auth.session.user.id {
+                await loadCoinsBalance(userId: userId)
+            }
             let result = try await NutritionManager.fetchNutritionHighlights()
             let elapsed = Date().timeIntervalSince(started)
             if elapsed < 0.6 {
@@ -544,6 +548,26 @@ final class NutritionViewModel: ObservableObject {
         highlightsLoading = false
         highlights = nil
         highlightsError = nil
+        coinsBalance = 0
+    }
+
+    private struct CoinsProfileRow: Decodable {
+        let coins_balance: Int?
+    }
+
+    private func loadCoinsBalance(userId: UUID) async {
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("profiles")
+                .select("coins_balance")
+                .eq("user_id", value: userId.uuidString)
+                .single()
+                .execute()
+            let row = try JSONDecoder.supabase().decode(CoinsProfileRow.self, from: res.data)
+            coinsBalance = row.coins_balance ?? 0
+        } catch {
+            coinsBalance = 0
+        }
     }
 
     func beginRankingNavigation(kind: NutritionRankingKind) {

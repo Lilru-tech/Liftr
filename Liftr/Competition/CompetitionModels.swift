@@ -16,8 +16,16 @@ struct CompetitionRow: Decodable, Identifiable {
     let cancelled_at: Date?
     let finished_at: Date?
     let winner_user_id: UUID?
+    let bet_amount: Int
     let created_at: Date
     let updated_at: Date
+}
+
+struct CompetitionEscrowSummary: Decodable {
+    let escrowed_total: Int
+    let pending_count: Int
+    let active_staked_count: Int
+    let staked_challenge_count: Int
 }
 
 struct CompetitionGoalRow: Decodable {

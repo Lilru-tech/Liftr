@@ -24,6 +24,7 @@ struct CompetitionsHubView: View {
     @State private var goalsByCompId: [Int: CompetitionGoalRow] = [:]
     @State private var profilesById: [UUID: ProfileLiteRow] = [:]
     @State private var progressByCompId: [Int: [UUID: CompetitionProgress]] = [:]
+    @State private var escrowSummary: CompetitionEscrowSummary?
     
     struct CompetitionHistorySummary {
         let totalHistory: Int
@@ -244,6 +245,23 @@ struct CompetitionsHubView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
 
+                if let escrowSummary, escrowSummary.escrowed_total > 0 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "bitcoinsign.circle.fill")
+                            .foregroundStyle(.yellow)
+                        Text("\(escrowSummary.escrowed_total) coins in play across \(escrowSummary.staked_challenge_count) challenge\(escrowSummary.staked_challenge_count == 1 ? "" : "s")")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(.white.opacity(0.18), lineWidth: 0.8)
+                    )
+                    .padding(.horizontal)
+                }
+
                 if tab == .history {
                     HistorySummaryCard(summary: historySummary)
                     .padding(.horizontal, 20)
@@ -347,13 +365,16 @@ struct CompetitionsHubView: View {
             let profs = try await CompetitionService.shared.fetchProfiles(userIds: userIds)
 
             let progress = try await CompetitionService.shared.fetchProgress(for: ids)
+            let escrow = try? await CompetitionService.shared.fetchEscrowSummary()
 
             await MainActor.run {
                 comps = rows
                 goalsByCompId = goals
                 profilesById = profs
                 progressByCompId = progress
+                escrowSummary = escrow
             }
+            await CoinManager.shared.refreshBalance(notifyIfEarned: false)
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
         }
@@ -451,6 +472,25 @@ private struct CompetitionCard: View {
             }
 
             Spacer()
+
+            if competition.bet_amount > 0 {
+                VStack(alignment: .trailing, spacing: 2) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bitcoinsign.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.yellow)
+                        Text("\(competition.bet_amount)")
+                            .font(.caption.weight(.semibold))
+                    }
+                    if competition.status == .pending,
+                       let myId,
+                       competition.created_by == myId {
+                        Text("Escrowed")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
 
             if competition.status == .pending {
                 Text(expiresLabel)

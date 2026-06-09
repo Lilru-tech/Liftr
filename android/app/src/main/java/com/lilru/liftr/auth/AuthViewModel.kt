@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.push.FcmTokenUploader
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.SignOutScope
@@ -348,6 +349,7 @@ class AuthViewModel(
         Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate().toString()
 
     fun signOut() {
+        CoinManager.resetSession()
         viewModelScope.launch {
             _uiError.value = null
             PasswordRecoveryGate.clear()

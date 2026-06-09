@@ -37,6 +37,15 @@ struct LevelRankRow: Decodable, Identifiable {
     let xp: Int64
 }
 
+struct CoinsRankRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let coins_balance: Int
+}
+
 struct GoalsLeaderRow: Decodable, Identifiable {
     var id: UUID { user_id }
     let rank: Int
@@ -296,7 +305,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
         let base: [LBMetric]
         switch self {
         case .general:
-            base = [.score, .calories, .level, .bestWorkout, .goals, .duels, .challengePodiums]
+            base = [.score, .calories, .level, .coins, .bestWorkout, .goals, .duels, .challengePodiums]
         case .social:
             base = [.likesReceived, .commentsReceived, .groupSessions, .achievements]
         case .strength:
@@ -319,6 +328,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case score = "Score"
     case calories = "Calories"
     case level = "Level"
+    case coins = "Liftr Coins"
     case bestWorkout = "Top workouts"
     case goals = "Goals"
     case duels = "Duels"
@@ -464,6 +474,7 @@ private struct RankingMetricPickerSheet: View {
 final class RankingVM: ObservableObject {
     @Published var rows: [LeaderRow] = []
     @Published var levelRows: [LevelRankRow] = []
+    @Published var coinsRows: [CoinsRankRow] = []
     @Published var workoutRows: [WorkoutLeaderRow] = []
     @Published var goalsRows: [GoalsLeaderRow] = []
     @Published var duelsRows: [DuelsLeaderRow] = []
@@ -538,6 +549,7 @@ final class RankingVM: ObservableObject {
         rows = []
         kcalRows = []
         levelRows = []
+        coinsRows = []
         workoutRows = []
         goalsRows = []
         duelsRows = []
@@ -1112,6 +1124,37 @@ final class RankingVM: ObservableObject {
             }
         }
     }
+
+    private func fetchCoinsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_coins_leaderboard_v1", params: params)
+                .execute()
+
+            let decoded = try JSONDecoder.supabase().decode([CoinsRankRow].self, from: res.data)
+            await MainActor.run {
+                self.coinsRows = decoded
+                self.rows = []
+                self.kcalRows = []
+                self.levelRows = []
+                self.workoutRows = []
+                self.goalsRows = []
+                self.duelsRows = []
+            }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.coinsRows = []
+            }
+        }
+    }
     
     private func fetchBestWorkoutsLeaderboard() async {
         do {
@@ -1244,6 +1287,10 @@ final class RankingVM: ObservableObject {
         
         if metric == .level {
             await fetchLevelLeaderboard()
+            return
+        }
+        if metric == .coins {
+            await fetchCoinsLeaderboard()
             return
         }
         if metric == .calories {
@@ -1659,14 +1706,14 @@ struct RankingView: View {
     
     private func metricSkipsPeriod(_ m: LBMetric) -> Bool {
         switch m {
-        case .level, .goals, .duels, .territoryShare, .territoryCells: return true
+        case .level, .coins, .goals, .duels, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
     
     private func metricSkipsKind(_ m: LBMetric) -> Bool {
         switch m {
-        case .level, .goals, .duels, .challengePodiums, .segmentPopularity, .territoryShare, .territoryCells: return true
+        case .level, .coins, .goals, .duels, .challengePodiums, .segmentPopularity, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
@@ -1857,6 +1904,49 @@ struct RankingView: View {
                             Text("\(row.xp) XP")
                                 .font(.headline)
                                 .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+
+            } else if vm.metric == .coins {
+                List(vm.coinsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
+                                Text("Liftr Coins")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            HStack(spacing: 4) {
+                                Text("\(row.coins_balance)")
+                                    .font(.headline)
+                                    .monospacedDigit()
+                                Image(systemName: "bitcoinsign.circle.fill")
+                                    .foregroundStyle(Color.yellow.opacity(0.95))
+                            }
                         }
                     }
                     .listRowBackground(Color.clear)
@@ -2781,6 +2871,7 @@ struct RankingView: View {
         case .score: return vm.rows.isEmpty
         case .calories: return vm.kcalRows.isEmpty
         case .level: return vm.levelRows.isEmpty
+        case .coins: return vm.coinsRows.isEmpty
         case .bestWorkout: return vm.workoutRows.isEmpty
         case .goals: return vm.goalsRows.isEmpty
         case .duels: return vm.duelsRows.isEmpty

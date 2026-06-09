@@ -34,6 +34,7 @@ struct NotificationSettingsRow: Codable {
     var pushWorkoutKindInactive: Bool
     var pushMealPlanInvite: Bool
     var pushAppleHealthCardioImported: Bool
+    var pushPetHatched: Bool
     var appleHealthCardioPushKnownOnServer: Bool
 
     enum CodingKeys: String, CodingKey {
@@ -69,6 +70,7 @@ struct NotificationSettingsRow: Codable {
         case pushWorkoutKindInactive = "push_workout_kind_inactive"
         case pushMealPlanInvite = "push_meal_plan_invite"
         case pushAppleHealthCardioImported = "push_apple_health_cardio_imported"
+        case pushPetHatched = "push_pet_hatched"
     }
 
     init(from decoder: Decoder) throws {
@@ -106,6 +108,7 @@ struct NotificationSettingsRow: Codable {
         pushMealPlanInvite = try c.decodeIfPresent(Bool.self, forKey: .pushMealPlanInvite) ?? true
         appleHealthCardioPushKnownOnServer = c.contains(.pushAppleHealthCardioImported)
         pushAppleHealthCardioImported = try c.decodeIfPresent(Bool.self, forKey: .pushAppleHealthCardioImported) ?? true
+        pushPetHatched = try c.decodeIfPresent(Bool.self, forKey: .pushPetHatched) ?? true
     }
 }
 
@@ -209,6 +212,14 @@ struct NotificationSettingsView: View {
                     toggleCard(
                         title: "Meal plan invites",
                         isOn: binding(\.pushMealPlanInvite),
+                        enabled: pushMaster && !saving
+                    )
+                }
+
+                Section("Pets") {
+                    toggleCard(
+                        title: "Pet hatched",
+                        isOn: binding(\.pushPetHatched),
                         enabled: pushMaster && !saving
                     )
                 }
@@ -354,6 +365,7 @@ struct NotificationSettingsView: View {
             let push_workout_kind_inactive: Bool
             let push_meal_plan_invite: Bool
             let push_apple_health_cardio_imported: Bool?
+            let push_pet_hatched: Bool
 
             enum CodingKeys: String, CodingKey {
                 case push_enabled
@@ -387,6 +399,7 @@ struct NotificationSettingsView: View {
                 case push_workout_kind_inactive
                 case push_meal_plan_invite
                 case push_apple_health_cardio_imported
+                case push_pet_hatched
             }
 
             func encode(to encoder: Encoder) throws {
@@ -422,6 +435,7 @@ struct NotificationSettingsView: View {
                 try c.encode(push_workout_kind_inactive, forKey: .push_workout_kind_inactive)
                 try c.encode(push_meal_plan_invite, forKey: .push_meal_plan_invite)
                 try c.encodeIfPresent(push_apple_health_cardio_imported, forKey: .push_apple_health_cardio_imported)
+                try c.encode(push_pet_hatched, forKey: .push_pet_hatched)
             }
         }
 
@@ -458,7 +472,8 @@ struct NotificationSettingsView: View {
             push_meal_plan_invite: row.pushMealPlanInvite,
             push_apple_health_cardio_imported: row.appleHealthCardioPushKnownOnServer
                 ? row.pushAppleHealthCardioImported
-                : nil
+                : nil,
+            push_pet_hatched: row.pushPetHatched
         )
 
         do {

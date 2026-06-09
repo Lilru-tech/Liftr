@@ -14,6 +14,8 @@ struct CreateCompetitionView: View {
     @State private var includePerformanceGoal = true
     @State private var metric: CompetitionMetric = .workouts
     @State private var targetText: String = "10"
+    @State private var maxBet: Int = 0
+    @State private var betAmount: Int = 0
 
     var body: some View {
         ZStack {
@@ -66,6 +68,38 @@ struct CreateCompetitionView: View {
                                 }
                             }
                             
+                            Divider()
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Liftr Coins stake")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+
+                                Text("Stake: \(betAmount) coins (max \(maxBet))")
+                                    .font(.subheadline)
+
+                                if maxBet > 0 {
+                                    Slider(
+                                        value: Binding(
+                                            get: { Double(betAmount) },
+                                            set: { betAmount = min(maxBet, max(0, Int($0.rounded()))) }
+                                        ),
+                                        in: 0...Double(maxBet),
+                                        step: 1
+                                    )
+                                } else {
+                                    Text("Neither you nor your opponent has coins available to stake.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                if betAmount > 0 {
+                                    Text("Coins are held in escrow until the challenge is accepted, finished, or expires (7 days).")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+
                             Divider()
                             
                             VStack(alignment: .leading, spacing: 10) {
@@ -137,7 +171,10 @@ struct CreateCompetitionView: View {
         }
         }
         .navigationTitle("Challenge")
-        .task { await checkExistingCompetition() }
+        .task {
+            await checkExistingCompetition()
+            await loadBetCap()
+        }
     }
 
     private var targetPlaceholder: String {
@@ -148,8 +185,22 @@ struct CreateCompetitionView: View {
         }
     }
 
+    private func loadBetCap() async {
+        await CoinManager.shared.refreshBalance(notifyIfEarned: false)
+        do {
+            let cap = try await CompetitionService.shared.fetchMaxBet(opponentId: opponentId)
+            await MainActor.run {
+                maxBet = cap
+                if betAmount > cap { betAmount = cap }
+            }
+        } catch {
+            await MainActor.run { maxBet = 0 }
+        }
+    }
+
     private var isValid: Bool {
         if !includeTimeLimit && !includePerformanceGoal { return false }
+        if betAmount > maxBet { return false }
 
         if includePerformanceGoal {
             let t = targetText
@@ -247,7 +298,8 @@ struct CreateCompetitionView: View {
                 metric: metricValue,
                 targetValue: targetValue,
                 timeLimitAt: timeLimitAt,
-                inviteHours: 48
+                inviteHours: 48,
+                betAmount: betAmount
             )
 
             dismiss()
@@ -257,6 +309,12 @@ struct CreateCompetitionView: View {
                 if msg.contains("ux_competitions_active_pair") || msg.contains("duplicate key value") {
                     self.error = "You already have an active competition with this user. Challenge someone else to start a new one."
                     Task { await checkExistingCompetition() }
+                } else if msg.contains("bet_exceeds_max_allowed") {
+                    self.error = "Stake exceeds the maximum allowed for this challenge."
+                    Task { await loadBetCap() }
+                } else if msg.contains("insufficient_coins") {
+                    self.error = "You don't have enough Liftr Coins for this stake."
+                    Task { await loadBetCap() }
                 } else {
                     self.error = msg
                 }

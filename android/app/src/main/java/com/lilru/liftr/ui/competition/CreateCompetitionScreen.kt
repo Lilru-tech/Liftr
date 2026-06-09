@@ -17,6 +17,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -71,7 +72,8 @@ fun CreateCompetitionScreen(
         wasCreating = ui.creating
     }
 
-    val isValid: Boolean = (includeTimeLimit || includePerformanceGoal) && (
+    val isValid: Boolean = (includeTimeLimit || includePerformanceGoal) &&
+        ui.betAmount <= ui.maxBet && (
         !includePerformanceGoal || run {
             val t = targetText.replace(",", ".").trim()
             val d = t.toDoubleOrNull()
@@ -177,6 +179,49 @@ fun CreateCompetitionScreen(
                     enabled = timeLimitDays < 60
                 ) { Text("+") }
             }
+        }
+        Text(
+            "Liftr Coins stake",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "Stake: ${ui.betAmount} coins (max ${ui.maxBet})",
+            style = MaterialTheme.typography.bodyMedium
+        )
+        if (ui.maxBet > 0) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { vm.setBetAmount(ui.betAmount - 1) },
+                    enabled = ui.betAmount > 0
+                ) { Text("−") }
+                Slider(
+                    value = ui.betAmount.toFloat(),
+                    onValueChange = { vm.setBetAmount(it.toInt()) },
+                    valueRange = 0f..ui.maxBet.toFloat(),
+                    steps = max(0, ui.maxBet - 1),
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 8.dp)
+                )
+                OutlinedButton(
+                    onClick = { vm.setBetAmount(ui.betAmount + 1) },
+                    enabled = ui.betAmount < ui.maxBet
+                ) { Text("+") }
+            }
+        } else {
+            Text(
+                "Neither you nor your opponent has coins available to stake.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (ui.betAmount > 0) {
+            Text(
+                "Coins are held in escrow until the challenge is accepted, finished, or expires (7 days).",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
         Text(
             stringResource(R.string.create_competition_perf_section),
