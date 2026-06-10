@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,6 +68,7 @@ fun MarketScreen(
 ) {
     val vm: MarketViewModel = viewModel(factory = MarketViewModelFactory(supabase))
     val ui by vm.uiState.collectAsStateWithLifecycle()
+    val unseenMyItemsCount by PetMarketPurchaseFeedback.unseenMyItemsCount.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf<PetMarketItemWire?>(null) }
     val backgroundTheme = LiftrPreferences.backgroundTheme(LocalContext.current.applicationContext)
 
@@ -86,8 +89,19 @@ fun MarketScreen(
                         }
                     },
                     actions = {
-                        IconButton(onClick = onOpenMyItems) {
-                            Icon(Icons.Filled.ShoppingBag, contentDescription = null)
+                        IconButton(onClick = {
+                            PetMarketPurchaseFeedback.clearBadge()
+                            onOpenMyItems()
+                        }) {
+                            if (unseenMyItemsCount > 0) {
+                                BadgedBox(
+                                    badge = { Badge { Text(unseenMyItemsCount.toString()) } }
+                                ) {
+                                    Icon(Icons.Filled.ShoppingBag, contentDescription = null)
+                                }
+                            } else {
+                                Icon(Icons.Filled.ShoppingBag, contentDescription = null)
+                            }
                         }
                     },
                     colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
@@ -124,11 +138,22 @@ fun MarketScreen(
                             ) {
                                 Row(
                                     modifier = Modifier.padding(16.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Icon(Icons.Filled.Paid, contentDescription = null, tint = Color(0xFFFFC107))
-                                    Text("${CoinManager.balance} coins", fontWeight = FontWeight.Bold)
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Filled.Paid, contentDescription = null, tint = Color(0xFFFFC107))
+                                        Text("${CoinManager.balance} coins", fontWeight = FontWeight.Bold)
+                                    }
+                                    ui.petData?.energy?.let { energy ->
+                                        PetEnergyBadge(
+                                            energy = energy,
+                                            horizontalAlignment = Alignment.End
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -190,6 +215,17 @@ fun MarketScreen(
                         errorMessage = ui.error,
                         onClose = { selected = null },
                         onConfirm = { vm.upgradeRarity { selected = null } },
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                } else if (item.itemType == "pet_energy_capacity") {
+                    EnergyCapacityUpgradeOverlay(
+                        item = item,
+                        petData = ui.petData,
+                        balance = CoinManager.balance,
+                        isBuying = ui.upgradingEnergy,
+                        errorMessage = ui.error,
+                        onClose = { selected = null },
+                        onConfirm = { vm.upgradeEnergyCapacity { selected = null } },
                         modifier = Modifier.align(Alignment.Center)
                     )
                 } else {

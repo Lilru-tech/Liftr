@@ -127,11 +127,13 @@ struct PetFullData: Codable, Equatable {
     let inventory: [PetInventoryRow]
     let xpRequired: Int
     let canEvolve: Bool
+    let energy: ProfileEnergy?
 
     enum CodingKeys: String, CodingKey {
         case pet, stats, inventory
         case xpRequired = "xp_required"
         case canEvolve = "can_evolve"
+        case energy
     }
 
     init(from decoder: Decoder) throws {
@@ -145,6 +147,7 @@ struct PetFullData: Codable, Equatable {
         inventory = try c.decodeIfPresent([PetInventoryRow].self, forKey: .inventory) ?? []
         xpRequired = try c.decodeIfPresent(Int.self, forKey: .xpRequired) ?? 0
         canEvolve = try c.decodeIfPresent(Bool.self, forKey: .canEvolve) ?? false
+        energy = try c.decodeIfPresent(ProfileEnergy.self, forKey: .energy)
     }
 }
 

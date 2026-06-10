@@ -139,6 +139,7 @@ struct ProfilePetFloatingOverlay: View {
 
     private func refreshPet() async {
         await viewModel.load()
+        await viewModel.reloadLogs()
         viewModel.startPollingIfNeeded()
     }
 }

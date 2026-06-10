@@ -54,7 +54,8 @@ import kotlinx.coroutines.delay
 fun ProfilePetFloatingOverlay(
     supabase: SupabaseClient,
     bottomInsetDp: Int,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenMarket: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -76,6 +77,7 @@ fun ProfilePetFloatingOverlay(
         vm.startPollingIfNeeded()
         PetRefreshBus.events.collect {
             vm.load()
+            vm.reloadLogs()
             vm.startPollingIfNeeded()
         }
     }
@@ -249,7 +251,14 @@ fun ProfilePetFloatingOverlay(
                     showSheet = false
                     vm.load()
                 },
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                onOpenMarket = onOpenMarket?.let { openMarket ->
+                    {
+                        showSheet = false
+                        vm.load()
+                        openMarket()
+                    }
+                }
             )
         }
     }

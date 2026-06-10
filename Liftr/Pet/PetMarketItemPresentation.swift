@@ -6,6 +6,15 @@ struct PetMarketItemPresentation {
     let imagePath: String?
 
     static func make(item: PetMarketItemRow, petData: PetFullData?) -> PetMarketItemPresentation {
+        if item.itemType == "pet_energy_capacity" {
+            let currentMax = petData?.energy?.max ?? 5
+            let nextMax = min(currentMax + 1, PetEnergyPricing.maxCapacity)
+            return PetMarketItemPresentation(
+                effectivePrice: PetEnergyPricing.upgradeCost(maxEnergy: currentMax),
+                subtitle: "\(currentMax) → \(nextMax) daily energy",
+                imagePath: item.imagePath
+            )
+        }
         guard item.itemType == "pet_rarity_upgrade",
               let pet = petData?.pet,
               let current = PetRarity(databaseValue: pet.rarity),
@@ -25,6 +34,11 @@ struct PetMarketItemPresentation {
     }
 
     static func modalTitle(item: PetMarketItemRow, petData: PetFullData?) -> String {
+        if item.itemType == "pet_energy_capacity" {
+            let currentMax = petData?.energy?.max ?? 5
+            let nextMax = min(currentMax + 1, PetEnergyPricing.maxCapacity)
+            return "Expand energy capacity from \(currentMax) to \(nextMax)"
+        }
         guard item.itemType == "pet_rarity_upgrade",
               let pet = petData?.pet,
               let current = PetRarity(databaseValue: pet.rarity),

@@ -596,6 +596,7 @@ fun MainShellScreen(
                 )
             }
             is MainOverlay.AddWorkoutDraftKind -> { }
+            is MainOverlay.PetHatched -> { }
             is MainOverlay.ChatThread -> {
                 val ot = overlayNonNull
                 var profile by remember(ot.conversationId) { mutableStateOf<com.lilru.liftr.ui.chat.ProfileLite?>(null) }

@@ -22,6 +22,9 @@ enum PetMarketVisibility {
                   let rarity = PetRarity(databaseValue: pet.rarity),
                   rarity != .mythic else { return false }
             return true
+        case "pet_energy_capacity":
+            guard let energy = petData?.energy else { return true }
+            return energy.max < PetEnergyPricing.maxCapacity
         default:
             if PetFoodItemType.all.contains(item.itemType) {
                 return hasPet

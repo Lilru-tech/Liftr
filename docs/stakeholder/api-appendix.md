@@ -208,6 +208,7 @@ Full list with parameters: [backend-contracts.md § Inventario de RPC](../backen
 | `get_duels_won_leaderboard_v1` | Duels won |
 | `get_level_leaderboard_v1` | User level |
 | `get_coins_leaderboard_v1` | Liftr Coins balance |
+| `get_pet_leaderboard_v1` | Pet rankings (level, stats, combat records) |
 | `list_my_coin_transactions_v1` | Own coin transaction history |
 | `clear_my_coin_history_v1` | Clear own coin ledger (balance unchanged) |
 | `get_territory_total_cells_leaderboard_v1` | Territory cells |

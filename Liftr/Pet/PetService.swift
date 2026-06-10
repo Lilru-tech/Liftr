@@ -77,6 +77,67 @@ final class PetService {
         return try JSONDecoder.supabase().decode(RarityUpgradeResult.self, from: res.data)
     }
 
+    func fetchCombatPreview(targetUserId: UUID) async throws -> PetCombatPreview {
+        struct Params: Encodable {
+            let p_target_user_id: UUID
+        }
+        let res = try await client
+            .rpc("get_pet_combat_preview_v1", params: Params(p_target_user_id: targetUserId))
+            .execute()
+        if let decoded = try? JSONDecoder.supabaseCustom().decode(PetCombatPreview.self, from: res.data) {
+            return decoded
+        }
+        return try JSONDecoder.supabase().decode(PetCombatPreview.self, from: res.data)
+    }
+
+    func fetchCombatHeadToHead(opponentUserId: UUID) async throws -> PetCombatHeadToHeadSummary {
+        struct Params: Encodable {
+            let p_opponent_user_id: UUID
+        }
+        let res = try await client
+            .rpc("get_pet_combat_head_to_head_v1", params: Params(p_opponent_user_id: opponentUserId))
+            .execute()
+        if let decoded = try? JSONDecoder.supabaseCustom().decode(PetCombatHeadToHeadSummary.self, from: res.data) {
+            return decoded
+        }
+        return try JSONDecoder.supabase().decode(PetCombatHeadToHeadSummary.self, from: res.data)
+    }
+
+    func executeCombat(targetOpponentUserId: UUID) async throws -> PetCombatResult {
+        struct Params: Encodable {
+            let p_target_opponent_user_id: UUID
+        }
+        let res = try await client
+            .rpc("execute_pet_combat_v1", params: Params(p_target_opponent_user_id: targetOpponentUserId))
+            .execute()
+        await CoinManager.shared.refreshBalance()
+        PetRefreshCenter.notifyPetStateDidChange()
+        if let decoded = try? JSONDecoder.supabaseCustom().decode(PetCombatResult.self, from: res.data) {
+            return decoded
+        }
+        return try JSONDecoder.supabase().decode(PetCombatResult.self, from: res.data)
+    }
+
+    func fetchCombatUserStats() async throws -> PetCombatUserStats {
+        let res = try await client
+            .rpc("get_pet_combat_user_stats_v1")
+            .execute()
+        if let decoded = try? JSONDecoder.supabaseCustom().decode(PetCombatUserStats.self, from: res.data) {
+            return decoded
+        }
+        return try JSONDecoder.supabase().decode(PetCombatUserStats.self, from: res.data)
+    }
+
+    func upgradeEnergyCapacity() async throws -> EnergyUpgradeResult {
+        let res = try await client.rpc("upgrade_pet_energy_capacity_v1").execute()
+        await CoinManager.shared.refreshBalance()
+        PetRefreshCenter.notifyPetStateDidChange()
+        if let decoded = try? JSONDecoder.supabaseCustom().decode(EnergyUpgradeResult.self, from: res.data) {
+            return decoded
+        }
+        return try JSONDecoder.supabase().decode(EnergyUpgradeResult.self, from: res.data)
+    }
+
     private func decodeHatchAt(from data: Data) -> Date? {
         struct HatchPayload: Decodable {
             let hatchAt: Date?
@@ -100,6 +161,7 @@ final class PetService {
             .from("pet_logs")
             .select("id, event_type, item_type, exp_gained, new_level, stats_delta, details, created_at")
             .order("created_at", ascending: false)
+            .order("id", ascending: false)
             .range(from: offset, to: offset + limit - 1)
             .execute()
         return try JSONDecoder.supabase().decode([PetLogRow].self, from: res.data).map(\.petLog)

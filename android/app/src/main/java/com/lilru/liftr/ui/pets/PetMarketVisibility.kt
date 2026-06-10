@@ -1,5 +1,6 @@
 package com.lilru.liftr.ui.pets
 
+import com.lilru.liftr.data.PetEnergyPricing
 import com.lilru.liftr.data.PetFullDataWire
 import com.lilru.liftr.data.PetInventoryWire
 import com.lilru.liftr.data.PetMarketItemWire
@@ -20,6 +21,7 @@ object PetMarketVisibility {
                 val rarity = petData?.pet?.rarity ?: return false
                 PetRarityUpgrade.nextTier(rarity) != null
             }
+            "pet_energy_capacity" -> (petData?.energy?.max ?: 5) < PetEnergyPricing.MAX_CAPACITY
             in FOOD_TYPES -> hasPet
             else -> true
         }

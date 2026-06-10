@@ -43,7 +43,7 @@ fun PetMarketItemCard(
     Surface(
         modifier = modifier
             .width(100.dp)
-            .height(160.dp)
+            .height(168.dp)
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(12.dp),
         tonalElevation = 2.dp,
@@ -57,7 +57,7 @@ fun PetMarketItemCard(
             AsyncImage(
                 model = PetService.marketImageUrl(displayImagePath),
                 contentDescription = null,
-                modifier = Modifier.size(70.dp)
+                modifier = Modifier.size(88.dp)
             )
             Text(
                 text = item.displayName,

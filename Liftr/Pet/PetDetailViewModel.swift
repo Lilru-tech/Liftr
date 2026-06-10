@@ -39,6 +39,7 @@ final class PetDetailViewModel: ObservableObject {
         guard wasEgg, isBaby else { return }
 
         PetHatchEventHandler.handleHatchEvent(navigateToProfile: false)
+        Task { await reloadLogs() }
     }
 
     func reloadLogs() async {
@@ -120,6 +121,7 @@ final class PetDetailViewModel: ObservableObject {
         do {
             try await PetService.shared.feed(itemType: itemType)
             await load()
+            await reloadLogs()
             PetRefreshCenter.notifyPetStateDidChange()
         } catch {
             errorMessage = error.localizedDescription
@@ -132,6 +134,7 @@ final class PetDetailViewModel: ObservableObject {
         do {
             try await PetService.shared.confirmEvolution()
             await load()
+            await reloadLogs()
             PetRefreshCenter.notifyPetStateDidChange()
         } catch {
             errorMessage = error.localizedDescription

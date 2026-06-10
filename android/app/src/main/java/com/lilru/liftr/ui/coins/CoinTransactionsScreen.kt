@@ -35,7 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.CoinManager
-import com.lilru.liftr.ui.LiftrBackTopBar
+import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.ranking.RankingInitial
 import com.lilru.liftr.ui.ranking.RankingMetric
 import com.lilru.liftr.ui.ranking.RankingScope
@@ -240,6 +240,7 @@ fun CoinTransactionsScreen(
     }
 }
 
+@OptIn(androidx.compose.material.ExperimentalMaterialApi::class)
 @Composable
 private fun BoxPullRefresh(
     modifier: Modifier,

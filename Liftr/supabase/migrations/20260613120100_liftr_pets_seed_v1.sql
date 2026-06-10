@@ -397,13 +397,13 @@ on conflict (rarity) do update set
   sort_order = excluded.sort_order;
 
 insert into public.pet_market_items (item_type, display_name, description, price, category, image_path, is_active) values
-  ('pet_egg', 'Mysterious Egg', 'A mysterious egg that may hatch into a random pet.', 5000, 'eggs_devices', 'market/pet_egg.png', true),
-  ('incubator', 'Egg Incubator', 'Required to hatch your mysterious egg. Consumed when the egg hatches.', 5000, 'eggs_devices', 'market/incubator.png', true),
-  ('food_baby', 'Baby Snack', 'Best food for baby-stage pets.', 50, 'pet_food', 'market/food_baby.png', true),
-  ('food_kid', 'Kid Cookies', 'Best food for kid-stage pets.', 100, 'pet_food', 'market/food_kid.png', true),
-  ('food_teen', 'Teen Treat', 'Best food for teen-stage pets.', 200, 'pet_food', 'market/food_teen.png', true),
-  ('food_adult', 'Adult Biscuit', 'Best food for adult-stage pets.', 350, 'pet_food', 'market/food_adult.png', true),
-  ('food_elder', 'Elder Delight', 'Best food for elder-stage pets.', 500, 'pet_food', 'market/food_elder.png', true)
+  ('pet_egg', 'Mysterious Egg', 'A mysterious egg that may hatch into a random pet.', 2000, 'eggs_devices', 'market/pet_egg.png', true),
+  ('incubator', 'Egg Incubator', 'Required to hatch your mysterious egg. Consumed when the egg hatches.', 2000, 'eggs_devices', 'market/incubator.png', true),
+  ('food_baby', 'Baby Snack', 'Best food for baby-stage pets.', 250, 'pet_food', 'market/food_baby.png', true),
+  ('food_kid', 'Kid Cookies', 'Best food for kid-stage pets.', 500, 'pet_food', 'market/food_kid.png', true),
+  ('food_teen', 'Teen Treat', 'Best food for teen-stage pets.', 1000, 'pet_food', 'market/food_teen.png', true),
+  ('food_adult', 'Adult Biscuit', 'Best food for adult-stage pets.', 1750, 'pet_food', 'market/food_adult.png', true),
+  ('food_elder', 'Elder Delight', 'Best food for elder-stage pets.', 2500, 'pet_food', 'market/food_elder.png', true)
 on conflict (item_type) do update set
   display_name = excluded.display_name,
   description = excluded.description,

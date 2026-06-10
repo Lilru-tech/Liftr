@@ -59,6 +59,7 @@ class PetViewModel(
         lastKnownStage = newStage
         if (wasEgg && isBaby) {
             PetHatchEventHandler.handleHatchEvent(navigateToProfile = false)
+            reloadLogs()
         }
     }
 
@@ -137,7 +138,10 @@ class PetViewModel(
         viewModelScope.launch {
             _ui.update { it.copy(feeding = true, error = null) }
             runCatching { PetService.feed(supabase, itemType) }
-                .onSuccess { load() }
+                .onSuccess {
+                    load()
+                    reloadLogs()
+                }
                 .onFailure { e -> _ui.update { it.copy(error = e.message) } }
             _ui.update { it.copy(feeding = false) }
         }
@@ -147,7 +151,10 @@ class PetViewModel(
         viewModelScope.launch {
             _ui.update { it.copy(evolving = true, error = null) }
             runCatching { PetService.confirmEvolution(supabase) }
-                .onSuccess { load() }
+                .onSuccess {
+                    load()
+                    reloadLogs()
+                }
                 .onFailure { e -> _ui.update { it.copy(error = e.message) } }
             _ui.update { it.copy(evolving = false) }
         }

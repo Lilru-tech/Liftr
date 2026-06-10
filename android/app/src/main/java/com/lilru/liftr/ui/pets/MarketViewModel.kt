@@ -20,6 +20,7 @@ data class MarketUiState(
     val loading: Boolean = false,
     val incubating: Boolean = false,
     val upgradingRarity: Boolean = false,
+    val upgradingEnergy: Boolean = false,
     val error: String? = null
 )
 
@@ -53,6 +54,7 @@ class MarketViewModel(
         viewModelScope.launch {
             runCatching { PetService.buyItem(supabase, itemType, quantity) }
                 .onSuccess {
+                    PetMarketPurchaseFeedback.recordPurchase(itemType)
                     refresh()
                     onSuccess()
                 }
@@ -70,6 +72,19 @@ class MarketViewModel(
                 }
                 .onFailure { e -> _ui.update { it.copy(error = e.message) } }
             _ui.update { it.copy(upgradingRarity = false) }
+        }
+    }
+
+    fun upgradeEnergyCapacity(onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _ui.update { it.copy(upgradingEnergy = true, error = null) }
+            runCatching { PetService.upgradeEnergyCapacity(supabase) }
+                .onSuccess {
+                    refresh()
+                    onSuccess()
+                }
+                .onFailure { e -> _ui.update { it.copy(error = e.message) } }
+            _ui.update { it.copy(upgradingEnergy = false) }
         }
     }
 

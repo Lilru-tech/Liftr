@@ -38,6 +38,7 @@ final class AppState: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published private(set) var isPremium: Bool = false
     @Published var userId: UUID?
+    @Published var profileSurfaceUserId: UUID?
     @Published var passwordRecoveryPending: Bool = false
     @Published var authCallbackError: String?
     
@@ -532,6 +533,14 @@ final class AppState: ObservableObject {
         case "pet_hatched":
             notificationDestination = .none
             PetHatchEventHandler.handleHatchEvent(navigateToProfile: true)
+
+        case "pet_combat_challenged":
+            if let attackerIdStr = data["attacker_user_id"] as? String,
+               let attackerId = UUID(uuidString: attackerIdStr) {
+                notificationDestination = .followerProfile(userId: attackerId)
+            } else {
+                notificationDestination = .none
+            }
 
         default:
             notificationDestination = .none

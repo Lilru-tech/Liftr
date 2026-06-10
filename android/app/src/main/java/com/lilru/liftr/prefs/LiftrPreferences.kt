@@ -182,6 +182,24 @@ object LiftrPreferences {
             .apply()
     }
 
+    private const val KEY_PROFILE_OPPONENT_PET_FAB_PERIMETER_T = "profileOpponentPetFabPerimeterT"
+
+    fun profileOpponentPetFabPerimeterT(context: Context): Float? {
+        val prefs = context.applicationContext.getSharedPreferences(PREF, MODE_PRIVATE)
+        if (!prefs.contains(KEY_PROFILE_OPPONENT_PET_FAB_PERIMETER_T)) return null
+        val t = prefs.getFloat(KEY_PROFILE_OPPONENT_PET_FAB_PERIMETER_T, -1f)
+        if (t !in 0f..1f) return null
+        return t
+    }
+
+    fun setProfileOpponentPetFabPerimeterT(context: Context, t: Float) {
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .edit()
+            .putFloat(KEY_PROFILE_OPPONENT_PET_FAB_PERIMETER_T, t.coerceIn(0f, 1f))
+            .apply()
+    }
+
     fun profilePetFabLegacyNormalizedCenter(context: Context): Pair<Float, Float>? {
         val prefs = context.applicationContext.getSharedPreferences(PREF, MODE_PRIVATE)
         if (!prefs.contains(KEY_PROFILE_PET_FAB_CENTER_X) || !prefs.contains(KEY_PROFILE_PET_FAB_CENTER_Y)) {

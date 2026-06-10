@@ -61,7 +61,6 @@ for pet in "${PET_TYPES[@]}"; do
 done
 
 declare -A MARKET_ASSETS=(
-  [pet_egg.png]="egg.png"
   [incubator.png]="incubator.png"
   [food_baby.png]="baby_snack.png"
   [food_kid.png]="kid_cookie.png"
@@ -88,6 +87,16 @@ if [[ -d "$RARITY_UPGRADE_DIR" ]]; then
     [[ -f "$asset" ]] || continue
     upload_object "market/$(basename "$asset")" "$asset"
   done
+fi
+
+PET_EGG_ASSET="${SCRIPT_DIR}/../assets/market/pet_egg.png"
+if [[ -f "$PET_EGG_ASSET" ]]; then
+  upload_object "market/pet_egg.png" "$PET_EGG_ASSET"
+fi
+
+ENERGY_CAPACITY_ASSET="${SCRIPT_DIR}/../assets/market/energy_capacity.png"
+if [[ -f "$ENERGY_CAPACITY_ASSET" ]]; then
+  upload_object "market/energy_capacity.png" "$ENERGY_CAPACITY_ASSET"
 fi
 
 echo "Done. Public URL pattern: ${LIFTR_SUPABASE_URL}/storage/v1/object/public/${BUCKET}/{pet_type}_{stage}.png"

@@ -16,26 +16,7 @@ struct PetMarketItemCard: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            AsyncImage(url: displayImageURL) { phase in
-                switch phase {
-                case .empty:
-                    ProgressView()
-                        .frame(width: 70, height: 70)
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 70, height: 70)
-                case .failure:
-                    Image(systemName: "photo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 70, height: 70)
-                        .foregroundStyle(.secondary)
-                @unknown default:
-                    EmptyView()
-                }
-            }
+            MarketItemImage(url: displayImageURL, size: 88)
 
             Text(item.displayName)
                 .font(.caption.weight(.semibold))
@@ -63,7 +44,7 @@ struct PetMarketItemCard: View {
             .foregroundStyle(displayPrice > userCoins ? .red : .green)
             .frame(height: 16)
         }
-        .frame(width: 100, height: 160)
+        .frame(width: 100, height: 168)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
         .onTapGesture(perform: onTap)

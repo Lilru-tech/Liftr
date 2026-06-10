@@ -70,6 +70,9 @@ struct PetUserItemsView: View {
         }
         .navigationTitle("My Items")
         .gradientBG()
+        .onAppear {
+            PetMarketPurchaseFeedback.shared.clearBadge()
+        }
         .task { await reload() }
         .alert("Error", isPresented: Binding(
             get: { incubateError != nil },

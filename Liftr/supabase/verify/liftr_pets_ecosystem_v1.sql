@@ -56,12 +56,28 @@ begin
     raise exception 'expected at least 60 pet types seeded';
   end if;
 
-  if (select count(*) from public.pet_market_items where is_active) < 8 then
-    raise exception 'expected 8 active pet market items';
+  if (select count(*) from public.pet_market_items where is_active) < 9 then
+    raise exception 'expected at least 9 active pet market items';
   end if;
 
   if to_regprocedure('public.upgrade_pet_rarity_v1()') is null then
     raise exception 'missing rpc upgrade_pet_rarity_v1';
+  end if;
+
+  if to_regprocedure('public.upgrade_pet_energy_capacity_v1()') is null then
+    raise exception 'missing rpc upgrade_pet_energy_capacity_v1';
+  end if;
+
+  if to_regprocedure('public.get_pet_combat_preview_v1(uuid)') is null then
+    raise exception 'missing rpc get_pet_combat_preview_v1';
+  end if;
+
+  if to_regprocedure('public.execute_pet_combat_v1(uuid)') is null then
+    raise exception 'missing rpc execute_pet_combat_v1';
+  end if;
+
+  if to_regclass('public.pet_combat_history') is null then
+    raise exception 'missing table pet_combat_history';
   end if;
 
   if to_regprocedure('public.get_pet_rarity_upgrade_cost(public.pet_rarity)') is null then

@@ -6,7 +6,7 @@ import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
-import io.github.jan.supabase.postgrest.result.decodeList
+import kotlin.math.pow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -35,6 +35,9 @@ object PetService {
 
     fun resolvedImageUrl(pet: PetInstanceWire): String =
         resolvedImageUrls(pet).first()
+
+    fun resolvedCombatPetImageUrl(pet: PetCombatPetSummaryWire): String =
+        pet.imageUrl?.takeIf { it.isNotBlank() } ?: petImageUrl(pet.petType, pet.evolutionStage)
 
     fun marketImageUrl(path: String?): String? {
         if (path.isNullOrBlank()) return null
@@ -100,9 +103,51 @@ object PetService {
         return SupabaseResponseDecoding.decodeObject(res.data)
     }
 
+    suspend fun fetchCombatPreview(supabase: SupabaseClient, targetUserId: String): PetCombatPreviewWire {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_PET_COMBAT_PREVIEW_V1,
+            buildJsonObject { put("p_target_user_id", targetUserId) }
+        ) { }
+        return SupabaseResponseDecoding.decodeObject(res.data)
+    }
+
+    suspend fun fetchCombatHeadToHead(
+        supabase: SupabaseClient,
+        opponentUserId: String
+    ): PetCombatHeadToHeadSummaryWire {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_PET_COMBAT_HEAD_TO_HEAD_V1,
+            buildJsonObject { put("p_opponent_user_id", opponentUserId) }
+        ) { }
+        return SupabaseResponseDecoding.decodeObject(res.data)
+    }
+
+    suspend fun executeCombat(supabase: SupabaseClient, targetOpponentUserId: String): PetCombatResultWire {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.EXECUTE_PET_COMBAT_V1,
+            buildJsonObject { put("p_target_opponent_user_id", targetOpponentUserId) }
+        ) { }
+        CoinManager.refreshBalanceAfterMutation(supabase)
+        PetRefreshBus.notifyPetStateDidChange()
+        return SupabaseResponseDecoding.decodeObject(res.data)
+    }
+
+    suspend fun fetchCombatUserStats(supabase: SupabaseClient): PetCombatUserStatsWire {
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_PET_COMBAT_USER_STATS_V1) { }
+        return SupabaseResponseDecoding.decodeObject(res.data)
+    }
+
+    suspend fun upgradeEnergyCapacity(supabase: SupabaseClient): EnergyUpgradeResultWire {
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.UPGRADE_PET_ENERGY_CAPACITY_V1) { }
+        CoinManager.refreshBalanceAfterMutation(supabase)
+        PetRefreshBus.notifyPetStateDidChange()
+        return SupabaseResponseDecoding.decodeObject(res.data)
+    }
+
     suspend fun fetchPetLogs(supabase: SupabaseClient, offset: Int, limit: Int = 5): List<PetLogWire> {
         return supabase.from(BackendContracts.Tables.PET_LOGS).select {
             order(column = "created_at", order = Order.DESCENDING)
+            order(column = "id", order = Order.DESCENDING)
             range(offset.toLong(), (offset + limit - 1).toLong())
         }.decodeList<PetLogWire>()
     }
@@ -112,7 +157,7 @@ object PetService {
     }
 
     fun rerollCost(rerollCount: Int): Int =
-        kotlin.math.floor(50 * kotlin.math.pow(1.1, rerollCount.toDouble())).toInt()
+        kotlin.math.floor(50 * 1.1.pow(rerollCount.toDouble())).toInt()
 
     fun isIncubating(pet: PetInstanceWire): Boolean {
         val hatchMs = parseHatchAtMs(pet.hatchAt) ?: return false
@@ -188,7 +233,8 @@ data class PetFullDataWire(
     val stats: PetStatsWire? = null,
     val inventory: List<PetInventoryWire> = emptyList(),
     @SerialName("xp_required") val xpRequired: Int = 0,
-    @SerialName("can_evolve") val canEvolve: Boolean = false
+    @SerialName("can_evolve") val canEvolve: Boolean = false,
+    val energy: ProfileEnergyWire? = null
 )
 
 @Serializable
@@ -222,8 +268,36 @@ data class PetLogWire(
                 "Rarity upgrade"
             }
         }
+        "coins_generated" -> {
+            val coins = details?.get("coins")
+            if (!coins.isNullOrBlank()) "Coins generated: +$coins"
+            else "Coins generated"
+        }
+        "combat" -> {
+            val opponent = details?.get("opponent_username")?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: "opponent"
+            when {
+                details?.get("is_draw") == "true" -> "Draw vs $opponent"
+                details?.get("won") == "true" -> "Victory vs $opponent"
+                else -> "Defeat vs $opponent"
+            }
+        }
         else -> eventType.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
+
+    fun subtitle(): String? {
+        if (eventType != "combat") return null
+        if (details?.get("is_draw") == "true" || details?.get("won") == "true") {
+            val coins = details?.get("coins_gained")?.toIntOrNull() ?: 0
+            val parts = buildList {
+                if (expGained > 0) add("+$expGained XP")
+                if (coins > 0) add("+$coins coins")
+            }
+            return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ") ?: "No rewards"
+        }
+        return "No rewards"
+    }
+
+    fun showsCombatSubtitle(): Boolean = eventType == "combat" && subtitle() != null
 }
 
 @Serializable

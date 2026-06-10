@@ -139,6 +139,7 @@ Vistas:
 - `get_leaderboard_v1`
 - `get_level_leaderboard_v1`
 - `get_coins_leaderboard_v1` (`p_scope`, `p_limit`, `p_sex`, `p_age_band`) — ranking por `profiles.coins_balance`; sin periodo
+- `get_pet_leaderboard_v1` (`p_metric`, `p_scope`, `p_limit`, `p_sex`, `p_age_band`) — rankings de mascotas, sin periodo (all-time). `p_metric`: `level`, `total_stats`, `health`, `strength`, `defense` (requieren mascota activa eclosionada), `battles`, `wins`, `losses`, `win_rate` (mín. 5 combates), `max_damage_dealt`, `max_damage_taken`, `total_damage_dealt`, `total_damage_taken` (de `pet_combat_user_stats`, requieren `total_battles > 0`). Devuelve `rank`, `user_id`, `username`, `avatar_url`, `value` (numeric; `win_rate` en %), `battles`, `pet_name` (custom o display name del tipo), `pet_level`
 - `list_my_coin_transactions_v1` (`p_limit` default 20, max 50) — historial propio; `SECURITY DEFINER`
 - `clear_my_coin_history_v1` () — borra filas de `coin_transactions` del caller; **no** modifica `coins_balance`
 - `get_workout_likes_received_leaderboard_v1`, `get_workout_comments_received_leaderboard_v1`, `get_group_workout_sessions_leaderboard_v1` (social / feed quality; published workouts in period)
@@ -622,11 +623,11 @@ Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); s
 | `reroll_pet_egg_v1()` | Reroll tipo/rareza del huevo incubando; coste `floor(50 × 1.1^reroll_count)` coins |
 | `upgrade_pet_rarity_v1()` | Sube la rareza del pet activo un tier; coste `1000 × 2^(sort_order − 1)` coins; no recalcula stats históricos |
 
-**Cron:** `liftr_hatch_pet_eggs_job` cada 10 min → `check_and_hatch_pet_eggs_v1` (egg → baby, stats iniciales, consume incubator).
+**Energía de arena (`profiles.current_energy` / `max_energy`):** regeneración por punto — **1 energía cada 4 horas** hasta `max_energy` (migración `20260615140000_liftr_pet_energy_regen_v1.sql`; sustituye al refill diario UTC). Acumulación lazy vía `liftr_refresh_profile_energy(p_user_id)` (interna, llamada desde `get_my_pet_v1`, `get_pet_combat_preview_v1`, `execute_pet_combat_v1`, `upgrade_pet_energy_capacity_v1`): `points = floor(elapsed / 4h)`; `current = least(max, current + points)`; `last_energy_refresh` avanza `points × 4h`, o se fija a `now()` cuando `current >= max` (el contador arranca al gastar un punto estando lleno). `liftr_profile_energy_json` devuelve `{current, max, last_refresh, next_refresh_at, regen_minutes: 240}` — `next_refresh_at = last_refresh + 4h` si `current < max`, `null` si está lleno. `get_pet_combat_preview_v1` usa este mismo json (clave `energy`).\n\n**Cron:** `liftr_hatch_pet_eggs_job` cada 10 min → `check_and_hatch_pet_eggs_v1` (egg → baby, stats iniciales, consume incubator).
 
 **XP:** `required_exp(level) = 50 × level²` (`pet_levels`). Comida: EXP aleatorio por matriz `pet_food_experience`.
 
-**Market — precios (`pet_market_items`):** `pet_egg` y `incubator` cuestan **5000** coins cada uno.
+**Market — precios (`pet_market_items`):** `pet_egg` y `incubator` cuestan **2000** coins cada uno.
 
 **`buy_pet_market_item_v1` — guardas de propiedad:**
 

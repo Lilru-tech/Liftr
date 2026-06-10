@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MarketView: View {
     @ObservedObject private var coinManager = CoinManager.shared
+    @ObservedObject private var purchaseFeedback = PetMarketPurchaseFeedback.shared
     @State private var items: [PetMarketItemRow] = []
     @State private var petData: PetFullData?
     @State private var isLoading = true
@@ -53,6 +54,19 @@ struct MarketView: View {
                                 Task { await reload() }
                             }
                         )
+                    } else if selectedItem.itemType == "pet_energy_capacity" {
+                        EnergyCapacityUpgradeOverlay(
+                            item: selectedItem,
+                            petData: petData,
+                            userCoins: coinManager.balance,
+                            onClose: {
+                                withAnimation { self.selectedItem = nil }
+                            },
+                            onPurchaseSuccess: {
+                                withAnimation { self.selectedItem = nil }
+                                Task { await reload() }
+                            }
+                        )
                     } else {
                         MarketItemDetailOverlay(
                             item: selectedItem,
@@ -70,18 +84,47 @@ struct MarketView: View {
                 .transition(.scale)
                 .zIndex(2)
             }
+
+            if let message = purchaseFeedback.toastMessage {
+                VStack {
+                    Text(message)
+                        .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.green.opacity(0.95), in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                    Spacer()
+                }
+                .zIndex(3)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .animation(.easeInOut(duration: 0.3), value: isLoading)
+        .animation(.easeInOut(duration: 0.25), value: purchaseFeedback.toastMessage)
         .navigationTitle("Market")
         .gradientBG()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    PetUserItemsView()
-                        .gradientBG()
-                } label: {
-                    Image(systemName: "bag.fill")
-                        .font(.title3)
+                if purchaseFeedback.unseenMyItemsCount > 0 {
+                    NavigationLink {
+                        PetUserItemsView()
+                            .gradientBG()
+                    } label: {
+                        Image(systemName: "bag.fill")
+                            .font(.title3)
+                    }
+                    .badge(purchaseFeedback.unseenMyItemsCount)
+                } else {
+                    NavigationLink {
+                        PetUserItemsView()
+                            .gradientBG()
+                    } label: {
+                        Image(systemName: "bag.fill")
+                            .font(.title3)
+                    }
                 }
             }
         }
@@ -92,12 +135,18 @@ struct MarketView: View {
     }
 
     private var coinBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "bitcoinsign.circle.fill")
-                .foregroundStyle(.yellow)
-                .font(.title3)
-            Text("\(coinManager.balance) coins")
-                .font(.headline.weight(.bold))
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "bitcoinsign.circle.fill")
+                    .foregroundStyle(.yellow)
+                    .font(.title3)
+                Text("\(coinManager.balance) coins")
+                    .font(.headline.weight(.bold))
+                Spacer()
+                if let energy = petData?.energy {
+                    PetEnergyBadge(energy: energy, alignment: .trailing)
+                }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity)

@@ -48,7 +48,11 @@ fun PetLogsSection(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        if (log.expGained > 0) {
+                        if (log.showsCombatSubtitle()) {
+                            log.subtitle()?.let { subtitle ->
+                                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        } else if (log.expGained > 0) {
                             Text("Exp gained: ${log.expGained}", style = MaterialTheme.typography.bodySmall)
                         }
                         log.newLevel?.let {

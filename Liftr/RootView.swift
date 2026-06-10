@@ -51,7 +51,7 @@ struct RootView: View {
                 .badge(app.unreadNotificationsCount)
         }
 
-        if app.selectedTab == .profile, app.isAuthenticated {
+        if app.selectedTab == .profile, app.isAuthenticated, app.profileSurfaceUserId == nil {
             ProfilePetFloatingOverlay(bannerInset: app.isPremium ? 0 : 58)
         }
         }

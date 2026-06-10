@@ -97,6 +97,7 @@ struct MarketItemDetailOverlay: View {
         defer { isBuying = false }
         do {
             try await PetService.shared.buyItem(itemType: item.itemType, quantity: quantity)
+            PetMarketPurchaseFeedback.shared.recordPurchase(itemType: item.itemType)
             onPurchaseSuccess()
         } catch {
             errorMessage = error.localizedDescription

@@ -193,6 +193,10 @@ struct ProfileView: View {
     @State private var profileAchievementsTotal: Int = 0
     @State private var profileWeeklyGoalsDone: Int = 0
     @State private var profileWeeklyGoalsTotal: Int = 0
+    @State private var petCombatPreview: PetCombatPreview?
+    @State private var petCombatHeadToHead: PetCombatHeadToHeadSummary?
+    @State private var petCombatPreviewLoading = false
+    @State private var showPetCombatArena = false
     @State private var consistencyWorkoutMeta: [Int: ConsistencyWorkoutMeta] = [:]
     @AppStorage("consistencyRootChartMetric") private var consistencyRootChartMetricRaw: String = ConsistencyChartMetric.duration.rawValue
     @State private var email: String? = nil
@@ -244,11 +248,50 @@ struct ProfileView: View {
     @State private var mySegmentsError: String?
     
     var body: some View {
-        profileRootView
+        ZStack {
+            profileRootView
+
+            if !isOwnProfile,
+               let preview = petCombatPreview,
+               viewingUserId != nil,
+               let defenderPet = preview.defender?.pet,
+               defenderPet.evolutionStage.lowercased() != "egg" {
+                ProfileOpponentPetFloatingOverlay(
+                    preview: preview,
+                    defenderPet: defenderPet,
+                    headToHead: petCombatHeadToHead,
+                    opponentUsername: username.isEmpty ? nil : username,
+                    bannerInset: app.isPremium ? 0 : 58,
+                    onChallenge: { showPetCombatArena = true }
+                )
+            }
+        }
         .foregroundStyle(.primary)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .banner($banner)
+        .onAppear {
+            app.profileSurfaceUserId = isOwnProfile ? nil : userId
+        }
+        .onDisappear {
+            if !isOwnProfile, app.profileSurfaceUserId == userId {
+                app.profileSurfaceUserId = nil
+            }
+        }
+        .onChange(of: userId) { _, newUserId in
+            app.profileSurfaceUserId = (newUserId != nil && newUserId != app.userId) ? newUserId : nil
+        }
+        .navigationDestination(isPresented: $showPetCombatArena) {
+            if let opponentId = viewingUserId, let preview = petCombatPreview {
+                PetCombatArenaView(opponentUserId: opponentId, preview: preview)
+                    .gradientBG()
+            }
+        }
+        .onChange(of: showPetCombatArena) { _, isShowing in
+            if !isShowing, let opponentId = viewingUserId, !isOwnProfile {
+                Task { await loadPetCombatPreview(opponentId: opponentId) }
+            }
+        }
         .task {
             let session = try? await SupabaseManager.shared.client.auth.session
             print("[Auth] user.id:", session?.user.id.uuidString ?? "nil")
@@ -260,6 +303,8 @@ struct ProfileView: View {
             await loadUnreadNotifications()
             if isOwnProfile {
                 await loadPremiumProduct()
+            } else if let opponentId = viewingUserId {
+                await loadPetCombatPreview(opponentId: opponentId)
             }
         }
         .onChange(of: app.userId) { _, _ in
@@ -272,6 +317,8 @@ struct ProfileView: View {
                 await loadUnreadNotifications()
                 if isOwnProfile {
                     await loadPremiumProduct()
+                } else if let opponentId = viewingUserId {
+                    await loadPetCombatPreview(opponentId: opponentId)
                 }
             }
         }
@@ -2566,7 +2613,7 @@ struct ProfileView: View {
     private func loadProfileHeader() async {
         guard let uid = viewingUserId else { return }
         loading = true; defer { loading = false }
-        
+
         do {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
@@ -2574,7 +2621,7 @@ struct ProfileView: View {
                 .eq("user_id", value: uid.uuidString)
                 .single()
                 .execute()
-            
+
             let profile = try JSONDecoder.supabase().decode(ProfileRow.self, from: res1.data)
             username = profile.username
             avatarURL = profile.avatar_url
@@ -2582,7 +2629,7 @@ struct ProfileView: View {
             if isOwnProfile {
                 await app.syncTabBarProfileAvatar(urlString: profile.avatar_url)
             }
-            
+
             if let session = try? await SupabaseManager.shared.client.auth.session {
                 self.email = session.user.email
             }
@@ -2608,14 +2655,28 @@ struct ProfileView: View {
                 .select()
                 .eq("user_id", value: uid.uuidString)
                 .execute()
-            
+
             let rows = try JSONDecoder.supabase().decode([ProfileCounts].self, from: res2.data)
             counts = rows.first ?? ProfileCounts(user_id: uid, followers: 0, following: 0)
         } catch {
             self.error = error.localizedDescription
         }
     }
-    
+
+    private func loadPetCombatPreview(opponentId: UUID) async {
+        petCombatPreviewLoading = true
+        defer { petCombatPreviewLoading = false }
+        do {
+            async let previewTask = PetService.shared.fetchCombatPreview(targetUserId: opponentId)
+            async let headToHeadTask = PetService.shared.fetchCombatHeadToHead(opponentUserId: opponentId)
+            petCombatPreview = try await previewTask
+            petCombatHeadToHead = try await headToHeadTask
+        } catch {
+            petCombatPreview = nil
+            petCombatHeadToHead = nil
+        }
+    }
+
     private func prepareMonthAndLoad() async {
         monthDays = monthDaysGrid(for: monthDate)
         await loadMonthActivity()

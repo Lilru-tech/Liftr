@@ -32,11 +32,53 @@ struct PetLog: Identifiable, Equatable {
                 return "Rarity upgrade: \(fromLabel) → \(toLabel)"
             }
             return "Rarity upgrade"
+        case "coins_generated":
+            if let coins = log.details?["coins"], !coins.isEmpty {
+                return "Coins generated: +\(coins)"
+            }
+            return "Coins generated"
+        case "combat":
+            let opponent = combatOpponentName(from: log.details)
+            if log.details?["is_draw"] == "true" {
+                return "Draw vs \(opponent)"
+            }
+            if log.details?["won"] == "true" {
+                return "Victory vs \(opponent)"
+            }
+            return "Defeat vs \(opponent)"
         default:
             return log.eventType
                 .replacingOccurrences(of: "_", with: " ")
                 .capitalized
         }
+    }
+
+    static func subtitle(for log: PetLog) -> String? {
+        guard log.eventType == "combat" else { return nil }
+        if log.details?["is_draw"] == "true" {
+            return combatRewardText(xp: log.expGained, coins: Int(log.details?["coins_gained"] ?? "") ?? 0)
+        }
+        if log.details?["won"] == "true" {
+            return combatRewardText(
+                xp: log.expGained,
+                coins: Int(log.details?["coins_gained"] ?? "") ?? 0
+            )
+        }
+        return "No rewards"
+    }
+
+    private static func combatOpponentName(from details: [String: String]?) -> String {
+        if let username = details?["opponent_username"], !username.isEmpty {
+            return "@\(username)"
+        }
+        return "opponent"
+    }
+
+    private static func combatRewardText(xp: Int, coins: Int) -> String {
+        var parts: [String] = []
+        if xp > 0 { parts.append("+\(xp) XP") }
+        if coins > 0 { parts.append("+\(coins) coins") }
+        return parts.isEmpty ? "No rewards" : parts.joined(separator: " · ")
     }
 }
 
@@ -103,10 +145,15 @@ private enum PetLogDetailValue: Decodable {
     case int(Int)
     case double(Double)
     case bool(Bool)
+    case object([String: PetLogDetailValue])
+    case array([PetLogDetailValue])
+    case null
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let value = try? container.decode(String.self) {
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(String.self) {
             self = .string(value)
         } else if let value = try? container.decode(Int.self) {
             self = .int(value)
@@ -114,8 +161,12 @@ private enum PetLogDetailValue: Decodable {
             self = .double(value)
         } else if let value = try? container.decode(Bool.self) {
             self = .bool(value)
+        } else if let value = try? container.decode([String: PetLogDetailValue].self) {
+            self = .object(value)
+        } else if let value = try? container.decode([PetLogDetailValue].self) {
+            self = .array(value)
         } else {
-            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported pet log detail value")
+            self = .null
         }
     }
 
@@ -125,6 +176,7 @@ private enum PetLogDetailValue: Decodable {
         case .int(let value): return String(value)
         case .double(let value): return String(value)
         case .bool(let value): return value ? "true" : "false"
+        case .object, .array, .null: return ""
         }
     }
 }

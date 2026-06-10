@@ -108,6 +108,12 @@ import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.SupabaseResponseDecoding
 import com.lilru.liftr.data.PremiumStatusStore
+import com.lilru.liftr.data.PetCombatHeadToHeadSummaryWire
+import com.lilru.liftr.data.PetCombatPreviewWire
+import com.lilru.liftr.data.PetRefreshBus
+import com.lilru.liftr.data.PetService
+import com.lilru.liftr.ui.pets.PetCombatArenaScreen
+import com.lilru.liftr.ui.pets.ProfileOpponentPetFloatingOverlay
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -682,6 +688,9 @@ fun ProfileTabScreen(
     var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
     var showMarket by rememberSaveable { mutableStateOf(false) }
     var showUserItems by rememberSaveable { mutableStateOf(false) }
+    var showPetCombatArena by rememberSaveable { mutableStateOf(false) }
+    var petCombatPreview by remember { mutableStateOf<PetCombatPreviewWire?>(null) }
+    var petCombatHeadToHead by remember { mutableStateOf<PetCombatHeadToHeadSummaryWire?>(null) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
     var showChangePassword by rememberSaveable { mutableStateOf(false) }
     var bioDraft by remember { mutableStateOf("") }
@@ -717,6 +726,29 @@ fun ProfileTabScreen(
                 vm.setUserVisibleError(null)
                 vm.uploadAvatarJpeg(jpeg)
             }
+        }
+    }
+    LaunchedEffect(profileUserId, ui.isOwnProfile) {
+        if (!ui.isOwnProfile && profileUserId != null) {
+            petCombatPreview = runCatching {
+                PetService.fetchCombatPreview(supabase, profileUserId)
+            }.getOrNull()
+            petCombatHeadToHead = runCatching {
+                PetService.fetchCombatHeadToHead(supabase, profileUserId)
+            }.getOrNull()
+        } else {
+            petCombatPreview = null
+            petCombatHeadToHead = null
+        }
+    }
+    LaunchedEffect(showPetCombatArena, profileUserId, ui.isOwnProfile) {
+        if (!showPetCombatArena && !ui.isOwnProfile && profileUserId != null) {
+            petCombatPreview = runCatching {
+                PetService.fetchCombatPreview(supabase, profileUserId)
+            }.getOrNull()
+            petCombatHeadToHead = runCatching {
+                PetService.fetchCombatHeadToHead(supabase, profileUserId)
+            }.getOrNull()
         }
     }
     val pullState = rememberPullRefreshState(
@@ -814,7 +846,25 @@ fun ProfileTabScreen(
         com.lilru.liftr.ui.pets.MarketScreen(
             supabase = supabase,
             onBack = { showMarket = false },
-            onOpenMyItems = { showUserItems = true },
+            onOpenMyItems = {
+                com.lilru.liftr.ui.pets.PetMarketPurchaseFeedback.clearBadge()
+                showUserItems = true
+            },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showPetCombatArena && profileUserId != null) {
+        PetCombatArenaScreen(
+            supabase = supabase,
+            opponentUserId = profileUserId,
+            preview = petCombatPreview,
+            backgroundThemeId = LiftrPreferences.backgroundTheme(context.applicationContext),
+            onBack = {
+                PetRefreshBus.notifyPetStateDidChange()
+                showPetCombatArena = false
+            },
             modifier = modifier
         )
         return
@@ -1540,8 +1590,25 @@ fun ProfileTabScreen(
             com.lilru.liftr.ui.pets.ProfilePetFloatingOverlay(
                 supabase = supabase,
                 bottomInsetDp = bottomInsetDp,
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                onOpenMarket = { showMarket = true }
             )
+        } else {
+            val bottomInsetDp = if (profileNoAds) 18 else 70
+            val preview = petCombatPreview
+            val defenderPet = preview?.defender?.pet
+            if (preview != null && defenderPet != null && !defenderPet.evolutionStage.equals("egg", ignoreCase = true)) {
+                ProfileOpponentPetFloatingOverlay(
+                    preview = preview,
+                    defenderPet = defenderPet,
+                    headToHead = petCombatHeadToHead,
+                    opponentUsername = preview.defender?.username,
+                    bottomInsetDp = bottomInsetDp,
+                    backgroundThemeId = LiftrPreferences.backgroundTheme(context.applicationContext),
+                    onChallenge = { showPetCombatArena = true },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
     }
 

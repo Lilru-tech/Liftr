@@ -158,6 +158,10 @@ object NotificationRouter {
                 MainOverlay.ChatThread(cid, sender)
             }
             "pet_hatched" -> MainOverlay.PetHatched
+            "pet_combat_challenged" -> {
+                val attackerId = map["attacker_user_id"]?.trim()?.takeIf { looksLikeUuid(it) } ?: return null
+                MainOverlay.FollowerProfile(attackerId)
+            }
             "legacy" -> {
                 if (map["workout_id"] != null) {
                     val w = map["workout_id"]?.toIntOrNull() ?: return null

@@ -8,6 +8,9 @@ struct PetDetailView: View {
     @State private var isEditingName = false
     @State private var draftName = ""
     @State private var selectedTab = "Inventory"
+    @State private var statsExpanded = true
+    @State private var recordsExpanded = false
+    @State private var hasAppeared = false
 
     var body: some View {
         NavigationStack {
@@ -69,6 +72,15 @@ struct PetDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Close") { dismiss() }
                 }
+            }
+            .onAppear {
+                if hasAppeared {
+                    Task {
+                        await viewModel.load()
+                        await coinManager.refreshBalance(notifyIfEarned: false)
+                    }
+                }
+                hasAppeared = true
             }
         }
         .gradientBG()
@@ -211,9 +223,82 @@ struct PetDetailView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            if let stats = viewModel.data?.stats {
-                statsGrid(stats)
+            if let energy = viewModel.data?.energy {
+                energyAndShortcuts(energy)
             }
+
+            if let stats = viewModel.data?.stats {
+                collapsibleSection(title: "Stats", isExpanded: $statsExpanded) {
+                    statsGrid(stats)
+                }
+            }
+
+            collapsibleSection(title: "Arena Records", isExpanded: $recordsExpanded) {
+                PetCombatRecordsSection(showsHeader: false)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func energyAndShortcuts(_ energy: ProfileEnergy) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            PetEnergyBadge(energy: energy, label: "Your energy")
+            Spacer()
+            VStack(alignment: .trailing, spacing: 8) {
+                NavigationLink {
+                    MarketView()
+                } label: {
+                    Label("Buy food", systemImage: "cart.fill")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.green)
+
+                if energy.max < PetEnergyPricing.maxCapacity {
+                    NavigationLink {
+                        MarketView()
+                    } label: {
+                        Label("Expand energy", systemImage: "bolt.badge.plus")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.orange)
+                }
+            }
+        }
+        .padding(12)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    @ViewBuilder
+    private func collapsibleSection<Content: View>(
+        title: String,
+        isExpanded: Binding<Bool>,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DisclosureGroup(isExpanded: isExpanded) {
+                content()
+                    .padding(.top, 8)
+            } label: {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .tint(.accentColor)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(.ultraThinMaterial)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(.white.opacity(0.18), lineWidth: 0.8)
         }
     }
 

@@ -1,5 +1,7 @@
 package com.lilru.liftr.ui.pets
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -20,10 +24,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +39,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,9 +49,12 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.lilru.liftr.data.CoinManager
+import com.lilru.liftr.data.PetCombatUserStatsWire
+import com.lilru.liftr.data.PetEnergyPricing
 import com.lilru.liftr.data.PetInstanceWire
 import com.lilru.liftr.data.PetService
 import com.lilru.liftr.data.PetStatsWire
+import com.lilru.liftr.data.ProfileEnergyWire
 import io.github.jan.supabase.SupabaseClient
 import java.time.Instant
 import java.time.ZoneId
@@ -58,7 +68,8 @@ fun PetDetailScreen(
     vm: PetViewModel,
     supabase: SupabaseClient,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenMarket: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
     val ui by vm.uiState.collectAsStateWithLifecycle()
@@ -128,8 +139,13 @@ fun PetDetailScreen(
                 feeding = ui.feeding,
                 evolving = ui.evolving,
                 onEvolve = { vm.confirmEvolution() },
-                onFeed = { vm.feed(it) }
+                onFeed = { vm.feed(it) },
+                energy = ui.data?.energy,
+                onOpenMarket = onOpenMarket
             )
+            CollapsibleSection(title = "Arena Records", initiallyExpanded = false) {
+                ArenaRecordsSection(supabase)
+            }
             HorizontalDivider()
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 SegmentedButton(
@@ -269,7 +285,9 @@ private fun HatchedSection(
     feeding: Boolean,
     evolving: Boolean,
     onEvolve: () -> Unit,
-    onFeed: (String) -> Unit
+    onFeed: (String) -> Unit,
+    energy: ProfileEnergyWire? = null,
+    onOpenMarket: (() -> Unit)? = null
 ) {
     val req = xpRequired.coerceAtLeast(1)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -283,7 +301,88 @@ private fun HatchedSection(
                 Text("Evolve to next stage")
             }
         }
-        stats?.let { StatsGrid(it) }
+        energy?.let {
+            EnergyAndShortcutsCard(energy = it, onOpenMarket = onOpenMarket)
+        }
+        stats?.let {
+            CollapsibleSection(title = "Stats", initiallyExpanded = true) {
+                StatsGrid(it)
+            }
+        }
+    }
+}
+
+@Composable
+private fun EnergyAndShortcutsCard(
+    energy: ProfileEnergyWire,
+    onOpenMarket: (() -> Unit)?
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = Color.White.copy(alpha = 0.06f)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PetEnergyBadge(energy = energy, label = "Your energy")
+            if (onOpenMarket != null) {
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    OutlinedButton(onClick = onOpenMarket) {
+                        Text("Buy food", style = MaterialTheme.typography.labelMedium)
+                    }
+                    if (energy.max < PetEnergyPricing.MAX_CAPACITY) {
+                        OutlinedButton(onClick = onOpenMarket) {
+                            Text("Expand energy", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CollapsibleSection(
+    title: String,
+    initiallyExpanded: Boolean,
+    content: @Composable () -> Unit
+) {
+    var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = Color.White.copy(alpha = 0.04f)
+    ) {
+        Column(
+            modifier = Modifier
+                .animateContentSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, fontWeight = FontWeight.SemiBold)
+                Icon(
+                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (expanded) {
+                content()
+            }
+        }
     }
 }
 
@@ -305,6 +404,59 @@ private fun FoodSection(
             foods.forEach { item ->
                 TextButton(onClick = { onFeed(item.itemType) }, enabled = !feeding) {
                     Text("${item.itemType.substringAfter("food_")} ×${item.quantity}")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArenaRecordsSection(supabase: SupabaseClient) {
+    var stats by remember { mutableStateOf<PetCombatUserStatsWire?>(null) }
+    var loading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        stats = runCatching { PetService.fetchCombatUserStats(supabase) }.getOrNull()
+        loading = false
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        when {
+            loading -> Text(
+                "Loading records…",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            stats == null || stats?.totalBattles == 0 -> Text(
+                "No arena battles yet. Challenge a friend's pet!",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            else -> {
+                val s = stats!!
+                val pairs = listOf(
+                    "Battles" to "${s.totalBattles} (${s.wins}W-${s.losses}L-${s.draws}D)",
+                    "Win streak" to "${s.currentWinStreak} (best ${s.bestWinStreak})",
+                    "Max hit dealt" to "${s.maxDamageDealt}",
+                    "Max hit taken" to "${s.maxDamageTaken}",
+                    "Total dmg dealt" to "${s.totalDamageDealt}",
+                    "Total dmg taken" to "${s.totalDamageTaken}",
+                    "Crits landed" to "${s.critsLanded}",
+                    "Dodges" to "${s.dodgesPerformed}",
+                    "Longest battle" to "${s.longestBattleTurns} turns"
+                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    pairs.chunked(2).forEach { row ->
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            row.forEach { (label, value) ->
+                                Text(
+                                    "$label: $value",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

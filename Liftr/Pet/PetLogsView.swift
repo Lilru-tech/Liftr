@@ -25,7 +25,11 @@ struct PetLogsView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
-                        if log.expGained > 0 {
+                        if let subtitle = PetLog.subtitle(for: log) {
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        } else if log.expGained > 0 {
                             Text("Exp gained: \(log.expGained)")
                                 .font(.caption)
                         }
