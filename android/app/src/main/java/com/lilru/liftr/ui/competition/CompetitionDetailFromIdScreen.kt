@@ -35,6 +35,7 @@ private data class CRowW(
     @SerialName("accepted_at") val acceptedAt: String? = null,
     @SerialName("finished_at") val finishedAt: String? = null,
     @SerialName("winner_user_id") val winnerUserId: String? = null,
+    @SerialName("bet_amount") val betAmount: Int = 0,
     @SerialName("created_at") val createdAt: String
 )
 
@@ -143,5 +144,6 @@ private fun CRowW.toUi() = CompetitionRowUi(
     acceptedAt = acceptedAt,
     finishedAt = finishedAt,
     winnerUserId = winnerUserId,
+    betAmount = betAmount,
     createdAt = createdAt
 )

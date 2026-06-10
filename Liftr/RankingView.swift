@@ -37,6 +37,15 @@ struct LevelRankRow: Decodable, Identifiable {
     let xp: Int64
 }
 
+struct CoinsRankRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let coins_balance: Int
+}
+
 struct GoalsLeaderRow: Decodable, Identifiable {
     var id: UUID { user_id }
     let rank: Int
@@ -268,6 +277,18 @@ struct SegmentPopularityLeaderRow: Decodable, Identifiable {
     let buffer_m: Double?
 }
 
+struct PetLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let value: Decimal
+    let battles: Int
+    let pet_name: String?
+    let pet_level: Int?
+}
+
 enum LBScope: String, CaseIterable, Identifiable {
     case global = "Global", friends = "Friends"
     var id: String { rawValue }
@@ -289,6 +310,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
     case strength = "Strength"
     case cardio = "Cardio"
     case sport = "Sport"
+    case pets = "Pets"
     case segments = "Segments"
     var id: String { rawValue }
     
@@ -296,7 +318,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
         let base: [LBMetric]
         switch self {
         case .general:
-            base = [.score, .calories, .level, .bestWorkout, .goals, .duels, .challengePodiums]
+            base = [.score, .calories, .level, .coins, .bestWorkout, .goals, .duels, .challengePodiums]
         case .social:
             base = [.likesReceived, .commentsReceived, .groupSessions, .achievements]
         case .strength:
@@ -307,6 +329,12 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
             base = [
                 .sportWins, .sportWinRate, .sportDuration,
                 .hyroxBestTime, .footballGoals, .skiDistanceKpi
+            ]
+        case .pets:
+            base = [
+                .petLevel, .petTotalStats, .petHealth, .petStrength, .petDefense,
+                .petBattles, .petWins, .petLosses, .petWinRate,
+                .petMaxHitDealt, .petMaxHitTaken, .petDamageDealt, .petDamageTaken
             ]
         case .segments:
             base = [.segmentPopularity]
@@ -319,6 +347,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case score = "Score"
     case calories = "Calories"
     case level = "Level"
+    case coins = "Liftr Coins"
     case bestWorkout = "Top workouts"
     case goals = "Goals"
     case duels = "Duels"
@@ -344,9 +373,53 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case footballGoals = "Football goals"
     case skiDistanceKpi = "Ski km"
     case segmentPopularity = "Segment efforts"
+    case petLevel = "Pet level"
+    case petTotalStats = "Pet total stats"
+    case petHealth = "Pet HP"
+    case petStrength = "Pet strength"
+    case petDefense = "Pet defense"
+    case petBattles = "Pet battles"
+    case petWins = "Pet wins"
+    case petLosses = "Pet losses"
+    case petWinRate = "Pet win %"
+    case petMaxHitDealt = "Pet max hit dealt"
+    case petMaxHitTaken = "Pet max hit taken"
+    case petDamageDealt = "Pet damage dealt"
+    case petDamageTaken = "Pet damage taken"
     var id: String { rawValue }
     
+    var isPetMetric: Bool {
+        switch self {
+        case .petLevel, .petTotalStats, .petHealth, .petStrength, .petDefense,
+             .petBattles, .petWins, .petLosses, .petWinRate,
+             .petMaxHitDealt, .petMaxHitTaken, .petDamageDealt, .petDamageTaken:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    var petMetricParam: String? {
+        switch self {
+        case .petLevel: return "level"
+        case .petTotalStats: return "total_stats"
+        case .petHealth: return "health"
+        case .petStrength: return "strength"
+        case .petDefense: return "defense"
+        case .petBattles: return "battles"
+        case .petWins: return "wins"
+        case .petLosses: return "losses"
+        case .petWinRate: return "win_rate"
+        case .petMaxHitDealt: return "max_damage_dealt"
+        case .petMaxHitTaken: return "max_damage_taken"
+        case .petDamageDealt: return "total_damage_dealt"
+        case .petDamageTaken: return "total_damage_taken"
+        default: return nil
+        }
+    }
+    
     func isVisible(for kind: LBKind) -> Bool {
+        if isPetMetric { return kind == .all }
         switch self {
         case .strengthVolume, .strengthReps, .strengthSets, .strengthMaxSetWeight:
             return kind == .all || kind == .strength
@@ -464,6 +537,7 @@ private struct RankingMetricPickerSheet: View {
 final class RankingVM: ObservableObject {
     @Published var rows: [LeaderRow] = []
     @Published var levelRows: [LevelRankRow] = []
+    @Published var coinsRows: [CoinsRankRow] = []
     @Published var workoutRows: [WorkoutLeaderRow] = []
     @Published var goalsRows: [GoalsLeaderRow] = []
     @Published var duelsRows: [DuelsLeaderRow] = []
@@ -488,6 +562,7 @@ final class RankingVM: ObservableObject {
     @Published var footballGoalsRows: [FootballGoalsLeaderRow] = []
     @Published var skiDistanceKpiRows: [SkiDistanceKpiLeaderRow] = []
     @Published var segmentPopularityRows: [SegmentPopularityLeaderRow] = []
+    @Published var petRows: [PetLeaderRow] = []
     @Published var territoryShareRows: [TerritoryShareLeaderRow] = []
     @Published var territoryCities: [TerritoryCityRegionRow] = []
     @Published var territoryCityKey: String?
@@ -538,6 +613,7 @@ final class RankingVM: ObservableObject {
         rows = []
         kcalRows = []
         levelRows = []
+        coinsRows = []
         workoutRows = []
         goalsRows = []
         duelsRows = []
@@ -561,6 +637,7 @@ final class RankingVM: ObservableObject {
         footballGoalsRows = []
         skiDistanceKpiRows = []
         segmentPopularityRows = []
+        petRows = []
         territoryShareRows = []
     }
     
@@ -1112,6 +1189,37 @@ final class RankingVM: ObservableObject {
             }
         }
     }
+
+    private func fetchCoinsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_coins_leaderboard_v1", params: params)
+                .execute()
+
+            let decoded = try JSONDecoder.supabase().decode([CoinsRankRow].self, from: res.data)
+            await MainActor.run {
+                self.coinsRows = decoded
+                self.rows = []
+                self.kcalRows = []
+                self.levelRows = []
+                self.workoutRows = []
+                self.goalsRows = []
+                self.duelsRows = []
+            }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.coinsRows = []
+            }
+        }
+    }
     
     private func fetchBestWorkoutsLeaderboard() async {
         do {
@@ -1236,14 +1344,47 @@ final class RankingVM: ObservableObject {
         }
     }
     
+    private func fetchPetLeaderboard() async {
+        guard let metricParam = metric.petMetricParam else { return }
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_metric"]   = ajString(metricParam)
+            params["p_scope"]    = ajString(scope == .global ? "global" : "friends")
+            params["p_limit"]    = ajInt(100)
+            params["p_sex"]      = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_pet_leaderboard_v1", params: params)
+                .execute()
+            
+            let decoded = try JSONDecoder.supabase().decode([PetLeaderRow].self, from: res.data)
+            await MainActor.run { self.petRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.petRows = []
+            }
+        }
+    }
+    
     private func fetch() async {
         loading = true
         error = nil
         clearAllRowBuffers()
         defer { loading = false }
         
+        if metric.isPetMetric {
+            await fetchPetLeaderboard()
+            return
+        }
         if metric == .level {
             await fetchLevelLeaderboard()
+            return
+        }
+        if metric == .coins {
+            await fetchCoinsLeaderboard()
             return
         }
         if metric == .calories {
@@ -1658,15 +1799,17 @@ struct RankingView: View {
     }
     
     private func metricSkipsPeriod(_ m: LBMetric) -> Bool {
+        if m.isPetMetric { return true }
         switch m {
-        case .level, .goals, .duels, .territoryShare, .territoryCells: return true
+        case .level, .coins, .goals, .duels, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
     
     private func metricSkipsKind(_ m: LBMetric) -> Bool {
+        if m.isPetMetric { return true }
         switch m {
-        case .level, .goals, .duels, .challengePodiums, .segmentPopularity, .territoryShare, .territoryCells: return true
+        case .level, .coins, .goals, .duels, .challengePodiums, .segmentPopularity, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
@@ -1855,6 +1998,88 @@ struct RankingView: View {
                             }
                             Spacer()
                             Text("\(row.xp) XP")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+
+            } else if vm.metric == .coins {
+                List(vm.coinsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
+                                Text("Liftr Coins")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            HStack(spacing: 4) {
+                                Text("\(row.coins_balance)")
+                                    .font(.headline)
+                                    .monospacedDigit()
+                                Image(systemName: "bitcoinsign.circle.fill")
+                                    .foregroundStyle(Color.yellow.opacity(0.95))
+                            }
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+
+            } else if vm.metric.isPetMetric {
+                List(vm.petRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
+                                Text(petSecondaryString(row))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(petValueString(vm.metric, row))
                                 .font(.headline)
                                 .monospacedDigit()
                         }
@@ -2776,11 +3001,38 @@ struct RankingView: View {
         return String(format: "%.0f%%", n)
     }
     
+    private func petSecondaryString(_ row: PetLeaderRow) -> String {
+        var base: String
+        if let name = row.pet_name, !name.isEmpty {
+            base = name
+            if let lvl = row.pet_level { base += " · Lv \(lvl)" }
+        } else if let lvl = row.pet_level {
+            base = "Lv \(lvl)"
+        } else {
+            base = "No active pet"
+        }
+        if vm.metric == .petWinRate {
+            base += " · \(row.battles) battles"
+        }
+        return base
+    }
+    
+    private func petValueString(_ m: LBMetric, _ row: PetLeaderRow) -> String {
+        let n = NSDecimalNumber(decimal: row.value).doubleValue
+        switch m {
+        case .petWinRate:
+            return String(format: "%.1f%%", n)
+        default:
+            return "\(Int(n))"
+        }
+    }
+    
     private func rankingListIsEmpty(_ vm: RankingVM) -> Bool {
         switch vm.metric {
         case .score: return vm.rows.isEmpty
         case .calories: return vm.kcalRows.isEmpty
         case .level: return vm.levelRows.isEmpty
+        case .coins: return vm.coinsRows.isEmpty
         case .bestWorkout: return vm.workoutRows.isEmpty
         case .goals: return vm.goalsRows.isEmpty
         case .duels: return vm.duelsRows.isEmpty
@@ -2805,6 +3057,10 @@ struct RankingView: View {
         case .skiDistanceKpi: return vm.skiDistanceKpiRows.isEmpty
         case .segmentPopularity: return vm.segmentPopularityRows.isEmpty
         case .territoryShare, .territoryCells: return vm.territoryShareRows.isEmpty
+        case .petLevel, .petTotalStats, .petHealth, .petStrength, .petDefense,
+             .petBattles, .petWins, .petLosses, .petWinRate,
+             .petMaxHitDealt, .petMaxHitTaken, .petDamageDealt, .petDamageTaken:
+            return vm.petRows.isEmpty
         }
     }
     

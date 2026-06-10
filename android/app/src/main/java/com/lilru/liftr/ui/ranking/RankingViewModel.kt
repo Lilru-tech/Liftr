@@ -25,6 +25,7 @@ enum class RankingMetric {
     SCORE,
     CALORIES,
     LEVEL,
+    COINS,
     BEST_WORKOUT,
     GOALS_COMPLETED,
     DUELS_WON,
@@ -49,8 +50,37 @@ enum class RankingMetric {
     SKI_DISTANCE_KPI,
     SEGMENT_POPULARITY,
     TERRITORY_SHARE,
-    TERRITORY_CELLS
+    TERRITORY_CELLS,
+    PET_LEVEL,
+    PET_TOTAL_STATS,
+    PET_HEALTH,
+    PET_STRENGTH,
+    PET_DEFENSE,
+    PET_BATTLES,
+    PET_WINS,
+    PET_LOSSES,
+    PET_WIN_RATE,
+    PET_MAX_HIT_DEALT,
+    PET_MAX_HIT_TAKEN,
+    PET_DAMAGE_DEALT,
+    PET_DAMAGE_TAKEN
 }
+
+internal val petRankingMetrics = setOf(
+    RankingMetric.PET_LEVEL,
+    RankingMetric.PET_TOTAL_STATS,
+    RankingMetric.PET_HEALTH,
+    RankingMetric.PET_STRENGTH,
+    RankingMetric.PET_DEFENSE,
+    RankingMetric.PET_BATTLES,
+    RankingMetric.PET_WINS,
+    RankingMetric.PET_LOSSES,
+    RankingMetric.PET_WIN_RATE,
+    RankingMetric.PET_MAX_HIT_DEALT,
+    RankingMetric.PET_MAX_HIT_TAKEN,
+    RankingMetric.PET_DAMAGE_DEALT,
+    RankingMetric.PET_DAMAGE_TAKEN
+)
 
 private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this) {
     RankingMetric.STRENGTH_VOLUME,
@@ -75,6 +105,7 @@ private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this)
     RankingMetric.ACHIEVEMENTS,
     RankingMetric.CHALLENGE_PODIUMS,
     RankingMetric.SEGMENT_POPULARITY -> kind == RankingKind.ALL
+    in petRankingMetrics -> kind == RankingKind.ALL
     else -> true
 }
 
@@ -88,6 +119,7 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetric.SCORE,
         RankingMetric.CALORIES,
         RankingMetric.LEVEL,
+        RankingMetric.COINS,
         RankingMetric.BEST_WORKOUT,
         RankingMetric.GOALS_COMPLETED,
         RankingMetric.DUELS_WON,
@@ -120,6 +152,21 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetric.FOOTBALL_GOALS,
         RankingMetric.SKI_DISTANCE_KPI
     ).filter { it.isVisibleFor(kind) }
+    val pets = listOf(
+        RankingMetric.PET_LEVEL,
+        RankingMetric.PET_TOTAL_STATS,
+        RankingMetric.PET_HEALTH,
+        RankingMetric.PET_STRENGTH,
+        RankingMetric.PET_DEFENSE,
+        RankingMetric.PET_BATTLES,
+        RankingMetric.PET_WINS,
+        RankingMetric.PET_LOSSES,
+        RankingMetric.PET_WIN_RATE,
+        RankingMetric.PET_MAX_HIT_DEALT,
+        RankingMetric.PET_MAX_HIT_TAKEN,
+        RankingMetric.PET_DAMAGE_DEALT,
+        RankingMetric.PET_DAMAGE_TAKEN
+    ).filter { it.isVisibleFor(kind) }
     val segments = listOf(RankingMetric.SEGMENT_POPULARITY).filter { it.isVisibleFor(kind) }
     return listOf(
         RankingMetricSheetSection("General", general),
@@ -127,6 +174,7 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetricSheetSection("Strength", strength),
         RankingMetricSheetSection("Cardio", cardio),
         RankingMetricSheetSection("Sport", sport),
+        RankingMetricSheetSection("Pets", pets),
         RankingMetricSheetSection("Segments", segments)
     ).filter { it.metrics.isNotEmpty() }
 }
@@ -251,6 +299,7 @@ class RankingViewModel(
                     RankingMetric.SCORE -> fetchScore(st)
                     RankingMetric.CALORIES -> fetchCalories(st)
                     RankingMetric.LEVEL -> fetchLevel(st)
+                    RankingMetric.COINS -> fetchCoins(st)
                     RankingMetric.BEST_WORKOUT -> fetchBestWorkouts(st)
                     RankingMetric.GOALS_COMPLETED -> fetchGoalsCompleted(st)
                     RankingMetric.DUELS_WON -> fetchDuelsWon(st)
@@ -279,6 +328,8 @@ class RankingViewModel(
                     }
                     RankingMetric.TERRITORY_SHARE -> fetchTerritoryShare(st) to emptyList()
                     RankingMetric.TERRITORY_CELLS -> fetchTerritoryTotalCells(st) to emptyList()
+                    in petRankingMetrics -> fetchPetLeaderboard(st)
+                    else -> emptyList<RankingUserRow>() to emptyList()
                 }
             }.onSuccess { (users, workouts) ->
                 _uiState.value = _uiState.value.copy(
@@ -480,6 +531,30 @@ class RankingViewModel(
                     avatarUrl = o.optNullableString("avatar_url"),
                     primary = "Level: ${o.optInt("level", 0)}",
                     secondary = "XP: ${o.optLong("xp", 0)}"
+                )
+            }
+        }
+        return rows to emptyList()
+    }
+
+    private suspend fun fetchCoins(st: RankingUiState): Pair<List<RankingUserRow>, List<RankingWorkoutRow>> {
+        val params = buildJsonObject {
+            put("p_scope", mapScope(st.scope))
+            put("p_limit", 100)
+            put("p_sex", JsonNull)
+            put("p_age_band", JsonNull)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_COINS_LEADERBOARD_V1, params) { }
+        val arr = parseArrayFlexible(res.data)
+        val rows = (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                RankingUserRow(
+                    rank = o.optInt("rank", idx + 1),
+                    userId = o.optString("user_id"),
+                    username = o.optNullableString("username"),
+                    avatarUrl = o.optNullableString("avatar_url"),
+                    primary = "${o.optInt("coins_balance", 0)} Liftr Coins",
+                    secondary = "Liftr Coins"
                 )
             }
         }
@@ -1094,6 +1169,75 @@ class RankingViewModel(
             }
         }
         return rows to emptyList()
+    }
+
+    private suspend fun fetchPetLeaderboard(st: RankingUiState): Pair<List<RankingUserRow>, List<RankingWorkoutRow>> {
+        val params = buildJsonObject {
+            put("p_metric", mapPetMetric(st.metric))
+            put("p_scope", mapScope(st.scope))
+            put("p_limit", 100)
+            put("p_sex", JsonNull)
+            put("p_age_band", JsonNull)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_PET_LEADERBOARD_V1, params) { }
+        val arr = parseArrayFlexible(res.data)
+        val rows = (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                val value = o.optDouble("value", 0.0)
+                val battles = o.optInt("battles", 0)
+                val petName = o.optNullableString("pet_name")
+                val petLevel = if (o.has("pet_level") && !o.isNull("pet_level")) o.optInt("pet_level") else null
+                RankingUserRow(
+                    rank = o.optInt("rank", idx + 1),
+                    userId = o.optString("user_id"),
+                    username = o.optNullableString("username"),
+                    avatarUrl = o.optNullableString("avatar_url"),
+                    primary = petPrimaryLabel(st.metric, value, battles),
+                    secondary = petSecondaryLabel(petName, petLevel)
+                )
+            }
+        }
+        return rows to emptyList()
+    }
+
+    private fun mapPetMetric(metric: RankingMetric): String = when (metric) {
+        RankingMetric.PET_LEVEL -> "level"
+        RankingMetric.PET_TOTAL_STATS -> "total_stats"
+        RankingMetric.PET_HEALTH -> "health"
+        RankingMetric.PET_STRENGTH -> "strength"
+        RankingMetric.PET_DEFENSE -> "defense"
+        RankingMetric.PET_BATTLES -> "battles"
+        RankingMetric.PET_WINS -> "wins"
+        RankingMetric.PET_LOSSES -> "losses"
+        RankingMetric.PET_WIN_RATE -> "win_rate"
+        RankingMetric.PET_MAX_HIT_DEALT -> "max_damage_dealt"
+        RankingMetric.PET_MAX_HIT_TAKEN -> "max_damage_taken"
+        RankingMetric.PET_DAMAGE_DEALT -> "total_damage_dealt"
+        RankingMetric.PET_DAMAGE_TAKEN -> "total_damage_taken"
+        else -> error("Not a pet metric: $metric")
+    }
+
+    private fun petPrimaryLabel(metric: RankingMetric, value: Double, battles: Int): String = when (metric) {
+        RankingMetric.PET_LEVEL -> "Pet level: ${value.toLong()}"
+        RankingMetric.PET_TOTAL_STATS -> "Total stats: ${value.toLong()}"
+        RankingMetric.PET_HEALTH -> "HP: ${value.toLong()}"
+        RankingMetric.PET_STRENGTH -> "Strength: ${value.toLong()}"
+        RankingMetric.PET_DEFENSE -> "Defense: ${value.toLong()}"
+        RankingMetric.PET_BATTLES -> "Battles: ${value.toLong()}"
+        RankingMetric.PET_WINS -> "Wins: ${value.toLong()}"
+        RankingMetric.PET_LOSSES -> "Losses: ${value.toLong()}"
+        RankingMetric.PET_WIN_RATE -> "Win rate: ${String.format("%.1f%%", value)} ($battles battles, min 5)"
+        RankingMetric.PET_MAX_HIT_DEALT -> "Max hit: ${value.toLong()}"
+        RankingMetric.PET_MAX_HIT_TAKEN -> "Max hit taken: ${value.toLong()}"
+        RankingMetric.PET_DAMAGE_DEALT -> "Damage dealt: ${value.toLong()}"
+        RankingMetric.PET_DAMAGE_TAKEN -> "Damage taken: ${value.toLong()}"
+        else -> "${value.toLong()}"
+    }
+
+    private fun petSecondaryLabel(petName: String?, petLevel: Int?): String = when {
+        petName != null && petLevel != null -> "$petName · Lv $petLevel"
+        petName != null -> petName
+        else -> "No active pet"
     }
 
     private fun parseArrayFlexible(raw: String): JSONArray {

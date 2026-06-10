@@ -4,6 +4,8 @@ struct NutritionHighlightsContent: View {
     let loading: Bool
     let highlights: NutritionHighlights?
     let error: String?
+    var coinsBalance: Int? = nil
+    var showCoinsBalance: Bool = false
     var onOpenRanking: (NutritionRankingKind) -> Void = { _ in }
 
     @State private var shimmerPhase = false
@@ -77,8 +79,14 @@ struct NutritionHighlightsContent: View {
 
     private func overviewSection(_ h: NutritionHighlights) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Overview", systemImage: "calendar")
-                .font(.headline)
+            HStack(alignment: .center) {
+                Label("Overview", systemImage: "calendar")
+                    .font(.headline)
+                Spacer(minLength: 8)
+                if showCoinsBalance {
+                    CoinsBalanceBadge(balance: coinsBalance ?? 0, compact: true)
+                }
+            }
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
                     statPill(title: "Days logged", value: "\(h.days_logged)")

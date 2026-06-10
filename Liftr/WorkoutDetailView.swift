@@ -1231,6 +1231,7 @@ struct WorkoutDetailView: View {
                     self.likeCount += 1
                 }
                 Task { await loadLikers(); await loadLikes() }
+                await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             }
         } catch {
             await loadLikes()
@@ -1362,6 +1363,7 @@ struct WorkoutDetailView: View {
             
             print("[Publish] done. state=\(updated.state)")
             await loadParticipants()
+            await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
         } catch {
             print("[Publish][ERROR]", error.localizedDescription)
             await MainActor.run {

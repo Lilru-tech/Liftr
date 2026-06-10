@@ -438,6 +438,7 @@ struct CommentsSheet: View {
             }
 
             await onDidChange?()
+            await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             await MainActor.run { sending = false }
         } catch {
             print("❌ sendComment error:", error)

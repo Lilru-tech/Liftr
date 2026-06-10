@@ -99,6 +99,7 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.SCORE -> stringResource(R.string.ranking_metric_score)
     RankingMetric.CALORIES -> stringResource(R.string.ranking_metric_calories)
     RankingMetric.LEVEL -> stringResource(R.string.ranking_metric_level)
+    RankingMetric.COINS -> stringResource(R.string.ranking_metric_coins)
     RankingMetric.BEST_WORKOUT -> stringResource(R.string.ranking_metric_top_workouts)
     RankingMetric.GOALS_COMPLETED -> stringResource(R.string.ranking_metric_goals)
     RankingMetric.DUELS_WON -> stringResource(R.string.ranking_metric_duels)
@@ -124,6 +125,19 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.FOOTBALL_GOALS -> stringResource(R.string.ranking_metric_football_goals)
     RankingMetric.SKI_DISTANCE_KPI -> stringResource(R.string.ranking_metric_ski_km)
     RankingMetric.SEGMENT_POPULARITY -> stringResource(R.string.ranking_metric_segment_popularity)
+    RankingMetric.PET_LEVEL -> stringResource(R.string.ranking_metric_pet_level)
+    RankingMetric.PET_TOTAL_STATS -> stringResource(R.string.ranking_metric_pet_total_stats)
+    RankingMetric.PET_HEALTH -> stringResource(R.string.ranking_metric_pet_health)
+    RankingMetric.PET_STRENGTH -> stringResource(R.string.ranking_metric_pet_strength)
+    RankingMetric.PET_DEFENSE -> stringResource(R.string.ranking_metric_pet_defense)
+    RankingMetric.PET_BATTLES -> stringResource(R.string.ranking_metric_pet_battles)
+    RankingMetric.PET_WINS -> stringResource(R.string.ranking_metric_pet_wins)
+    RankingMetric.PET_LOSSES -> stringResource(R.string.ranking_metric_pet_losses)
+    RankingMetric.PET_WIN_RATE -> stringResource(R.string.ranking_metric_pet_win_rate)
+    RankingMetric.PET_MAX_HIT_DEALT -> stringResource(R.string.ranking_metric_pet_max_hit_dealt)
+    RankingMetric.PET_MAX_HIT_TAKEN -> stringResource(R.string.ranking_metric_pet_max_hit_taken)
+    RankingMetric.PET_DAMAGE_DEALT -> stringResource(R.string.ranking_metric_pet_damage_dealt)
+    RankingMetric.PET_DAMAGE_TAKEN -> stringResource(R.string.ranking_metric_pet_damage_taken)
 }
 
 @OptIn(ExperimentalMaterialApi::class, ExperimentalMaterial3Api::class)
@@ -289,20 +303,24 @@ fun RankingTabScreen(
                     val showScope = ui.metric != RankingMetric.SEGMENT_POPULARITY
                     val showPeriod = when (ui.metric) {
                         RankingMetric.LEVEL,
+                        RankingMetric.COINS,
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON,
                         RankingMetric.TERRITORY_SHARE,
                         RankingMetric.TERRITORY_CELLS -> false
+                        in petRankingMetrics -> false
                         else -> true
                     }
                     val showKind = when (ui.metric) {
                         RankingMetric.LEVEL,
+                        RankingMetric.COINS,
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON,
                         RankingMetric.CHALLENGE_PODIUMS,
                         RankingMetric.SEGMENT_POPULARITY,
                         RankingMetric.TERRITORY_SHARE,
                         RankingMetric.TERRITORY_CELLS -> false
+                        in petRankingMetrics -> false
                         else -> true
                     }
                     if (showScope) {

@@ -279,6 +279,7 @@
     <string name="ranking_metric_score">Score</string>
     <string name="ranking_metric_calories">Calories</string>
     <string name="ranking_metric_level">Level</string>
+    <string name="ranking_metric_coins">Liftr Coins</string>
     <string name="ranking_metric_top_workouts">Top workouts</string>
     <string name="ranking_metric_goals">Goals</string>
     <string name="ranking_metric_duels">Duels</string>
@@ -304,6 +305,19 @@
     <string name="ranking_metric_football_goals">Football goals</string>
     <string name="ranking_metric_ski_km">Ski km</string>
     <string name="ranking_metric_segment_popularity">Segment efforts</string>
+    <string name="ranking_metric_pet_level">Pet level</string>
+    <string name="ranking_metric_pet_total_stats">Pet total stats</string>
+    <string name="ranking_metric_pet_health">Pet HP</string>
+    <string name="ranking_metric_pet_strength">Pet strength</string>
+    <string name="ranking_metric_pet_defense">Pet defense</string>
+    <string name="ranking_metric_pet_battles">Pet battles</string>
+    <string name="ranking_metric_pet_wins">Pet wins</string>
+    <string name="ranking_metric_pet_losses">Pet losses</string>
+    <string name="ranking_metric_pet_win_rate">Pet win %</string>
+    <string name="ranking_metric_pet_max_hit_dealt">Pet max hit dealt</string>
+    <string name="ranking_metric_pet_max_hit_taken">Pet max hit taken</string>
+    <string name="ranking_metric_pet_damage_dealt">Pet damage dealt</string>
+    <string name="ranking_metric_pet_damage_taken">Pet damage taken</string>
     <string name="ranking_segment_efforts_in_period">Matched efforts: %1$s</string>
     <string name="ranking_metric_picker_title">Metric</string>
     <string name="ranking_metric_picker_hint">Choose a leaderboard</string>
@@ -684,6 +698,7 @@
     <string name="profile_notifications_button">Notifications (%1$d)</string>
     <string name="notifications_title">Notifications</string>
     <string name="notifications_settings_button">Push notifications</string>
+    <string name="pets_market_button">Pets &amp; Mascots Market</string>
     <string name="notifications_settings_title">Push notifications</string>
     <string name="notifications_settings_master">Push notifications</string>
     <string name="notifications_settings_master_sub">Control which notifications are sent to your phone. Notifications can still appear inside the app.</string>
@@ -724,6 +739,9 @@
     <string name="notifications_settings_workout_reminders">Workout reminders</string>
     <string name="notifications_settings_nutrition">Nutrition</string>
     <string name="notifications_settings_meal_plan_invites">Meal plan invites</string>
+    <string name="notifications_settings_pets">Pets</string>
+    <string name="notifications_settings_pet_hatched">Pet hatched</string>
+    <string name="notifications_settings_pet_combat_challenged">Pet arena challenge</string>
     <string name="notifications_settings_apple_health">Apple Health</string>
     <string name="notifications_settings_apple_health_cardio">Cardio workout imported</string>
     <string name="notifications_loading">Loading notifications…</string>
@@ -912,6 +930,7 @@
     <string name="profile_add_bio">Add bio</string>
     <string name="profile_edit_bio">Edit bio</string>
     <string name="profile_menu_notifications">Notifications</string>
+    <string name="profile_menu_market">Market</string>
     <string name="profile_menu_achievements">Achievements</string>
     <string name="profile_menu_goals">Goals</string>
     <string name="profile_menu_competitions">Competitions</string>

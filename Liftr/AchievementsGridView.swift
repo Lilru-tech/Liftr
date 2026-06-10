@@ -428,7 +428,8 @@ struct AchievementsGridView: View {
                 .rpc("check_and_unlock_achievements_for", params: ["p_user_id": uid.uuidString])
                 .execute()
         } catch { }
-        
+
+        await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
         await load()
     }
     

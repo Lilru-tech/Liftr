@@ -145,6 +145,8 @@ struct NutritionInsightsHubView: View {
                 loading: vm.highlightsLoading,
                 highlights: vm.highlights,
                 error: vm.highlightsError,
+                coinsBalance: vm.coinsBalance,
+                showCoinsBalance: true,
                 onOpenRanking: openRanking
             )
         }

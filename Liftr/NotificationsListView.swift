@@ -330,6 +330,19 @@ struct NotificationsListView: View {
                 Text("Challenge not found")
             }
 
+        case "pet_hatched":
+            PetHatchNotificationDestinationView()
+                .gradientBG()
+
+        case "pet_combat_challenged":
+            if let attackerIdStr = n.data?["attacker_user_id"]?.stringValue,
+               let attackerId = UUID(uuidString: attackerIdStr) {
+                ProfileView(userId: attackerId)
+                    .gradientBG()
+            } else {
+                Text("Challenge not found")
+            }
+
         case "dm_message":
             if let cid = dmConversationId(from: n.data) {
                 DeepLinkedChatThread(conversationId: cid, senderId: dmSenderId(from: n.data))
@@ -706,6 +719,8 @@ struct NotificationsListView: View {
         case "territory_capture_from_user", "territory_lost_to_user": return "map.circle.fill"
         case "challenge_won", "challenge_won_weekly": return "medal.star.fill"
         case "workout_kind_inactive": return "bell.circle.fill"
+        case "pet_hatched": return "pawprint.circle.fill"
+        case "pet_combat_challenged": return "bolt.horizontal.circle.fill"
         default: return "bell.circle.fill"
         }
     }
@@ -740,6 +755,8 @@ struct NotificationsListView: View {
         case "challenge_won", "challenge_won_weekly": return "Challenge"
         case "territory_capture_from_user": return "Territory captured"
         case "territory_lost_to_user":      return "Territory lost"
+        case "pet_hatched":                 return "Pet hatched"
+        case "pet_combat_challenged":       return "Pet arena challenge"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

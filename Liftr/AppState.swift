@@ -38,6 +38,7 @@ final class AppState: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published private(set) var isPremium: Bool = false
     @Published var userId: UUID?
+    @Published var profileSurfaceUserId: UUID?
     @Published var passwordRecoveryPending: Bool = false
     @Published var authCallbackError: String?
     
@@ -47,6 +48,7 @@ final class AppState: ObservableObject {
     @Published private(set) var unreadNotificationsCount: Int = 0
     @Published private(set) var unreadChatMessagesCount: Int = 0
     @Published var territoryCaptureToast: String?
+    @Published var coinEarnToast: String?
     @Published var territoryReferenceCoordinate: CLLocationCoordinate2D?
     
     private var authTask: Task<Void, Never>?
@@ -326,7 +328,9 @@ final class AppState: ObservableObject {
         return drawn.withRenderingMode(.alwaysOriginal)
     }
     
+    @MainActor
     func signOut() {
+        CoinManager.shared.resetSession()
         Task {
             try? await SupabaseManager.shared.client.auth.signOut()
         }
@@ -522,6 +526,18 @@ final class AppState: ObservableObject {
 
             if let convoId {
                 notificationDestination = .directMessage(conversationId: convoId, senderUserId: sender)
+            } else {
+                notificationDestination = .none
+            }
+
+        case "pet_hatched":
+            notificationDestination = .none
+            PetHatchEventHandler.handleHatchEvent(navigateToProfile: true)
+
+        case "pet_combat_challenged":
+            if let attackerIdStr = data["attacker_user_id"] as? String,
+               let attackerId = UUID(uuidString: attackerIdStr) {
+                notificationDestination = .followerProfile(userId: attackerId)
             } else {
                 notificationDestination = .none
             }
