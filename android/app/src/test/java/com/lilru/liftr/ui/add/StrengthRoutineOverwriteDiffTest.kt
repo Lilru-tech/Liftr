@@ -184,4 +184,83 @@ class StrengthRoutineOverwriteDiffTest {
         assertTrue(lines.any { it.fieldTitle == "Reps" && it.oldValue == "—" && it.newValue == "2" })
         assertTrue(lines.any { it.fieldTitle == "Added set" })
     }
+
+    @Test
+    fun selectiveMergeAppliesOnlyCheckedRepsChanges() {
+        val routine = listOf(
+            item(1, 1, listOf(set(1, reps = 2), set(2, reps = 2))),
+            item(2, 2, listOf(set(1, reps = 3), set(2, reps = 3), set(3, reps = 3)))
+        )
+        val proposed = listOf(
+            item(1, 1, listOf(set(1, reps = 2), set(2, reps = 2), set(3, reps = 2))),
+            item(2, 2, listOf(set(1, reps = 4), set(2, reps = 4), set(3, reps = 4)))
+        )
+        val lines = diff(proposed, routine)
+        val addSetId = lines.first { it.fieldTitle == "Added set" && it.exerciseOrderIndex == 1 }.id
+        val merged = mergeStrengthRoutineWithSelectedChanges(routine, proposed, setOf(addSetId))
+        val ex1Reps = expandedStrengthProgramItemsForCompare(merged)
+            .first { it.exerciseId == 1L }
+            .sets.sortedBy { it.setNumber }
+            .map { it.reps }
+        assertTrue(ex1Reps == listOf(2, 2, 2))
+        val ex2Reps = expandedStrengthProgramItemsForCompare(merged)
+            .first { it.exerciseId == 2L }
+            .sets.sortedBy { it.setNumber }
+            .map { it.reps }
+        assertTrue(ex2Reps == listOf(3, 3, 3))
+    }
+
+    @Test
+    fun selectiveMergeAppliesOnlyCheckedExerciseReps() {
+        val routine = listOf(
+            item(1, 1, listOf(set(1, reps = 2), set(2, reps = 2))),
+            item(2, 2, listOf(set(1, reps = 3), set(2, reps = 3), set(3, reps = 3)))
+        )
+        val proposed = listOf(
+            item(1, 1, listOf(set(1, reps = 2), set(2, reps = 2), set(3, reps = 2))),
+            item(2, 2, listOf(set(1, reps = 4), set(2, reps = 4), set(3, reps = 4)))
+        )
+        val lines = diff(proposed, routine)
+        val repIds = lines.filter { it.fieldTitle == "Reps" && it.exerciseOrderIndex == 2 }.map { it.id }.toSet()
+        val merged = mergeStrengthRoutineWithSelectedChanges(routine, proposed, repIds)
+        val ex1Count = expandedStrengthProgramItemsForCompare(merged).first { it.exerciseId == 1L }.sets.size
+        assertTrue(ex1Count == 2)
+        val ex2Reps = expandedStrengthProgramItemsForCompare(merged)
+            .first { it.exerciseId == 2L }
+            .sets.sortedBy { it.setNumber }
+            .map { it.reps }
+        assertTrue(ex2Reps == listOf(4, 4, 4))
+    }
+
+    @Test
+    fun allSelectedMergeMatchesFullProposedExpanded() {
+        val routine = listOf(item(1, 1, listOf(set(1, reps = 10))))
+        val proposed = listOf(item(1, 1, listOf(set(1, reps = 10), set(2, reps = 12))))
+        val lines = diff(proposed, routine)
+        val allIds = actionableOverwriteDiffLineIds(lines)
+        val merged = mergeStrengthRoutineWithSelectedChanges(routine, proposed, allIds)
+        val mergedExpanded = expandedStrengthProgramItemsForCompare(merged)
+        val proposedExpanded = expandedStrengthProgramItemsForCompare(normalizedProgramItemsForCompare(proposed))
+        assertTrue(mergedExpanded.size == proposedExpanded.size)
+        assertTrue(mergedExpanded[0].sets.map { it.reps } == proposedExpanded[0].sets.map { it.reps })
+    }
+
+    @Test
+    fun uncheckedAddedSetIgnoresFieldLinesForNewSet() {
+        val routine = listOf(item(1, 1, listOf(set(1, reps = 1))))
+        val proposed = listOf(
+            item(
+                1,
+                1,
+                listOf(
+                    set(2, rowOrder = 1, reps = 1),
+                    set(1, rowOrder = 2, reps = 2)
+                )
+            )
+        )
+        val lines = diff(proposed, routine)
+        val repLine = lines.first { it.fieldTitle == "Reps" }.id
+        val merged = mergeStrengthRoutineWithSelectedChanges(routine, proposed, setOf(repLine))
+        assertTrue(expandedStrengthProgramItemsForCompare(merged).first().sets.size == 1)
+    }
 }

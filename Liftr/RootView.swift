@@ -289,6 +289,7 @@ struct RootView: View {
                 AuthCallbackLogger.log("RootView presenting password recovery fullScreenCover", source: "RootView")
             }
         }
+        .activeWorkoutRecoveryOverlay()
     }
 
     @ViewBuilder

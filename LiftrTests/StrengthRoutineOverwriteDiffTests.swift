@@ -194,4 +194,115 @@ struct StrengthRoutineOverwriteDiffTests {
         #expect(lines.contains { $0.fieldTitle == "Reps" && $0.oldValue == "—" && $0.newValue == "2" })
         #expect(lines.contains { $0.fieldTitle == "Added set" })
     }
+
+    private func expandedReps(_ items: [StrengthProgramItem]) -> [Int?] {
+        expandedStrengthProgramItemsForCompare(items).flatMap { ex in
+            ex.sets.sorted { $0.setNumber < $1.setNumber }.map(\.reps)
+        }
+    }
+
+    @Test func selectiveMergeAppliesOnlyCheckedRepsChanges() {
+        let routine = [
+            item(exerciseId: 1, orderIndex: 1, sets: [
+                set(num: 1, reps: 2), set(num: 2, reps: 2)
+            ]),
+            item(exerciseId: 2, orderIndex: 2, sets: [
+                set(num: 1, reps: 3), set(num: 2, reps: 3), set(num: 3, reps: 3)
+            ])
+        ]
+        let proposed = [
+            item(exerciseId: 1, orderIndex: 1, sets: [
+                set(num: 1, reps: 2), set(num: 2, reps: 2), set(num: 3, reps: 2)
+            ]),
+            item(exerciseId: 2, orderIndex: 2, sets: [
+                set(num: 1, reps: 4), set(num: 2, reps: 4), set(num: 3, reps: 4)
+            ])
+        ]
+        let lines = diff(proposed: proposed, routine: routine)
+        let addSetId = lines.first { $0.fieldTitle == "Added set" && $0.exerciseOrderIndex == 1 }!.id
+        let merged = mergeStrengthRoutineWithSelectedChanges(
+            routine: routine,
+            proposed: proposed,
+            selectedLineIds: [addSetId]
+        )
+        let ex1Reps = expandedStrengthProgramItemsForCompare(merged)
+            .first { $0.exerciseId == 1 }!
+            .sets.sorted { $0.setNumber < $1.setNumber }
+            .map(\.reps)
+        #expect(ex1Reps == [2, 2, 2])
+        let ex2Reps = expandedStrengthProgramItemsForCompare(merged)
+            .first { $0.exerciseId == 2 }!
+            .sets.sorted { $0.setNumber < $1.setNumber }
+            .map(\.reps)
+        #expect(ex2Reps == [3, 3, 3])
+    }
+
+    @Test func selectiveMergeAppliesOnlyCheckedExerciseReps() {
+        let routine = [
+            item(exerciseId: 1, orderIndex: 1, sets: [
+                set(num: 1, reps: 2), set(num: 2, reps: 2)
+            ]),
+            item(exerciseId: 2, orderIndex: 2, sets: [
+                set(num: 1, reps: 3), set(num: 2, reps: 3), set(num: 3, reps: 3)
+            ])
+        ]
+        let proposed = [
+            item(exerciseId: 1, orderIndex: 1, sets: [
+                set(num: 1, reps: 2), set(num: 2, reps: 2), set(num: 3, reps: 2)
+            ]),
+            item(exerciseId: 2, orderIndex: 2, sets: [
+                set(num: 1, reps: 4), set(num: 2, reps: 4), set(num: 3, reps: 4)
+            ])
+        ]
+        let lines = diff(proposed: proposed, routine: routine)
+        let repIds = Set(lines.filter { $0.fieldTitle == "Reps" && $0.exerciseOrderIndex == 2 }.map(\.id))
+        let merged = mergeStrengthRoutineWithSelectedChanges(
+            routine: routine,
+            proposed: proposed,
+            selectedLineIds: repIds
+        )
+        let ex1Count = expandedStrengthProgramItemsForCompare(merged)
+            .first { $0.exerciseId == 1 }!
+            .sets.count
+        #expect(ex1Count == 2)
+        let ex2Reps = expandedStrengthProgramItemsForCompare(merged)
+            .first { $0.exerciseId == 2 }!
+            .sets.sorted { $0.setNumber < $1.setNumber }
+            .map(\.reps)
+        #expect(ex2Reps == [4, 4, 4])
+    }
+
+    @Test func allSelectedMergeMatchesFullProposedExpanded() {
+        let routine = [item(exerciseId: 1, orderIndex: 1, sets: [set(num: 1, reps: 10)])]
+        let proposed = [item(exerciseId: 1, orderIndex: 1, sets: [
+            set(num: 1, reps: 10), set(num: 2, reps: 12)
+        ])]
+        let lines = diff(proposed: proposed, routine: routine)
+        let allIds = actionableOverwriteDiffLineIds(from: lines)
+        let merged = mergeStrengthRoutineWithSelectedChanges(
+            routine: routine,
+            proposed: proposed,
+            selectedLineIds: allIds
+        )
+        let mergedExpanded = expandedStrengthProgramItemsForCompare(merged)
+        let proposedExpanded = expandedStrengthProgramItemsForCompare(proposed)
+        #expect(mergedExpanded.count == proposedExpanded.count)
+        #expect(mergedExpanded[0].sets.map(\.reps) == proposedExpanded[0].sets.map(\.reps))
+    }
+
+    @Test func uncheckedAddedSetIgnoresFieldLinesForNewSet() {
+        let routine = [item(exerciseId: 1, orderIndex: 1, sets: [set(num: 1, reps: 1)])]
+        let proposed = [item(exerciseId: 1, orderIndex: 1, sets: [
+            set(num: 2, rowOrder: 1, reps: 1),
+            set(num: 1, rowOrder: 2, reps: 2)
+        ])]
+        let lines = diff(proposed: proposed, routine: routine)
+        let repLine = lines.first { $0.fieldTitle == "Reps" }!.id
+        let merged = mergeStrengthRoutineWithSelectedChanges(
+            routine: routine,
+            proposed: proposed,
+            selectedLineIds: [repLine]
+        )
+        #expect(expandedStrengthProgramItemsForCompare(merged).first!.sets.count == 1)
+    }
 }

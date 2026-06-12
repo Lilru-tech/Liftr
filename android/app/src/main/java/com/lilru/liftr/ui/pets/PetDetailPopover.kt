@@ -2,32 +2,43 @@ package com.lilru.liftr.ui.pets
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.lilru.liftr.R
 import com.lilru.liftr.data.PetInstanceWire
 import com.lilru.liftr.data.PetService
 import com.lilru.liftr.data.PetStatsWire
@@ -37,6 +48,7 @@ import java.time.format.DateTimeParseException
 
 private val FOOD_TYPES = listOf("food_baby", "food_kid", "food_teen", "food_adult", "food_elder")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PetDetailPopover(
     vm: PetViewModel,
@@ -44,13 +56,16 @@ fun PetDetailPopover(
 ) {
     val context = LocalContext.current
     val ui by vm.uiState.collectAsStateWithLifecycle()
+    var showStatCombatHelp by rememberSaveable { mutableStateOf(false) }
+    val statCombatHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
   LaunchedEffect(Unit) {
         vm.load()
         vm.startPollingIfNeeded()
     }
 
+    Box(modifier = modifier.fillMaxWidth()) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
@@ -90,11 +105,22 @@ fun PetDetailPopover(
                 feeding = ui.feeding,
                 evolving = ui.evolving,
                 onEvolve = { vm.confirmEvolution() },
-                onFeed = { vm.feed(it) }
+                onFeed = { vm.feed(it) },
+                onStatGuideClick = { showStatCombatHelp = true }
             )
         }
 
         ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    }
+
+        if (showStatCombatHelp) {
+            ModalBottomSheet(
+                onDismissRequest = { showStatCombatHelp = false },
+                sheetState = statCombatHelpSheetState
+            ) {
+                PetStatCombatHelpSheetContent(onClose = { showStatCombatHelp = false })
+            }
+        }
     }
 }
 
@@ -154,7 +180,8 @@ private fun HatchedSection(
     feeding: Boolean,
     evolving: Boolean,
     onEvolve: () -> Unit,
-    onFeed: (String) -> Unit
+    onFeed: (String) -> Unit,
+    onStatGuideClick: (() -> Unit)? = null
 ) {
     val req = xpRequired.coerceAtLeast(1)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -169,7 +196,24 @@ private fun HatchedSection(
             }
         }
 
-        stats?.let { StatsGrid(it) }
+        stats?.let {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Stats", fontWeight = FontWeight.SemiBold)
+                if (onStatGuideClick != null) {
+                    IconButton(onClick = onStatGuideClick) {
+                        Icon(
+                            Icons.Filled.Info,
+                            contentDescription = stringResource(R.string.pet_stat_combat_info_content_description)
+                        )
+                    }
+                }
+            }
+            StatsGrid(it)
+        }
 
         Text("Food", fontWeight = FontWeight.SemiBold)
         val foods = inventory.filter { it.itemType in FOOD_TYPES && it.quantity > 0 }

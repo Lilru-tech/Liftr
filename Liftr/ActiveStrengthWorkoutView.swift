@@ -397,6 +397,7 @@ struct ActiveStrengthWorkoutView: View {
     @State private var quickRestPresets: [Int] = StrengthRestPresetService.defaultPresets
     @State private var strengthFinishDeferral: StrengthFinishDeferral?
     @State private var sourceStrengthRoutineId: Int64? = nil
+    @State private var didRestoreSessionCheckpoint = false
     @State private var showActiveExercisePicker = false
     @State private var showActiveExerciseSetup = false
     @State private var activeExerciseSetupLane: StrengthLaneKind = .host
@@ -1075,6 +1076,9 @@ struct ActiveStrengthWorkoutView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background || newPhase == .inactive {
+                persistSessionCheckpoint()
+            }
             guard newPhase == .active else { return }
             restoreActiveWorkoutStateOnForeground()
             guard !isSessionPaused else { return }
@@ -1171,17 +1175,17 @@ struct ActiveStrengthWorkoutView: View {
         .sheet(item: $strengthFinishDeferral) { def in
             StrengthRoutineOverwriteConfirmSheet(
                 prompt: def.prompt,
-                onUpdate: {
+                onApply: { selectedLineIds in
                     let d = def
                     strengthFinishDeferral = nil
                     isSaving = true
-                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: true) }
+                    Task { await commitDeferredStrengthFinish(deferral: d, selectedLineIds: selectedLineIds) }
                 },
                 onNotNow: {
                     let d = def
                     strengthFinishDeferral = nil
                     isSaving = true
-                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: false) }
+                    Task { await commitDeferredStrengthFinish(deferral: d, selectedLineIds: []) }
                 }
             )
             .presentationSizing(.fitted)
@@ -2761,6 +2765,7 @@ struct ActiveStrengthWorkoutView: View {
         showFinishEarlyConfirm = false
         showFinishConfirm = false
         showDualIncompleteFinishConfirm = false
+        clearSessionCheckpoint()
     }
 
     private func skipRest(for lane: StrengthLaneKind, exerciseId: Int) {
@@ -3131,6 +3136,7 @@ struct ActiveStrengthWorkoutView: View {
             }
             advanceToNextSupersetMemberIfNeeded(from: ex, lane: .guest2, setIndex: completedSetIndex)
         }
+        persistSessionCheckpoint()
     }
 
     private func supersetMembers(for ex: ExerciseRow, lane: StrengthLaneKind) -> [ExerciseRow] {
@@ -5376,6 +5382,7 @@ struct ActiveStrengthWorkoutView: View {
                 activeElapsedSeconds: strengthSessionActiveElapsedSeconds
             )
         }
+        persistSessionCheckpoint()
     }
 
     private func activeStrengthNavFirstHintBanner() -> some View {
@@ -6125,10 +6132,14 @@ struct ActiveStrengthWorkoutView: View {
         return String(format: "%.1f", v)
     }
 
-    private func commitDeferredStrengthFinish(deferral: StrengthFinishDeferral, updateRoutine: Bool) async {
-        let extra: (Int64, [EditableExercise])? = updateRoutine
-            ? (deferral.prompt.routineId, deferral.editableForRoutine)
-            : nil
+    private func commitDeferredStrengthFinish(deferral: StrengthFinishDeferral, selectedLineIds: Set<String>) async {
+        let extra: (StrengthRoutineOverwritePrompt, [StrengthProgramItem], Set<String>)? = selectedLineIds.isEmpty
+            ? nil
+            : (
+                deferral.prompt,
+                strengthProgramItems(from: deferral.editableForRoutine),
+                selectedLineIds
+            )
         let (wallEndedAt, pausedSec) = await MainActor.run { () -> (Date, Int) in
             let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
             let total = max(0, accumulatedPausedSeconds + openPause)
@@ -6143,7 +6154,7 @@ struct ActiveStrengthWorkoutView: View {
             guest2ExList: deferral.guest2ExList,
             guest2PerformedMap: deferral.guest2PerformedMap,
             guest2WorkoutId: deferral.guest2WorkoutId,
-            routinePrescriptionOverwrite: extra,
+            routineSelectiveOverwrite: extra,
             wallEndedAt: wallEndedAt,
             pausedSec: pausedSec
         )
@@ -6158,7 +6169,11 @@ struct ActiveStrengthWorkoutView: View {
         guest2ExList: [ExerciseRow],
         guest2PerformedMap: [Int: [PerformedSet]],
         guest2WorkoutId: Int?,
-        routinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])?,
+        routineSelectiveOverwrite: (
+            prompt: StrengthRoutineOverwritePrompt,
+            proposed: [StrengthProgramItem],
+            selectedLineIds: Set<String>
+        )?,
         wallEndedAt: Date,
         pausedSec: Int
     ) async {
@@ -6245,12 +6260,13 @@ struct ActiveStrengthWorkoutView: View {
                 NotificationCenter.default.post(name: .workoutDidChange, object: result.workout_id)
             }
 
-            if let o = routinePrescriptionOverwrite, let uid = await MainActor.run(body: { app.userId }) {
-                try? await applyStrengthRoutinePrescriptionUpdate(
+            if let o = routineSelectiveOverwrite, let uid = await MainActor.run(body: { app.userId }) {
+                try? await applySelectiveStrengthRoutineOverwrite(
                     client: client,
                     userId: uid,
-                    routineId: o.routineId,
-                    exercises: o.exercises
+                    prompt: o.prompt,
+                    proposed: o.proposed,
+                    selectedLineIds: o.selectedLineIds
                 )
             }
 
@@ -6425,7 +6441,7 @@ struct ActiveStrengthWorkoutView: View {
             guest2ExList: guest2ExList,
             guest2PerformedMap: guest2PerformedMap,
             guest2WorkoutId: guest2WorkoutId,
-            routinePrescriptionOverwrite: nil,
+            routineSelectiveOverwrite: nil,
             wallEndedAt: wallEndedAt,
             pausedSec: pausedSec
         )
@@ -7327,6 +7343,7 @@ struct ActiveStrengthWorkoutView: View {
                         + "guestDataError=\(guestErr ?? "nil") guest2Err=\(guest2Err ?? "nil")"
                 )
                 #endif
+                restoreSessionCheckpointIfNeeded()
             }
         } catch is CancellationError {
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -7412,6 +7429,143 @@ struct ActiveStrengthWorkoutView: View {
             setsByExerciseId: cachedSets,
             sourceRoutineId: sourceStrengthRoutineId
         )
+    }
+
+    private func performedSetSnapshot(_ p: PerformedSet) -> ActiveWorkoutSessionCheckpoint.PerformedSetSnapshot {
+        ActiveWorkoutSessionCheckpoint.PerformedSetSnapshot(
+            reps: p.reps,
+            weight_kg: p.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rpe: p.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rest_sec: p.rest_sec,
+            configId: p.configId,
+            segmentsInRow: p.segmentsInRow,
+            weight_segments: p.weight_segments
+        )
+    }
+
+    private func setRowSnapshot(_ s: SetRow) -> ActiveWorkoutSessionCheckpoint.SetRowSnapshot {
+        ActiveWorkoutSessionCheckpoint.SetRowSnapshot(
+            id: s.id,
+            workout_exercise_id: s.workout_exercise_id,
+            set_number: s.set_number,
+            order_index: s.order_index,
+            reps: s.reps,
+            weight_kg: s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rpe: s.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rest_sec: s.rest_sec,
+            weight_segments: s.weight_segments
+        )
+    }
+
+    @MainActor
+    private func persistSessionCheckpoint() {
+        guard !exercises.isEmpty else { return }
+        let performedHost = performedSetsByExercise.mapValues { $0.map(performedSetSnapshot) }
+        let setsSnapshot = setsByExercise.mapValues { $0.map(setRowSnapshot) }
+        let restEpoch = restEndDateByExercise.mapValues { $0.timeIntervalSince1970 }
+        let strength = ActiveWorkoutSessionCheckpoint.StrengthPayload(
+            currentExerciseIndex: currentExerciseIndex,
+            currentSetIndex: currentSetIndex,
+            currentSetIndexByExercise: currentSetIndexByExercise,
+            performedSetsByExercise: performedHost,
+            setsByExercise: setsSnapshot,
+            restEndEpochByExercise: restEpoch,
+            isResting: isResting,
+            guestWorkoutId: dualGuestWorkoutId,
+            guest2WorkoutId: dualGuest2WorkoutId,
+            guestPerformedSetsByExercise: gPerformedSetsByExercise.mapValues { $0.map(performedSetSnapshot) },
+            guest2PerformedSetsByExercise: g2PerformedSetsByExercise.mapValues { $0.map(performedSetSnapshot) },
+            guestCurrentSetIndexByExercise: gCurrentSetIndexByExercise,
+            guest2CurrentSetIndexByExercise: g2CurrentSetIndexByExercise,
+            showCountdown: showCountdown
+        )
+        let entry = ActiveWorkoutSessionCheckpoint.Entry(
+            workoutId: workoutId,
+            kind: .strength,
+            savedAt: Date(),
+            sessionStartedAt: strengthWorkoutSessionStart,
+            accumulatedPausedSec: accumulatedPausedSeconds,
+            isSessionPaused: isSessionPaused,
+            pauseBeganAt: sessionPauseBegan,
+            strength: strength,
+            cardio: nil,
+            sport: nil
+        )
+        ActiveWorkoutSessionCheckpoint.store(entry)
+        persistProgramCacheSnapshot()
+    }
+
+    @MainActor
+    private func restoreSessionCheckpointIfNeeded() {
+        guard !didRestoreSessionCheckpoint else { return }
+        guard let entry = ActiveWorkoutSessionCheckpoint.load(),
+              entry.workoutId == workoutId,
+              entry.kind == .strength,
+              let strength = entry.strength
+        else { return }
+        didRestoreSessionCheckpoint = true
+
+        func restorePerformed(_ map: [Int: [ActiveWorkoutSessionCheckpoint.PerformedSetSnapshot]]) -> [Int: [PerformedSet]] {
+            map.mapValues { snaps in
+                snaps.map {
+                    PerformedSet(
+                        reps: $0.reps,
+                        weight_kg: $0.weight_kg.map { Decimal($0) },
+                        rpe: $0.rpe.map { Decimal($0) },
+                        rest_sec: $0.rest_sec,
+                        configId: $0.configId,
+                        segmentsInRow: $0.segmentsInRow,
+                        weight_segments: $0.weight_segments
+                    )
+                }
+            }
+        }
+
+        func restoreSets(_ map: [Int: [ActiveWorkoutSessionCheckpoint.SetRowSnapshot]]) -> [Int: [SetRow]] {
+            map.mapValues { rows in
+                rows.map {
+                    SetRow(
+                        id: $0.id,
+                        workout_exercise_id: $0.workout_exercise_id,
+                        set_number: $0.set_number,
+                        order_index: $0.order_index,
+                        reps: $0.reps,
+                        weight_kg: $0.weight_kg.map { Decimal($0) },
+                        rpe: $0.rpe.map { Decimal($0) },
+                        rest_sec: $0.rest_sec,
+                        weight_segments: $0.weight_segments,
+                        configId: $0.id,
+                        segmentsInRow: 1
+                    )
+                }
+            }
+        }
+
+        performedSetsByExercise = restorePerformed(strength.performedSetsByExercise)
+        gPerformedSetsByExercise = restorePerformed(strength.guestPerformedSetsByExercise)
+        g2PerformedSetsByExercise = restorePerformed(strength.guest2PerformedSetsByExercise)
+        if !strength.setsByExercise.isEmpty {
+            setsByExercise = restoreSets(strength.setsByExercise)
+        }
+        currentExerciseIndex = min(max(0, strength.currentExerciseIndex), max(0, exercises.count - 1))
+        currentSetIndex = strength.currentSetIndex
+        currentSetIndexByExercise = strength.currentSetIndexByExercise
+        gCurrentSetIndexByExercise = strength.guestCurrentSetIndexByExercise
+        g2CurrentSetIndexByExercise = strength.guest2CurrentSetIndexByExercise
+        isResting = strength.isResting
+        restEndDateByExercise = strength.restEndEpochByExercise.mapValues { Date(timeIntervalSince1970: $0) }
+        showCountdown = strength.showCountdown
+        strengthWorkoutSessionStart = entry.sessionStartedAt ?? strengthWorkoutSessionStart
+        accumulatedPausedSeconds = entry.accumulatedPausedSec
+        isSessionPaused = entry.isSessionPaused
+        sessionPauseBegan = entry.pauseBeganAt
+        pagerDisplayIndexHost = pagerAnchorExerciseIndex(for: currentExerciseIndex, lane: .host)
+        syncRestCountdownFromEndDate()
+    }
+
+    @MainActor
+    private func clearSessionCheckpoint() {
+        ActiveWorkoutSessionCheckpoint.clearIfWorkout(workoutId)
     }
 
     private func activeWorkoutNetworkStatusLabel() -> String {

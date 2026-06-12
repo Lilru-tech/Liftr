@@ -37,6 +37,14 @@ struct PetLog: Identifiable, Equatable {
                 return "Coins generated: +\(coins)"
             }
             return "Coins generated"
+        case "workout_pet_bonus":
+            if let message = log.details?["message"], !message.isEmpty {
+                return message
+            }
+            if let coins = log.details?["coins"], !coins.isEmpty {
+                return "Your pet helped you earn +\(coins) coins!"
+            }
+            return "Pet workout bonus"
         case "combat":
             let opponent = combatOpponentName(from: log.details)
             if log.details?["is_draw"] == "true" {

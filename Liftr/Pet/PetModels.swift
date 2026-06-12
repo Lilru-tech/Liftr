@@ -173,6 +173,51 @@ struct PetMarketItemRow: Codable, Identifiable, Equatable {
     var imageURL: URL? { PetImageURLBuilder.marketItemURL(path: imagePath) }
 }
 
+struct PetRarityConfigRow: Codable, Identifiable, Equatable {
+    let rarity: String
+    let displayName: String
+    let colorHex: String
+    let dropWeight: Int
+    let coinMultiplier: Double
+    let statMultiplier: Double
+    let sortOrder: Int
+
+    var id: String { rarity }
+
+    enum CodingKeys: String, CodingKey {
+        case rarity
+        case displayName = "display_name"
+        case colorHex = "color_hex"
+        case dropWeight = "drop_weight"
+        case coinMultiplier = "coin_multiplier"
+        case statMultiplier = "stat_multiplier"
+        case sortOrder = "sort_order"
+    }
+}
+
+struct PetTypeCatalogRow: Codable, Identifiable, Equatable {
+    let name: String
+    let displayName: String
+    let description: String
+    let imageEgg: String?
+
+    var id: String { name }
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case displayName = "display_name"
+        case description
+        case imageEgg = "image_egg"
+    }
+
+    var imageURL: URL? {
+        if let imageEgg, !imageEgg.isEmpty, let url = URL(string: imageEgg) {
+            return url
+        }
+        return PetImageURLBuilder.imageURL(petType: name, evolutionStage: "egg")
+    }
+}
+
 enum PetFoodItemType {
     static let all: [String] = ["food_baby", "food_kid", "food_teen", "food_adult", "food_elder"]
 

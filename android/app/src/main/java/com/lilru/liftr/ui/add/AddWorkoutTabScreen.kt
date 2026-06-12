@@ -1626,8 +1626,8 @@ fun AddWorkoutTabScreen(
         StrengthRoutineOverwriteBottomSheet(
             prompt = pend.prompt,
             onDismissRequest = { vm.dismissStrengthRoutineOverwrite() },
-            onOverwriteTemplate = { vm.confirmStrengthRoutineOverwrite(true) },
-            onNotNow = { vm.confirmStrengthRoutineOverwrite(false) }
+            onOverwriteTemplate = { selected -> vm.confirmStrengthRoutineOverwrite(selected) },
+            onNotNow = { vm.dismissStrengthRoutineOverwrite() }
         )
     }
     if (showClearStrengthDialog) {

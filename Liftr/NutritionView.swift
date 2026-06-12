@@ -407,6 +407,7 @@ final class NutritionViewModel: ObservableObject {
         guard userId != nil else { return }
         do {
             try await NutritionManager.completeMealPlanAsEaten(targetId: targetId)
+            await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             await load(userId: userId)
         } catch {
             self.error = NutritionManager.mealPlanErrorMessage(error)
@@ -2539,6 +2540,7 @@ private struct NutritionLogFoodSheet: View {
                         return
                     }
                 }
+                await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             }
             dismiss()
             onDone()
@@ -2739,6 +2741,7 @@ private struct NutritionIngredientEditorSheet: View {
                     name: name,
                     profile: profile
                 )
+                await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             case .edit(let ingredient):
                 _ = try await NutritionManager.updateIngredient(
                     ingredientId: ingredient.id,
@@ -2999,6 +3002,7 @@ private struct NutritionRecipeEditorSheet: View {
                     description: description,
                     lines: committedLines
                 )
+                await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             case .edit(let recipe):
                 _ = try await NutritionManager.updateRecipe(
                     recipeId: recipe.id,

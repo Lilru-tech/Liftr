@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.data.SupabaseResponseDecoding
 import com.lilru.liftr.domain.NutritionMealPlanInviteUi
 import com.lilru.liftr.domain.NutritionMealPlanItemUi
@@ -587,6 +588,7 @@ class NutritionViewModel(
                     BackendContracts.Rpc.COMPLETE_MEAL_PLAN_AS_EATEN,
                     buildJsonObject { put("p_target_id", targetId) }
                 )
+                CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
                 refresh()
             }.onFailure { e -> setErr(mealPlanErrorMessage(e)) }
         }
@@ -1601,6 +1603,7 @@ class NutritionViewModel(
                     }
                     supabase.from(BackendContracts.Tables.NUTRITION_DIARY_LOGS).insert(payload)
                 }
+                CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
                 dismissOverlay()
             }.onFailure { e ->
                 _uiState.update { it.copy(saving = false, error = e.message?.take(300)) }
@@ -1682,6 +1685,7 @@ class NutritionViewModel(
                             put(BackendContracts.NutritionColumns.IS_PUBLIC, false)
                         }
                     )
+                    CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
                     if (onNestedClose != null) {
                         dismissLogFoodNestedOverlay()
                         _uiState.update { it.copy(saving = false) }
@@ -1824,6 +1828,7 @@ class NutritionViewModel(
                             }
                         )
                     }
+                    CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
                     if (_uiState.value.overlay == NutritionOverlay.AddFood) {
                         dismissLogFoodNestedOverlay()
                         _uiState.update { it.copy(saving = false) }

@@ -45,6 +45,8 @@ object BackendContracts {
         const val PET_INSTANCES = "pet_instances"
         const val PET_INSTANCE_STATS = "pet_instance_stats"
         const val PET_MARKET_ITEMS = "pet_market_items"
+        const val PET_TYPES = "pet_types"
+        const val PET_RARITY_CONFIG = "pet_rarity_config"
         const val PET_LOGS = "pet_logs"
         const val USER_INVENTORY = "user_inventory"
         const val NUTRITION_INGREDIENTS = "nutrition_ingredients"

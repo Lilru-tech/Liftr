@@ -156,6 +156,24 @@ final class PetService {
         return nil
     }
 
+    func fetchRarityConfig() async throws -> [PetRarityConfigRow] {
+        let res = try await client
+            .from("pet_rarity_config")
+            .select()
+            .order("sort_order", ascending: true)
+            .execute()
+        return try JSONDecoder.supabase().decode([PetRarityConfigRow].self, from: res.data)
+    }
+
+    func fetchPetTypeCatalog() async throws -> [PetTypeCatalogRow] {
+        let res = try await client
+            .from("pet_types")
+            .select("name, display_name, description, image_egg")
+            .order("display_name", ascending: true)
+            .execute()
+        return try JSONDecoder.supabase().decode([PetTypeCatalogRow].self, from: res.data)
+    }
+
     func fetchPetLogs(offset: Int, limit: Int = 5) async throws -> [PetLog] {
         let res = try await client
             .from("pet_logs")

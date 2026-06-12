@@ -58,6 +58,16 @@ fun ActiveSportWorkoutScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val ongoingSubtitle = stringResource(R.string.active_sport_title)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                vm.saveSessionCheckpoint()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     DisposableEffect(ongoingSubtitle, workoutId) {
         OngoingWorkoutService.start(ctx, ongoingSubtitle, trackLocation = false, workoutId = workoutId)
         onDispose { OngoingWorkoutService.stop(ctx) }

@@ -6,6 +6,7 @@ struct PetDetailPopover: View {
 
     @State private var isEditingName = false
     @State private var draftName = ""
+    @State private var showStatCombatHelp = false
     @State private var now = Date()
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -77,6 +78,11 @@ struct PetDetailPopover: View {
             }
         }
         .onDisappear { viewModel.stopPolling() }
+        .sheet(isPresented: $showStatCombatHelp) {
+            PetStatCombatHelpSheet()
+                .presentationDetents([.medium, .large])
+                .presentationBackground(.clear)
+        }
     }
 
     @ViewBuilder
@@ -165,6 +171,17 @@ struct PetDetailPopover: View {
             }
 
             if let stats = viewModel.data?.stats {
+                HStack {
+                    Text("Stats")
+                        .font(.subheadline.weight(.semibold))
+                    Spacer()
+                    Button {
+                        showStatCombatHelp = true
+                    } label: {
+                        PetStatCombatHelpButton()
+                    }
+                    .buttonStyle(.plain)
+                }
                 statsGrid(stats)
             }
 

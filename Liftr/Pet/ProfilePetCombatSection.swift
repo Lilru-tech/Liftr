@@ -37,8 +37,20 @@ struct PetCombatComparisonStats: View {
     let attackerLevel: Int
     let defenderLevel: Int
 
+    @State private var showStatCombatHelp = false
+
     var body: some View {
         VStack(spacing: 8) {
+            HStack {
+                Spacer()
+                Button {
+                    showStatCombatHelp = true
+                } label: {
+                    PetStatCombatHelpButton()
+                }
+                .buttonStyle(.plain)
+            }
+
             HStack {
                 Text(attackerName)
                     .font(.caption2.weight(.semibold))
@@ -65,6 +77,11 @@ struct PetCombatComparisonStats: View {
             statCompareRow(label: "Resistance", left: attackerStats.resistance, right: defenderStats.resistance)
             statCompareRow(label: "Explore", left: attackerStats.exploration, right: defenderStats.exploration)
             statCompareRow(label: "Happiness", left: attackerStats.happiness, right: defenderStats.happiness)
+        }
+        .sheet(isPresented: $showStatCombatHelp) {
+            PetStatCombatHelpSheet()
+                .presentationDetents([.medium, .large])
+                .presentationBackground(.clear)
         }
     }
 

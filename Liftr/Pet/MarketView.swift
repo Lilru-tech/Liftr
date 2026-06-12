@@ -8,6 +8,7 @@ struct MarketView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedItem: PetMarketItemRow?
+    @State private var showPetHelp = false
 
     var body: some View {
         ZStack {
@@ -108,25 +109,40 @@ struct MarketView: View {
         .gradientBG()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                if purchaseFeedback.unseenMyItemsCount > 0 {
-                    NavigationLink {
-                        PetUserItemsView()
-                            .gradientBG()
+                HStack(spacing: 12) {
+                    Button {
+                        showPetHelp = true
                     } label: {
-                        Image(systemName: "bag.fill")
+                        Image(systemName: "info.circle")
                             .font(.title3)
                     }
-                    .badge(purchaseFeedback.unseenMyItemsCount)
-                } else {
-                    NavigationLink {
-                        PetUserItemsView()
-                            .gradientBG()
-                    } label: {
-                        Image(systemName: "bag.fill")
-                            .font(.title3)
+                    .accessibilityLabel("Pet information")
+
+                    if purchaseFeedback.unseenMyItemsCount > 0 {
+                        NavigationLink {
+                            PetUserItemsView()
+                                .gradientBG()
+                        } label: {
+                            Image(systemName: "bag.fill")
+                                .font(.title3)
+                        }
+                        .badge(purchaseFeedback.unseenMyItemsCount)
+                    } else {
+                        NavigationLink {
+                            PetUserItemsView()
+                                .gradientBG()
+                        } label: {
+                            Image(systemName: "bag.fill")
+                                .font(.title3)
+                        }
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showPetHelp) {
+            PetHelpSheet()
+                .presentationDetents([.medium, .large])
+                .presentationBackground(.clear)
         }
         .task {
             await coinManager.refreshBalance()

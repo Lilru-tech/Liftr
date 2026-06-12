@@ -12,7 +12,12 @@ import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ongoing.CardioLocationBridge
 import com.lilru.liftr.prefs.CardioGpsProfile
 import com.lilru.liftr.prefs.CardioGpsPreferences
+import com.lilru.liftr.data.LiftrSupabase
 import com.lilru.liftr.territory.TerritoryCaptureClient
+import com.lilru.liftr.workout.ActiveWorkoutCheckpointEntry
+import com.lilru.liftr.workout.ActiveWorkoutCheckpointKind
+import com.lilru.liftr.workout.ActiveWorkoutSessionCheckpoint
+import com.lilru.liftr.workout.CardioCheckpointPayload
 import com.lilru.liftr.ui.AppSnackbar
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -296,6 +301,7 @@ class ActiveCardioWorkoutViewModel(
                     isSessionRunning = false,
                     elapsedSec = 0
                 )
+                restoreCardioCheckpointIfNeeded()
             }.onFailure { e ->
                 Log.e(TAG, "load failed", e)
                 _ui.value = _ui.value.copy(
@@ -405,6 +411,7 @@ class ActiveCardioWorkoutViewModel(
                         }
                     }
                 }
+                clearCardioCheckpoint()
                 _ui.value = _ui.value.copy(finishing = false)
                 onDone()
             }.onFailure { e ->
@@ -439,6 +446,64 @@ class ActiveCardioWorkoutViewModel(
                 else -> buildJsonObject { }
             }
         }.getOrDefault(buildJsonObject { })
+    }
+
+    private var didRestoreCardioCheckpoint = false
+
+    fun saveSessionCheckpoint() {
+        val ctx = LiftrSupabase.appContext ?: return
+        val s = _ui.value
+        val routeSnapshot = synchronized(routePoints) {
+            routePoints.map { listOf(it.first, it.second) }
+        }
+        val payload = CardioCheckpointPayload(
+            elapsedSec = s.elapsedSec,
+            isSessionRunning = s.isSessionRunning,
+            distanceText = s.distanceText,
+            routePoints = routeSnapshot,
+            kmSplitCumulativeSec = s.kmSplitCumulativeSec,
+            timerMode = if (s.timerMode == CardioTimerMode.COUNTDOWN) "countdown" else "stopwatch",
+            remainingSec = 0,
+            initialTargetSec = s.targetDurationSec ?: 0,
+            gpsProfileRaw = s.gpsProfile.name.lowercase(),
+            showCountdown = true
+        )
+        ActiveWorkoutSessionCheckpoint.store(
+            ctx,
+            ActiveWorkoutCheckpointEntry(
+                workoutId = workoutId,
+                kind = ActiveWorkoutCheckpointKind.CARDIO,
+                savedAtEpochMs = System.currentTimeMillis(),
+                cardio = payload
+            )
+        )
+    }
+
+    fun clearCardioCheckpoint() {
+        LiftrSupabase.appContext?.let { ActiveWorkoutSessionCheckpoint.clearIfWorkout(it, workoutId) }
+    }
+
+    private fun restoreCardioCheckpointIfNeeded() {
+        if (didRestoreCardioCheckpoint) return
+        val ctx = LiftrSupabase.appContext ?: return
+        val entry = ActiveWorkoutSessionCheckpoint.load(ctx) ?: return
+        if (entry.workoutId != workoutId || entry.kind != ActiveWorkoutCheckpointKind.CARDIO) return
+        val cardio = entry.cardio ?: return
+        didRestoreCardioCheckpoint = true
+        synchronized(routePoints) {
+            routePoints.clear()
+            cardio.routePoints.forEach { pair ->
+                if (pair.size >= 2) routePoints.add(pair[0] to pair[1])
+            }
+        }
+        splitCumulativeSec.clear()
+        splitCumulativeSec.addAll(cardio.kmSplitCumulativeSec)
+        _ui.value = _ui.value.copy(
+            elapsedSec = cardio.elapsedSec,
+            isSessionRunning = cardio.isSessionRunning,
+            distanceText = cardio.distanceText,
+            kmSplitCumulativeSec = cardio.kmSplitCumulativeSec
+        )
     }
 }
 

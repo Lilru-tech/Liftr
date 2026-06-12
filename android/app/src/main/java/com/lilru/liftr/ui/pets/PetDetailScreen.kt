@@ -4,6 +4,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,7 +18,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -44,6 +50,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import com.lilru.liftr.R
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -63,6 +71,7 @@ import java.util.Locale
 
 private val FOOD_TYPES = listOf("food_baby", "food_kid", "food_teen", "food_adult", "food_elder")
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PetDetailScreen(
     vm: PetViewModel,
@@ -74,6 +83,8 @@ fun PetDetailScreen(
     val context = LocalContext.current
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableIntStateOf(0) }
+    var showStatCombatHelp by rememberSaveable { mutableStateOf(false) }
+    val statCombatHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     LaunchedEffect(Unit) {
         vm.load()
@@ -82,8 +93,9 @@ fun PetDetailScreen(
         vm.startPollingIfNeeded()
     }
 
+    Box(modifier = modifier.fillMaxSize()) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
@@ -141,7 +153,8 @@ fun PetDetailScreen(
                 onEvolve = { vm.confirmEvolution() },
                 onFeed = { vm.feed(it) },
                 energy = ui.data?.energy,
-                onOpenMarket = onOpenMarket
+                onOpenMarket = onOpenMarket,
+                onStatGuideClick = { showStatCombatHelp = true }
             )
             CollapsibleSection(title = "Arena Records", initiallyExpanded = false) {
                 ArenaRecordsSection(supabase)
@@ -177,6 +190,16 @@ fun PetDetailScreen(
 
         ui.error?.let {
             Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+
+        if (showStatCombatHelp) {
+            ModalBottomSheet(
+                onDismissRequest = { showStatCombatHelp = false },
+                sheetState = statCombatHelpSheetState
+            ) {
+                PetStatCombatHelpSheetContent(onClose = { showStatCombatHelp = false })
+            }
         }
     }
 }
@@ -287,7 +310,8 @@ private fun HatchedSection(
     onEvolve: () -> Unit,
     onFeed: (String) -> Unit,
     energy: ProfileEnergyWire? = null,
-    onOpenMarket: (() -> Unit)? = null
+    onOpenMarket: (() -> Unit)? = null,
+    onStatGuideClick: (() -> Unit)? = null
 ) {
     val req = xpRequired.coerceAtLeast(1)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -305,7 +329,20 @@ private fun HatchedSection(
             EnergyAndShortcutsCard(energy = it, onOpenMarket = onOpenMarket)
         }
         stats?.let {
-            CollapsibleSection(title = "Stats", initiallyExpanded = true) {
+            CollapsibleSection(
+                title = "Stats",
+                initiallyExpanded = true,
+                trailing = onStatGuideClick?.let { onClick ->
+                    {
+                        IconButton(onClick = onClick) {
+                            Icon(
+                                Icons.Filled.Info,
+                                contentDescription = stringResource(R.string.pet_stat_combat_info_content_description)
+                            )
+                        }
+                    }
+                }
+            ) {
                 StatsGrid(it)
             }
         }
@@ -351,6 +388,7 @@ private fun EnergyAndShortcutsCard(
 private fun CollapsibleSection(
     title: String,
     initiallyExpanded: Boolean,
+    trailing: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     var expanded by rememberSaveable { mutableStateOf(initiallyExpanded) }
@@ -366,18 +404,24 @@ private fun CollapsibleSection(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { expanded = !expanded },
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(title, fontWeight = FontWeight.SemiBold)
-                Icon(
-                    if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clickable { expanded = !expanded },
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(title, fontWeight = FontWeight.SemiBold)
+                    Icon(
+                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                trailing?.invoke()
             }
             if (expanded) {
                 content()

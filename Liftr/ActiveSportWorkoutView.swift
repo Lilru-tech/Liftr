@@ -4,8 +4,11 @@ import Supabase
 struct ActiveSportWorkoutView: View {
     let workoutId: Int
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var app: AppState
     @State private var showCountdown = true
+    @State private var didRestoreSportCheckpoint = false
+    @State private var sportCheckpointDebounceTask: Task<Void, Never>?
     @State private var isRunning = false
     @State private var elapsedSec: Int = 0
     @State private var remainingSec: Int = 0
@@ -381,6 +384,15 @@ struct ActiveSportWorkoutView: View {
         }
         .task {
             await loadSport()
+            await MainActor.run { restoreSportCheckpointIfNeeded() }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background || newPhase == .inactive {
+                persistSportCheckpoint()
+            }
+        }
+        .onChange(of: elapsedSec) { _, _ in
+            persistSportCheckpointDebounced()
         }
         .onChange(of: isRunning) { _, running in
             if running {
@@ -1118,6 +1130,7 @@ struct ActiveSportWorkoutView: View {
         for ex in group.exercises {
             completedHyroxExerciseIds.insert(ex.id)
         }
+        persistSportCheckpoint()
     }
 
     private func updateHyroxZoneScrollFade() {
@@ -1609,6 +1622,7 @@ struct ActiveSportWorkoutView: View {
             
             await MainActor.run {
                 isSaving = false
+                clearSportCheckpoint()
                 dismiss()
             }
         } catch {
@@ -1617,6 +1631,114 @@ struct ActiveSportWorkoutView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    @MainActor
+    private func persistSportCheckpointDebounced() {
+        sportCheckpointDebounceTask?.cancel()
+        sportCheckpointDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { persistSportCheckpoint() }
+        }
+    }
+
+    @MainActor
+    private func persistSportCheckpoint() {
+        let hyroxSnaps = hyroxExercises.map {
+            ActiveWorkoutSessionCheckpoint.SportHyroxExerciseSnapshot(
+                id: $0.id,
+                exercise_code: $0.exercise_code,
+                exercise_order: $0.exercise_order,
+                zone_order: $0.zone_order,
+                distance_m: $0.distance_m,
+                reps: $0.reps,
+                weight_kg: $0.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+                duration_sec: $0.duration_sec,
+                height_cm: $0.height_cm,
+                implement_count: $0.implement_count,
+                notes: $0.notes,
+                custom_display_name: $0.exercise_display_name
+            )
+        }
+        let sportPayload = ActiveWorkoutSessionCheckpoint.SportPayload(
+            elapsedSec: elapsedSec,
+            isSessionRunning: isRunning,
+            remainingSec: remainingSec,
+            initialTargetSec: initialTargetSec,
+            timerMode: mode == .countdown ? "countdown" : "stopwatch",
+            showCountdown: showCountdown,
+            hyroxExerciseIndex: currentHyroxExerciseIndex,
+            completedHyroxExerciseIds: Array(completedHyroxExerciseIds),
+            hyroxExercises: hyroxSnaps,
+            scoreForText: sportForm.scoreFor,
+            scoreAgainstText: sportForm.scoreAgainst,
+            matchResultRaw: sportForm.matchResult.rawValue,
+            matchScoreText: sportForm.matchScoreText,
+            locationText: sportForm.location,
+            sessionNotesText: sportForm.sessionNotes
+        )
+        let entry = ActiveWorkoutSessionCheckpoint.Entry(
+            workoutId: workoutId,
+            kind: .sport,
+            savedAt: Date(),
+            sessionStartedAt: nil,
+            accumulatedPausedSec: 0,
+            isSessionPaused: !isRunning,
+            pauseBeganAt: nil,
+            strength: nil,
+            cardio: nil,
+            sport: sportPayload
+        )
+        ActiveWorkoutSessionCheckpoint.store(entry)
+    }
+
+    @MainActor
+    private func restoreSportCheckpointIfNeeded() {
+        guard !didRestoreSportCheckpoint else { return }
+        guard let entry = ActiveWorkoutSessionCheckpoint.load(),
+              entry.workoutId == workoutId,
+              entry.kind == .sport,
+              let sport = entry.sport
+        else { return }
+        didRestoreSportCheckpoint = true
+        elapsedSec = sport.elapsedSec
+        isRunning = sport.isSessionRunning
+        remainingSec = sport.remainingSec
+        initialTargetSec = sport.initialTargetSec
+        showCountdown = sport.showCountdown
+        mode = sport.timerMode == "countdown" ? .countdown : .stopwatch
+        currentHyroxExerciseIndex = sport.hyroxExerciseIndex
+        completedHyroxExerciseIds = Set(sport.completedHyroxExerciseIds)
+        if !sport.hyroxExercises.isEmpty {
+            hyroxExercises = sport.hyroxExercises.map {
+                ActiveHyroxExercise(
+                    id: $0.id,
+                    exercise_code: $0.exercise_code,
+                    exercise_order: $0.exercise_order,
+                    zone_order: $0.zone_order,
+                    distance_m: $0.distance_m,
+                    reps: $0.reps,
+                    weight_kg: $0.weight_kg.map { Decimal($0) },
+                    duration_sec: $0.duration_sec,
+                    height_cm: $0.height_cm,
+                    implement_count: $0.implement_count,
+                    notes: $0.notes,
+                    exercise_display_name: $0.custom_display_name
+                )
+            }
+        }
+        sportForm.scoreFor = sport.scoreForText
+        sportForm.scoreAgainst = sport.scoreAgainstText
+        sportForm.matchResult = MatchResult(rawValue: sport.matchResultRaw) ?? .unfinished
+        sportForm.matchScoreText = sport.matchScoreText
+        sportForm.location = sport.locationText
+        sportForm.sessionNotes = sport.sessionNotesText
+    }
+
+    @MainActor
+    private func clearSportCheckpoint() {
+        ActiveWorkoutSessionCheckpoint.clearIfWorkout(workoutId)
     }
     
     private func parseIntField(_ text: String) -> Int? {

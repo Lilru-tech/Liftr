@@ -122,6 +122,18 @@ Paridad Add detallada (RPC, planned, competición, comentarios): [`android/ADD_W
 
 ---
 
+## F. Recuperación tras cierre / crash (checkpoint local)
+
+- [ ] **Fuerza**: completar varias series → forzar cierre de la app → al relanzar, alerta **Unfinished workout** con **Resume / Finish now / Discard**.
+- [ ] **Resume (fuerza)**: series completadas y posición de navegación restauradas; al **Finish** normal se borra el checkpoint.
+- [ ] **Discard**: no vuelve a aparecer el aviso en el siguiente arranque.
+- [ ] **Cardio**: tiempo transcurrido y (si aplica) ruta GPS restaurados tras **Resume**.
+- [ ] **Sport / Hyrox**: índice de estación y formulario de resumen restaurados tras **Resume**.
+- [ ] **Finish now** desde el aviso: el entreno queda guardado en servidor (o en cola offline en fuerza) y el checkpoint desaparece.
+- [ ] **Android**: con *Don't keep activities* o rotación, al volver al activo el progreso persiste (no reset a 0 en fuerza).
+
+---
+
 ## E. Cierre de sesión QA
 
 - [ ] Lista de **fallos** con: pasos, plataforma, `workoutId` si aplica, captura o logcat (`tag` relevante en Android).

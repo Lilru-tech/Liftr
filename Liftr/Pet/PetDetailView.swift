@@ -10,6 +10,7 @@ struct PetDetailView: View {
     @State private var selectedTab = "Inventory"
     @State private var statsExpanded = true
     @State private var recordsExpanded = false
+    @State private var showStatCombatHelp = false
     @State private var hasAppeared = false
 
     var body: some View {
@@ -84,6 +85,11 @@ struct PetDetailView: View {
             }
         }
         .gradientBG()
+        .sheet(isPresented: $showStatCombatHelp) {
+            PetStatCombatHelpSheet()
+                .presentationDetents([.medium, .large])
+                .presentationBackground(.clear)
+        }
         .task {
             await viewModel.load()
             await viewModel.reloadLogs()
@@ -230,6 +236,13 @@ struct PetDetailView: View {
             if let stats = viewModel.data?.stats {
                 collapsibleSection(title: "Stats", isExpanded: $statsExpanded) {
                     statsGrid(stats)
+                } trailing: {
+                    Button {
+                        showStatCombatHelp = true
+                    } label: {
+                        PetStatCombatHelpButton()
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 
@@ -273,20 +286,25 @@ struct PetDetailView: View {
     }
 
     @ViewBuilder
-    private func collapsibleSection<Content: View>(
+    private func collapsibleSection<Content: View, Trailing: View>(
         title: String,
         isExpanded: Binding<Bool>,
-        @ViewBuilder content: @escaping () -> Content
+        @ViewBuilder content: @escaping () -> Content,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() }
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             DisclosureGroup(isExpanded: isExpanded) {
                 content()
                     .padding(.top, 8)
             } label: {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 0)
+                    trailing()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .tint(.accentColor)
         }
