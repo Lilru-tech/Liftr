@@ -114,6 +114,12 @@ final class CoinManager: ObservableObject {
         case "earned_follower": return "New follower"
         case "achievement_unlocked": return "Achievement"
         case "workout_logged": return "Workout logged"
+        case "workout_pet_training_bonus": return "Pet workout bonus"
+        case "workout_coin_doubling_v1": return "Workout reward boost"
+        case "workout_economy_rebalance_v1": return "Workout economy update"
+        case "pet_passive_economy_rebalance_v1": return "Pet passive rebalance"
+        case "workout_economy_reduction_30pct_v1": return "Workout economy adjustment"
+        case "pet_passive_economy_reduction_30pct_v1": return "Pet passive adjustment"
         case "weekly_goal_perfect_week": return "Perfect week"
         case "workout_consistency_streak": return "7-day streak"
         case "competition_bet_escrow": return "Competition stake"
@@ -124,6 +130,10 @@ final class CoinManager: ObservableObject {
         case "pet_market_purchase": return "Pet shop purchase"
         case "pet_egg_reroll": return "Egg reroll"
         case "pet_rarity_upgrade": return "Pet rarity upgrade"
+        case "nutrition_ingredient_logged": return "Food logged"
+        case "nutrition_recipe_logged": return "Recipe logged"
+        case "nutrition_ingredient_created": return "Ingredient created"
+        case "nutrition_recipe_created": return "Recipe created"
         default:
             if actionType.isEmpty { return "Coins earned" }
             return actionType

@@ -23,7 +23,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
-internal data class StrengthProgramSet(
+data class StrengthProgramSet(
     val setNumber: Int,
     val rowOrder: Int = setNumber,
     val reps: Int?,
@@ -34,7 +34,7 @@ internal data class StrengthProgramSet(
     val weightSegments: List<StrengthSegmentPayload>? = null
 )
 
-internal data class StrengthProgramItem(
+data class StrengthProgramItem(
     val exerciseId: Long,
     val orderIndex: Int,
     val notes: String?,
@@ -58,8 +58,187 @@ data class StrengthRoutineOverwriteDiffLine(
 data class StrengthRoutineOverwritePrompt(
     val routineId: Long,
     val routineName: String,
-    val diffLines: List<StrengthRoutineOverwriteDiffLine>
+    val diffLines: List<StrengthRoutineOverwriteDiffLine>,
+    val routineBaselineItems: List<StrengthProgramItem>
 )
+
+fun actionableOverwriteDiffLineIds(lines: List<StrengthRoutineOverwriteDiffLine>): Set<String> =
+    lines.filter { it.fieldTitle != "Sets" }.map { it.id }.toSet()
+
+private fun deepCopyProgramSet(s: StrengthProgramSet): StrengthProgramSet =
+    s.copy(weightSegments = s.weightSegments?.map { it.copy() })
+
+private fun deepCopyProgramItem(item: StrengthProgramItem): StrengthProgramItem =
+    item.copy(sets = item.sets.map { deepCopyProgramSet(it) })
+
+private fun renumberExpandedSets(sets: List<StrengthProgramSet>): List<StrengthProgramSet> =
+    sets.sortedBy { it.setNumber }.mapIndexed { idx, s ->
+        s.copy(setNumber = idx + 1, rowOrder = idx + 1)
+    }
+
+fun collapseStrengthProgramSetsForStorage(sets: List<StrengthProgramSet>): List<StrengthProgramSet> {
+    val sorted = sets.sortedBy { it.setNumber }
+    if (sorted.isEmpty()) return emptyList()
+    val out = mutableListOf<StrengthProgramSet>()
+    var i = 0
+    while (i < sorted.size) {
+        var count = 1
+        while (i + count < sorted.size &&
+            !strengthProgramSetPrescriptionDiffers(sorted[i], sorted[i + count])
+        ) {
+            count += 1
+        }
+        val template = sorted[i]
+        out.add(
+            template.copy(
+                setNumber = count,
+                rowOrder = out.size + 1,
+                weightSegments = template.weightSegments?.map { it.copy() }
+            )
+        )
+        i += count
+    }
+    return out
+}
+
+fun collapseStrengthProgramItemsForStorage(items: List<StrengthProgramItem>): List<StrengthProgramItem> =
+    items.sortedBy { it.orderIndex }.map { item ->
+        item.copy(sets = collapseStrengthProgramSetsForStorage(item.sets))
+    }
+
+private fun overwriteDiffLineApplicationRank(fieldTitle: String): Int = when (fieldTitle) {
+    "Removed exercise" -> 0
+    "Added exercise" -> 1
+    "Exercise" -> 2
+    "Removed set" -> 3
+    "Added set" -> 4
+    "Reps" -> 10
+    "Weight" -> 11
+    "RPE" -> 12
+    "Rest" -> 13
+    "Drop steps" -> 14
+    "Set notes" -> 15
+    "Prescription" -> 100
+    else -> 50
+}
+
+private fun exerciseIndexInMerged(merged: List<StrengthProgramItem>, orderIndex: Int): Int? =
+    merged.indexOfFirst { it.orderIndex == orderIndex }.takeIf { it >= 0 }
+
+private fun sortedSetsForMerge(sets: List<StrengthProgramSet>): List<StrengthProgramSet> =
+    sets.sortedBy { it.setNumber }
+
+private fun applyOverwriteDiffLine(
+    line: StrengthRoutineOverwriteDiffLine,
+    merged: MutableList<StrengthProgramItem>,
+    proposedExpanded: List<StrengthProgramItem>
+) {
+    when (line.fieldTitle) {
+        "Prescription" -> return
+        "Removed exercise" -> {
+            val idx = exerciseIndexInMerged(merged, line.exerciseOrderIndex) ?: return
+            merged.removeAt(idx)
+            merged.forEachIndexed { offset, item ->
+                merged[offset] = deepCopyProgramItem(item).copy(orderIndex = offset + 1)
+            }
+        }
+        "Added exercise" -> {
+            val src = proposedExpanded.firstOrNull { it.orderIndex == line.exerciseOrderIndex } ?: return
+            merged.add(deepCopyProgramItem(src))
+            merged.sortBy { it.orderIndex }
+        }
+        "Exercise" -> {
+            val idx = exerciseIndexInMerged(merged, line.exerciseOrderIndex) ?: return
+            val src = proposedExpanded.firstOrNull { it.orderIndex == line.exerciseOrderIndex } ?: return
+            merged[idx] = deepCopyProgramItem(src)
+        }
+        "Removed set" -> {
+            val exIdx = exerciseIndexInMerged(merged, line.exerciseOrderIndex) ?: return
+            if (line.setNumber <= 0) return
+            val sets = sortedSetsForMerge(merged[exIdx].sets).toMutableList()
+            if (line.setNumber > sets.size) return
+            sets.removeAt(line.setNumber - 1)
+            merged[exIdx] = merged[exIdx].copy(sets = renumberExpandedSets(sets))
+        }
+        "Added set" -> {
+            val exIdx = exerciseIndexInMerged(merged, line.exerciseOrderIndex) ?: return
+            val propEx = proposedExpanded.firstOrNull { it.orderIndex == line.exerciseOrderIndex } ?: return
+            if (line.setNumber <= 0) return
+            val propSets = sortedSetsForMerge(propEx.sets)
+            if (line.setNumber > propSets.size) return
+            val newSet = deepCopyProgramSet(propSets[line.setNumber - 1])
+            val sets = sortedSetsForMerge(merged[exIdx].sets).toMutableList()
+            when {
+                line.setNumber - 1 == sets.size -> sets.add(newSet)
+                line.setNumber - 1 < sets.size -> sets.add(line.setNumber - 1, newSet)
+                else -> return
+            }
+            merged[exIdx] = merged[exIdx].copy(sets = renumberExpandedSets(sets))
+        }
+        "Reps", "Weight", "RPE", "Rest", "Set notes", "Drop steps" -> {
+            val exIdx = exerciseIndexInMerged(merged, line.exerciseOrderIndex) ?: return
+            val propEx = proposedExpanded.firstOrNull { it.orderIndex == line.exerciseOrderIndex } ?: return
+            if (line.setNumber <= 0) return
+            val propSets = sortedSetsForMerge(propEx.sets)
+            if (line.setNumber > propSets.size) return
+            val propSet = propSets[line.setNumber - 1]
+            val sets = sortedSetsForMerge(merged[exIdx].sets).toMutableList()
+            if (line.setNumber > sets.size) return
+            val target = sets[line.setNumber - 1]
+            val updated = when (line.fieldTitle) {
+                "Reps" -> target.copy(reps = propSet.reps)
+                "Weight" -> target.copy(weightKg = propSet.weightKg)
+                "RPE" -> target.copy(rpe = propSet.rpe)
+                "Rest" -> target.copy(restSec = propSet.restSec)
+                "Set notes" -> target.copy(notes = propSet.notes)
+                "Drop steps" -> target.copy(weightSegments = propSet.weightSegments?.map { it.copy() })
+                else -> target
+            }
+            sets[line.setNumber - 1] = updated
+            merged[exIdx] = merged[exIdx].copy(sets = sets)
+        }
+    }
+}
+
+fun mergeStrengthRoutineWithSelectedChanges(
+    routine: List<StrengthProgramItem>,
+    proposed: List<StrengthProgramItem>,
+    selectedLineIds: Set<String>
+): List<StrengthProgramItem> {
+    if (selectedLineIds.contains("prescription-fallback")) {
+        return collapseStrengthProgramItemsForStorage(
+            expandedStrengthProgramItemsForCompare(normalizedProgramItemsForCompare(proposed))
+        )
+    }
+    val merged = expandedStrengthProgramItemsForCompare(
+        normalizedProgramItemsForCompare(routine)
+    ).map { deepCopyProgramItem(it) }.toMutableList()
+    val proposedExpanded = expandedStrengthProgramItemsForCompare(
+        normalizedProgramItemsForCompare(proposed)
+    )
+    val sorted = buildStrengthRoutineOverwriteDiffLines(proposed, routine) { "" }
+        .filter { it.fieldTitle != "Sets" && selectedLineIds.contains(it.id) }
+        .sortedWith(
+            compareBy<StrengthRoutineOverwriteDiffLine> { overwriteDiffLineApplicationRank(it.fieldTitle) }
+                .thenBy { it.exerciseOrderIndex }
+                .thenBy { it.setNumber }
+                .thenBy { it.id }
+        )
+    for (line in sorted) {
+        applyOverwriteDiffLine(line, merged, proposedExpanded)
+    }
+    merged.forEachIndexed { offset, item ->
+        merged[offset] = deepCopyProgramItem(item).copy(orderIndex = offset + 1)
+    }
+    return collapseStrengthProgramItemsForStorage(merged)
+}
+
+fun mergedStrengthRoutineProgramItemsForOverwrite(
+    prompt: StrengthRoutineOverwritePrompt,
+    proposed: List<StrengthProgramItem>,
+    selectedLineIds: Set<String>
+): List<StrengthProgramItem> =
+    mergeStrengthRoutineWithSelectedChanges(prompt.routineBaselineItems, proposed, selectedLineIds)
 
 data class StrengthSegmentPayload(val reps: Int, val weightKg: Double)
 
@@ -693,7 +872,8 @@ private fun strengthRoutineOverwritePromptIfContentDiffers(
         StrengthRoutineOverwritePrompt(
             routineId = row.id,
             routineName = row.name,
-            diffLines = diff
+            diffLines = diff,
+            routineBaselineItems = normalizedRoutine
         )
     )
 }
@@ -782,8 +962,19 @@ suspend fun applyStrengthRoutinePrescriptionUpdate(
     exercises: List<StrengthExerciseDraft>
 ) {
     val normalized = normalizedSupersetDrafts(exercises)
-    val payloadItems = buildStrengthPayloadItemsForRoutineUpdate(normalized)
-    val contentHash = strengthRoutineContentFingerprintFromDrafts(normalized)
+    val items = strengthProgramItemsFromDrafts(normalized) ?: error("No exercises to save.")
+    applyStrengthRoutinePrescriptionUpdateFromProgramItems(supabase, userId, routineId, items)
+}
+
+suspend fun applyStrengthRoutinePrescriptionUpdateFromProgramItems(
+    supabase: SupabaseClient,
+    userId: String,
+    routineId: Long,
+    items: List<StrengthProgramItem>
+) {
+    if (items.isEmpty()) error("No exercises to save.")
+    val sortedItems = items.sortedBy { it.orderIndex }
+    val contentHash = strengthRoutineContentFingerprintFromItems(sortedItems)
 
     val existingRes = supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES).select(
         columns = Columns.raw("id")
@@ -804,18 +995,15 @@ suspend fun applyStrengthRoutinePrescriptionUpdate(
         filter { eq("routine_id", routineId) }
     }
 
-    for ((exerciseIndex, pair) in payloadItems.withIndex()) {
-        val exercise = pair.first
-        val eid = exercise.exerciseId ?: error("Missing exercise_id")
+    for ((exerciseIndex, item) in sortedItems.withIndex()) {
         val routineExPayload = buildJsonObject {
             put("routine_id", routineId)
-            put("exercise_id", eid)
+            put("exercise_id", item.exerciseId)
             put("order_index", exerciseIndex + 1)
-            if (exercise.notes.isNotBlank()) put("notes", JsonPrimitive(exercise.notes.trim()))
-            if (exercise.customName.isNotBlank()) {
-                put("custom_name", JsonPrimitive(exercise.customName.trim()))
-            }
-            applyRoutineExerciseSupersetFields(exercise)
+            item.notes?.takeIf { it.isNotBlank() }?.let { put("notes", JsonPrimitive(it.trim())) }
+            item.customName?.takeIf { it.isNotBlank() }?.let { put("custom_name", JsonPrimitive(it.trim())) }
+            item.supersetGroupId?.let { put("superset_group_id", JsonPrimitive(it)) }
+            item.supersetPosition?.let { put("superset_position", it) }
         }
         supabase.from(BackendContracts.Tables.STRENGTH_ROUTINE_EXERCISES).insert(routineExPayload) { }
     }
@@ -829,8 +1017,8 @@ suspend fun applyStrengthRoutinePrescriptionUpdate(
     val insertedRows = parseRoutineExerciseRows(insertedRes.data)
 
     insertedRows.forEachIndexed { index, row ->
-        val validSets = payloadItems.getOrNull(index)?.second ?: return@forEachIndexed
-        for (set in validSets) {
+        val itemSets = sortedItems.getOrNull(index)?.sets ?: return@forEachIndexed
+        for (set in itemSets) {
             val setPayload = buildJsonObject {
                 put("routine_exercise_id", row.id)
                 put("set_number", set.setNumber.coerceIn(1, 99))
@@ -857,6 +1045,17 @@ suspend fun applyStrengthRoutinePrescriptionUpdate(
             eq("user_id", userId)
         }
     }
+}
+
+suspend fun applySelectiveStrengthRoutineOverwrite(
+    supabase: SupabaseClient,
+    userId: String,
+    prompt: StrengthRoutineOverwritePrompt,
+    proposed: List<StrengthProgramItem>,
+    selectedLineIds: Set<String>
+) {
+    val merged = mergedStrengthRoutineProgramItemsForOverwrite(prompt, proposed, selectedLineIds)
+    applyStrengthRoutinePrescriptionUpdateFromProgramItems(supabase, userId, prompt.routineId, merged)
 }
 
 private data class RoutineExerciseRowParsed(val id: Long)

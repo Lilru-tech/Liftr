@@ -17,8 +17,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.filled.ShoppingBag
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
@@ -42,7 +45,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import com.lilru.liftr.R
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -70,6 +75,8 @@ fun MarketScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val unseenMyItemsCount by PetMarketPurchaseFeedback.unseenMyItemsCount.collectAsStateWithLifecycle()
     var selected by remember { mutableStateOf<PetMarketItemWire?>(null) }
+    var showPetHelp by remember { mutableStateOf(false) }
+    val petHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val backgroundTheme = LiftrPreferences.backgroundTheme(LocalContext.current.applicationContext)
 
     Box(
@@ -89,6 +96,12 @@ fun MarketScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { showPetHelp = true }) {
+                            Icon(
+                                imageVector = Icons.Filled.Info,
+                                contentDescription = stringResource(R.string.pet_help_info_content_description)
+                            )
+                        }
                         IconButton(onClick = {
                             PetMarketPurchaseFeedback.clearBadge()
                             onOpenMyItems()
@@ -195,6 +208,18 @@ fun MarketScreen(
                         item { Box(modifier = Modifier.height(20.dp)) }
                     }
                 }
+            }
+        }
+
+        if (showPetHelp) {
+            ModalBottomSheet(
+                onDismissRequest = { showPetHelp = false },
+                sheetState = petHelpSheetState
+            ) {
+                PetHelpSheetContent(
+                    supabase = supabase,
+                    onClose = { showPetHelp = false }
+                )
             }
         }
 

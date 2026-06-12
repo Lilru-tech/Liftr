@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -32,6 +33,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -101,7 +106,7 @@ private fun iconForOverwriteField(title: String): ImageVector = when (title) {
 fun StrengthRoutineOverwriteBottomSheet(
     prompt: StrengthRoutineOverwritePrompt,
     onDismissRequest: () -> Unit,
-    onOverwriteTemplate: () -> Unit,
+    onOverwriteTemplate: (Set<String>) -> Unit,
     onNotNow: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -123,17 +128,24 @@ fun StrengthRoutineOverwriteBottomSheet(
 @Composable
 private fun StrengthRoutineOverwriteSheetContent(
     prompt: StrengthRoutineOverwritePrompt,
-    onOverwriteTemplate: () -> Unit,
+    onOverwriteTemplate: (Set<String>) -> Unit,
     onNotNow: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val actionableIds = remember(prompt) { actionableOverwriteDiffLineIds(prompt.diffLines) }
+    var selectedIds by remember(prompt) { mutableStateOf(actionableIds) }
+    val selectedCount = selectedIds.count { actionableIds.contains(it) }
     val groups = buildOverwriteDiffGroups(prompt.diffLines)
-    val changeCount = prompt.diffLines.size
     val exCount = prompt.diffLines.map { it.exerciseOrderIndex }.toSet().size
-    val summary = if (exCount == 1) {
-        "$changeCount change · 1 exercise"
-    } else {
-        "$changeCount changes · $exCount exercises"
+    val summary = when {
+        selectedCount == actionableIds.size && exCount == 1 ->
+            "$selectedCount change · 1 exercise"
+        selectedCount == actionableIds.size ->
+            "$selectedCount changes · $exCount exercises"
+        exCount == 1 ->
+            "$selectedCount of ${actionableIds.size} changes · 1 exercise"
+        else ->
+            "$selectedCount of ${actionableIds.size} changes · $exCount exercises"
     }
 
     LazyColumn(
@@ -224,7 +236,19 @@ private fun StrengthRoutineOverwriteSheetContent(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             setGroup.lines.forEach { line ->
-                                OverwriteDiffRow(line)
+                                OverwriteDiffRow(
+                                    line = line,
+                                    isSelectable = line.fieldTitle != "Sets",
+                                    checked = selectedIds.contains(line.id),
+                                    onCheckedChange = { enabled ->
+                                        if (line.fieldTitle == "Sets") return@OverwriteDiffRow
+                                        selectedIds = if (enabled) {
+                                            selectedIds + line.id
+                                        } else {
+                                            selectedIds - line.id
+                                        }
+                                    }
+                                )
                             }
                         }
                         if (idx < exGroup.setGroups.lastIndex) {
@@ -240,10 +264,13 @@ private fun StrengthRoutineOverwriteSheetContent(
             HorizontalDivider()
             Spacer(Modifier.height(12.dp))
             Button(
-                onClick = onOverwriteTemplate,
-                modifier = Modifier.fillMaxWidth()
+                onClick = { onOverwriteTemplate(selectedIds.intersect(actionableIds)) },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = selectedCount > 0
             ) {
-                Text("Overwrite template")
+                Text(
+                    if (selectedCount == 1) "Apply 1 change" else "Apply $selectedCount changes"
+                )
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
@@ -258,7 +285,12 @@ private fun StrengthRoutineOverwriteSheetContent(
 }
 
 @Composable
-private fun OverwriteDiffRow(line: StrengthRoutineOverwriteDiffLine) {
+private fun OverwriteDiffRow(
+    line: StrengthRoutineOverwriteDiffLine,
+    isSelectable: Boolean,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -269,6 +301,14 @@ private fun OverwriteDiffRow(line: StrengthRoutineOverwriteDiffLine) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.Top
     ) {
+        if (isSelectable) {
+            Checkbox(
+                checked = checked,
+                onCheckedChange = onCheckedChange
+            )
+        } else {
+            Spacer(Modifier.size(48.dp))
+        }
         Icon(
             imageVector = iconForOverwriteField(line.fieldTitle),
             contentDescription = null,

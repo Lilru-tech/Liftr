@@ -620,15 +620,15 @@ struct AddWorkoutSheet: View {
         .sheet(item: $strengthRoutineOverwritePrompt) { prompt in
             StrengthRoutineOverwriteConfirmSheet(
                 prompt: prompt,
-                onUpdate: {
+                onApply: { selectedLineIds in
                     let p = prompt
                     strengthRoutineOverwritePrompt = nil
-                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, updateRoutine: true) }
+                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, selectedLineIds: selectedLineIds) }
                 },
                 onNotNow: {
                     let p = prompt
                     strengthRoutineOverwritePrompt = nil
-                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, updateRoutine: false) }
+                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, selectedLineIds: []) }
                 }
             )
             .presentationSizing(.fitted)
@@ -1860,7 +1860,7 @@ struct AddWorkoutSheet: View {
             try await performSaveWorkoutAndRoutine(
                 replacingStrengthRoutineId: rid,
                 replacingHyroxRoutineId: nil,
-                strengthRoutinePrescriptionOverwrite: nil
+                strengthRoutineSelectiveOverwrite: nil
             )
         } catch {
             self.error = error.localizedDescription
@@ -1876,7 +1876,7 @@ struct AddWorkoutSheet: View {
             try await performSaveWorkoutAndRoutine(
                 replacingStrengthRoutineId: nil,
                 replacingHyroxRoutineId: rid,
-                strengthRoutinePrescriptionOverwrite: nil
+                strengthRoutineSelectiveOverwrite: nil
             )
         } catch {
             self.error = error.localizedDescription
@@ -1885,7 +1885,7 @@ struct AddWorkoutSheet: View {
 
     private func saveAfterStrengthRoutineOverwriteDecision(
         prompt: StrengthRoutineOverwritePrompt,
-        updateRoutine: Bool
+        selectedLineIds: Set<String>
     ) async {
         let exercisesCopy = pendingStrengthRoutineOverwriteExercises
         await MainActor.run { pendingStrengthRoutineOverwriteExercises = [] }
@@ -1894,13 +1894,18 @@ struct AddWorkoutSheet: View {
         loading = true
         defer { loading = false }
         do {
-            let overwrite: (routineId: Int64, exercises: [EditableExercise])? = updateRoutine
-                ? (prompt.routineId, exercisesCopy)
-                : nil
+            let overwrite: (prompt: StrengthRoutineOverwritePrompt, proposed: [StrengthProgramItem], selectedLineIds: Set<String>)? =
+                selectedLineIds.isEmpty
+                ? nil
+                : (
+                    prompt,
+                    strengthProgramItems(from: exercisesCopy),
+                    selectedLineIds
+                )
             try await performSaveWorkoutAndRoutine(
                 replacingStrengthRoutineId: nil,
                 replacingHyroxRoutineId: nil,
-                strengthRoutinePrescriptionOverwrite: overwrite
+                strengthRoutineSelectiveOverwrite: overwrite
             )
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
@@ -2049,7 +2054,11 @@ struct AddWorkoutSheet: View {
     private func performSaveWorkoutAndRoutine(
         replacingStrengthRoutineId: Int64?,
         replacingHyroxRoutineId: Int64? = nil,
-        strengthRoutinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])? = nil
+        strengthRoutineSelectiveOverwrite: (
+            prompt: StrengthRoutineOverwritePrompt,
+            proposed: [StrengthProgramItem],
+            selectedLineIds: Set<String>
+        )? = nil
     ) async throws {
         let client = SupabaseManager.shared.client
         let session = try await client.auth.session
@@ -2286,13 +2295,14 @@ struct AddWorkoutSheet: View {
                     }
                 }
             }
-            if let o = strengthRoutinePrescriptionOverwrite {
+            if let o = strengthRoutineSelectiveOverwrite {
                 do {
-                    try await applyStrengthRoutinePrescriptionUpdate(
+                    try await applySelectiveStrengthRoutineOverwrite(
                         client: client,
                         userId: userId,
-                        routineId: o.routineId,
-                        exercises: o.exercises
+                        prompt: o.prompt,
+                        proposed: o.proposed,
+                        selectedLineIds: o.selectedLineIds
                     )
                     routineSaveSuffix += " Routine template updated."
                 } catch {

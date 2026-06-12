@@ -221,8 +221,250 @@ struct StrengthRoutineOverwritePrompt: Equatable, Identifiable {
     let routineId: Int64
     let routineName: String
     let diffLines: [StrengthRoutineOverwriteDiffLine]
+    let routineBaselineItems: [StrengthProgramItem]
 
     var id: Int64 { routineId }
+}
+
+func actionableOverwriteDiffLineIds(from lines: [StrengthRoutineOverwriteDiffLine]) -> Set<String> {
+    Set(lines.filter { $0.fieldTitle != "Sets" }.map(\.id))
+}
+
+private func deepCopyProgramSet(_ s: StrengthProgramSet) -> StrengthProgramSet {
+    StrengthProgramSet(
+        setNumber: s.setNumber,
+        rowOrder: s.rowOrder,
+        reps: s.reps,
+        weightKg: s.weightKg,
+        rpe: s.rpe,
+        restSec: s.restSec,
+        notes: s.notes,
+        weightSegments: s.weightSegments?.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weightKg) }
+    )
+}
+
+private func deepCopyProgramItem(_ item: StrengthProgramItem) -> StrengthProgramItem {
+    StrengthProgramItem(
+        exerciseId: item.exerciseId,
+        orderIndex: item.orderIndex,
+        notes: item.notes,
+        customName: item.customName,
+        supersetGroupId: item.supersetGroupId,
+        supersetPosition: item.supersetPosition,
+        sets: item.sets.map(deepCopyProgramSet)
+    )
+}
+
+private func renumberExpandedSets(_ sets: [StrengthProgramSet]) -> [StrengthProgramSet] {
+    sets.sorted { $0.setNumber < $1.setNumber }.enumerated().map { idx, s in
+        StrengthProgramSet(
+            setNumber: idx + 1,
+            rowOrder: idx + 1,
+            reps: s.reps,
+            weightKg: s.weightKg,
+            rpe: s.rpe,
+            restSec: s.restSec,
+            notes: s.notes,
+            weightSegments: s.weightSegments?.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weightKg) }
+        )
+    }
+}
+
+func collapseStrengthProgramSetsForStorage(_ sets: [StrengthProgramSet]) -> [StrengthProgramSet] {
+    let sorted = sets.sorted { $0.setNumber < $1.setNumber }
+    guard !sorted.isEmpty else { return [] }
+    var out: [StrengthProgramSet] = []
+    var i = 0
+    while i < sorted.count {
+        var count = 1
+        while i + count < sorted.count,
+              !strengthProgramSetPrescriptionDiffers(proposed: sorted[i], routine: sorted[i + count]) {
+            count += 1
+        }
+        let template = sorted[i]
+        out.append(
+            StrengthProgramSet(
+                setNumber: count,
+                rowOrder: out.count + 1,
+                reps: template.reps,
+                weightKg: template.weightKg,
+                rpe: template.rpe,
+                restSec: template.restSec,
+                notes: template.notes,
+                weightSegments: template.weightSegments?.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weightKg) }
+            )
+        )
+        i += count
+    }
+    return out
+}
+
+func collapseStrengthProgramItemsForStorage(_ items: [StrengthProgramItem]) -> [StrengthProgramItem] {
+    items.sorted { $0.orderIndex < $1.orderIndex }.map { item in
+        StrengthProgramItem(
+            exerciseId: item.exerciseId,
+            orderIndex: item.orderIndex,
+            notes: item.notes,
+            customName: item.customName,
+            supersetGroupId: item.supersetGroupId,
+            supersetPosition: item.supersetPosition,
+            sets: collapseStrengthProgramSetsForStorage(item.sets)
+        )
+    }
+}
+
+private func overwriteDiffLineApplicationRank(_ fieldTitle: String) -> Int {
+    switch fieldTitle {
+    case "Removed exercise": return 0
+    case "Added exercise": return 1
+    case "Exercise": return 2
+    case "Removed set": return 3
+    case "Added set": return 4
+    case "Reps": return 10
+    case "Weight": return 11
+    case "RPE": return 12
+    case "Rest": return 13
+    case "Drop steps": return 14
+    case "Set notes": return 15
+    case "Prescription": return 100
+    default: return 50
+    }
+}
+
+private func exerciseIndexInMerged(_ merged: [StrengthProgramItem], orderIndex: Int) -> Int? {
+    merged.firstIndex { $0.orderIndex == orderIndex }
+}
+
+private func sortedSetsForMerge(_ sets: [StrengthProgramSet]) -> [StrengthProgramSet] {
+    sets.sorted { $0.setNumber < $1.setNumber }
+}
+
+private func applyOverwriteDiffLine(
+    _ line: StrengthRoutineOverwriteDiffLine,
+    merged: inout [StrengthProgramItem],
+    proposedExpanded: [StrengthProgramItem]
+) {
+    switch line.fieldTitle {
+    case "Prescription":
+        return
+    case "Removed exercise":
+        guard let idx = exerciseIndexInMerged(merged, orderIndex: line.exerciseOrderIndex) else { return }
+        merged.remove(at: idx)
+        merged = merged.enumerated().map { offset, item in
+            var copy = deepCopyProgramItem(item)
+            copy.orderIndex = offset + 1
+            return copy
+        }
+    case "Added exercise":
+        guard let src = proposedExpanded.first(where: { $0.orderIndex == line.exerciseOrderIndex }) else { return }
+        merged.append(deepCopyProgramItem(src))
+        merged.sort { $0.orderIndex < $1.orderIndex }
+    case "Exercise":
+        guard let idx = exerciseIndexInMerged(merged, orderIndex: line.exerciseOrderIndex),
+              let src = proposedExpanded.first(where: { $0.orderIndex == line.exerciseOrderIndex }) else { return }
+        merged[idx] = deepCopyProgramItem(src)
+    case "Removed set":
+        guard let exIdx = exerciseIndexInMerged(merged, orderIndex: line.exerciseOrderIndex),
+              line.setNumber > 0 else { return }
+        var sets = sortedSetsForMerge(merged[exIdx].sets)
+        guard line.setNumber <= sets.count else { return }
+        sets.remove(at: line.setNumber - 1)
+        merged[exIdx].sets = renumberExpandedSets(sets)
+    case "Added set":
+        guard let exIdx = exerciseIndexInMerged(merged, orderIndex: line.exerciseOrderIndex),
+              let propEx = proposedExpanded.first(where: { $0.orderIndex == line.exerciseOrderIndex }),
+              line.setNumber > 0 else { return }
+        let propSets = sortedSetsForMerge(propEx.sets)
+        guard line.setNumber <= propSets.count else { return }
+        let newSet = deepCopyProgramSet(propSets[line.setNumber - 1])
+        var sets = sortedSetsForMerge(merged[exIdx].sets)
+        if line.setNumber - 1 == sets.count {
+            sets.append(newSet)
+        } else if line.setNumber - 1 < sets.count {
+            sets.insert(newSet, at: line.setNumber - 1)
+        } else {
+            return
+        }
+        merged[exIdx].sets = renumberExpandedSets(sets)
+    case "Reps", "Weight", "RPE", "Rest", "Set notes", "Drop steps":
+        guard let exIdx = exerciseIndexInMerged(merged, orderIndex: line.exerciseOrderIndex),
+              let propEx = proposedExpanded.first(where: { $0.orderIndex == line.exerciseOrderIndex }),
+              line.setNumber > 0 else { return }
+        let propSets = sortedSetsForMerge(propEx.sets)
+        guard line.setNumber <= propSets.count else { return }
+        let propSet = propSets[line.setNumber - 1]
+        var sets = sortedSetsForMerge(merged[exIdx].sets)
+        guard line.setNumber <= sets.count else { return }
+        var target = sets[line.setNumber - 1]
+        switch line.fieldTitle {
+        case "Reps": target.reps = propSet.reps
+        case "Weight": target.weightKg = propSet.weightKg
+        case "RPE": target.rpe = propSet.rpe
+        case "Rest": target.restSec = propSet.restSec
+        case "Set notes": target.notes = propSet.notes
+        case "Drop steps":
+            target.weightSegments = propSet.weightSegments?.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weightKg) }
+        default: break
+        }
+        sets[line.setNumber - 1] = target
+        merged[exIdx].sets = sets
+    default:
+        break
+    }
+}
+
+func mergeStrengthRoutineWithSelectedChanges(
+    routine: [StrengthProgramItem],
+    proposed: [StrengthProgramItem],
+    selectedLineIds: Set<String>
+) -> [StrengthProgramItem] {
+    if selectedLineIds.contains("prescription-fallback") {
+        return collapseStrengthProgramItemsForStorage(
+            expandedStrengthProgramItemsForCompare(normalizedProgramItemsForCompare(proposed))
+        )
+    }
+    var merged = expandedStrengthProgramItemsForCompare(
+        normalizedProgramItemsForCompare(routine)
+    ).map(deepCopyProgramItem)
+    let proposedExpanded = expandedStrengthProgramItemsForCompare(
+        normalizedProgramItemsForCompare(proposed)
+    )
+    let diffLines = buildStrengthRoutineOverwriteDiffLines(
+        proposed: proposed,
+        routine: routine,
+        exerciseDisplayName: { _ in "" }
+    )
+    let sorted = diffLines
+        .filter { $0.fieldTitle != "Sets" && selectedLineIds.contains($0.id) }
+        .sorted {
+            let r0 = overwriteDiffLineApplicationRank($0.fieldTitle)
+            let r1 = overwriteDiffLineApplicationRank($1.fieldTitle)
+            if r0 != r1 { return r0 < r1 }
+            if $0.exerciseOrderIndex != $1.exerciseOrderIndex { return $0.exerciseOrderIndex < $1.exerciseOrderIndex }
+            if $0.setNumber != $1.setNumber { return $0.setNumber < $1.setNumber }
+            return $0.id < $1.id
+        }
+    for line in sorted {
+        applyOverwriteDiffLine(line, merged: &merged, proposedExpanded: proposedExpanded)
+    }
+    merged = merged.enumerated().map { offset, item in
+        var copy = deepCopyProgramItem(item)
+        copy.orderIndex = offset + 1
+        return copy
+    }
+    return collapseStrengthProgramItemsForStorage(merged)
+}
+
+func mergedStrengthRoutineProgramItemsForOverwrite(
+    prompt: StrengthRoutineOverwritePrompt,
+    proposed: [StrengthProgramItem],
+    selectedLineIds: Set<String>
+) -> [StrengthProgramItem] {
+    mergeStrengthRoutineWithSelectedChanges(
+        routine: prompt.routineBaselineItems,
+        proposed: proposed,
+        selectedLineIds: selectedLineIds
+    )
 }
 
 enum StrengthRoutineOverwriteCandidate {
@@ -232,14 +474,35 @@ enum StrengthRoutineOverwriteCandidate {
 
 struct StrengthRoutineOverwriteConfirmSheet: View {
     let prompt: StrengthRoutineOverwritePrompt
-    let onUpdate: () -> Void
+    let onApply: (Set<String>) -> Void
     let onNotNow: () -> Void
+
+    @State private var selectedLineIds: Set<String>
+
+    init(
+        prompt: StrengthRoutineOverwritePrompt,
+        onApply: @escaping (Set<String>) -> Void,
+        onNotNow: @escaping () -> Void
+    ) {
+        self.prompt = prompt
+        self.onApply = onApply
+        self.onNotNow = onNotNow
+        _selectedLineIds = State(initialValue: actionableOverwriteDiffLineIds(from: prompt.diffLines))
+    }
 
     private var groupedDiff: [ExerciseDiffGroup] {
         StrengthRoutineOverwriteConfirmSheet.buildGroups(from: prompt.diffLines)
     }
 
-    private var changeCount: Int { prompt.diffLines.count }
+    private var actionableLineIds: Set<String> {
+        actionableOverwriteDiffLineIds(from: prompt.diffLines)
+    }
+
+    private var selectedCount: Int {
+        selectedLineIds.intersection(actionableLineIds).count
+    }
+
+    private var actionableCount: Int { actionableLineIds.count }
     private var affectedExerciseCount: Int {
         Set(prompt.diffLines.map(\.exerciseOrderIndex)).count
     }
@@ -286,7 +549,7 @@ struct StrengthRoutineOverwriteConfirmSheet: View {
                                             .foregroundStyle(.secondary)
 
                                         ForEach(setGroup.lines) { line in
-                                            diffRow(line)
+                                            diffRow(line, isSelectable: line.fieldTitle != "Sets")
                                         }
                                     }
                                     if idx + 1 < exGroup.setGroups.count {
@@ -331,23 +594,33 @@ struct StrengthRoutineOverwriteConfirmSheet: View {
 
     private var summaryChipText: String {
         let ex = affectedExerciseCount
-        let ch = changeCount
-        if ex == 1 {
-            return "\(ch) change · 1 exercise"
+        let selected = selectedCount
+        let total = actionableCount
+        let changePart: String
+        if selected == total {
+            changePart = total == 1 ? "1 change" : "\(total) changes"
+        } else {
+            changePart = "\(selected) of \(total) changes"
         }
-        return "\(ch) changes · \(ex) exercises"
+        if ex == 1 {
+            return "\(changePart) · 1 exercise"
+        }
+        return "\(changePart) · \(ex) exercises"
     }
 
     private var actionFooter: some View {
         VStack(spacing: 12) {
-            Button(action: onUpdate) {
-                Text("Overwrite template")
+            Button {
+                onApply(selectedLineIds.intersection(actionableLineIds))
+            } label: {
+                Text(selectedCount == 1 ? "Apply 1 change" : "Apply \(selectedCount) changes")
                     .font(.body.weight(.semibold))
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            .disabled(selectedCount == 0)
 
             Button("Not now", action: onNotNow)
                 .font(.body.weight(.medium))
@@ -365,8 +638,33 @@ struct StrengthRoutineOverwriteConfirmSheet: View {
     }
 
     @ViewBuilder
-    private func diffRow(_ line: StrengthRoutineOverwriteDiffLine) -> some View {
+    private func diffRow(_ line: StrengthRoutineOverwriteDiffLine, isSelectable: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
+            if isSelectable {
+                Button {
+                    if selectedLineIds.contains(line.id) {
+                        selectedLineIds.remove(line.id)
+                    } else {
+                        selectedLineIds.insert(line.id)
+                    }
+                } label: {
+                    Image(systemName: selectedLineIds.contains(line.id) ? "checkmark.square.fill" : "square")
+                        .font(.title3)
+                        .foregroundStyle(selectedLineIds.contains(line.id) ? Color.accentColor : .secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(
+                    selectedLineIds.contains(line.id)
+                        ? "Selected, \(line.fieldTitle)"
+                        : "Not selected, \(line.fieldTitle)"
+                )
+            } else {
+                Color.clear
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+            }
+
             Image(systemName: Self.iconName(for: line.fieldTitle))
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -1009,7 +1307,8 @@ private func strengthRoutineOverwritePromptIfContentDiffers(
     return .prompt(StrengthRoutineOverwritePrompt(
         routineId: routineId,
         routineName: routineName,
-        diffLines: diff
+        diffLines: diff,
+        routineBaselineItems: normalizedRoutine
     ))
 }
 
@@ -1076,8 +1375,30 @@ func applyStrengthRoutinePrescriptionUpdate(
     routineId: Int64,
     exercises: [EditableExercise]
 ) async throws {
-    let strengthItems = exercises.compactMap { $0.toStrengthItem() }
-    guard !strengthItems.isEmpty else {
+    let normalized = normalizedSupersetPrograms(exercises)
+    let items = strengthProgramItems(from: normalized)
+    guard !items.isEmpty else {
+        throw NSError(
+            domain: "StrengthRoutineOverwrite",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "No exercises to save."]
+        )
+    }
+    try await applyStrengthRoutinePrescriptionUpdateFromProgramItems(
+        client: client,
+        userId: userId,
+        routineId: routineId,
+        items: items
+    )
+}
+
+func applyStrengthRoutinePrescriptionUpdateFromProgramItems(
+    client: SupabaseClient,
+    userId: UUID,
+    routineId: Int64,
+    items: [StrengthProgramItem]
+) async throws {
+    guard !items.isEmpty else {
         throw NSError(
             domain: "StrengthRoutineOverwrite",
             code: 1,
@@ -1087,8 +1408,8 @@ func applyStrengthRoutinePrescriptionUpdate(
 
     struct RoutineExerciseIdRow: Decodable { let id: Int64 }
 
-    let normalized = normalizedSupersetPrograms(exercises)
-    let contentHash = strengthRoutineContentFingerprint(from: normalized)
+    let sortedItems = items.sorted { $0.orderIndex < $1.orderIndex }
+    let contentHash = strengthRoutineContentFingerprint(from: sortedItems)
 
     struct ExistingRoutineExerciseId: Decodable { let id: Int64 }
     let existingRes = try await client
@@ -1122,19 +1443,18 @@ func applyStrengthRoutinePrescriptionUpdate(
         let weight_segments: [StrengthWeightSegWire]?
     }
 
-    for ex in normalized {
-        guard let item = ex.toStrengthItem() else { continue }
+    for item in sortedItems {
         let exRes = try await client
             .from("strength_routine_exercises")
             .insert(
                 StrengthRoutineExerciseRowInsert(
                     routine_id: routineId,
-                    exercise_id: item.exercise_id,
-                    order_index: item.order_index,
+                    exercise_id: item.exerciseId,
+                    order_index: item.orderIndex,
                     notes: item.notes,
-                    custom_name: item.custom_name,
-                    superset_group_id: ex.supersetGroupId,
-                    superset_position: ex.supersetPosition
+                    custom_name: item.customName,
+                    superset_group_id: item.supersetGroupId,
+                    superset_position: item.supersetPosition
                 ),
                 returning: .representation
             )
@@ -1153,16 +1473,16 @@ func applyStrengthRoutinePrescriptionUpdate(
 
         let setRows: [StrengthRoutineSetRowInsert] = item.sets.map { s in
             let ws: [StrengthWeightSegWire]? = {
-                guard let segs = s.weight_segments, segs.count >= 2 else { return nil }
-                return segs.map { StrengthWeightSegWire(reps: $0.reps, weight_kg: $0.weight_kg) }
+                guard let segs = s.weightSegments, segs.count >= 2 else { return nil }
+                return segs.map { StrengthWeightSegWire(reps: $0.reps, weight_kg: $0.weightKg) }
             }()
             return StrengthRoutineSetRowInsert(
                 routine_exercise_id: exerciseRowId,
-                set_number: s.set_number,
+                set_number: s.setNumber,
                 reps: s.reps,
-                weight_kg: s.weight_kg,
+                weight_kg: s.weightKg,
                 rpe: s.rpe,
-                rest_sec: s.rest_sec,
+                rest_sec: s.restSec,
                 notes: s.notes,
                 weight_segments: ws
             )
@@ -1182,4 +1502,24 @@ func applyStrengthRoutinePrescriptionUpdate(
         .eq("id", value: Int(routineId))
         .eq("user_id", value: userId)
         .execute()
+}
+
+func applySelectiveStrengthRoutineOverwrite(
+    client: SupabaseClient,
+    userId: UUID,
+    prompt: StrengthRoutineOverwritePrompt,
+    proposed: [StrengthProgramItem],
+    selectedLineIds: Set<String>
+) async throws {
+    let merged = mergedStrengthRoutineProgramItemsForOverwrite(
+        prompt: prompt,
+        proposed: proposed,
+        selectedLineIds: selectedLineIds
+    )
+    try await applyStrengthRoutinePrescriptionUpdateFromProgramItems(
+        client: client,
+        userId: userId,
+        routineId: prompt.routineId,
+        items: merged
+    )
 }

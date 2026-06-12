@@ -5,6 +5,12 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.LiftrSupabase
+import com.lilru.liftr.workout.ActiveWorkoutCheckpointEntry
+import com.lilru.liftr.workout.ActiveWorkoutCheckpointKind
+import com.lilru.liftr.workout.ActiveWorkoutSessionCheckpoint
+import com.lilru.liftr.workout.SportCheckpointPayload
+import com.lilru.liftr.workout.SportHyroxExerciseSnapshot
 import com.lilru.liftr.ui.home.formatActivityCodeForDisplay
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -103,6 +109,7 @@ class ActiveSportWorkoutViewModel(
     fun toggleSessionRunning() {
         if (_ui.value.finishing) return
         _ui.value = _ui.value.copy(isSessionRunning = !_ui.value.isSessionRunning)
+        saveSessionCheckpoint()
     }
 
     fun resetSession() {
@@ -144,6 +151,7 @@ class ActiveSportWorkoutViewModel(
         val next = (s.hyroxExerciseIndex + delta).coerceIn(0, n - 1)
         if (next != s.hyroxExerciseIndex) {
             _ui.value = s.copy(hyroxExerciseIndex = next)
+            saveSessionCheckpoint()
         }
     }
 
@@ -224,6 +232,7 @@ class ActiveSportWorkoutViewModel(
                     locationText = row.location ?: "",
                     sessionNotesText = row.notes ?: ""
                 )
+                restoreSportCheckpointIfNeeded()
             }.onFailure { e ->
                 Log.e(TAG, "load failed", e)
                 _ui.value = _ui.value.copy(
@@ -273,6 +282,7 @@ class ActiveSportWorkoutViewModel(
                     filter { eq("id", workoutId) }
                 }
             }.onSuccess {
+                clearSportCheckpoint()
                 _ui.value = _ui.value.copy(finishing = false)
                 onDone()
             }.onFailure { e ->
@@ -283,6 +293,98 @@ class ActiveSportWorkoutViewModel(
                 )
             }
         }
+    }
+
+    private var didRestoreSportCheckpoint = false
+
+    fun saveSessionCheckpoint() {
+        val ctx = LiftrSupabase.appContext ?: return
+        val s = _ui.value
+        val hyroxSnaps = s.hyroxExercises.map { ex ->
+            SportHyroxExerciseSnapshot(
+                id = ex.id,
+                exerciseCode = ex.exerciseCode,
+                exerciseOrder = ex.exerciseOrder,
+                distanceM = ex.distanceM,
+                reps = ex.reps,
+                weightKg = ex.weightKg,
+                durationSec = ex.durationSec,
+                heightCm = ex.heightCm,
+                implementCount = ex.implementCount,
+                notes = ex.notes,
+                customDisplayName = ex.exerciseDisplayName
+            )
+        }
+        val completedIds = (0 until s.hyroxExerciseIndex.coerceAtLeast(0))
+            .mapNotNull { idx -> s.hyroxExercises.getOrNull(idx)?.id }
+        val payload = SportCheckpointPayload(
+            elapsedSec = s.elapsedSec,
+            isSessionRunning = s.isSessionRunning,
+            remainingSec = 0,
+            initialTargetSec = s.targetDurationSec ?: 0,
+            hyroxExerciseIndex = s.hyroxExerciseIndex,
+            completedHyroxExerciseIds = completedIds,
+            hyroxExercises = hyroxSnaps,
+            scoreForText = s.scoreForText,
+            scoreAgainstText = s.scoreAgainstText,
+            matchResultRaw = s.matchResultRaw,
+            matchScoreText = s.matchScoreText,
+            locationText = s.locationText,
+            sessionNotesText = s.sessionNotesText
+        )
+        ActiveWorkoutSessionCheckpoint.store(
+            ctx,
+            ActiveWorkoutCheckpointEntry(
+                workoutId = workoutId,
+                kind = ActiveWorkoutCheckpointKind.SPORT,
+                savedAtEpochMs = System.currentTimeMillis(),
+                sport = payload
+            )
+        )
+    }
+
+    fun clearSportCheckpoint() {
+        LiftrSupabase.appContext?.let { ActiveWorkoutSessionCheckpoint.clearIfWorkout(it, workoutId) }
+    }
+
+    private fun restoreSportCheckpointIfNeeded() {
+        if (didRestoreSportCheckpoint) return
+        val ctx = LiftrSupabase.appContext ?: return
+        val entry = ActiveWorkoutSessionCheckpoint.load(ctx) ?: return
+        if (entry.workoutId != workoutId || entry.kind != ActiveWorkoutCheckpointKind.SPORT) return
+        val sport = entry.sport ?: return
+        didRestoreSportCheckpoint = true
+        val hyroxList = if (sport.hyroxExercises.isNotEmpty()) {
+            sport.hyroxExercises.map { ex ->
+                ActiveHyroxExerciseUi(
+                    id = ex.id,
+                    exerciseCode = ex.exerciseCode,
+                    exerciseOrder = ex.exerciseOrder,
+                    distanceM = ex.distanceM,
+                    reps = ex.reps,
+                    weightKg = ex.weightKg,
+                    durationSec = ex.durationSec,
+                    heightCm = ex.heightCm,
+                    implementCount = ex.implementCount,
+                    notes = ex.notes,
+                    exerciseDisplayName = ex.customDisplayName
+                )
+            }
+        } else {
+            _ui.value.hyroxExercises
+        }
+        _ui.value = _ui.value.copy(
+            elapsedSec = sport.elapsedSec,
+            isSessionRunning = sport.isSessionRunning,
+            hyroxExercises = hyroxList,
+            hyroxExerciseIndex = sport.hyroxExerciseIndex,
+            scoreForText = sport.scoreForText,
+            scoreAgainstText = sport.scoreAgainstText,
+            matchResultRaw = sport.matchResultRaw,
+            matchScoreText = sport.matchScoreText,
+            locationText = sport.locationText,
+            sessionNotesText = sport.sessionNotesText
+        )
     }
 
     private suspend fun persistHyroxExercises(sessionId: Int, exercises: List<ActiveHyroxExerciseUi>) {

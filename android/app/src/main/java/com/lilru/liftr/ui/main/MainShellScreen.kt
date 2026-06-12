@@ -102,6 +102,7 @@ import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.ranking.ChallengeWeeklyDetailScreen
 import com.lilru.liftr.ui.nutrition.NutritionTabScreen
 import com.lilru.liftr.ui.components.LiftrBackTopBar
+import com.lilru.liftr.ui.active.ActiveWorkoutRecoveryHost
 import com.lilru.liftr.ui.search.SearchTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import com.lilru.liftr.ui.territory.TerritoryMapScreen
@@ -721,5 +722,8 @@ fun MainShellScreen(
                 }
             }
         }
+    }
+    if (isAuthenticated) {
+        ActiveWorkoutRecoveryHost(supabase = supabase, isAuthenticated = true)
     }
 }

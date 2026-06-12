@@ -575,9 +575,20 @@ Moneda sin valor monetario real. Balance canónico: `profiles.coins_balance` (ac
 | `user_followed` | 5 | INSERT `follows` (follower) |
 | `earned_follower` | 10 | INSERT `follows` (followee) |
 | `achievement_unlocked` | 25 / 50 / 100 (bronze / silver / gold) | INSERT `user_achievements` |
-| `workout_logged` | dinámico | workout `state → published` |
+| `workout_logged` | dinámico (base entrenamiento) | workout `state → published` |
+| `workout_pet_training_bonus` | `% bono mascota` sobre base | workout `state → published` (misma `reference_id`) |
+| `workout_coin_doubling_v1` | delta legacy | backfill one-shot 2× |
+| `workout_economy_rebalance_v1` | delta | backfill one-shot rebalance entrenos |
+| `pet_passive_economy_rebalance_v1` | `−75%` de `pet_coins_generated` histórico | backfill one-shot pasivo |
+| `workout_economy_reduction_30pct_v1` | clawback delta | backfill reducción 30% entrenos |
+| `pet_passive_economy_reduction_30pct_v1` | `−30%` de `pet_coins_generated` histórico | backfill reducción 30% pasivo |
+| `pet_coins_generated` | dinámico | cron horario `generate_pet_coins_v1` |
 | `weekly_goal_perfect_week` | 40 | todas las metas de la semana completadas |
 | `workout_consistency_streak` | 50 | racha de 7 días consecutivos con workout publicado |
+| `nutrition_ingredient_logged` | 3 | INSERT `nutrition_diary_logs` con `ingredient_id` |
+| `nutrition_recipe_logged` | 5 | INSERT `nutrition_diary_logs` con `recipe_id` |
+| `nutrition_ingredient_created` | 10 | INSERT `nutrition_ingredients` con `user_id` (no catálogo sistema) |
+| `nutrition_recipe_created` | 15 | INSERT `nutrition_recipes` con `user_id` (no catálogo sistema) |
 | `competition_bet_escrow` | `−bet_amount` | creación / aceptación de duelo con stake |
 | `competition_bet_win` | `+bet_amount × 2` | duelo `finished` con ganador |
 | `competition_bet_refund_draw` | `+bet_amount` | duelo `finished` sin ganador (empate) |
@@ -588,12 +599,16 @@ Moneda sin valor monetario real. Balance canónico: `profiles.coins_balance` (ac
 
 **Apuestas en competiciones:** mutaciones solo vía RPC (`authenticated` sin `INSERT`/`UPDATE` directo en `competitions` / `competition_goals`). Liquidación idempotente en trigger `trg_competition_settle_bet` al pasar a estado terminal. Cron `expire_pending_competition_bets_hourly` expira `pending` con stake > 7 días.
 
-**`workout_logged` dinámico:**
-- Strength: `10 +` número de series completadas (`exercise_sets.is_completed`).
-- Cardio: base `10` + umbrales por `cardio_sessions.duration_sec` (30 min +5, 60 min +5) y `distance_km` (≥5 km +5, ≥10 km +10); fallback `workouts.duration_min`.
-- Otros kinds publicados: base `10`.
+**`workout_logged` dinámico (escala ×5.95 sobre la base pre-doble desde `20260621120000_economy_reduction_30pct_v1`):**
+- Strength: `round((10 +` número de series completadas `) × 5.95)`.
+- Cardio: `round((base 10` + umbrales por `cardio_sessions.duration_sec` (30 min +5, 60 min +5) y `distance_km` (≥5 km +5, ≥10 km +10); fallback `workouts.duration_min` `) × 5.95)`.
+- Otros kinds publicados: `60` (base sin bono de mascota).
+- **Bono de mascota activa** (solo hatched, `baby`–`elder`): porcentaje según `pet_training_bonus_config`; fila aparte `workout_pet_training_bonus` + `pet_logs.event_type = workout_pet_bonus` con `details.message` (frase aleatoria en inglés desde `pet_workout_bonus_messages`).
+- Backfills históricos: `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1` (clawback si el total pagado supera el nuevo cálculo), `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1` (clawback 30% de `pet_coins_generated`).
 
-**Anti-exploit:** unlike / unfollow / re-like no otorgan monedas de nuevo (sin filas de revocación). Reintentos devuelven `unique_violation` silenciado en `apply_liftr_coin_reward`.
+**Anti-exploit:** unlike / unfollow / re-like no otorgan monedas de nuevo (sin filas de revocación). Borrar un log de nutrición no revoca monedas. Reintentos devuelven `unique_violation` silenciado en `apply_liftr_coin_reward`.
+
+**Nutrición:** cada fila de diario otorga monedas (carrito, plan marcado como comido vía `complete_meal_plan_as_eaten`). Creación solo para ítems con `user_id` no nulo. Backfill histórico: `backfill_nutrition_coin_rewards_v1`.
 
 **Cliente — lectura:** `profiles.select(coins_balance)` en una petición **aparte** (falla en silencio → `0` si la migración aún no está desplegada). La cabecera de perfil no debe incluir `coins_balance` en el SELECT principal. Componentes: `CoinsBalanceBadge` (iOS/Android). Historial: `list_my_coin_transactions_v1`; limpiar: `clear_my_coin_history_v1`. Ranking: métrica **Liftr Coins** vía `get_coins_leaderboard_v1`. Banner efímero al ganar monedas (cliente compara balance antes/después).
 
@@ -601,7 +616,13 @@ Moneda sin valor monetario real. Balance canónico: `profiles.coins_balance` (ac
 
 Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); sin `INSERT`/`UPDATE` directo en `pet_instances`, `pet_instance_stats` ni `user_inventory`.
 
-**Tablas:** `pet_types`, `pet_type_stat_weights`, `pet_levels`, `pet_stage_rewards`, `pet_food_experience`, `pet_rarity_config`, `pet_market_items`, `pet_instances`, `pet_instance_stats`, `user_inventory`, `pet_logs`.
+**Tablas:** `pet_types`, `pet_type_stat_weights`, `pet_levels`, `pet_stage_rewards`, `pet_training_bonus_config`, `pet_food_experience`, `pet_rarity_config`, `pet_market_items`, `pet_instances`, `pet_instance_stats`, `user_inventory`, `pet_logs`.
+
+**Pasivo por hora (`pet_stage_rewards`, tras `economy_reduction_30pct_v1`):** baby 2–5, kid 4–8, teen 6–10, adult 8–13, elder 11–20 (× `pet_rarity_config.coin_multiplier`). Huevo: 0.
+
+**Bono entrenamiento (`pet_training_bonus_config`):** matriz stage × rarity; helper `get_pet_training_bonus_pct(user_id)`; histórico backfill vía `resolve_pet_bonus_at_time(user_id, at)`. Grant en publish: `grant_workout_coin_rewards_v1`.
+
+**`pet_logs.event_type = workout_pet_bonus`:** insertado al publicar entreno si hay bono > 0; `details`: `coins`, `bonus_pct`, `base_coins`, `workout_id`, `message` (rotación vía `pick_pet_workout_bonus_message`).
 
 **Sprites:** bucket Storage `pets` (público). Archivos: `{pet_type}_{stage}.png` en la raíz del bucket (`stage` = `egg|baby|kid|teen|adult|elder`). Market: `pets/market/{filename}.png`. Población inicial: `Liftr/scripts/mirror-settleit-pet-assets.sh` (copia desde SettleIt).
 
@@ -627,6 +648,14 @@ Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); s
 
 **XP:** `required_exp(level) = 50 × level²` (`pet_levels`). Comida: EXP aleatorio por matriz `pet_food_experience`.
 
+**Arena combat — stat roles (`liftr_combat_strike_v4` + turn order en `execute_pet_combat_v1`, migración `20260625120000_liftr_combat_balance_v4.sql`):** `health` → HP máximo en arena vía `liftr_combat_battle_hp_v1(health)` = `(health × 8 + 9) / 10` (80% del pool anterior); `strength` → daño base por golpe; `agility` → esquiva 3–28% (2% por punto de agi menos mitigación por int enemiga) **y** aporta daño (`×0.22`); `intelligence` → reduce esquiva enemiga, multiplicador de crítico **y** aporta daño (`×0.10`); `defense` + `resistance` → mitigación de daño recibido (promedio); `speed` → ataca primero cada ronda; `agility` también desempata turno si `speed` empata; `critical_rate` → probabilidad de crítico (hasta 50%); `stamina` → reduce penalización por fatiga tras ronda 12; `exploration` → bonus pequeño en el primer golpe; `happiness` → suelo mínimo de varianza de daño. Daño base: `1.22 × effective_strength × mitigation × …` (v3 usaba `1.4 × strength`). `liftr_combat_strike_v3` se conserva para rollback.
+
+**Arena combat — balance de arquetipos (`20260625120000` + `20260626120000`):** v4: suelo `health_weight` 3 para tipos con peso ≤2; cap tank+DPS: si `health_weight ≥ 5` y `strength_weight ≥ 5`, `strength −1` y `happiness +1`; `monkey` 4/4 HP/str; `griffin` base 4/4 HP/str. v5 (paridad mismo nivel+rareza ~40–60% entre arquetipos de producción): `neon_panther` `strength_weight` 5→4, `exploration_weight` 3→4; `griffin` movilidad `speed` 5, `agility` 4, `intelligence` 2, `exploration` 3 (mantiene `resistance_weight` 5); `dragon` override explícito 4/4/6 HP/str/def, `intelligence` 4, `resistance` 4, `happiness` 4, `exploration` 4, `critical_rate` 1 (suma 40) (el cap v4 dejaba dragon en 6/6). Recompute: `recompute_pet_stats_combat_balance_v1()` — v4 en `20260625120100`, v5 en `20260626120100`; hatch con `liftr_compute_hatch_stats_v1` + re-roll de cada `level_up` en `pet_logs`. Verificación: `supabase/verify/combat_balance_v5.sql` + `combat_balance_v5_monte_carlo.py`.
+
+Cliente: botón ⓘ en Stats del pet y en comparativa pre-combate → `PetStatCombatHelpSheet` / `PetStatCombatHelpSheetContent`.
+
+**Subida de nivel — stats (`pet_level_stat_shared_budget_v1`):** un presupuesto compartido por subida vía `compute_pet_level_stat_delta_v1(pet_type, stage, user_id)` (llamada desde `distribute_pet_stats`). (1) `total_budget = floor(random() × (max − min + 1)) + min` según `pet_stage_rewards` del stage — **una sola tirada por nivel**; (2) por stat, jitter independiente `0.5 + random()` (50%–150%); (3) `raw = total_budget × get_pet_stat_multiplier × weight/total_weight × jitter`; `health = floor(raw × 20)`; resto `round(raw)`. Varianza por stat sin 11 presupuestos independientes (evita pantallas con mayoría de +0). `pet_logs.stats_delta` conserva la misma forma jsonb. Backfill histórico: `backfill_pet_level_stat_variance_v1()` — baseline hatch = stats actuales − suma de deltas `level_up`; re-tira cada log ordenado por `new_level` con stage resuelto por `resolve_pet_stage_at_time` (último log `evolution` antes del timestamp, si no `baby`). `critical_rate` (peso 1) puede seguir en 0 en baby. Fuera de alcance: stats iniciales al hatch (`generate_initial_pet_stats`) y bono evolución (`apply_evolution_stat_bonus`).
+
 **Market — precios (`pet_market_items`):** `pet_egg` y `incubator` cuestan **2000** coins cada uno.
 
 **`buy_pet_market_item_v1` — guardas de propiedad:**
@@ -641,6 +670,8 @@ Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); s
 **Rarity upgrade — precios exponenciales (desde tier actual):** Common→Uncommon 1 000; Uncommon→Rare 2 000; Rare→Epic 4 000; Epic→Legendary 8 000; Legendary→Mythic 16 000. Compra vía `upgrade_pet_rarity_v1` (no `buy_pet_market_item_v1`). Imagen Market dinámica en Storage: `pets/market/rarity_upgrade_{from}_to_{to}.png` (p. ej. `rarity_upgrade_rare_to_epic.png`); el cliente resuelve la ruta según la rareza activa del pet.
 
 **`pet_logs` (cliente):** lectura y borrado de filas propias vía RLS (`pet_logs_select_own`, `pet_logs_delete_own`). Paginación en cliente (5 por página). Perfil: FAB 90pt fijo abajo-derecha → sheet **Your Egg** con rarity, hatch time, tipo, Change Pet, logs.
+
+**Market info sheet (cliente):** lectura directa de catálogo público vía PostgREST (`pet_types`: `name`, `display_name`, `description`, `image_egg`; `pet_rarity_config`: todos los campos, orden `sort_order`). RLS `pet_types_read` / `pet_rarity_config_read` (`using (true)`). iOS/Android: botón ⓘ en Pet Market → sheet con rarezas (drop %, multiplicadores, coste upgrade) y grid de especies.
 
 ## Política de cambios de contrato
 

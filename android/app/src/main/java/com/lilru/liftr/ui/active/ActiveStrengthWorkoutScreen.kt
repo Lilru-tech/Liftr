@@ -207,8 +207,10 @@ fun ActiveStrengthWorkoutScreen(
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                vm.onScreenResumed()
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> vm.onScreenResumed()
+                Lifecycle.Event.ON_STOP -> vm.saveSessionCheckpoint()
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -262,7 +264,6 @@ fun ActiveStrengthWorkoutScreen(
     var didAutoSwitchFromHostRest by remember { mutableStateOf(false) }
     LaunchedEffect(workoutId) {
         guestNavEmphasisLockWeId = null
-        vm.resetSessionProgress()
     }
     LaunchedEffect(ui.guestExercises) {
         if (ui.guestExercises.isNotEmpty()) {
@@ -1806,8 +1807,8 @@ fun ActiveStrengthWorkoutScreen(
         StrengthRoutineOverwriteBottomSheet(
             prompt = prompt,
             onDismissRequest = { vm.dismissStrengthRoutineOverwrite() },
-            onOverwriteTemplate = { vm.confirmStrengthRoutineOverwrite(true) },
-            onNotNow = { vm.confirmStrengthRoutineOverwrite(false) }
+            onOverwriteTemplate = { selected -> vm.confirmStrengthRoutineOverwrite(selected) },
+            onNotNow = { vm.dismissStrengthRoutineOverwrite() }
         )
     }
     if (ui.showElborblaCelebration) {

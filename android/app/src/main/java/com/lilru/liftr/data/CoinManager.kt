@@ -123,6 +123,12 @@ object CoinManager {
         "earned_follower" -> "New follower"
         "achievement_unlocked" -> "Achievement"
         "workout_logged" -> "Workout logged"
+        "workout_pet_training_bonus" -> "Pet workout bonus"
+        "workout_coin_doubling_v1" -> "Workout reward boost"
+        "workout_economy_rebalance_v1" -> "Workout economy update"
+        "pet_passive_economy_rebalance_v1" -> "Pet passive rebalance"
+        "workout_economy_reduction_30pct_v1" -> "Workout economy adjustment"
+        "pet_passive_economy_reduction_30pct_v1" -> "Pet passive adjustment"
         "weekly_goal_perfect_week" -> "Perfect week"
         "workout_consistency_streak" -> "7-day streak"
         "competition_bet_escrow" -> "Competition stake"
@@ -133,6 +139,10 @@ object CoinManager {
         "pet_market_purchase" -> "Pet shop purchase"
         "pet_egg_reroll" -> "Egg reroll"
         "pet_rarity_upgrade" -> "Pet rarity upgrade"
+        "nutrition_ingredient_logged" -> "Food logged"
+        "nutrition_recipe_logged" -> "Recipe logged"
+        "nutrition_ingredient_created" -> "Ingredient created"
+        "nutrition_recipe_created" -> "Recipe created"
         "" -> "Coins earned"
         else -> actionType.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }

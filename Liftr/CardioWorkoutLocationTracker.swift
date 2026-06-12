@@ -82,6 +82,12 @@ final class CardioWorkoutLocationTracker: NSObject, ObservableObject {
         lastRouteSample = nil
     }
 
+    func restoreRoute(coordinates: [CLLocationCoordinate2D], distanceKm restoredDistanceKm: Double) {
+        routeCoordinates = coordinates
+        distanceKm = restoredDistanceKm
+        lastRouteSample = coordinates.last.map { CLLocation(latitude: $0.latitude, longitude: $0.longitude) }
+    }
+
     func fullReset() {
         pauseUpdates()
         resetMeasuredDistance()

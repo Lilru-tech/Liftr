@@ -3309,21 +3309,26 @@ class AddWorkoutViewModel(
                 endedAtIso = endedAtIso,
                 useCustomSchedule = useCustomSchedule,
                 scheduleEndedEnabled = scheduleEndedEnabled,
-                routinePrescriptionOverwrite = null
+                routineSelectiveOverwrite = null
             )
         }
     }
 
     fun dismissStrengthRoutineOverwrite() {
-        confirmStrengthRoutineOverwrite(updateRoutine = false)
+        confirmStrengthRoutineOverwrite(emptySet())
     }
 
-    fun confirmStrengthRoutineOverwrite(updateRoutine: Boolean) {
+    fun confirmStrengthRoutineOverwrite(selectedLineIds: Set<String>) {
         val pending = _uiState.value.strengthRoutineOverwritePending ?: return
         val p = pending.createParams
         _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
-        val overwrite: Pair<Long, List<StrengthExerciseDraft>>? =
-            if (updateRoutine) pending.prompt.routineId to pending.exercisesSnapshot else null
+        val overwrite: Triple<StrengthRoutineOverwritePrompt, List<StrengthProgramItem>, Set<String>>? =
+            if (selectedLineIds.isEmpty()) null
+            else Triple(
+                pending.prompt,
+                strengthProgramItemsFromDrafts(pending.exercisesSnapshot) ?: emptyList(),
+                selectedLineIds
+            )
         beginCreateStrengthWorkout(
             title = p.title,
             notes = p.notes,
@@ -3334,7 +3339,7 @@ class AddWorkoutViewModel(
             endedAtIso = p.endedAtIso,
             useCustomSchedule = p.useCustomSchedule,
             scheduleEndedEnabled = p.scheduleEndedEnabled,
-            routinePrescriptionOverwrite = overwrite
+            routineSelectiveOverwrite = overwrite
         )
     }
 
@@ -3348,7 +3353,7 @@ class AddWorkoutViewModel(
         endedAtIso: String?,
         useCustomSchedule: Boolean,
         scheduleEndedEnabled: Boolean,
-        routinePrescriptionOverwrite: Pair<Long, List<StrengthExerciseDraft>>?
+        routineSelectiveOverwrite: Triple<StrengthRoutineOverwritePrompt, List<StrengthProgramItem>, Set<String>>?
     ) {
         viewModelScope.launch {
             val snap = _uiState.value
@@ -3468,7 +3473,7 @@ class AddWorkoutViewModel(
                     }
                     patchWorkoutSupersetsForCreatedWorkouts(supabase, squadIds, lanePrograms)
                 } else {
-                    val selected = routinePrescriptionOverwrite?.second ?: snap.selectedExercises
+                    val selected = snap.selectedExercises
                     if (selected.isEmpty()) error("Add at least one exercise first.")
                     val normalized = normalizedSupersetDrafts(selected)
                     val params = paramsForState(targetState, buildStrengthPayloadItems(selected))
@@ -3487,17 +3492,18 @@ class AddWorkoutViewModel(
                         )
                     }
                 }
-                if (routinePrescriptionOverwrite != null) {
-                    applyStrengthRoutinePrescriptionUpdate(
+                if (routineSelectiveOverwrite != null) {
+                    applySelectiveStrengthRoutineOverwrite(
                         supabase,
                         userId,
-                        routinePrescriptionOverwrite.first,
-                        routinePrescriptionOverwrite.second
+                        routineSelectiveOverwrite.first,
+                        routineSelectiveOverwrite.second,
+                        routineSelectiveOverwrite.third
                     )
                 }
             }.onSuccess {
                 var msg = strengthSuccessMessage(perPersonStrength, state)
-                if (routinePrescriptionOverwrite != null) {
+                if (routineSelectiveOverwrite != null) {
                     msg += " Routine template updated."
                 }
                 onWorkoutCreatedUi(msg)

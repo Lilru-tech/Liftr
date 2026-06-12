@@ -4,6 +4,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
 import kotlin.math.pow
@@ -144,6 +145,26 @@ object PetService {
         return SupabaseResponseDecoding.decodeObject(res.data)
     }
 
+    suspend fun fetchRarityConfig(supabase: SupabaseClient): List<PetRarityConfigWire> {
+        return supabase.from(BackendContracts.Tables.PET_RARITY_CONFIG).select {
+            order(column = "sort_order", order = Order.ASCENDING)
+        }.decodeList<PetRarityConfigWire>()
+    }
+
+    suspend fun fetchPetTypeCatalog(supabase: SupabaseClient): List<PetTypeCatalogWire> {
+        return supabase.from(BackendContracts.Tables.PET_TYPES).select(
+            columns = Columns.raw("name, display_name, description, image_egg")
+        ) {
+            order(column = "display_name", order = Order.ASCENDING)
+        }.decodeList<PetTypeCatalogWire>()
+    }
+
+    fun catalogEggImageUrl(row: PetTypeCatalogWire): String {
+        val fromDb = row.imageEgg?.takeIf { it.isNotBlank() }
+        if (fromDb != null) return fromDb
+        return petImageUrl(row.name, "egg")
+    }
+
     suspend fun fetchPetLogs(supabase: SupabaseClient, offset: Int, limit: Int = 5): List<PetLogWire> {
         return supabase.from(BackendContracts.Tables.PET_LOGS).select {
             order(column = "created_at", order = Order.DESCENDING)
@@ -273,6 +294,15 @@ data class PetLogWire(
             if (!coins.isNullOrBlank()) "Coins generated: +$coins"
             else "Coins generated"
         }
+        "workout_pet_bonus" -> {
+            val message = details?.get("message")
+            if (!message.isNullOrBlank()) message
+            else {
+                val coins = details?.get("coins")
+                if (!coins.isNullOrBlank()) "Your pet helped you earn +$coins coins!"
+                else "Pet workout bonus"
+            }
+        }
         "combat" -> {
             val opponent = details?.get("opponent_username")?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: "opponent"
             when {
@@ -311,6 +341,25 @@ data class RarityUpgradeResultWire(
     @SerialName("from_coin_multiplier") val fromCoinMultiplier: Double,
     @SerialName("to_coin_multiplier") val toCoinMultiplier: Double,
     @SerialName("purchase_id") val purchaseId: String
+)
+
+@Serializable
+data class PetRarityConfigWire(
+    val rarity: String,
+    @SerialName("display_name") val displayName: String,
+    @SerialName("color_hex") val colorHex: String,
+    @SerialName("drop_weight") val dropWeight: Int,
+    @SerialName("coin_multiplier") val coinMultiplier: Double,
+    @SerialName("stat_multiplier") val statMultiplier: Double,
+    @SerialName("sort_order") val sortOrder: Int
+)
+
+@Serializable
+data class PetTypeCatalogWire(
+    val name: String,
+    @SerialName("display_name") val displayName: String,
+    val description: String = "",
+    @SerialName("image_egg") val imageEgg: String? = null
 )
 
 @Serializable
