@@ -210,6 +210,7 @@ Full list with parameters: [backend-contracts.md § Inventario de RPC](../backen
 | `get_coins_leaderboard_v1` | Liftr Coins balance |
 | `get_pet_leaderboard_v1` | Pet rankings (level, stats, combat records) |
 | `list_my_coin_transactions_v1` | Own coin transaction history |
+| `get_my_coin_sources_v1` | Earned coins breakdown by source category (optional date range) |
 | `clear_my_coin_history_v1` | Clear own coin ledger (balance unchanged) |
 | `get_territory_total_cells_leaderboard_v1` | Territory cells |
 | `get_territory_city_share_leaderboard_v1` | City share % |

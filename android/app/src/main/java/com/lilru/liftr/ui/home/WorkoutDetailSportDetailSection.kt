@@ -21,6 +21,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.hyrox.HyroxExerciseFormatting
+import com.lilru.liftr.climbing.ClimbingGradeSystem
+import com.lilru.liftr.climbing.ClimbingRouteFormatting
+import com.lilru.liftr.climbing.ClimbingStyle
 import com.lilru.liftr.ui.add.AddSportType
 import com.lilru.liftr.ui.active.normalizeSportMatchResult
 import java.util.Locale
@@ -90,7 +93,10 @@ fun WorkoutDetailSportDetailSection(
                 formatDurationFromSec(sec)
             )
         }
-        if (spLower != AddSportType.SKI.wire && !r.matchResult.isNullOrBlank()) {
+        if (spLower != AddSportType.SKI.wire &&
+            spLower != AddSportType.CLIMBING.wire &&
+            !r.matchResult.isNullOrBlank()
+        ) {
             val mr = normalizeSportMatchResult(r.matchResult)
             val label = when (mr.lowercase()) {
                 "win" -> stringResource(R.string.match_result_win)
@@ -353,6 +359,78 @@ fun WorkoutDetailSportDetailSection(
             s.resortName?.takeIf { it.isNotBlank() }?.let { DetailStatRow(stringResource(R.string.workout_detail_label_resort), it) }
             s.snowCondition?.takeIf { it.isNotBlank() }?.let { DetailStatRow(stringResource(R.string.workout_detail_label_snow), it) }
             s.weather?.takeIf { it.isNotBlank() }?.let { DetailStatRow(stringResource(R.string.workout_detail_label_weather), it) }
+        }
+
+        stats.climbing?.let { s ->
+            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            Text("Climbing", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            s.environment?.takeIf { it.isNotBlank() }?.let {
+                DetailStatRow("Environment", humanizeUnderscore(it))
+            }
+            s.primaryStyle?.takeIf { it.isNotBlank() }?.let {
+                DetailStatRow("Primary style", ClimbingStyle.fromWire(it).label)
+            }
+            s.routesSent?.let { DetailStatRow("Routes sent", "$it") }
+            s.routesAttempted?.let { DetailStatRow("Attempts", "$it") }
+            s.flashes?.let { DetailStatRow("Flashes", "$it") }
+            s.falls?.let { DetailStatRow("Falls", "$it") }
+            s.totalVerticalM?.let { DetailStatRow("Vertical m", stringResource(R.string.workout_detail_m_fmt, it)) }
+            s.movingTimeSec?.let {
+                DetailStatRow(stringResource(R.string.workout_detail_label_moving_time), formatDurationFromSec(it))
+            }
+            s.pausedTimeSec?.let {
+                DetailStatRow(stringResource(R.string.workout_detail_label_paused_time), formatDurationFromSec(it))
+            }
+            s.venueName?.takeIf { it.isNotBlank() }?.let { DetailStatRow("Venue", it) }
+            s.weather?.takeIf { it.isNotBlank() }?.let {
+                DetailStatRow(stringResource(R.string.workout_detail_label_weather), it)
+            }
+            s.avgHr?.let { DetailStatRow("Avg HR", stringResource(R.string.workout_detail_bpm_fmt, it)) }
+            s.maxHr?.let { DetailStatRow("Max HR", stringResource(R.string.workout_detail_bpm_fmt, it)) }
+            if (!s.highestGradeValue.isNullOrBlank()) {
+                val sys = ClimbingGradeSystem.fromWire(s.highestGradeSystem)
+                DetailStatRow(
+                    "Highest grade",
+                    ClimbingRouteFormatting.displayGrade(sys, s.highestGradeValue.orEmpty())
+                )
+            }
+            if (stats.climbingRoutes.isNotEmpty()) {
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                Text("Routes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                stats.climbingRoutes.sortedBy { it.routeOrder ?: 0 }.forEach { route ->
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(workoutDetailInsetFieldColor())
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        val title = route.routeName?.takeIf { it.isNotBlank() }
+                            ?: "Route ${route.routeOrder ?: 0}"
+                        Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        route.style?.takeIf { it.isNotBlank() }?.let {
+                            DetailStatRow("Style", ClimbingStyle.fromWire(it).label)
+                        }
+                        if (!route.gradeValue.isNullOrBlank()) {
+                            DetailStatRow(
+                                "Grade",
+                                ClimbingRouteFormatting.displayGrade(
+                                    ClimbingGradeSystem.fromWire(route.gradeSystem),
+                                    route.gradeValue.orEmpty()
+                                )
+                            )
+                        }
+                        route.attempts?.let { DetailStatRow("Attempts", "$it") }
+                        if (route.sent == true) DetailStatRow("Sent", "Yes")
+                        if (route.flash == true) DetailStatRow("Flash", "Yes")
+                        route.notes?.trim()?.takeIf { it.isNotEmpty() }?.let {
+                            DetailStatRow(stringResource(R.string.workout_detail_stat_notes), it)
+                        }
+                    }
+                }
+            }
         }
         }
     }

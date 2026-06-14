@@ -16,7 +16,7 @@ enum WorkoutIntensity: String, CaseIterable, Identifiable {
 }
 
 enum SportType: String, CaseIterable, Identifiable {
-    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby, hyrox, ski
+    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby, hyrox, ski, climbing
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -33,6 +33,7 @@ enum SportType: String, CaseIterable, Identifiable {
         case .rugby:         return "Rugby"
         case .hyrox:         return "Hyrox"
         case .ski:          return "Ski"
+        case .climbing:     return "Climbing"
         }
     }
 }
@@ -1267,7 +1268,7 @@ struct AddWorkoutSheet: View {
                             sport.scoreFor = ""; sport.scoreAgainst = ""
                         }
 
-                        if new == .ski {
+                        if new == .ski || new == .climbing {
                             sport.matchResult = .unfinished
                         }
                     }
@@ -1302,7 +1303,7 @@ struct AddWorkoutSheet: View {
                 }
                 Divider()
                 
-                if sport.sport != .ski {
+                if sport.sport != .ski && sport.sport != .climbing {
                     Divider()
 
                     FieldRowPlain {
@@ -1684,6 +1685,9 @@ struct AddWorkoutSheet: View {
             WorkoutMetricFieldsRow {
                 workoutMetricField("Weather", text: $sport.skiWeather, keyboard: .default)
             }
+
+        case .climbing:
+            ClimbingSessionEditor(sport: $sport)
         }
     }
 
@@ -2202,7 +2206,7 @@ struct AddWorkoutSheet: View {
                 if let sf = scoreFor { pDict["p_score_for"] = try .init(sf) }
                 if let sa = scoreAgainst { pDict["p_score_against"] = try .init(sa) }
 
-                if sport.sport != .ski {
+                if sport.sport != .ski && sport.sport != .climbing {
                     pDict["p_match_result"] = try .init(sport.matchResult.rawValue)
                 }
 
@@ -2634,6 +2638,45 @@ struct AddWorkoutSheet: View {
             if let s = strOrNil(f.skiResortName)    { out["resort_name"]    = try .init(s) }
             if let s = strOrNil(f.skiSnowCondition){ out["snow_condition"] = try .init(s) }
             if let s = strOrNil(f.skiWeather)      { out["weather"]        = try .init(s) }
+            return try AnyJSON(out)
+
+        case .climbing:
+            var out: [String: AnyJSON] = [:]
+            out["environment"] = try .init(f.clEnvironment.rawValue)
+            out["primary_style"] = try .init(f.clPrimaryStyle.wire)
+            if let v = parseInt(f.clRoutesSent) { out["routes_sent"] = try .init(v) }
+            if let v = parseInt(f.clRoutesAttempted) { out["routes_attempted"] = try .init(v) }
+            if let v = parseInt(f.clTotalVerticalM) { out["total_vertical_m"] = try .init(v) }
+            if let v = parseInt(f.clMovingTimeSec) { out["moving_time_sec"] = try .init(v) }
+            if let v = parseInt(f.clPausedTimeSec) { out["paused_time_sec"] = try .init(v) }
+            if let s = strOrNil(f.clVenueName) { out["venue_name"] = try .init(s) }
+            if let s = strOrNil(f.clWeather) { out["weather"] = try .init(s) }
+            if let v = parseInt(f.clAvgHR) { out["avg_hr"] = try .init(v) }
+            if let v = parseInt(f.clMaxHR) { out["max_hr"] = try .init(v) }
+            if let v = parseInt(f.clFalls) { out["falls"] = try .init(v) }
+            if let v = parseInt(f.clFlashes) { out["flashes"] = try .init(v) }
+            if let s = strOrNil(f.clHighestGradeValue) {
+                out["highest_grade_system"] = try .init(f.clHighestGradeSystem.wire)
+                out["highest_grade_value"] = try .init(s)
+            }
+            if !f.clRoutes.isEmpty {
+                let routes: [AnyJSON] = try f.clRoutes.enumerated().map { index, route in
+                    var item: [String: AnyJSON] = [:]
+                    item["route_order"] = try .init(index + 1)
+                    if let s = strOrNil(route.routeName) { item["route_name"] = try .init(s) }
+                    item["style"] = try .init(route.style.wire)
+                    if let s = strOrNil(route.gradeValue) {
+                        item["grade_system"] = try .init(route.gradeSystem.wire)
+                        item["grade_value"] = try .init(s)
+                    }
+                    if let v = parseInt(route.attempts) { item["attempts"] = try .init(v) }
+                    item["sent"] = try .init(route.sent)
+                    item["flash"] = try .init(route.flash)
+                    if let s = strOrNil(route.notes) { item["notes"] = try .init(s) }
+                    return try AnyJSON(item)
+                }
+                out["routes"] = try .init(routes)
+            }
             return try AnyJSON(out)
         }
     }
@@ -3339,6 +3382,22 @@ struct SportForm {
     var skiResortName: String = ""
     var skiSnowCondition: String = ""
     var skiWeather: String = ""
+    var clEnvironment: ClimbingEnvironment = .indoor
+    var clPrimaryStyle: ClimbingStyle = .boulder
+    var clRoutesSent: String = ""
+    var clRoutesAttempted: String = ""
+    var clTotalVerticalM: String = ""
+    var clMovingTimeSec: String = ""
+    var clPausedTimeSec: String = ""
+    var clVenueName: String = ""
+    var clWeather: String = ""
+    var clAvgHR: String = ""
+    var clMaxHR: String = ""
+    var clFalls: String = ""
+    var clFlashes: String = ""
+    var clHighestGradeSystem: ClimbingGradeSystem = .v_scale
+    var clHighestGradeValue: String = ""
+    var clRoutes: [ClimbingRouteForm] = []
 }
 
 struct RPCStrengthParams: Encodable {

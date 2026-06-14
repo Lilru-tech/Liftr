@@ -223,23 +223,25 @@ struct MessagesInboxView: View {
                 .frame(width: 44, height: 44)
                 .clipShape(Circle())
             VStack(alignment: .leading, spacing: 2) {
-                HStack {
+                HStack(alignment: .center, spacing: 8) {
                     Text(profile.map { "@\($0.username)" } ?? row.title ?? "Conversation")
                         .font(.body.weight(.semibold))
                         .lineLimit(1)
-                    Spacer(minLength: 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     if let when = row.last_message_at {
                         Text(Self.shortDate(when))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
+                            .layoutPriority(1)
                     }
                 }
-                HStack(alignment: .top) {
+                HStack(alignment: .top, spacing: 8) {
                     Text(Self.previewText(for: row))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
-                    Spacer(minLength: 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                     if row.unread_count > 0 {
                         Text("\(row.unread_count)")
                             .font(.caption2.weight(.bold))
@@ -247,9 +249,11 @@ struct MessagesInboxView: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
                             .background(Color.accentColor, in: Capsule())
+                            .layoutPriority(1)
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

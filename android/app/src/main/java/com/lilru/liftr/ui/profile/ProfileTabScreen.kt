@@ -39,6 +39,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.ShoppingCart
@@ -118,6 +119,7 @@ import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.lilru.liftr.ui.components.CoinsBalanceBadge
+import com.lilru.liftr.ui.components.HorizontalViewThatFits
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.components.LiftrBackTopBar
 import com.lilru.liftr.ui.territory.TerritoryMapScreen
@@ -190,6 +192,77 @@ private enum class ProfileMainTab {
 }
 
 @Composable
+private fun ProfileHeaderStatPillsRow(
+    ui: ProfileUiState,
+    listMode: (FollowListMode) -> Unit,
+    onOpenCoinTransactions: (() -> Unit)?,
+    coinsCompact: Boolean,
+    coinsAbbreviated: Boolean
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Surface(
+            onClick = { listMode(FollowListMode.FOLLOWERS) },
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.padding(0.dp))
+                Text(
+                    "${ui.followers}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        Surface(
+            onClick = { listMode(FollowListMode.FOLLOWING) },
+            shape = RoundedCornerShape(50),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+        ) {
+            Row(
+                Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = null,
+                    modifier = Modifier.padding(0.dp)
+                )
+                Text(
+                    "${ui.following}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        if (ui.isOwnProfile) {
+            CoinsBalanceBadge(
+                balance = ui.coinsBalance,
+                compact = coinsCompact,
+                abbreviated = coinsAbbreviated,
+                onClick = onOpenCoinTransactions
+            )
+        } else {
+            CoinsBalanceBadge(
+                balance = ui.coinsBalance,
+                compact = coinsCompact,
+                abbreviated = coinsAbbreviated
+            )
+        }
+    }
+}
+
+@Composable
 private fun ProfileIosStyleHeader(
     ui: ProfileUiState,
     profileUserId: String?,
@@ -205,6 +278,7 @@ private fun ProfileIosStyleHeader(
     onProfileMenuExpandedChange: (Boolean) -> Unit,
     onMenuNotifications: () -> Unit,
     onMenuMarket: () -> Unit,
+    onMenuPetDex: () -> Unit,
     onMenuAchievements: () -> Unit,
     onMenuGoals: () -> Unit,
     onMenuCompetitions: () -> Unit,
@@ -263,59 +337,33 @@ private fun ProfileIosStyleHeader(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Surface(
-                        onClick = { listMode(FollowListMode.FOLLOWERS) },
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(Icons.Filled.Groups, contentDescription = null, modifier = Modifier.padding(0.dp))
-                            Text(
-                                "${ui.followers}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                    Surface(
-                        onClick = { listMode(FollowListMode.FOLLOWING) },
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                contentDescription = null,
-                                modifier = Modifier.padding(0.dp)
-                            )
-                            Text(
-                                "${ui.following}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                    if (ui.isOwnProfile) {
-                        CoinsBalanceBadge(
-                            balance = ui.coinsBalance,
-                            onClick = onOpenCoinTransactions
+                HorizontalViewThatFits(modifier = Modifier.fillMaxWidth()) {
+                    variant {
+                        ProfileHeaderStatPillsRow(
+                            ui = ui,
+                            listMode = listMode,
+                            onOpenCoinTransactions = onOpenCoinTransactions,
+                            coinsCompact = false,
+                            coinsAbbreviated = false
                         )
-                    } else {
-                        CoinsBalanceBadge(balance = ui.coinsBalance)
+                    }
+                    variant {
+                        ProfileHeaderStatPillsRow(
+                            ui = ui,
+                            listMode = listMode,
+                            onOpenCoinTransactions = onOpenCoinTransactions,
+                            coinsCompact = true,
+                            coinsAbbreviated = false
+                        )
+                    }
+                    variant {
+                        ProfileHeaderStatPillsRow(
+                            ui = ui,
+                            listMode = listMode,
+                            onOpenCoinTransactions = onOpenCoinTransactions,
+                            coinsCompact = true,
+                            coinsAbbreviated = true
+                        )
                     }
                 }
                 if (profileUserId != null) {
@@ -593,6 +641,20 @@ private fun ProfileIosStyleHeader(
                                 )
                             }
                         )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.pet_dex_title)) },
+                            onClick = {
+                                onProfileMenuExpandedChange(false)
+                                onMenuPetDex()
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Filled.MenuBook,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        )
                     }
                     DropdownMenuItem(
                         text = { Text(stringResource(R.string.profile_menu_achievements)) },
@@ -687,6 +749,7 @@ fun ProfileTabScreen(
     var showCreateCompetition by rememberSaveable { mutableStateOf(false) }
     var showNotificationSettings by rememberSaveable { mutableStateOf(false) }
     var showMarket by rememberSaveable { mutableStateOf(false) }
+    var showPetDex by rememberSaveable { mutableStateOf(false) }
     var showUserItems by rememberSaveable { mutableStateOf(false) }
     var showPetCombatArena by rememberSaveable { mutableStateOf(false) }
     var petCombatPreview by remember { mutableStateOf<PetCombatPreviewWire?>(null) }
@@ -850,6 +913,15 @@ fun ProfileTabScreen(
                 com.lilru.liftr.ui.pets.PetMarketPurchaseFeedback.clearBadge()
                 showUserItems = true
             },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showPetDex) {
+        com.lilru.liftr.ui.pets.PetDexScreen(
+            supabase = supabase,
+            onBack = { showPetDex = false },
             modifier = modifier
         )
         return
@@ -1105,6 +1177,7 @@ fun ProfileTabScreen(
                 onProfileMenuExpandedChange = { profileMenuExpanded = it },
                 onMenuNotifications = { showNotifications = true },
                 onMenuMarket = { showMarket = true },
+                onMenuPetDex = { showPetDex = true },
                 onMenuAchievements = { if (profileUserId != null) showAchievements = true },
                 onMenuGoals = { if (profileUserId != null) showGoals = true },
                 onMenuCompetitions = {

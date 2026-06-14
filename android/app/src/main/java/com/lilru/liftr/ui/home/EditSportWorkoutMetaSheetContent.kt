@@ -16,12 +16,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.add.AddWorkoutIntensity
+import com.lilru.liftr.ui.add.ClimbingSessionEditorSection
 import com.lilru.liftr.ui.active.sportMatchResultEntries
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -55,6 +57,10 @@ fun EditSportWorkoutMetaSheetContent(
     onLocationChange: (String) -> Unit,
     sessionNotes: String,
     onSessionNotesChange: (String) -> Unit,
+    climbingSportStats: Map<String, String> = emptyMap(),
+    onClimbingStatChange: ((String, String) -> Unit)? = null,
+    climbingRoutesJson: String = "[]",
+    onClimbingRoutesChange: ((String) -> Unit)? = null,
     saveLabel: String,
     saving: Boolean,
     onSave: () -> Unit
@@ -186,6 +192,21 @@ fun EditSportWorkoutMetaSheetContent(
             maxLines = 4,
             modifier = Modifier.fillMaxWidth()
         )
+        if (onClimbingStatChange != null && onClimbingRoutesChange != null) {
+            val climbingRoutes = remember(climbingRoutesJson) {
+                com.lilru.liftr.climbing.ClimbingRouteFormatting.decodeRoutesJson(climbingRoutesJson)
+            }
+            ClimbingSessionEditorSection(
+                sportStats = climbingSportStats,
+                onSportStatChange = { key, value -> onClimbingStatChange(key, value) },
+                routes = climbingRoutes,
+                onRoutesChange = { routes ->
+                    onClimbingRoutesChange(
+                        com.lilru.liftr.climbing.ClimbingRouteFormatting.encodeRoutesJson(routes)
+                    )
+                }
+            )
+        }
         Button(
             onClick = onSave,
             enabled = !saving,

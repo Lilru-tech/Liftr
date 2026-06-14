@@ -1,5 +1,6 @@
 package com.lilru.liftr.data
 
+import androidx.compose.ui.graphics.Color
 import com.lilru.liftr.ui.AppSnackbar
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
@@ -145,5 +146,32 @@ object CoinManager {
         "nutrition_recipe_created" -> "Recipe created"
         "" -> "Coins earned"
         else -> actionType.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+
+    fun sourceCategoryLabel(key: String): String = when (key) {
+        "workouts" -> "Workouts"
+        "pet_workout_bonus" -> "Pet workout bonus"
+        "pet_coins" -> "Pet coins"
+        "social" -> "Social"
+        "nutrition" -> "Nutrition"
+        "achievements" -> "Achievements"
+        "goals_streaks" -> "Goals & streaks"
+        "competition" -> "Competition"
+        "pet_combat" -> "Pet combat"
+        "other" -> "Other"
+        else -> key.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+
+    fun sourceCategoryColor(key: String): Color = when (key) {
+        "workouts" -> Color(0xFF1E88E5)
+        "pet_workout_bonus" -> Color(0xFF9C27B0)
+        "pet_coins" -> Color(0xFFFFC107)
+        "social" -> Color(0xFFE91E63)
+        "nutrition" -> Color(0xFF4CAF50)
+        "achievements" -> Color(0xFFFF5722)
+        "goals_streaks" -> Color(0xFF00BCD4)
+        "competition" -> Color(0xFF795548)
+        "pet_combat" -> Color(0xFF673AB7)
+        else -> Color(0xFF9E9E9E)
     }
 }

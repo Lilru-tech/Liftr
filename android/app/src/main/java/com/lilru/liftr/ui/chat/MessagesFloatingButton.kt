@@ -6,11 +6,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
@@ -42,8 +43,10 @@ import com.lilru.liftr.prefs.ChatFabDockState
 import com.lilru.liftr.prefs.ChatPreferences
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.common.FloatingDockEdge
+import com.lilru.liftr.ui.common.floatingBubbleOffset
 import com.lilru.liftr.ui.common.floatingEdgeAnchor
 import com.lilru.liftr.ui.common.floatingEdgeDock
+import com.lilru.liftr.ui.common.marginPx
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradientOpaque
 import io.github.jan.supabase.SupabaseClient
 import kotlinx.coroutines.launch
@@ -81,6 +84,7 @@ fun MessagesFloatingButton(
     var openThread by remember { mutableStateOf<Pair<Long, ProfileLite?>?>(null) }
     var dragHintClearRequested by remember { mutableStateOf(false) }
     var fabDidDrag by remember { mutableStateOf(false) }
+    var dragHintSize by remember { mutableStateOf(IntSize.Zero) }
 
     LaunchedEffect(showInbox, dragHintSeen) {
         if (showInbox && !dragHintSeen) ChatPreferences.setFabDragHintSeen(context)
@@ -101,19 +105,36 @@ fun MessagesFloatingButton(
         )
 
         if (!dragHintSeen) {
+            val cardWidthPx = with(density) { 280.dp.toPx() }
+            val cardHeightPx = if (dragHintSize.height > 0) {
+                dragHintSize.height.toFloat()
+            } else {
+                with(density) { 130.dp.toPx() }
+            }
+            val spacingPx = with(density) { 12.dp.toPx() }
             Card(
                 modifier = Modifier
+                    .width(280.dp)
+                    .onGloballyPositioned { coordinates ->
+                        val size = coordinates.size
+                        if (size != dragHintSize) {
+                            dragHintSize = size
+                        }
+                    }
                     .offset {
-                        chatFabDragHintOffset(
+                        floatingBubbleOffset(
                             anchor = anchor,
                             edge = fabEdge,
-                            widthPx = widthPx,
-                            heightPx = heightPx,
-                            density = density
+                            bubbleWidthPx = cardWidthPx,
+                            bubbleHeightPx = cardHeightPx,
+                            tabWidthPx = tabSizePx,
+                            tabHeightPx = tabSizePx,
+                            screenWidthPx = widthPx,
+                            screenHeightPx = heightPx,
+                            spacingPx = spacingPx,
+                            marginPx = density.marginPx()
                         )
-                    }
-                    .widthIn(max = 300.dp)
-                    .fillMaxWidth(0.92f),
+                    },
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
                 )
@@ -217,28 +238,4 @@ fun MessagesFloatingButton(
             }
         }
     }
-}
-
-private fun chatFabDragHintOffset(
-    anchor: Offset,
-    edge: FloatingDockEdge,
-    widthPx: Float,
-    heightPx: Float,
-    density: androidx.compose.ui.unit.Density
-): IntOffset {
-    val cardWidth = with(density) { 280.dp.toPx() }
-    val cardHeight = with(density) { 96.dp.toPx() }
-    val spacing = with(density) { 70.dp.toPx() }
-    val verticalSpacing = with(density) { 58.dp.toPx() }
-    val raw = when (edge) {
-        FloatingDockEdge.LEFT -> Offset(anchor.x + spacing, anchor.y)
-        FloatingDockEdge.RIGHT -> Offset(anchor.x - spacing - cardWidth, anchor.y)
-        FloatingDockEdge.TOP -> Offset(anchor.x - cardWidth / 2f, anchor.y + verticalSpacing)
-        FloatingDockEdge.BOTTOM -> Offset(anchor.x - cardWidth / 2f, anchor.y - verticalSpacing - cardHeight)
-    }
-
-    return IntOffset(
-        raw.x.coerceIn(12f, widthPx - cardWidth - 12f).roundToInt(),
-        (raw.y - cardHeight / 2f).coerceIn(12f, heightPx - cardHeight - 12f).roundToInt()
-    )
 }

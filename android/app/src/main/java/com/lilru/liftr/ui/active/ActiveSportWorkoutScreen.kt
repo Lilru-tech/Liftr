@@ -40,7 +40,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.R
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
+import com.lilru.liftr.climbing.ClimbingRouteFormatting
 import com.lilru.liftr.hyrox.HyroxExerciseFormatting
+import com.lilru.liftr.ui.add.ClimbingSessionEditorSection
 import com.lilru.liftr.ui.chat.MessagesFloatingButton
 import io.github.jan.supabase.SupabaseClient
 
@@ -338,7 +340,30 @@ fun ActiveSportWorkoutScreen(
                                     hyroxOrdered.isNotEmpty() && ui.hyroxExerciseIndex < hyroxOrdered.lastIndex
                             ) { Text(stringResource(R.string.active_sport_hyrox_next)) }
                         }
-                    } else {
+                    } else if (ui.isClimbing) {
+                        val climbingRoutes = remember(ui.climbingRoutesJson) {
+                            com.lilru.liftr.climbing.ClimbingRouteFormatting.decodeRoutesJson(ui.climbingRoutesJson)
+                        }
+                        ClimbingSessionEditorSection(
+                            sportStats = ui.climbingSportStats,
+                            onSportStatChange = vm::setClimbingStat,
+                            routes = climbingRoutes,
+                            onRoutesChange = { routes ->
+                                vm.setClimbingRoutesJson(ClimbingRouteFormatting.encodeRoutesJson(routes))
+                            },
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                        OutlinedTextField(
+                            value = ui.locationText,
+                            onValueChange = vm::setLocationText,
+                            label = { Text(stringResource(R.string.active_sport_location)) },
+                            singleLine = true,
+                            enabled = !ui.finishing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        )
+                    } else if (!ui.isSki) {
                         OutlinedTextField(
                             value = ui.scoreForText,
                             onValueChange = vm::setScoreForText,

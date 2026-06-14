@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.LinkedHashMap
@@ -125,7 +127,8 @@ data class HomeUiState(
     /** Signed-out home: public published feed only. */
     val isGuestHomeFeed: Boolean = false,
     /** Last refresh had at least one followee (signed-in empty states). */
-    val hasFollowees: Boolean = false
+    val hasFollowees: Boolean = false,
+    val trackedAchievementCount: Int = 0
 )
 
 class HomeViewModel(
@@ -386,7 +389,8 @@ class HomeViewModel(
                     }
                 val premium = PremiumStatusStore.isPremium.value
                 val r = recalcParallels(me, followees, visibleUserIds)
-                HomeRefreshResult(enriched, month, prs, premium, canLoadMore, r)
+                val trackedCount = loadTrackedAchievementCount(me)
+                HomeRefreshResult(enriched, month, prs, premium, canLoadMore, r, trackedCount)
             }.onSuccess { h ->
                 Log.i(TAG, "HOME success. workouts=${h.enriched.size} filter=${_uiState.value.kindFilter}")
                 _uiState.value = _uiState.value.copy(
@@ -413,7 +417,8 @@ class HomeViewModel(
                     strongestWeekPtsMtd = h.r.strongestWeekPtsMtd,
                     strongestWeekKcalMtd = h.r.strongestWeekKcalMtd,
                     bestSportScore = h.r.bestSportScore,
-                    bestSportLabel = h.r.bestSportLabel
+                    bestSportLabel = h.r.bestSportLabel,
+                    trackedAchievementCount = h.trackedAchievementCount
                 )
             }.onFailure { e ->
                 Log.e(TAG, "HOME failure", e)
@@ -449,8 +454,17 @@ class HomeViewModel(
         val prs: List<HomePrRow>,
         val premium: Boolean,
         val canLoadMore: Boolean,
-        val r: RecalcResult
+        val r: RecalcResult,
+        val trackedAchievementCount: Int = 0
     )
+
+    private suspend fun loadTrackedAchievementCount(me: String): Int = runCatching {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_TRACKED_ACHIEVEMENT_COUNT_V1,
+            buildJsonObject { put("p_user_id", me) }
+        )
+        JSONObject(res.data).optInt("count", 0)
+    }.getOrDefault(0)
 
     private suspend fun recalcParallels(
         me: String,

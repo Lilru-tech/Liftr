@@ -44,7 +44,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.data.PetRefreshBus
 import com.lilru.liftr.prefs.LiftrPreferences
+import com.lilru.liftr.ui.common.marginPx
+import com.lilru.liftr.ui.common.petGreetingBubbleOrigin
 import io.github.jan.supabase.SupabaseClient
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntSize
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -71,6 +76,7 @@ fun ProfilePetFloatingOverlay(
         mutableFloatStateOf(LiftrPreferences.profilePetFabPerimeterT(context) ?: -1f)
     }
     var dragPreviewPoint by remember { mutableStateOf<Offset?>(null) }
+    var greetingBubbleSize by remember { mutableStateOf(IntSize.Zero) }
 
     LaunchedEffect(Unit) {
         vm.load()
@@ -116,8 +122,31 @@ fun ProfilePetFloatingOverlay(
         )
         val anchor = dragPreviewPoint ?: ProfilePetFabPosition.pointOnPerimeter(resolvedT, bounds)
         val fabRadiusPx = with(density) { ProfilePetFabPosition.fabSize.toPx() } / 2f
+        val verticalGapPx = with(density) { 8.dp.toPx() }
+        val marginPx = density.marginPx()
         val positionX = (anchor.x - fabRadiusPx).roundToInt()
         val positionY = (anchor.y - fabRadiusPx).roundToInt()
+        val bubbleWidthPx = if (greetingBubbleSize.width > 0) {
+            greetingBubbleSize.width.toFloat()
+        } else {
+            widthPx - marginPx * 2f
+        }
+        val bubbleHeightPx = if (greetingBubbleSize.height > 0) {
+            greetingBubbleSize.height.toFloat()
+        } else {
+            with(density) { 44.dp.toPx() }
+        }
+        val maxBubbleWidth = maxWidth - 24.dp
+        val greetingOrigin = petGreetingBubbleOrigin(
+            anchor = anchor,
+            bubbleWidthPx = bubbleWidthPx,
+            bubbleHeightPx = bubbleHeightPx,
+            fabRadiusPx = fabRadiusPx,
+            screenWidthPx = widthPx,
+            screenHeightPx = heightPx,
+            verticalGapPx = verticalGapPx,
+            marginPx = marginPx
+        )
 
         LaunchedEffect(bounds) {
             if (perimeterT < 0f) {
@@ -189,20 +218,26 @@ fun ProfilePetFloatingOverlay(
                 }
         )
 
-        Column(
-            modifier = Modifier.offset { IntOffset(positionX, positionY) },
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
             AnimatedVisibility(
                 visible = showGreeting,
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut(),
-                modifier = Modifier.align(Alignment.CenterHorizontally)
+                modifier = Modifier.offset {
+                    IntOffset(greetingOrigin.x.roundToInt(), greetingOrigin.y.roundToInt())
+                }
             ) {
                 Surface(
                     shape = MaterialTheme.shapes.medium,
                     tonalElevation = 4.dp,
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier
+                        .widthIn(max = maxBubbleWidth)
+                        .onGloballyPositioned { coordinates ->
+                            val size = coordinates.size
+                            if (size != greetingBubbleSize) {
+                                greetingBubbleSize = size
+                            }
+                        }
                 ) {
                     Text(
                         text = greetingMessage,
@@ -214,6 +249,7 @@ fun ProfilePetFloatingOverlay(
 
             Box(
                 modifier = Modifier
+                    .offset { IntOffset(positionX, positionY) }
                     .size(ProfilePetFabPosition.fabSize)
                     .shadow(6.dp, CircleShape, spotColor = petRarityColor(pet.rarity).copy(alpha = 0.35f))
                     .clip(CircleShape)

@@ -174,6 +174,27 @@ final class PetService {
         return try JSONDecoder.supabase().decode([PetTypeCatalogRow].self, from: res.data)
     }
 
+    func fetchMyPetDex() async throws -> PetDexData {
+        let res = try await client.rpc("get_my_pet_dex_v1").execute()
+        if let decoded = try? JSONDecoder.supabaseCustom().decode(PetDexData.self, from: res.data) {
+            return decoded
+        }
+        return try JSONDecoder.supabase().decode(PetDexData.self, from: res.data)
+    }
+
+    func fetchPetSpeciesDetail(petType: String) async throws -> PetSpeciesDetail {
+        struct Params: Encodable {
+            let p_pet_type: String
+        }
+        let res = try await client
+            .rpc("get_pet_species_detail_v1", params: Params(p_pet_type: petType))
+            .execute()
+        if let decoded = try? JSONDecoder.supabaseCustom().decode(PetSpeciesDetail.self, from: res.data) {
+            return decoded
+        }
+        return try JSONDecoder.supabase().decode(PetSpeciesDetail.self, from: res.data)
+    }
+
     func fetchPetLogs(offset: Int, limit: Int = 5) async throws -> [PetLog] {
         let res = try await client
             .from("pet_logs")

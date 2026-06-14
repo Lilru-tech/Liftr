@@ -155,6 +155,39 @@ data class HyroxSessionExerciseRow(
 )
 
 @Serializable
+data class ClimbingSessionStatsRow(
+    @SerialName("session_id") val sessionId: Int? = null,
+    val environment: String? = null,
+    @SerialName("primary_style") val primaryStyle: String? = null,
+    @SerialName("routes_sent") val routesSent: Int? = null,
+    @SerialName("routes_attempted") val routesAttempted: Int? = null,
+    @SerialName("highest_grade_system") val highestGradeSystem: String? = null,
+    @SerialName("highest_grade_value") val highestGradeValue: String? = null,
+    @SerialName("total_vertical_m") val totalVerticalM: Int? = null,
+    @SerialName("moving_time_sec") val movingTimeSec: Int? = null,
+    @SerialName("paused_time_sec") val pausedTimeSec: Int? = null,
+    @SerialName("venue_name") val venueName: String? = null,
+    val weather: String? = null,
+    @SerialName("avg_hr") val avgHr: Int? = null,
+    @SerialName("max_hr") val maxHr: Int? = null,
+    val falls: Int? = null,
+    val flashes: Int? = null
+)
+
+@Serializable
+data class ClimbingSessionRouteRow(
+    @SerialName("route_order") val routeOrder: Int? = null,
+    @SerialName("route_name") val routeName: String? = null,
+    val style: String? = null,
+    @SerialName("grade_system") val gradeSystem: String? = null,
+    @SerialName("grade_value") val gradeValue: String? = null,
+    val attempts: Int? = null,
+    val sent: Boolean? = null,
+    val flash: Boolean? = null,
+    val notes: String? = null
+)
+
+@Serializable
 data class SkiSessionStatsRow(
     @SerialName("session_id") val sessionId: Int? = null,
     @SerialName("total_distance_km") val totalDistanceKm: Double? = null,
@@ -180,7 +213,9 @@ data class WorkoutSportDetailStatsBundle(
     val rugby: RugbySessionStatsRow? = null,
     val hyrox: HyroxSessionStatsRow? = null,
     val hyroxExercises: List<HyroxSessionExerciseRow> = emptyList(),
-    val ski: SkiSessionStatsRow? = null
+    val ski: SkiSessionStatsRow? = null,
+    val climbing: ClimbingSessionStatsRow? = null,
+    val climbingRoutes: List<ClimbingSessionRouteRow> = emptyList()
 )
 
 private inline fun <reified T> decodeOne(raw: String): T? {
@@ -268,6 +303,15 @@ suspend fun loadWorkoutSportDetailStats(
         }
         "ski" -> WorkoutSportDetailStatsBundle(
             ski = fetchSessionRow(supabase, BackendContracts.Tables.SKI_SESSION_STATS, sessionId)
+        )
+        "climbing" -> WorkoutSportDetailStatsBundle(
+            climbing = fetchSessionRow(supabase, BackendContracts.Tables.CLIMBING_SESSION_STATS, sessionId),
+            climbingRoutes = fetchSessionRowsOrdered(
+                supabase,
+                BackendContracts.Tables.CLIMBING_SESSION_ROUTES,
+                sessionId,
+                "route_order"
+            )
         )
         else -> WorkoutSportDetailStatsBundle()
     }

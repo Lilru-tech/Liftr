@@ -11,6 +11,7 @@ struct ProfilePetFloatingOverlay: View {
     @State private var greetingMessage = ""
     @State private var perimeterT: CGFloat?
     @State private var dragPreviewPoint: CGPoint?
+    @State private var greetingBubbleSize: CGSize = .zero
 
     private let fabSize: CGFloat = 90
     private let tabBarHeight: CGFloat = 49
@@ -35,8 +36,20 @@ struct ProfilePetFloatingOverlay: View {
                     in: bounds
                 )
                 let anchor = dragPreviewPoint ?? ProfilePetFabPositionStore.point(onPerimeter: resolvedT, in: bounds)
+                let bubbleSize = greetingBubbleSize == .zero
+                    ? CGSize(width: max(geo.size.width - 24, 1), height: 44)
+                    : greetingBubbleSize
+                let greetingOrigin = HomeFloatingDock.petGreetingOrigin(
+                    anchor: anchor,
+                    bubbleSize: bubbleSize,
+                    fabRadius: fabSize / 2,
+                    in: geo.size
+                )
 
-                VStack(spacing: 8) {
+                ZStack {
+                    petFab(pet: pet, bounds: bounds, resolvedT: resolvedT)
+                        .position(x: anchor.x, y: anchor.y)
+
                     if showGreeting {
                         Text(greetingMessage)
                             .font(.subheadline)
@@ -45,36 +58,19 @@ struct ProfilePetFloatingOverlay: View {
                             .shadow(radius: 3)
                             .multilineTextAlignment(.center)
                             .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: geo.size.width - 24)
+                            .onGeometryChange(for: CGSize.self) { proxy in
+                                proxy.size
+                            } action: { size in
+                                greetingBubbleSize = size
+                            }
+                            .position(
+                                x: greetingOrigin.x + bubbleSize.width / 2,
+                                y: greetingOrigin.y + bubbleSize.height / 2
+                            )
                             .transition(.opacity.combined(with: .scale))
                     }
-
-                    ZStack {
-                        Circle()
-                            .fill(.ultraThinMaterial)
-                        PetAsyncImage(
-                            pet: pet,
-                            height: fabSize - 20,
-                            padding: 10
-                        )
-                    }
-                    .frame(width: fabSize, height: fabSize)
-                    .clipShape(Circle())
-                    .overlay(
-                        Circle()
-                            .stroke(pet.rarityEnum.color.opacity(0.7), lineWidth: 2)
-                    )
-                    .shadow(color: pet.rarityEnum.color.opacity(0.35), radius: 6)
-                    .contentShape(Circle())
-                    .highPriorityGesture(
-                        TapGesture().onEnded {
-                            showGreeting = false
-                            showPetDetail = true
-                        }
-                    )
-                    .gesture(borderDragGesture(bounds: bounds, resolvedT: resolvedT))
                 }
-                .frame(width: 160)
-                .position(x: anchor.x, y: anchor.y)
                 .animation(nil, value: anchor)
                 .onAppear {
                     if perimeterT == nil {
@@ -109,6 +105,33 @@ struct ProfilePetFloatingOverlay: View {
                 }
             }
         }
+    }
+
+    private func petFab(pet: PetInstanceRow, bounds: ProfilePetFabBounds, resolvedT: CGFloat) -> some View {
+        ZStack {
+            Circle()
+                .fill(.ultraThinMaterial)
+            PetAsyncImage(
+                pet: pet,
+                height: fabSize - 20,
+                padding: 10
+            )
+        }
+        .frame(width: fabSize, height: fabSize)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(pet.rarityEnum.color.opacity(0.7), lineWidth: 2)
+        )
+        .shadow(color: pet.rarityEnum.color.opacity(0.35), radius: 6)
+        .contentShape(Circle())
+        .highPriorityGesture(
+            TapGesture().onEnded {
+                showGreeting = false
+                showPetDetail = true
+            }
+        )
+        .gesture(borderDragGesture(bounds: bounds, resolvedT: resolvedT))
     }
 
     private func legacyNormalizedCenter() -> CGPoint? {

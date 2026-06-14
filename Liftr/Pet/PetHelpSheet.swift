@@ -1,191 +1,135 @@
 import SwiftUI
 
 struct PetHelpSheet: View {
-    @State private var rarities: [PetRarityConfigRow] = []
-    @State private var species: [PetTypeCatalogRow] = []
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-
-    private let gridColumns = [
-        GridItem(.flexible(), spacing: 12),
-        GridItem(.flexible(), spacing: 12)
-    ]
-
     var body: some View {
         NavigationStack {
-            Group {
-                if isLoading {
-                    ProgressView("Loading pet guide...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if let errorMessage {
-                    VStack(spacing: 16) {
-                        Text(errorMessage)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                        Button("Retry") {
-                            Task { await load() }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .padding(24)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 20) {
-                            Text("Pet information")
-                                .font(.title2.weight(.semibold))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    Text("Pet information")
+                        .font(.title2.weight(.semibold))
 
-                            raritiesSection
-                            speciesSection
-                        }
-                        .padding(18)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    hatchingSection
+                    foodSection
+                    tipsSection
                 }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22))
             .padding(18)
             .navigationBarTitleDisplayMode(.inline)
         }
         .gradientBG()
-        .task { await load() }
     }
 
     @ViewBuilder
-    private var raritiesSection: some View {
+    private var hatchingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Rarities")
+            Text("How to hatch an egg")
                 .font(.headline)
 
-            Text("Rolled when incubation starts. Higher tiers boost stat gains and hourly coin generation.")
+            numberedStep(1, "Buy a Mysterious Egg and an Egg Incubator in the Market.")
+            myItemsStep
+            numberedStep(3, "Tap your egg and choose Incubate. You need an Egg Incubator in your inventory.")
+
+            Text("Your egg hatches automatically in about 6 to 16 hours. You can have one active pet at a time.")
                 .font(.body)
                 .foregroundStyle(.secondary)
-
-            let totalWeight = max(1, rarities.reduce(0) { $0 + $1.dropWeight })
-
-            ForEach(rarities) { row in
-                rarityRow(row, totalWeight: totalWeight)
-            }
         }
     }
 
     @ViewBuilder
-    private func rarityRow(_ row: PetRarityConfigRow, totalWeight: Int) -> some View {
-        let rarity = PetRarity(databaseValue: row.rarity) ?? .common
-        let dropPercent = Double(row.dropWeight) / Double(totalWeight) * 100
-        let upgradeCost = rarity.upgradeCost
-
-        VStack(alignment: .leading, spacing: 8) {
-            PetRarityBadge(rarity: rarity)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Drop chance: \(PetHelpFormatting.dropPercent(dropPercent))")
-                Text("Stat multiplier: \(PetHelpFormatting.multiplier(row.statMultiplier))")
-                Text("Coin multiplier: \(PetHelpFormatting.multiplier(row.coinMultiplier))")
-                if let upgradeCost, let next = rarity.nextTier {
-                    Text("Upgrade to \(next.displayName): \(PetHelpFormatting.coins(upgradeCost)) coins")
-                } else {
-                    Text("Max tier")
-                }
+    private var myItemsStep: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("2.")
+                .font(.body.weight(.semibold))
+                .frame(width: 20, alignment: .leading)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Open My Items using the")
+                Image(systemName: "bag.fill")
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                Text("icon in the Market toolbar.")
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            .font(.body)
+        }
+    }
+
+    @ViewBuilder
+    private func numberedStep(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number).")
+                .font(.body.weight(.semibold))
+                .frame(width: 20, alignment: .leading)
+            Text(text)
+                .font(.body)
+        }
+    }
+
+    @ViewBuilder
+    private var foodSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pet food")
+                .font(.headline)
+                .padding(.top, 6)
+
+            Text("Each life stage has matching food. Using the correct food gives the most experience.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 6) {
+                foodRow(stage: "Baby", food: "Baby Snack")
+                foodRow(stage: "Kid", food: "Kid Cookies")
+                foodRow(stage: "Teen", food: "Teen Treat")
+                foodRow(stage: "Adult", food: "Adult Biscuit")
+                foodRow(stage: "Elder", food: "Elder Delight")
+            }
+
+            Text("Buy food in the Market, then feed your pet from its detail screen.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func foodRow(stage: String, food: String) -> some View {
+        Text("\(stage) — \(food)")
+            .font(.body)
+    }
+
+    @ViewBuilder
+    private var tipsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Good to know")
+                .font(.headline)
+                .padding(.top, 6)
+
+            tipRow(
+                title: "Reroll",
+                body: "While incubating, before hatch, you can reroll species, rarity, and hatch time for coins."
+            )
+            tipRow(
+                title: "Rarities",
+                body: "Open Pet Dex from your Profile menu (⋯) for drop rates, multipliers, and upgrade costs."
+            )
+            tipRow(
+                title: "Evolution",
+                body: "Pets evolve at levels 25, 50, 75, and 100 through baby, kid, teen, adult, and elder stages."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func tipRow(title: String, body: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+            Text(body)
+                .font(.body)
+                .foregroundStyle(.secondary)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    @ViewBuilder
-    private var speciesSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Pet species")
-                .font(.headline)
-                .padding(.top, 6)
-
-            Text("Species are chosen at random when you start incubation. You can reroll before hatch.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-
-            LazyVGrid(columns: gridColumns, spacing: 12) {
-                ForEach(species) { row in
-                    speciesCard(row)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func speciesCard(_ row: PetTypeCatalogRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let url = row.imageURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFit()
-                    case .failure:
-                        Image(systemName: "egg.fill")
-                            .font(.title)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                    default:
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                .frame(height: 72)
-            }
-
-            Text(row.displayName.isEmpty ? row.name.petDisplayTitle : row.displayName)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(2)
-
-            if !row.description.isEmpty {
-                Text(row.description)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
-            }
-        }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private func load() async {
-        isLoading = rarities.isEmpty && species.isEmpty
-        errorMessage = nil
-        do {
-            async let rarityRows = PetService.shared.fetchRarityConfig()
-            async let typeRows = PetService.shared.fetchPetTypeCatalog()
-            rarities = try await rarityRows
-            species = try await typeRows
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isLoading = false
-    }
-}
-
-private enum PetHelpFormatting {
-    static func dropPercent(_ value: Double) -> String {
-        let rounded = (value * 10).rounded() / 10
-        if rounded == rounded.rounded() {
-            return "\(Int(rounded))%"
-        }
-        return String(format: "%.1f%%", rounded)
-    }
-
-    static func multiplier(_ value: Double) -> String {
-        String(format: "%.2f×", value)
-    }
-
-    static func coins(_ value: Int) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }

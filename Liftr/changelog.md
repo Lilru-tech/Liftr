@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.20.0] - 2026-06-14
+
+### Added
+- **Liftr Coins — income graphs** — Charts to see every source of coin income (iOS + Android).
+- **Achievements — pets & coins** — New achievement milestones for pets and Liftr Coins (iOS + Android).
+- **Pets — PetDex** — Catalog of pets you have fought against in the arena (iOS + Android).
+- **Achievements — tracker** — Achievement Tracker to follow progress toward unlocks (iOS + Android).
+- **Pets — workout coin bonus** — Shows how many coins your pet earned for you when you finish a workout (iOS + Android).
+- **Cardio — climbing** — Added **climbing** as a cardio workout type (iOS + Android).
+
+### Changed
+- **Suggest next session** — Improved suggestions when building the next workout from your history (iOS + Android).
+
+### Fixed
+- **Chat — conversations list** — Fixed the last-message preview sometimes not showing the full message (iOS + Android).
+- **Profile** — Fixed the coins icon overlapping the ranking icon in the profile header (iOS + Android).
+- **Home — floating dock** — Fixed pet, quick actions, and messages labels so the full text is visible (iOS + Android).
+
 ## [1.19.1] - 2026-06-12
 
 ### Added

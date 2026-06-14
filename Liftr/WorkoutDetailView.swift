@@ -2022,6 +2022,82 @@ struct WorkoutDetailView: View {
                         print("[DUP][SPORT] Ski stats load failed: \(error)")
                     }
                 }
+
+                if full.sport == "climbing" {
+                    do {
+                        let statsRes = try await SupabaseManager.shared.client
+                            .from("climbing_session_stats")
+                            .select("*")
+                            .eq("session_id", value: full.session_id)
+                            .single()
+                            .execute()
+                        struct CLRow: Decodable {
+                            let environment: String?
+                            let primary_style: String?
+                            let routes_sent: Int?
+                            let routes_attempted: Int?
+                            let total_vertical_m: Int?
+                            let moving_time_sec: Int?
+                            let paused_time_sec: Int?
+                            let venue_name: String?
+                            let weather: String?
+                            let avg_hr: Int?
+                            let max_hr: Int?
+                            let falls: Int?
+                            let flashes: Int?
+                            let highest_grade_system: String?
+                            let highest_grade_value: String?
+                        }
+                        let clRow = try decoder.decode(CLRow.self, from: statsRes.data)
+                        sf2.clEnvironment = ClimbingEnvironment(rawValue: clRow.environment ?? "") ?? .indoor
+                        sf2.clPrimaryStyle = ClimbingStyle(rawValue: clRow.primary_style ?? "") ?? .boulder
+                        sf2.clRoutesSent = clRow.routes_sent.map(String.init) ?? ""
+                        sf2.clRoutesAttempted = clRow.routes_attempted.map(String.init) ?? ""
+                        sf2.clTotalVerticalM = clRow.total_vertical_m.map(String.init) ?? ""
+                        sf2.clMovingTimeSec = clRow.moving_time_sec.map(String.init) ?? ""
+                        sf2.clPausedTimeSec = clRow.paused_time_sec.map(String.init) ?? ""
+                        sf2.clVenueName = clRow.venue_name ?? ""
+                        sf2.clWeather = clRow.weather ?? ""
+                        sf2.clAvgHR = clRow.avg_hr.map(String.init) ?? ""
+                        sf2.clMaxHR = clRow.max_hr.map(String.init) ?? ""
+                        sf2.clFalls = clRow.falls.map(String.init) ?? ""
+                        sf2.clFlashes = clRow.flashes.map(String.init) ?? ""
+                        sf2.clHighestGradeSystem = ClimbingGradeSystem(rawValue: clRow.highest_grade_system ?? "") ?? .v_scale
+                        sf2.clHighestGradeValue = clRow.highest_grade_value ?? ""
+
+                        let routesRes = try await SupabaseManager.shared.client
+                            .from("climbing_session_routes")
+                            .select("*")
+                            .eq("session_id", value: full.session_id)
+                            .order("route_order", ascending: true)
+                            .execute()
+                        struct RouteRow: Decodable {
+                            let route_name: String?
+                            let style: String?
+                            let grade_system: String?
+                            let grade_value: String?
+                            let attempts: Int?
+                            let sent: Bool?
+                            let flash: Bool?
+                            let notes: String?
+                        }
+                        let routeRows = try decoder.decode([RouteRow].self, from: routesRes.data)
+                        sf2.clRoutes = routeRows.map { row in
+                            var route = ClimbingRouteForm()
+                            route.routeName = row.route_name ?? ""
+                            route.style = ClimbingStyle(rawValue: row.style ?? "") ?? .boulder
+                            route.gradeSystem = ClimbingGradeSystem(rawValue: row.grade_system ?? "") ?? .v_scale
+                            route.gradeValue = row.grade_value ?? ""
+                            route.attempts = row.attempts.map(String.init) ?? ""
+                            route.sent = row.sent ?? false
+                            route.flash = row.flash ?? false
+                            route.notes = row.notes ?? ""
+                            return route
+                        }
+                    } catch {
+                        print("[DUP][SPORT] Climbing stats load failed: \(error)")
+                    }
+                }
                 
                 draft.sport = sf2
             } catch { return nil }
@@ -3582,6 +3658,37 @@ private struct SportDetailBlock: View {
         let snow_condition: String?
         let weather: String?
     }
+
+    private struct ClimbingStats: Decodable {
+        let environment: String?
+        let primary_style: String?
+        let routes_sent: Int?
+        let routes_attempted: Int?
+        let total_vertical_m: Int?
+        let moving_time_sec: Int?
+        let paused_time_sec: Int?
+        let venue_name: String?
+        let weather: String?
+        let avg_hr: Int?
+        let max_hr: Int?
+        let falls: Int?
+        let flashes: Int?
+        let highest_grade_system: String?
+        let highest_grade_value: String?
+    }
+
+    private struct ClimbingRouteStats: Decodable, Identifiable {
+        let id: Int
+        let route_order: Int?
+        let route_name: String?
+        let style: String?
+        let grade_system: String?
+        let grade_value: String?
+        let attempts: Int?
+        let sent: Bool?
+        let flash: Bool?
+        let notes: String?
+    }
     
     @State private var row: SportRow?
     @State private var loading = false
@@ -3597,6 +3704,8 @@ private struct SportDetailBlock: View {
     @State private var hy: HyroxStats? = nil
     @State private var hyExercises: [HyroxExerciseStats] = []
     @State private var sk: SkiStats? = nil
+    @State private var cl: ClimbingStats? = nil
+    @State private var clRoutes: [ClimbingRouteStats] = []
     
     var body: some View {
         DetailSectionCard(title: sportTitle, subtitle: sportSubtitle) {
@@ -3637,7 +3746,7 @@ private struct SportDetailBlock: View {
         if row.sport == "hyrox", !hyExercises.isEmpty {
             return "\(hyExercises.count) Hyrox exercises"
         }
-        if let result = detailTrimmed(row.match_result), row.sport != "ski" {
+        if let result = detailTrimmed(row.match_result), row.sport != "ski", row.sport != "climbing" {
             return result.capitalized
         }
         return nil
@@ -3648,7 +3757,7 @@ private struct SportDetailBlock: View {
         if let s = detailPositiveInt(r.duration_sec) {
             metrics.append(DetailMetric("Duration", durationString(Double(s)), systemImage: "clock"))
         }
-        if r.sport != "ski", let res = detailTrimmed(r.match_result) {
+        if r.sport != "ski", r.sport != "climbing", let res = detailTrimmed(r.match_result) {
             metrics.append(DetailMetric("Result", res.capitalized, systemImage: "flag.checkered"))
         }
         if sportUsesNumericScore(r.sport), let score = detailPair(r.score_for, r.score_against) {
@@ -3807,6 +3916,8 @@ private struct SportDetailBlock: View {
                     if let v = detailTrimmed(s.weather) { info("Weather", v) }
                 }
             }
+        case "climbing":
+            climbingSection()
         default:
             EmptyView()
         }
@@ -3857,6 +3968,62 @@ private struct SportDetailBlock: View {
                     } else {
                         hyroxDetailExerciseCard(pair.element)
                     }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func climbingSection() -> some View {
+        if let s = cl, hasClimbingStats(s) {
+            sportSubsection("Climbing stats") {
+                if let v = detailTrimmed(s.environment) {
+                    info("Environment", ClimbingEnvironment(rawValue: v)?.label ?? detailLabel(v))
+                }
+                if let v = detailTrimmed(s.primary_style) {
+                    info("Primary style", ClimbingStyle(rawValue: v)?.label ?? detailLabel(v))
+                }
+                if let v = detailPositiveInt(s.routes_sent) { info("Routes sent", "\(v)") }
+                if let v = detailPositiveInt(s.routes_attempted) { info("Routes attempted", "\(v)") }
+                if let v = detailPositiveInt(s.total_vertical_m) { info("Vertical", "\(v) m") }
+                if let v = detailPositiveInt(s.flashes) { info("Flashes", "\(v)") }
+                if let v = detailPositiveInt(s.falls) { info("Falls", "\(v)") }
+                if let t = detailPositiveInt(s.moving_time_sec) { info("Moving time", durationString(Double(t))) }
+                if let t = detailPositiveInt(s.paused_time_sec) { info("Paused time", durationString(Double(t))) }
+                if let v = detailTrimmed(s.venue_name) { info("Venue", v) }
+                if let v = detailTrimmed(s.weather) { info("Weather", v) }
+                if let v = detailPositiveInt(s.avg_hr) { info("Avg HR", "\(v) bpm") }
+                if let v = detailPositiveInt(s.max_hr) { info("Max HR", "\(v) bpm") }
+                if let gradeValue = detailTrimmed(s.highest_grade_value),
+                   let gradeSystem = detailTrimmed(s.highest_grade_system),
+                   let system = ClimbingGradeSystem(rawValue: gradeSystem) {
+                    info("Highest grade", ClimbingRouteFormatting.displayGrade(system: system, value: gradeValue))
+                }
+            }
+        }
+
+        if !clRoutes.isEmpty {
+            sportSubsection("Routes") {
+                ForEach(clRoutes.sorted { ($0.route_order ?? 0) < ($1.route_order ?? 0) }) { route in
+                    VStack(alignment: .leading, spacing: 8) {
+                        let title = detailTrimmed(route.route_name) ?? "Route \(route.route_order ?? 0)"
+                        Text(title)
+                            .font(.subheadline.weight(.semibold))
+                        if let style = detailTrimmed(route.style) {
+                            info("Style", ClimbingStyle(rawValue: style)?.label ?? detailLabel(style))
+                        }
+                        if let gradeValue = detailTrimmed(route.grade_value),
+                           let gradeSystem = detailTrimmed(route.grade_system),
+                           let system = ClimbingGradeSystem(rawValue: gradeSystem) {
+                            info("Grade", ClimbingRouteFormatting.displayGrade(system: system, value: gradeValue))
+                        }
+                        if let v = detailPositiveInt(route.attempts) { info("Attempts", "\(v)") }
+                        if route.sent == true { info("Sent", "Yes") }
+                        if route.flash == true { info("Flash", "Yes") }
+                        if let v = detailTrimmed(route.notes) { info("Notes", v) }
+                    }
+                    .padding(10)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
                 }
             }
         }
@@ -3941,6 +4108,19 @@ private struct SportDetailBlock: View {
         detailTrimmed(s.weather) != nil ||
         [
             s.runs_count, s.vertical_drop_m, s.moving_time_sec, s.paused_time_sec
+        ].contains { detailPositiveInt($0) != nil }
+    }
+
+    private func hasClimbingStats(_ s: ClimbingStats) -> Bool {
+        detailTrimmed(s.environment) != nil ||
+        detailTrimmed(s.primary_style) != nil ||
+        detailTrimmed(s.venue_name) != nil ||
+        detailTrimmed(s.weather) != nil ||
+        detailTrimmed(s.highest_grade_value) != nil ||
+        [
+            s.routes_sent, s.routes_attempted, s.total_vertical_m,
+            s.moving_time_sec, s.paused_time_sec, s.avg_hr, s.max_hr,
+            s.falls, s.flashes
         ].contains { detailPositiveInt($0) != nil }
     }
 
@@ -4166,6 +4346,35 @@ private struct SportDetailBlock: View {
                 await MainActor.run { sk = s }
             } catch {
                 await MainActor.run { sk = nil }
+            }
+
+        case "climbing":
+            do {
+                let q = try await client
+                    .from("climbing_session_stats")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .single()
+                    .execute()
+                let s = try decoder.decode(ClimbingStats.self, from: q.data)
+
+                let routesQ = try await client
+                    .from("climbing_session_routes")
+                    .select("*")
+                    .eq("session_id", value: r.id)
+                    .order("route_order", ascending: true)
+                    .execute()
+                let routes = try decoder.decode([ClimbingRouteStats].self, from: routesQ.data)
+
+                await MainActor.run {
+                    cl = s
+                    clRoutes = routes
+                }
+            } catch {
+                await MainActor.run {
+                    cl = nil
+                    clRoutes = []
+                }
             }
             
         default:

@@ -24,6 +24,7 @@ struct MessagesFloatingButton: View {
     @State private var fabDidDrag = false
     @State private var presentInbox: Bool = false
     @State private var deepLinkConversation: DeepLinkPayload?
+    @State private var dragHintSize: CGSize = .zero
 
     private let fabSize = CGSize(width: 56, height: 56)
 
@@ -39,13 +40,27 @@ struct MessagesFloatingButton: View {
             let maxBubbleW = min(280, max(120, size.width - insets.leading - insets.trailing - 24))
             let edge = fabEdge
             let point = dragLocation ?? fabAnchorPoint(edge: edge, position: fabPosition, in: size)
+            let hintSize = dragHintSize == .zero
+                ? CGSize(width: maxBubbleW, height: 130)
+                : dragHintSize
+            let hintOrigin = fabDragHintOrigin(
+                anchor: point,
+                edge: edge,
+                bubbleSize: hintSize,
+                in: size
+            )
 
             ZStack(alignment: .topLeading) {
                 Color.clear
 
                 if !chatFabDragHintSeen {
                     fabDragHintBubbleContent(maxWidth: maxBubbleW)
-                        .position(fabDragHintPoint(anchor: point, edge: edge, in: size))
+                        .onGeometryChange(for: CGSize.self) { proxy in
+                            proxy.size
+                        } action: { size in
+                            dragHintSize = size
+                        }
+                        .offset(x: hintOrigin.x, y: hintOrigin.y)
                         .zIndex(1)
                 }
 
@@ -178,29 +193,26 @@ struct MessagesFloatingButton: View {
         }
     }
 
-    private func fabDragHintPoint(
+    private func fabDragHintOrigin(
         anchor: CGPoint,
         edge: ChatFabDockEdge,
+        bubbleSize: CGSize,
         in size: CGSize
     ) -> CGPoint {
-        let bubbleSize = CGSize(width: 210, height: 96)
-        let spacing: CGFloat = 70
-        let raw: CGPoint
-
+        let dockEdge: HomeFloatingDockEdge
         switch edge {
-        case .left:
-            raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
-        case .right:
-            raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
-        case .top:
-            raw = CGPoint(x: anchor.x, y: anchor.y + 58)
-        case .bottom:
-            raw = CGPoint(x: anchor.x, y: anchor.y - 58)
+        case .left: dockEdge = .left
+        case .right: dockEdge = .right
+        case .top: dockEdge = .top
+        case .bottom: dockEdge = .bottom
         }
-
-        return CGPoint(
-            x: min(max(raw.x, bubbleSize.width / 2 + 12), size.width - bubbleSize.width / 2 - 12),
-            y: min(max(raw.y, bubbleSize.height / 2 + 12), size.height - bubbleSize.height / 2 - 12)
+        return HomeFloatingDock.bubbleOrigin(
+            anchor: anchor,
+            edge: dockEdge,
+            bubbleSize: bubbleSize,
+            tabSize: fabSize,
+            in: size,
+            spacing: 12
         )
     }
 

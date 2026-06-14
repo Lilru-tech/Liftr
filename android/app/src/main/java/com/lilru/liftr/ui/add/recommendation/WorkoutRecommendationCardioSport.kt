@@ -74,8 +74,12 @@ object WorkoutRecommendationCardioSport {
         supabase: SupabaseClient,
         json: Json,
         userId: String,
-        source: RecommendationDataSource
+        source: RecommendationDataSource,
+        networkInspired: Boolean = false
     ): CardioRecommendationResult {
+        val ctx = WorkoutRecommendationContextLoader.load(
+            supabase, json, userId, emptyList(), networkInspired || source == RecommendationDataSource.NETWORK_INSPIRED
+        )
         @Serializable
         data class WRow(val id: Int)
         val wRes = supabase.from(BackendContracts.Tables.WORKOUTS)
@@ -90,8 +94,14 @@ object WorkoutRecommendationCardioSport {
             }
         val wRows = json.decodeFromString<List<WRow>>(wRes.data)
         if (wRows.isEmpty()) {
-            if (source == RecommendationDataSource.FULL_CATALOG) {
-                return beginnerWalkCardio()
+            if (source == RecommendationDataSource.FULL_CATALOG ||
+                source == RecommendationDataSource.NETWORK_INSPIRED
+            ) {
+                val base = beginnerWalkCardio()
+                return base.copy(
+                    durationSec = (base.durationSec * ctx.cardioDurationMultiplier()).toInt(),
+                    rationale = ctx.appendGoalLine(base.rationale)
+                )
             }
             throw WorkoutRecommendationError.NoWorkoutsInWindow
         }
@@ -152,8 +162,10 @@ object WorkoutRecommendationCardioSport {
         val candidateCodes = when (source) {
             RecommendationDataSource.RECENT_HISTORY,
             RecommendationDataSource.HYROX,
-            RecommendationDataSource.HYROX_RACE -> sessions.map { it.code }.distinct()
-            RecommendationDataSource.FULL_CATALOG -> allCodes
+            RecommendationDataSource.HYROX_RACE,
+            RecommendationDataSource.MY_ROUTINES -> sessions.map { it.code }.distinct()
+            RecommendationDataSource.FULL_CATALOG,
+            RecommendationDataSource.NETWORK_INSPIRED -> allCodes
         }
         val sortedByRare = candidateCodes.sortedBy { counts[it] ?: 0 }
         val pickedCode = sortedByRare.firstOrNull() ?: "walk"
@@ -233,13 +245,18 @@ object WorkoutRecommendationCardioSport {
         } else {
             null
         }
-        var rationale = "Among ${if (source == RecommendationDataSource.FULL_CATALOG) "all app activities" else "activities you logged"}, this one was least frequent in your last $lookback cardio workouts."
+        var rationale = "Among ${if (source == RecommendationDataSource.FULL_CATALOG || source == RecommendationDataSource.NETWORK_INSPIRED) "all app activities" else "activities you logged"}, this one was least frequent in your last $lookback cardio workouts."
         if (usedCrossActivityFallback) {
             rationale += " Values are estimated from your other cardio in this window, since you haven't logged this activity yet."
         }
+        if (statsBySession.isEmpty() && statIds.isNotEmpty()) {
+            rationale += " Some activity stats were unavailable; core duration and distance still apply."
+        }
+        rationale = ctx.appendGoalLine(rationale)
+        val scaledDur = (medianDur * ctx.cardioDurationMultiplier()).toInt()
         return CardioRecommendationResult(
             activityWire = pickedCode,
-            durationSec = medianDur,
+            durationSec = scaledDur,
             distanceKm = medianDist,
             elevationGainM = medianElev,
             avgHr = medAvg,
@@ -278,8 +295,15 @@ object WorkoutRecommendationCardioSport {
         supabase: SupabaseClient,
         json: Json,
         userId: String,
-        source: RecommendationDataSource
+        source: RecommendationDataSource,
+        networkInspired: Boolean = false
     ): SportRecommendationResult {
+        if (source == RecommendationDataSource.MY_ROUTINES) {
+            return recommendFromHyroxRoutine(supabase, json, userId)
+        }
+        val ctx = WorkoutRecommendationContextLoader.load(
+            supabase, json, userId, emptyList(), networkInspired
+        )
         @Serializable
         data class WRow(val id: Int)
         val wRes = supabase.from(BackendContracts.Tables.WORKOUTS)
@@ -339,7 +363,9 @@ object WorkoutRecommendationCardioSport {
         val allM = sessions.map { it.durationMin }
         val matchM = matching.map { it.durationMin }
         val medMin = medianSportMinutes(if (matchM.isEmpty()) allM else matchM)
-        var r = "Among ${if (source == RecommendationDataSource.RECENT_HISTORY) "sports you logged" else "all app sports"}, this one was least frequent in your last $lookback sessions."
+        var r = ctx.appendGoalLine(
+            "Among ${if (source == RecommendationDataSource.RECENT_HISTORY) "sports you logged" else "all app sports"}, this one was least frequent in your last $lookback sessions."
+        )
         if (raw != "hyrox") {
             r += " Suggested session length only—choose whichever sport fits in the form."
             return SportRecommendationResult.DurationOnly(medMin, r)
@@ -569,4 +595,71 @@ object WorkoutRecommendationCardioSport {
     }
 
     private fun hyroxColdStart() = officialRaceHyroxWithRuns(HyroxWeightTier.OPEN_MEN, 1000, 4)
+
+    private suspend fun recommendFromHyroxRoutine(
+        supabase: SupabaseClient,
+        json: Json,
+        userId: String
+    ): SportRecommendationResult {
+        @Serializable
+        data class RoutineRow(val id: Long, val name: String)
+        @Serializable
+        data class ExWire(
+            @SerialName("exercise_code") val exerciseCode: String,
+            @SerialName("exercise_order") val exerciseOrder: Int,
+            @SerialName("distance_m") val distanceM: Int? = null,
+            val reps: Int? = null,
+            @SerialName("weight_kg") val weightKg: Double? = null,
+            @SerialName("duration_sec") val durationSec: Int? = null,
+            @SerialName("height_cm") val heightCm: Int? = null,
+            @SerialName("implement_count") val implementCount: Int? = null,
+            @SerialName("exercise_display_name") val exerciseDisplayName: String? = null,
+            val notes: String? = null
+        )
+        @Serializable
+        data class Detail(
+            val name: String,
+            @SerialName("hyrox_routine_exercises") val exercises: List<ExWire>? = null
+        )
+        val rRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINES)
+            .select(Columns.raw("id, name")) {
+                filter { eq("user_id", userId) }
+                order("updated_at", Order.ASCENDING)
+            }
+        val rows = json.decodeFromString<List<RoutineRow>>(rRes.data)
+        val picked = rows.randomOrNull()
+            ?: throw WorkoutRecommendationError.LoadFailed("Save a Hyrox routine first, or pick another data source.")
+        val dRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINES)
+            .select(
+                Columns.raw(
+                    "name, hyrox_routine_exercises(exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name, notes)"
+                )
+            ) {
+                filter { eq("id", picked.id) }
+            }
+        val detail = json.decodeFromString<List<Detail>>(dRes.data).firstOrNull()
+            ?: throw WorkoutRecommendationError.LoadFailed("Could not load routine.")
+        val exercises = (detail.exercises ?: emptyList()).sortedBy { it.exerciseOrder }.map { ex ->
+            sanitizeHyroxExerciseRecommendation(
+                HyroxExerciseRecommendationResult(
+                    exerciseCode = ex.exerciseCode,
+                    customDisplayName = ex.exerciseDisplayName ?: "",
+                    exerciseOrder = ex.exerciseOrder,
+                    distanceM = ex.distanceM,
+                    reps = ex.reps,
+                    weightKg = ex.weightKg,
+                    durationSec = ex.durationSec,
+                    heightCm = ex.heightCm,
+                    implementCount = ex.implementCount,
+                    notes = ex.notes
+                )
+            )
+        }
+        val durationMin = max(35, min(120, exercises.size * 8))
+        return SportRecommendationResult.Hyrox(
+            durationMin = durationMin,
+            exercises = if (exercises.isEmpty()) hyroxColdStart() else exercises,
+            rationale = "Loaded from your Hyrox routine \"${detail.name}\"."
+        )
+    }
 }

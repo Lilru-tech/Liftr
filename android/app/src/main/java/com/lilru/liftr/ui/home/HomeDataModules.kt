@@ -2,6 +2,13 @@ package com.lilru.liftr.ui.home
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -27,15 +34,16 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.components.LiftrAvatar
@@ -162,6 +170,140 @@ private fun InsightPill(text: String) {
             .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
             .padding(vertical = 6.dp, horizontal = 10.dp)
     )
+}
+
+@Composable
+fun HomeModulePillRow(
+    showData: Boolean,
+    dataExpanded: Boolean,
+    onToggleData: () -> Unit,
+    showGoals: Boolean,
+    showCompetitions: Boolean,
+    showAchievements: Boolean,
+    trackedAchievementCount: Int,
+    onGoals: () -> Unit,
+    onCompetitions: () -> Unit,
+    onAchievements: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val scrollState = rememberScrollState()
+    val showTrailingFade by remember(scrollState) {
+        derivedStateOf {
+            val maxScroll = scrollState.maxValue
+            maxScroll > 0 && scrollState.value < maxScroll - 2
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(scrollState),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (showData) {
+                HomeCompactNavPill(
+                    icon = { Text("📊", style = MaterialTheme.typography.bodyLarge) },
+                    title = stringResource(R.string.home_data_title),
+                    trailing = if (dataExpanded) "▴" else "▾",
+                    onClick = onToggleData
+                )
+            }
+            if (showGoals) {
+                HomeCompactNavPill(
+                    icon = { Text("🎯", style = MaterialTheme.typography.bodyLarge) },
+                    title = stringResource(R.string.home_weekly_goals),
+                    trailing = "›",
+                    onClick = onGoals
+                )
+            }
+            if (showCompetitions) {
+                HomeCompactNavPill(
+                    icon = { Text("🏆", style = MaterialTheme.typography.bodyLarge) },
+                    title = stringResource(R.string.home_competitions),
+                    trailing = "›",
+                    onClick = onCompetitions
+                )
+            }
+            if (showAchievements) {
+                val title = if (trackedAchievementCount > 1) {
+                    stringResource(R.string.home_achievements_pill_count, trackedAchievementCount)
+                } else {
+                    stringResource(R.string.home_achievements_pill)
+                }
+                HomeCompactNavPill(
+                    icon = { Text("🏅", style = MaterialTheme.typography.bodyLarge) },
+                    title = title,
+                    trailing = "›",
+                    onClick = onAchievements
+                )
+            }
+        }
+
+        if (showTrailingFade) {
+            Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    Modifier
+                        .width(40.dp)
+                        .fillMaxHeight()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.06f),
+                                    Color.Black.copy(alpha = 0.14f)
+                                )
+                            )
+                        )
+                )
+                Text(
+                    "›",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeCompactNavPill(
+    icon: @Composable () -> Unit,
+    title: String,
+    trailing: String,
+    onClick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            icon()
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                trailing,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable

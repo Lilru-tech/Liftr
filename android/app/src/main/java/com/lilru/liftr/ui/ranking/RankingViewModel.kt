@@ -48,6 +48,7 @@ enum class RankingMetric {
     HYROX_BEST_TIME,
     FOOTBALL_GOALS,
     SKI_DISTANCE_KPI,
+    CLIMBING_ROUTES_SENT_KPI,
     SEGMENT_POPULARITY,
     TERRITORY_SHARE,
     TERRITORY_CELLS,
@@ -98,7 +99,8 @@ private fun RankingMetric.isVisibleFor(kind: RankingKind): Boolean = when (this)
     RankingMetric.SPORT_DURATION,
     RankingMetric.HYROX_BEST_TIME,
     RankingMetric.FOOTBALL_GOALS,
-    RankingMetric.SKI_DISTANCE_KPI -> kind == RankingKind.ALL || kind == RankingKind.SPORT
+    RankingMetric.SKI_DISTANCE_KPI,
+    RankingMetric.CLIMBING_ROUTES_SENT_KPI -> kind == RankingKind.ALL || kind == RankingKind.SPORT
     RankingMetric.LIKES_RECEIVED,
     RankingMetric.COMMENTS_RECEIVED,
     RankingMetric.GROUP_SESSIONS,
@@ -150,7 +152,8 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetric.SPORT_DURATION,
         RankingMetric.HYROX_BEST_TIME,
         RankingMetric.FOOTBALL_GOALS,
-        RankingMetric.SKI_DISTANCE_KPI
+        RankingMetric.SKI_DISTANCE_KPI,
+        RankingMetric.CLIMBING_ROUTES_SENT_KPI
     ).filter { it.isVisibleFor(kind) }
     val pets = listOf(
         RankingMetric.PET_LEVEL,
@@ -322,6 +325,7 @@ class RankingViewModel(
                     RankingMetric.HYROX_BEST_TIME -> fetchHyroxBestTime(st)
                     RankingMetric.FOOTBALL_GOALS -> fetchFootballGoals(st)
                     RankingMetric.SKI_DISTANCE_KPI -> fetchSkiDistanceKpi(st)
+                    RankingMetric.CLIMBING_ROUTES_SENT_KPI -> fetchClimbingRoutesSentKpi(st)
                     RankingMetric.SEGMENT_POPULARITY -> {
                         segmentRowsBuffer = fetchSegmentPopularity(st)
                         emptyList<RankingUserRow>() to emptyList()
@@ -1132,6 +1136,32 @@ class RankingViewModel(
                     username = o.optNullableString("username"),
                     avatarUrl = o.optNullableString("avatar_url"),
                     primary = primary,
+                    secondary = "Sessions: ${o.optInt("sessions_cnt", 0)}"
+                )
+            }
+        }
+        return rows to emptyList()
+    }
+
+    private suspend fun fetchClimbingRoutesSentKpi(st: RankingUiState): Pair<List<RankingUserRow>, List<RankingWorkoutRow>> {
+        val params = buildJsonObject {
+            put("p_scope", mapScope(st.scope))
+            put("p_period", mapPeriod(st.period))
+            put("p_limit", 100)
+            put("p_sex", JsonNull)
+            put("p_age_band", JsonNull)
+            put("p_environment", JsonNull)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_CLIMBING_ROUTES_SENT_LEADERBOARD_V1, params) { }
+        val arr = parseArrayFlexible(res.data)
+        val rows = (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                RankingUserRow(
+                    rank = o.optInt("rank", idx + 1),
+                    userId = o.optString("user_id"),
+                    username = o.optNullableString("username"),
+                    avatarUrl = o.optNullableString("avatar_url"),
+                    primary = "Sends: ${o.optInt("total_routes_sent", 0)}",
                     secondary = "Sessions: ${o.optInt("sessions_cnt", 0)}"
                 )
             }

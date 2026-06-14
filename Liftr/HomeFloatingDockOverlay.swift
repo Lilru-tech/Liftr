@@ -34,6 +34,8 @@ struct HomeFloatingDockOverlay: View {
     @State private var chatDidDrag = false
     @State private var quickDidDrag = false
     @State private var mergedDidDrag = false
+    @State private var quickTooltipSize: CGSize = .zero
+    @State private var chatHintSize: CGSize = .zero
 
     private let chatTabSize = CGSize(width: 56, height: 56)
     private let quickTabSize = CGSize(width: 56, height: 52)
@@ -82,19 +84,46 @@ struct HomeFloatingDockOverlay: View {
             }
 
             if !quickHintDismissed && !showQuickMenu && quickStartBusyKind == nil {
+                let tooltipSize = quickTooltipSize == .zero
+                    ? CGSize(width: 280, height: 44)
+                    : quickTooltipSize
+                let tooltipOrigin = HomeFloatingDock.bubbleOrigin(
+                    anchor: quickPoint,
+                    edge: quickEdge,
+                    bubbleSize: tooltipSize,
+                    tabSize: quickTabSize,
+                    in: size,
+                    spacing: 12
+                )
                 quickTooltip
-                    .position(HomeFloatingDock.tooltipPoint(
-                        anchor: quickPoint,
-                        edge: quickEdge,
-                        tooltipSize: CGSize(width: 210, height: 44),
-                        in: size
-                    ))
+                    .onGeometryChange(for: CGSize.self) { proxy in
+                        proxy.size
+                    } action: { size in
+                        quickTooltipSize = size
+                    }
+                    .offset(x: tooltipOrigin.x, y: tooltipOrigin.y)
                     .zIndex(1)
             }
 
             if showChat && !chatDragHintSeen {
+                let hintSize = chatHintSize == .zero
+                    ? CGSize(width: 280, height: 130)
+                    : chatHintSize
+                let hintOrigin = HomeFloatingDock.bubbleOrigin(
+                    anchor: chatPoint,
+                    edge: chatEdge,
+                    bubbleSize: hintSize,
+                    tabSize: chatTabSize,
+                    in: size,
+                    spacing: 12
+                )
                 chatDragHint
-                    .position(chatHintPoint(anchor: chatPoint, in: size))
+                    .onGeometryChange(for: CGSize.self) { proxy in
+                        proxy.size
+                    } action: { size in
+                        chatHintSize = size
+                    }
+                    .offset(x: hintOrigin.x, y: hintOrigin.y)
                     .zIndex(1)
             }
 
@@ -207,22 +236,6 @@ struct HomeFloatingDockOverlay: View {
         case "bottomLeading", "bottomTrailing": return 1.0
         default: return 0.0
         }
-    }
-
-    private func chatHintPoint(anchor: CGPoint, in size: CGSize) -> CGPoint {
-        let bubbleSize = CGSize(width: 210, height: 96)
-        let spacing: CGFloat = 70
-        let raw: CGPoint
-        switch chatEdge {
-        case .left: raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
-        case .right: raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
-        case .top: raw = CGPoint(x: anchor.x, y: anchor.y + 58)
-        case .bottom: raw = CGPoint(x: anchor.x, y: anchor.y - 58)
-        }
-        return CGPoint(
-            x: min(max(raw.x, bubbleSize.width / 2 + 12), size.width - bubbleSize.width / 2 - 12),
-            y: min(max(raw.y, bubbleSize.height / 2 + 12), size.height - bubbleSize.height / 2 - 12)
-        )
     }
 
     private func chatDragGesture(in size: CGSize, otherAnchor: CGPoint) -> some Gesture {

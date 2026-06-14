@@ -2,6 +2,33 @@ import Foundation
 import SwiftUI
 import Supabase
 
+enum CoinSourcesPeriod: String, CaseIterable, Identifiable {
+    case week
+    case month
+    case year
+    case allTime
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .week: return "Week"
+        case .month: return "Month"
+        case .year: return "Year"
+        case .allTime: return "All time"
+        }
+    }
+}
+
+struct CoinSourceSlice: Identifiable {
+    let sourceKey: String
+    let totalAmount: Int
+
+    var id: String { sourceKey }
+    var label: String { CoinManager.sourceCategoryLabel(for: sourceKey) }
+    var color: Color { CoinManager.sourceCategoryColor(for: sourceKey) }
+}
+
 @MainActor
 final class CoinManager: ObservableObject {
     static let shared = CoinManager()
@@ -139,6 +166,65 @@ final class CoinManager: ObservableObject {
             return actionType
                 .replacingOccurrences(of: "_", with: " ")
                 .capitalized
+        }
+    }
+
+    nonisolated static func sourceCategoryLabel(for key: String) -> String {
+        switch key {
+        case "workouts": return "Workouts"
+        case "pet_workout_bonus": return "Pet workout bonus"
+        case "pet_coins": return "Pet coins"
+        case "social": return "Social"
+        case "nutrition": return "Nutrition"
+        case "achievements": return "Achievements"
+        case "goals_streaks": return "Goals & streaks"
+        case "competition": return "Competition"
+        case "pet_combat": return "Pet combat"
+        case "other": return "Other"
+        default:
+            return key.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    nonisolated static func sourceCategoryColor(for key: String) -> Color {
+        switch key {
+        case "workouts": return Color(red: 0.12, green: 0.53, blue: 0.90)
+        case "pet_workout_bonus": return Color(red: 0.61, green: 0.15, blue: 0.69)
+        case "pet_coins": return Color(red: 1.0, green: 0.76, blue: 0.03)
+        case "social": return Color(red: 0.91, green: 0.12, blue: 0.39)
+        case "nutrition": return Color(red: 0.30, green: 0.69, blue: 0.31)
+        case "achievements": return Color(red: 1.0, green: 0.34, blue: 0.13)
+        case "goals_streaks": return Color(red: 0.0, green: 0.74, blue: 0.83)
+        case "competition": return Color(red: 0.47, green: 0.33, blue: 0.28)
+        case "pet_combat": return Color(red: 0.40, green: 0.23, blue: 0.72)
+        default: return Color(red: 0.62, green: 0.62, blue: 0.62)
+        }
+    }
+
+    nonisolated static func coinSourcesTimeWindow(for period: CoinSourcesPeriod) -> (start: Date?, end: Date?) {
+        guard period != .allTime else { return (nil, nil) }
+
+        var cal = Calendar.current
+        cal.timeZone = .current
+        let now = Date()
+        let dayStart = cal.startOfDay(for: now)
+
+        switch period {
+        case .allTime:
+            return (nil, nil)
+        case .week:
+            let start = cal.date(byAdding: .day, value: -6, to: dayStart) ?? dayStart
+            let end = cal.date(byAdding: .day, value: 1, to: dayStart) ?? now
+            return (start, end)
+        case .month:
+            let start = cal.date(byAdding: .day, value: -29, to: dayStart) ?? dayStart
+            let end = cal.date(byAdding: .day, value: 1, to: dayStart) ?? now
+            return (start, end)
+        case .year:
+            let monthStart = cal.date(from: cal.dateComponents([.year, .month], from: now)) ?? now
+            let start = cal.date(byAdding: .month, value: -11, to: monthStart) ?? monthStart
+            let end = cal.date(byAdding: .day, value: 1, to: dayStart) ?? now
+            return (start, end)
         }
     }
 }

@@ -1406,7 +1406,9 @@ fun WorkoutDetailScreen(
                             )
                         }
                     } else {
-                        val showMatch = addSportTypeFromWire(sp.sport) != AddSportType.SKI
+                        val showMatch = addSportTypeFromWire(sp.sport)?.let {
+                            it != AddSportType.SKI && it != AddSportType.CLIMBING
+                        } ?: true
                         val sessionKey = sp.id
                         ModalBottomSheet(
                             onDismissRequest = { if (!ui.saveMetaBusy) showEditMeta = false }
@@ -1446,6 +1448,13 @@ fun WorkoutDetailScreen(
                             var sNotes by remember(wk.id, sessionKey, showEditMeta) {
                                 mutableStateOf(sp.notes.orEmpty())
                             }
+                            val isClimbingSport = addSportTypeFromWire(sp.sport) == AddSportType.CLIMBING
+                            var climbingStats by remember(wk.id, sessionKey, showEditMeta, ui.sportEditEnrichment) {
+                                mutableStateOf(ui.sportEditEnrichment.sportStats)
+                            }
+                            var climbingRoutesJson by remember(wk.id, sessionKey, showEditMeta, ui.sportEditEnrichment) {
+                                mutableStateOf(ui.sportEditEnrichment.climbingRoutesJson)
+                            }
                             EditSportWorkoutMetaSheetContent(
                                 sportTypeLabel = formatActivityCodeForDisplay(sp.sport.trim().ifEmpty { "sport" }),
                                 showMatchResult = showMatch,
@@ -1475,6 +1484,18 @@ fun WorkoutDetailScreen(
                                 onLocationChange = { loc = it },
                                 sessionNotes = sNotes,
                                 onSessionNotesChange = { sNotes = it },
+                                climbingSportStats = if (isClimbingSport) climbingStats else emptyMap(),
+                                onClimbingStatChange = if (isClimbingSport) {
+                                    { key, value -> climbingStats = climbingStats.toMutableMap().apply { put(key, value) } }
+                                } else {
+                                    null
+                                },
+                                climbingRoutesJson = if (isClimbingSport) climbingRoutesJson else "[]",
+                                onClimbingRoutesChange = if (isClimbingSport) {
+                                    { climbingRoutesJson = it }
+                                } else {
+                                    null
+                                },
                                 saveLabel = stringResource(R.string.edit_workout_meta_save),
                                 saving = ui.saveMetaBusy,
                                 onSave = {
@@ -1491,7 +1512,9 @@ fun WorkoutDetailScreen(
                                         matchResultRaw = mRes,
                                         matchScoreText = mLine,
                                         location = loc,
-                                        sessionNotes = sNotes
+                                        sessionNotes = sNotes,
+                                        sportStats = if (isClimbingSport) climbingStats else null,
+                                        climbingRoutesJson = if (isClimbingSport) climbingRoutesJson else null
                                     ) { e -> if (e == null) showEditMeta = false }
                                 }
                             )

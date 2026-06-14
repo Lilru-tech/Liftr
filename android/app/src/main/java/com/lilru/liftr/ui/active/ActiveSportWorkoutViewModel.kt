@@ -6,6 +6,12 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.LiftrSupabase
+import com.lilru.liftr.climbing.ClimbingRouteFormatting
+import com.lilru.liftr.ui.add.AddFootballPosition
+import com.lilru.liftr.ui.add.AddRacketFormat
+import com.lilru.liftr.ui.add.AddRacketMode
+import com.lilru.liftr.ui.add.AddSportType
+import com.lilru.liftr.ui.add.SportStatsPayloadBuilder
 import com.lilru.liftr.workout.ActiveWorkoutCheckpointEntry
 import com.lilru.liftr.workout.ActiveWorkoutCheckpointKind
 import com.lilru.liftr.workout.ActiveWorkoutSessionCheckpoint
@@ -15,6 +21,7 @@ import com.lilru.liftr.ui.home.formatActivityCodeForDisplay
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.Job
@@ -57,9 +64,13 @@ data class ActiveSportUiState(
     val hasSportSession: Boolean = true,
     val sportLabel: String = "Sport",
     val isHyrox: Boolean = false,
+    val isClimbing: Boolean = false,
+    val isSki: Boolean = false,
     val sportSessionId: Int = 0,
     val hyroxExercises: List<ActiveHyroxExerciseUi> = emptyList(),
     val hyroxExerciseIndex: Int = 0,
+    val climbingSportStats: Map<String, String> = emptyMap(),
+    val climbingRoutesJson: String = "[]",
     val targetDurationSec: Int? = null,
     val isSessionRunning: Boolean = false,
     val elapsedSec: Int = 0,
@@ -143,6 +154,17 @@ class ActiveSportWorkoutViewModel(
         _ui.value = _ui.value.copy(sessionNotesText = value)
     }
 
+    fun setClimbingStat(key: String, value: String) {
+        val next = _ui.value.climbingSportStats.toMutableMap().apply { put(key, value) }
+        _ui.value = _ui.value.copy(climbingSportStats = next)
+        saveSessionCheckpoint()
+    }
+
+    fun setClimbingRoutesJson(value: String) {
+        _ui.value = _ui.value.copy(climbingRoutesJson = value)
+        saveSessionCheckpoint()
+    }
+
     fun hyroxStep(delta: Int) {
         val s = _ui.value
         if (!s.isHyrox) return
@@ -183,6 +205,8 @@ class ActiveSportWorkoutViewModel(
                 val row = rows.first()
                 val label = formatActivityCodeForDisplay(row.sport.trim().ifEmpty { "sport" })
                 val isHyrox = row.sport.trim().equals("hyrox", ignoreCase = true)
+                val isClimbing = row.sport.trim().equals("climbing", ignoreCase = true)
+                val isSki = row.sport.trim().equals("ski", ignoreCase = true)
                 val hyroxList: List<ActiveHyroxExerciseUi> = if (isHyrox) {
                     val hRes = supabase
                         .from(BackendContracts.Tables.HYROX_SESSION_EXERCISES)
@@ -213,15 +237,24 @@ class ActiveSportWorkoutViewModel(
                 } else {
                     emptyList()
                 }
+                val climbingLoad = if (isClimbing) {
+                    loadClimbingSessionData(row.id)
+                } else {
+                    emptyMap<String, String>() to "[]"
+                }
                 _ui.value = _ui.value.copy(
                     loading = false,
                     loadError = null,
                     hasSportSession = true,
                     sportLabel = label,
                     isHyrox = isHyrox,
+                    isClimbing = isClimbing,
+                    isSki = isSki,
                     sportSessionId = row.id,
                     hyroxExercises = hyroxList,
                     hyroxExerciseIndex = 0,
+                    climbingSportStats = climbingLoad.first,
+                    climbingRoutesJson = climbingLoad.second,
                     targetDurationSec = row.durationSec?.takeIf { it > 0 },
                     isSessionRunning = false,
                     elapsedSec = 0,
@@ -266,6 +299,9 @@ class ActiveSportWorkoutViewModel(
 
                 if (snap.isHyrox && snap.sportSessionId > 0) {
                     persistHyroxExercises(snap.sportSessionId, snap.hyroxExercises)
+                }
+                if (snap.isClimbing) {
+                    persistClimbingStats(workoutId, snap)
                 }
 
                 val nRes = supabase
@@ -330,7 +366,9 @@ class ActiveSportWorkoutViewModel(
             matchResultRaw = s.matchResultRaw,
             matchScoreText = s.matchScoreText,
             locationText = s.locationText,
-            sessionNotesText = s.sessionNotesText
+            sessionNotesText = s.sessionNotesText,
+            climbingSportStats = s.climbingSportStats,
+            climbingRoutesJson = s.climbingRoutesJson
         )
         ActiveWorkoutSessionCheckpoint.store(
             ctx,
@@ -383,8 +421,81 @@ class ActiveSportWorkoutViewModel(
             matchResultRaw = sport.matchResultRaw,
             matchScoreText = sport.matchScoreText,
             locationText = sport.locationText,
-            sessionNotesText = sport.sessionNotesText
+            sessionNotesText = sport.sessionNotesText,
+            climbingSportStats = sport.climbingSportStats.ifEmpty { _ui.value.climbingSportStats },
+            climbingRoutesJson = sport.climbingRoutesJson.ifEmpty { _ui.value.climbingRoutesJson }
         )
+    }
+
+    private suspend fun loadClimbingSessionData(sessionId: Int): Pair<Map<String, String>, String> {
+        val sRes = supabase.from(BackendContracts.Tables.CLIMBING_SESSION_STATS)
+            .select(columns = Columns.raw("*")) {
+                filter { eq("session_id", sessionId) }
+                limit(1)
+            }
+        val row = decodeFlexibleList<ClimbingStatsWire>(sRes.data).firstOrNull()
+        val stats = mutableMapOf<String, String>(
+            "environment" to (row?.environment ?: "indoor"),
+            "primary_style" to (row?.primaryStyle ?: "boulder")
+        )
+        row?.routesSent?.let { stats["routes_sent"] = it.toString() }
+        row?.routesAttempted?.let { stats["routes_attempted"] = it.toString() }
+        row?.totalVerticalM?.let { stats["total_vertical_m"] = it.toString() }
+        row?.movingTimeSec?.let { stats["moving_time_sec"] = it.toString() }
+        row?.pausedTimeSec?.let { stats["paused_time_sec"] = it.toString() }
+        row?.venueName?.takeIf { it.isNotBlank() }?.let { stats["venue_name"] = it }
+        row?.weather?.takeIf { it.isNotBlank() }?.let { stats["weather"] = it }
+        row?.avgHr?.let { stats["avg_hr"] = it.toString() }
+        row?.maxHr?.let { stats["max_hr"] = it.toString() }
+        row?.falls?.let { stats["falls"] = it.toString() }
+        row?.flashes?.let { stats["flashes"] = it.toString() }
+        row?.highestGradeSystem?.takeIf { it.isNotBlank() }?.let { stats["highest_grade_system"] = it }
+        row?.highestGradeValue?.takeIf { it.isNotBlank() }?.let { stats["highest_grade_value"] = it }
+
+        val rRes = supabase.from(BackendContracts.Tables.CLIMBING_SESSION_ROUTES)
+            .select(columns = Columns.raw("route_order, route_name, style, grade_system, grade_value, attempts, sent, flash, notes")) {
+                filter { eq("session_id", sessionId) }
+                order("route_order", Order.ASCENDING)
+            }
+        val routes = decodeFlexibleList<ClimbingRouteWire>(rRes.data).map { r ->
+            com.lilru.liftr.climbing.ClimbingRouteForm(
+                routeName = r.routeName.orEmpty(),
+                style = com.lilru.liftr.climbing.ClimbingStyle.fromWire(r.style),
+                gradeSystem = com.lilru.liftr.climbing.ClimbingGradeSystem.fromWire(r.gradeSystem),
+                gradeValue = r.gradeValue.orEmpty(),
+                attempts = r.attempts?.toString().orEmpty(),
+                sent = r.sent == true,
+                flash = r.flash == true,
+                notes = r.notes.orEmpty()
+            )
+        }
+        return stats to ClimbingRouteFormatting.encodeRoutesJson(routes)
+    }
+
+    private suspend fun persistClimbingStats(workoutId: Int, snap: ActiveSportUiState) {
+        val stats = SportStatsPayloadBuilder.build(
+            sport = AddSportType.CLIMBING,
+            durationMinText = "",
+            footballPosition = AddFootballPosition.FORWARD,
+            racketMode = AddRacketMode.SINGLES,
+            racketFormat = AddRacketFormat.BEST_OF_3,
+            sportStats = snap.climbingSportStats,
+            hyroxExercisesText = "[]",
+            climbingRoutesJson = snap.climbingRoutesJson
+        )
+        val p = buildJsonObject {
+            put("p_sport", "climbing")
+            val loc = snap.locationText.trim()
+            if (loc.isNotEmpty()) put("p_location", loc)
+            val notes = snap.sessionNotesText.trim()
+            if (notes.isNotEmpty()) put("p_session_notes", notes)
+        }
+        val wrapper = buildJsonObject {
+            put("p_workout_id", workoutId)
+            put("p", p)
+            put("p_stats", stats)
+        }
+        supabase.postgrest.rpc(BackendContracts.Rpc.UPDATE_SPORT_WORKOUT_V2, wrapper) { }
     }
 
     private suspend fun persistHyroxExercises(sessionId: Int, exercises: List<ActiveHyroxExerciseUi>) {
@@ -452,8 +563,10 @@ private fun sportSessionFinishJson(elapsed: Int, s: ActiveSportUiState) = buildJ
     } else {
         sa.toIntOrNull()?.let { put("score_against", it) } ?: put("score_against", JsonNull)
     }
-    val mr = normalizeSportMatchResult(s.matchResultRaw)
-    put("match_result", mr)
+    if (!s.isClimbing && !s.isSki) {
+        val mr = normalizeSportMatchResult(s.matchResultRaw)
+        put("match_result", mr)
+    }
     val mst = s.matchScoreText.trim()
     if (mst.isEmpty()) put("match_score_text", JsonNull) else put("match_score_text", mst)
     val loc = s.locationText.trim()
@@ -461,6 +574,37 @@ private fun sportSessionFinishJson(elapsed: Int, s: ActiveSportUiState) = buildJ
     val n = s.sessionNotesText.trim()
     if (n.isEmpty()) put("notes", JsonNull) else put("notes", n)
 }
+
+@Serializable
+private data class ClimbingStatsWire(
+    val environment: String? = null,
+    @SerialName("primary_style") val primaryStyle: String? = null,
+    @SerialName("routes_sent") val routesSent: Int? = null,
+    @SerialName("routes_attempted") val routesAttempted: Int? = null,
+    @SerialName("total_vertical_m") val totalVerticalM: Int? = null,
+    @SerialName("moving_time_sec") val movingTimeSec: Int? = null,
+    @SerialName("paused_time_sec") val pausedTimeSec: Int? = null,
+    @SerialName("venue_name") val venueName: String? = null,
+    val weather: String? = null,
+    @SerialName("avg_hr") val avgHr: Int? = null,
+    @SerialName("max_hr") val maxHr: Int? = null,
+    val falls: Int? = null,
+    val flashes: Int? = null,
+    @SerialName("highest_grade_system") val highestGradeSystem: String? = null,
+    @SerialName("highest_grade_value") val highestGradeValue: String? = null
+)
+
+@Serializable
+private data class ClimbingRouteWire(
+    @SerialName("route_name") val routeName: String? = null,
+    val style: String? = null,
+    @SerialName("grade_system") val gradeSystem: String? = null,
+    @SerialName("grade_value") val gradeValue: String? = null,
+    val attempts: Int? = null,
+    val sent: Boolean? = null,
+    val flash: Boolean? = null,
+    val notes: String? = null
+)
 
 @Serializable
 private data class SportSessionWire(

@@ -351,7 +351,7 @@ final class NutritionViewModel: ObservableObject {
         insightsFromDate = weekStart
     }
 
-    func load(userId: UUID?) async {
+    func load(userId: UUID?, showLoadingIndicator: Bool = true) async {
         guard let userId else {
             diaryItems = []
             plannedItems = []
@@ -361,9 +361,9 @@ final class NutritionViewModel: ObservableObject {
             error = "Sign in to track nutrition."
             return
         }
-        loading = true
+        if showLoadingIndicator { loading = true }
         error = nil
-        defer { loading = false }
+        defer { if showLoadingIndicator { loading = false } }
         do {
             async let itemsTask = NutritionManager.fetchDiaryItems(for: userId, date: selectedDate)
             async let recTask = NutritionManager.fetchRecommendation(for: userId, date: selectedDate)
@@ -379,6 +379,7 @@ final class NutritionViewModel: ObservableObject {
             plannedItems = try await plannedTask
             pendingInvites = try await invitesTask
         } catch {
+            guard !isBenignFetchCancellation(error) else { return }
             self.error = error.localizedDescription
         }
     }
@@ -771,7 +772,7 @@ struct NutritionView: View {
                 .accessibilityLabel("Add nutrition")
             }
         }
-        .refreshable { await vm.load(userId: app.userId) }
+        .refreshable { await vm.load(userId: app.userId, showLoadingIndicator: false) }
         .task(id: taskKey) { await vm.load(userId: app.userId) }
     }
 

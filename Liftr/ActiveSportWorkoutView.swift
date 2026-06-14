@@ -554,15 +554,17 @@ struct ActiveSportWorkoutView: View {
                 }
             }
             
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Result")
-                    .font(.subheadline.weight(.semibold))
-                Picker("", selection: $sportForm.matchResult) {
-                    ForEach(MatchResult.allCases) {
-                        Text($0.label).tag($0)
+            if sportType != .ski && sportType != .climbing {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Result")
+                        .font(.subheadline.weight(.semibold))
+                    Picker("", selection: $sportForm.matchResult) {
+                        ForEach(MatchResult.allCases) {
+                            Text($0.label).tag($0)
+                        }
                     }
+                    .pickerStyle(.menu)
                 }
-                .pickerStyle(.menu)
             }
             
             VStack(alignment: .leading, spacing: 8) {
@@ -2146,6 +2148,88 @@ struct ActiveSportWorkoutView: View {
             } catch {
                 print("Error loading ski stats: \(error)")
             }
+
+        case .climbing:
+            struct CLRow: Decodable {
+                let environment: String?
+                let primary_style: String?
+                let routes_sent: Int?
+                let routes_attempted: Int?
+                let total_vertical_m: Int?
+                let moving_time_sec: Int?
+                let paused_time_sec: Int?
+                let venue_name: String?
+                let weather: String?
+                let avg_hr: Int?
+                let max_hr: Int?
+                let falls: Int?
+                let flashes: Int?
+                let highest_grade_system: String?
+                let highest_grade_value: String?
+            }
+
+            do {
+                let res = try await client
+                    .from("climbing_session_stats")
+                    .select("*")
+                    .eq("session_id", value: sessionId)
+                    .single()
+                    .execute()
+
+                let row = try JSONDecoder.supabase().decode(CLRow.self, from: res.data)
+
+                let routesRes = try await client
+                    .from("climbing_session_routes")
+                    .select("*")
+                    .eq("session_id", value: sessionId)
+                    .order("route_order", ascending: true)
+                    .execute()
+
+                struct RouteRow: Decodable {
+                    let route_name: String?
+                    let style: String?
+                    let grade_system: String?
+                    let grade_value: String?
+                    let attempts: Int?
+                    let sent: Bool?
+                    let flash: Bool?
+                    let notes: String?
+                }
+
+                let routeRows = try JSONDecoder.supabase().decode([RouteRow].self, from: routesRes.data)
+
+                await MainActor.run {
+                    self.sportForm.clEnvironment = ClimbingEnvironment(rawValue: row.environment ?? "") ?? .indoor
+                    self.sportForm.clPrimaryStyle = ClimbingStyle(rawValue: row.primary_style ?? "") ?? .boulder
+                    if let v = row.routes_sent { self.sportForm.clRoutesSent = String(v) }
+                    if let v = row.routes_attempted { self.sportForm.clRoutesAttempted = String(v) }
+                    if let v = row.total_vertical_m { self.sportForm.clTotalVerticalM = String(v) }
+                    if let v = row.moving_time_sec { self.sportForm.clMovingTimeSec = String(v) }
+                    if let v = row.paused_time_sec { self.sportForm.clPausedTimeSec = String(v) }
+                    self.sportForm.clVenueName = row.venue_name ?? ""
+                    self.sportForm.clWeather = row.weather ?? ""
+                    if let v = row.avg_hr { self.sportForm.clAvgHR = String(v) }
+                    if let v = row.max_hr { self.sportForm.clMaxHR = String(v) }
+                    if let v = row.falls { self.sportForm.clFalls = String(v) }
+                    if let v = row.flashes { self.sportForm.clFlashes = String(v) }
+                    self.sportForm.clHighestGradeSystem = ClimbingGradeSystem(rawValue: row.highest_grade_system ?? "") ?? .v_scale
+                    self.sportForm.clHighestGradeValue = row.highest_grade_value ?? ""
+                    self.sportForm.clRoutes = routeRows.map { route in
+                        var form = ClimbingRouteForm()
+                        form.routeName = route.route_name ?? ""
+                        form.style = ClimbingStyle(rawValue: route.style ?? "") ?? .boulder
+                        form.gradeSystem = ClimbingGradeSystem(rawValue: route.grade_system ?? "") ?? .v_scale
+                        form.gradeValue = route.grade_value ?? ""
+                        form.attempts = route.attempts.map(String.init) ?? ""
+                        form.sent = route.sent ?? false
+                        form.flash = route.flash ?? false
+                        form.notes = route.notes ?? ""
+                        return form
+                    }
+                }
+            } catch {
+                print("Error loading climbing stats: \(error)")
+            }
         }
     }
     
@@ -2519,6 +2603,89 @@ struct ActiveSportWorkoutView: View {
                 .update(payload)
                 .eq("session_id", value: sessionId)
                 .execute()
+
+        case .climbing:
+            struct StatsPayload: Encodable {
+                let environment: String?
+                let primary_style: String?
+                let routes_sent: Int?
+                let routes_attempted: Int?
+                let total_vertical_m: Int?
+                let moving_time_sec: Int?
+                let paused_time_sec: Int?
+                let venue_name: String?
+                let weather: String?
+                let avg_hr: Int?
+                let max_hr: Int?
+                let falls: Int?
+                let flashes: Int?
+                let highest_grade_system: String?
+                let highest_grade_value: String?
+            }
+
+            struct RoutePayload: Encodable {
+                let session_id: Int
+                let route_order: Int
+                let route_name: String?
+                let style: String?
+                let grade_system: String?
+                let grade_value: String?
+                let attempts: Int?
+                let sent: Bool
+                let flash: Bool
+                let notes: String?
+            }
+
+            let statsPayload = StatsPayload(
+                environment: sportForm.clEnvironment.rawValue,
+                primary_style: sportForm.clPrimaryStyle.wire,
+                routes_sent: parseIntField(sportForm.clRoutesSent),
+                routes_attempted: parseIntField(sportForm.clRoutesAttempted),
+                total_vertical_m: parseIntField(sportForm.clTotalVerticalM),
+                moving_time_sec: parseIntField(sportForm.clMovingTimeSec),
+                paused_time_sec: parseIntField(sportForm.clPausedTimeSec),
+                venue_name: sportForm.clVenueName.trimmedOrNil,
+                weather: sportForm.clWeather.trimmedOrNil,
+                avg_hr: parseIntField(sportForm.clAvgHR),
+                max_hr: parseIntField(sportForm.clMaxHR),
+                falls: parseIntField(sportForm.clFalls),
+                flashes: parseIntField(sportForm.clFlashes),
+                highest_grade_system: sportForm.clHighestGradeValue.trimmedOrNil == nil ? nil : sportForm.clHighestGradeSystem.wire,
+                highest_grade_value: sportForm.clHighestGradeValue.trimmedOrNil
+            )
+
+            _ = try await client
+                .from("climbing_session_stats")
+                .update(statsPayload)
+                .eq("session_id", value: sessionId)
+                .execute()
+
+            _ = try await client
+                .from("climbing_session_routes")
+                .delete()
+                .eq("session_id", value: sessionId)
+                .execute()
+
+            if !sportForm.clRoutes.isEmpty {
+                let routePayloads = sportForm.clRoutes.enumerated().map { index, route in
+                    RoutePayload(
+                        session_id: sessionId,
+                        route_order: index + 1,
+                        route_name: route.routeName.trimmedOrNil,
+                        style: route.style.wire,
+                        grade_system: route.gradeValue.trimmedOrNil == nil ? nil : route.gradeSystem.wire,
+                        grade_value: route.gradeValue.trimmedOrNil,
+                        attempts: parseIntField(route.attempts),
+                        sent: route.sent,
+                        flash: route.flash,
+                        notes: route.notes.trimmedOrNil
+                    )
+                }
+                _ = try await client
+                    .from("climbing_session_routes")
+                    .insert(routePayloads)
+                    .execute()
+            }
         }
     }
     
@@ -2957,6 +3124,9 @@ struct SportStatsFields: View {
                 TextField("Weather", text: $sportForm.skiWeather)
                     .textFieldStyle(.plain)
             }
+
+        case .climbing:
+            ClimbingSessionEditor(sport: $sportForm)
         }
     }
 }

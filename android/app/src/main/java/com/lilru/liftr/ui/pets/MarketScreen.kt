@@ -217,7 +217,6 @@ fun MarketScreen(
                 sheetState = petHelpSheetState
             ) {
                 PetHelpSheetContent(
-                    supabase = supabase,
                     onClose = { showPetHelp = false }
                 )
             }

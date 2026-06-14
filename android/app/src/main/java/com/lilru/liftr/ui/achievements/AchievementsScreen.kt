@@ -18,8 +18,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
@@ -98,11 +100,15 @@ fun AchievementsScreen(
     val chatRepo = remember { ChatRepository(supabase) }
     var shareAchievementSnapshot by remember { mutableStateOf<AchievementShareSnapshot?>(null) }
     var appliedInitialOpenCode by rememberSaveable { mutableStateOf(false) }
-    val lockOptions = listOf(
-        AchievementLockFilter.ALL to R.string.achievements_filter_all,
-        AchievementLockFilter.UNLOCKED to R.string.achievements_filter_unlocked,
-        AchievementLockFilter.LOCKED to R.string.achievements_filter_locked
-    )
+    val lockOptions = buildList {
+        add(AchievementLockFilter.ALL to R.string.achievements_filter_all)
+        add(AchievementLockFilter.UNLOCKED to R.string.achievements_filter_unlocked)
+        add(AchievementLockFilter.LOCKED to R.string.achievements_filter_locked)
+        val me = supabase.auth.currentUserOrNull()?.id
+        if (me != null && me == targetUserId) {
+            add(AchievementLockFilter.TRACKED to R.string.achievements_filter_tracked)
+        }
+    }
     val catOptions = AchievementCategoryFilter.entries
     val dateFmt = remember {
         DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)
@@ -267,6 +273,9 @@ fun AchievementsScreen(
     }
     if (selected != null) {
         val row = selected!!
+        val me = supabase.auth.currentUserOrNull()?.id
+        val isOwnProfile = me != null && me == targetUserId
+        val trackLimitReached = !row.isTracked && ui.trackedCount >= 5
         ModalBottomSheet(
             onDismissRequest = { selected = null },
             sheetState = detailSheet
@@ -411,6 +420,36 @@ fun AchievementsScreen(
                         ?: stringResource(R.string.achievements_detail_no_desc)),
                     style = MaterialTheme.typography.bodyMedium
                 )
+                if (isOwnProfile && !row.isUnlocked) {
+                    OutlinedButton(
+                        onClick = { vm.toggleTrack(row.achievementId) },
+                        enabled = !ui.trackBusy && !trackLimitReached,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = if (row.isTracked) Icons.Filled.CheckCircle else Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text(
+                            if (row.isTracked) {
+                                stringResource(R.string.achievements_tracking)
+                            } else {
+                                stringResource(R.string.achievements_track_action)
+                            }
+                        )
+                    }
+                    if (trackLimitReached) {
+                        Text(
+                            stringResource(R.string.achievements_track_limit),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    ui.trackError?.let { err ->
+                        Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = { selected = null },
@@ -477,6 +516,16 @@ private fun AchievementGridTile(
                         modifier = Modifier
                             .fillMaxSize(0.85f)
                             .alpha(a)
+                    )
+                }
+                if (row.isTracked) {
+                    Icon(
+                        imageVector = Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .size(18.dp)
                     )
                 }
             }

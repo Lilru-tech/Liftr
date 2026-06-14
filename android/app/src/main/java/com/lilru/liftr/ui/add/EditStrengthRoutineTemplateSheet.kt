@@ -108,7 +108,7 @@ fun EditStrengthRoutineTemplateSheetContent(
                     StrengthExerciseDraftsEditorBlock(
                         exercises = edit.drafts,
                         loadingExercises = loadingExercises,
-                        showQuickActions = false,
+                        showQuickActions = true,
                         onRecommendClick = { },
                         onPickExerciseClick = onRequestExercisePick,
                         onUpdateCustomName = { id, v -> vm.templateEditUpdateExerciseCustomName(id, v) },

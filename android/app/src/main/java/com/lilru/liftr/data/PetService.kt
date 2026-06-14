@@ -7,6 +7,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.rpc
+import java.util.Locale
 import kotlin.math.pow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -159,6 +160,19 @@ object PetService {
         }.decodeList<PetTypeCatalogWire>()
     }
 
+    suspend fun fetchMyPetDex(supabase: SupabaseClient): PetDexDataWire {
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_MY_PET_DEX_V1) { }
+        return SupabaseResponseDecoding.decodeObject(res.data)
+    }
+
+    suspend fun fetchPetSpeciesDetail(supabase: SupabaseClient, petType: String): PetSpeciesDetailWire {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_PET_SPECIES_DETAIL_V1,
+            buildJsonObject { put("p_pet_type", petType) }
+        ) { }
+        return SupabaseResponseDecoding.decodeObject(res.data)
+    }
+
     fun catalogEggImageUrl(row: PetTypeCatalogWire): String {
         val fromDb = row.imageEgg?.takeIf { it.isNotBlank() }
         if (fromDb != null) return fromDb
@@ -270,7 +284,7 @@ data class PetLogWire(
     val details: Map<String, String>? = null,
     @SerialName("created_at") val createdAt: String
 ) {
-    fun title(): String = when (eventType) {
+    fun title(): String = when (eventType.trim().lowercase()) {
         "item_used", "fed" -> {
             val name = details?.get("reason") ?: itemType
             if (name != null) "Used ${name.replace('_', ' ').replaceFirstChar { it.uppercase() }}"
@@ -298,8 +312,8 @@ data class PetLogWire(
             val message = details?.get("message")
             if (!message.isNullOrBlank()) message
             else {
-                val coins = details?.get("coins")
-                if (!coins.isNullOrBlank()) "Your pet helped you earn +$coins coins!"
+                val coins = workoutBonusCoinAmount()
+                if (coins != null) "Pet workout bonus: +$coins coins"
                 else "Pet workout bonus"
             }
         }
@@ -315,19 +329,43 @@ data class PetLogWire(
     }
 
     fun subtitle(): String? {
-        if (eventType != "combat") return null
-        if (details?.get("is_draw") == "true" || details?.get("won") == "true") {
-            val coins = details?.get("coins_gained")?.toIntOrNull() ?: 0
-            val parts = buildList {
-                if (expGained > 0) add("+$expGained XP")
-                if (coins > 0) add("+$coins coins")
+        return when (eventType.trim().lowercase()) {
+            "workout_pet_bonus" -> {
+                val amount = workoutBonusCoinAmount() ?: return null
+                if (amount <= 0) return null
+                val titleText = title()
+                if (textShowsCoinAmount(titleText, amount)) null
+                else "+$amount coins"
             }
-            return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ") ?: "No rewards"
+            "combat" -> {
+                if (details?.get("is_draw") == "true" || details?.get("won") == "true") {
+                    val coins = details?.get("coins_gained")?.toIntOrNull() ?: 0
+                    val parts = buildList {
+                        if (expGained > 0) add("+$expGained XP")
+                        if (coins > 0) add("+$coins coins")
+                    }
+                    parts.takeIf { it.isNotEmpty() }?.joinToString(" · ") ?: "No rewards"
+                } else {
+                    "No rewards"
+                }
+            }
+            else -> null
         }
-        return "No rewards"
     }
 
-    fun showsCombatSubtitle(): Boolean = eventType == "combat" && subtitle() != null
+    fun showsRewardSubtitle(): Boolean = !subtitle().isNullOrBlank()
+
+    private fun workoutBonusCoinAmount(): Int? {
+        val raw = details?.get("coins")?.trim().orEmpty()
+        if (raw.isEmpty()) return null
+        raw.toIntOrNull()?.let { return it }
+        return raw.toDoubleOrNull()?.let { kotlin.math.round(it).toInt() }
+    }
+
+    private fun textShowsCoinAmount(text: String, amount: Int): Boolean {
+        val lower = text.lowercase(Locale.US)
+        return text.contains("+$amount") || lower.contains("$amount coin")
+    }
 }
 
 @Serializable
@@ -353,6 +391,86 @@ data class PetRarityConfigWire(
     @SerialName("stat_multiplier") val statMultiplier: Double,
     @SerialName("sort_order") val sortOrder: Int
 )
+
+@Serializable
+data class PetDexStatsWire(
+    @SerialName("total_battles") val totalBattles: Int = 0,
+    val wins: Int = 0,
+    val losses: Int = 0,
+    val draws: Int = 0,
+    @SerialName("first_fought_at") val firstFoughtAt: String? = null,
+    @SerialName("last_fought_at") val lastFoughtAt: String? = null,
+    @SerialName("rarities_seen") val raritiesSeen: List<String> = emptyList(),
+    @SerialName("stages_seen") val stagesSeen: List<String> = emptyList()
+)
+
+@Serializable
+data class PetDexSpeciesEntryWire(
+    @SerialName("pet_type") val petType: String,
+    @SerialName("display_name") val displayName: String,
+    val description: String = "",
+    @SerialName("image_egg") val imageEgg: String? = null,
+    @SerialName("is_discovered") val isDiscovered: Boolean = false,
+    @SerialName("total_battles") val totalBattles: Int = 0,
+    val wins: Int = 0,
+    val losses: Int = 0,
+    val draws: Int = 0,
+    @SerialName("first_fought_at") val firstFoughtAt: String? = null,
+    @SerialName("last_fought_at") val lastFoughtAt: String? = null,
+    @SerialName("rarities_seen") val raritiesSeen: List<String> = emptyList(),
+    @SerialName("stages_seen") val stagesSeen: List<String> = emptyList()
+)
+
+@Serializable
+data class PetDexDataWire(
+    @SerialName("species_discovered") val speciesDiscovered: Int = 0,
+    @SerialName("total_species") val totalSpecies: Int = 0,
+    @SerialName("rarities_discovered") val raritiesDiscovered: Int = 0,
+    @SerialName("total_rarities") val totalRarities: Int = 6,
+    @SerialName("stages_discovered") val stagesDiscovered: Int = 0,
+    @SerialName("total_fightable_stages") val totalFightableStages: Int = 5,
+    val species: List<PetDexSpeciesEntryWire> = emptyList()
+)
+
+@Serializable
+data class PetSpeciesDetailWire(
+    @SerialName("pet_type") val petType: String,
+    @SerialName("display_name") val displayName: String,
+    val description: String = "",
+    @SerialName("image_egg") val imageEgg: String? = null,
+    @SerialName("image_baby") val imageBaby: String? = null,
+    @SerialName("image_kid") val imageKid: String? = null,
+    @SerialName("image_teen") val imageTeen: String? = null,
+    @SerialName("image_adult") val imageAdult: String? = null,
+    @SerialName("image_elder") val imageElder: String? = null,
+    @SerialName("discovered_stages") val discoveredStages: List<String> = emptyList(),
+    val dex: PetDexStatsWire? = null
+) {
+    fun imageUrlForStage(stage: String): String {
+        val raw = when (stage.lowercase()) {
+            "egg" -> imageEgg
+            "baby" -> imageBaby
+            "kid" -> imageKid
+            "teen" -> imageTeen
+            "adult" -> imageAdult
+            "elder" -> imageElder
+            else -> null
+        }?.takeIf { it.isNotBlank() }
+        return raw ?: PetService.petImageUrl(petType, stage)
+    }
+
+    fun isStageDiscovered(stage: String): Boolean {
+        if (stage.equals("egg", ignoreCase = true)) return true
+        return discoveredStages.any { it.equals(stage, ignoreCase = true) }
+    }
+}
+
+object PetEvolutionStages {
+    val ordered = listOf("egg", "baby", "kid", "teen", "adult", "elder")
+
+    fun displayName(stage: String): String =
+        stage.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+}
 
 @Serializable
 data class PetTypeCatalogWire(

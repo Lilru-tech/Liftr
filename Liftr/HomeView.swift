@@ -158,6 +158,10 @@ private struct QuickActiveWorkout: Identifiable, Hashable {
     let kind: Kind
 }
 
+private struct HomePillScrollEdgeFades: Equatable {
+    var showTrailing: Bool
+}
+
 struct HomeView: View {
     @EnvironmentObject var app: AppState
     
@@ -335,6 +339,9 @@ struct HomeView: View {
     @State private var bestSportScore = 0
     @State private var showGoals = false
     @State private var showCompetitions = false
+    @State private var showTrackedAchievements = false
+    @State private var trackedAchievementCount = 0
+    @State private var homePillScrollEdgeFades = HomePillScrollEdgeFades(showTrailing: false)
     @State private var bestSportLabel = ""
     @State private var shareItem: ShareItem?
     @AppStorage("homeCollapseData") private var collapseData = false
@@ -394,24 +401,107 @@ struct HomeView: View {
         .padding(.horizontal, 8)
     }
     
-    private var collapsedModulesPill: some View {
-        Button {
-            withAnimation(.easeInOut) { setAllCollapsed(false) }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "chart.bar.fill")
+    private var homeModulePillRow: some View {
+        ZStack {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    if hasAnyModule {
+                        homeCompactNavPill(
+                            icon: "chart.bar.fill",
+                            title: "Data",
+                            trailingChevron: collapseModules ? "chevron.down" : "chevron.up"
+                        ) {
+                            withAnimation(.easeInOut) { collapseModules.toggle() }
+                        }
+                    }
+                    if app.userId != nil {
+                        homeCompactNavPill(
+                            icon: "target",
+                            title: "Weekly goals",
+                            trailingChevron: "chevron.right"
+                        ) {
+                            showGoals = true
+                        }
+                        homeCompactNavPill(
+                            icon: "trophy",
+                            title: "Competitions",
+                            trailingChevron: "chevron.right"
+                        ) {
+                            showCompetitions = true
+                        }
+                        if trackedAchievementCount > 0 {
+                            let achTitle = trackedAchievementCount > 1
+                                ? "Achievements · \(trackedAchievementCount)"
+                                : "Achievements"
+                            homeCompactNavPill(
+                                icon: "rosette",
+                                title: achTitle,
+                                trailingChevron: "chevron.right"
+                            ) {
+                                showTrackedAchievements = true
+                            }
+                        }
+                    }
+                }
+            }
+            .onScrollGeometryChange(for: HomePillScrollEdgeFades.self, of: { geo in
+                let x = geo.contentOffset.x
+                let contentWidth = geo.contentSize.width
+                let viewportWidth = geo.containerSize.width
+                if contentWidth <= viewportWidth + 0.5 {
+                    return HomePillScrollEdgeFades(showTrailing: false)
+                }
+                let maxOffset = max(0, contentWidth - viewportWidth)
+                return HomePillScrollEdgeFades(showTrailing: x < maxOffset - 2)
+            }, action: { _, new in
+                homePillScrollEdgeFades = new
+            })
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                if homePillScrollEdgeFades.showTrailing {
+                    ZStack(alignment: .trailing) {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .black.opacity(0.06), location: 0.45),
+                                .init(color: .black.opacity(0.14), location: 1)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.trailing, 2)
+                    }
+                    .frame(width: 40)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private func homeCompactNavPill(
+        icon: String,
+        title: String,
+        trailingChevron: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
                     .foregroundStyle(.secondary)
-
-                Text("Data")
+                Text(title)
                     .font(.subheadline.weight(.semibold))
-
-                Spacer()
-                
-                Image(systemName: "chevron.down")
+                    .lineLimit(1)
+                Image(systemName: trailingChevron)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
             }
-            .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
         }
@@ -490,22 +580,22 @@ struct HomeView: View {
                 
                 ScrollViewReader { scrollProxy in
                     List {
-                    if hasAnyModule {
+                    if hasAnyModule || app.userId != nil {
                         VStack(spacing: 6) {
-                            CollapsibleCard(
-                                isCollapsed: collapseModules,
-                                onToggle: {
-                                    withAnimation(.easeInOut) {
-                                        setAllCollapsed(!collapseModules)
-                                    }
-                                },
-                                collapsed: { collapsedModulesPill },
-                                expanded: { expandedModulesPanel }
-                            )
+                            homeModulePillRow
+                            if hasAnyModule && !collapseModules {
+                                expandedModulesPanel
+                            }
                         }
                         .id("homeScrollTop")
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 6, trailing: 16))
                         .listRowBackground(Color.clear)
+                    } else {
+                        Color.clear
+                            .frame(height: 1)
+                            .id("homeScrollTop")
+                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+                            .listRowBackground(Color.clear)
                     }
                     
                     if initialLoading && feed.isEmpty {
@@ -548,24 +638,6 @@ struct HomeView: View {
                         }
                     }
                 }
-                    
-                    if app.userId != nil {
-                        HStack(spacing: 10) {
-                            weeklyGoalsModule
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            competitionsModule
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .id(hasAnyModule ? "homeGoalsRow" : "homeScrollTop")
-                        .listRowInsets(EdgeInsets(top: hasAnyModule ? 6 : 8, leading: 16, bottom: 6, trailing: 16))
-                        .listRowBackground(Color.clear)
-                    } else if !hasAnyModule {
-                        Color.clear
-                            .frame(height: 1)
-                            .id("homeScrollTop")
-                            .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
-                            .listRowBackground(Color.clear)
-                    }
                     
                     ForEach(Array(feed.enumerated()), id: \.element.id) { i, item in
                         let firstOfDay = i == 0 || !sameDay(feed[i-1].workout.started_at, item.workout.started_at)
@@ -855,6 +927,13 @@ struct HomeView: View {
         .navigationDestination(isPresented: $showCompetitions) {
             CompetitionsHubView()
                 .gradientBG()
+        }
+        .navigationDestination(isPresented: $showTrackedAchievements) {
+            TrackedAchievementsView()
+                .gradientBG()
+        }
+        .onChange(of: showTrackedAchievements) { _, show in
+            if !show { Task { await loadTrackedAchievementSummary() } }
         }
     }
 
@@ -1155,7 +1234,8 @@ struct HomeView: View {
             async let r: Void = loadRecentPRs()
             async let m: Void = loadMonthlySummary()
             async let i: Void = loadInsights()
-            _ = await (t, w, s, r, m, i)
+            async let ta: Void = loadTrackedAchievementSummary()
+            _ = await (t, w, s, r, m, i, ta)
             
         } catch {
             await MainActor.run { failFeedReload(error, generation: generation) }
@@ -1812,6 +1892,27 @@ struct HomeView: View {
         }
     }
     
+    private func loadTrackedAchievementSummary() async {
+        guard let me = app.userId else {
+            await MainActor.run { trackedAchievementCount = 0 }
+            return
+        }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_tracked_achievement_count_v1", params: ["p_user_id": me.uuidString])
+                .execute()
+            struct Summary: Decodable {
+                let count: Int
+            }
+            let summary = try JSONDecoder.supabase().decode(Summary.self, from: res.data)
+            await MainActor.run {
+                trackedAchievementCount = summary.count
+            }
+        } catch {
+            await MainActor.run { trackedAchievementCount = 0 }
+        }
+    }
+
     private func loadInsights() async {
         async let a: Void = loadStrongestWeekMTD()
         async let b: Void = loadBestSportMatch()
@@ -1990,90 +2091,6 @@ struct HomeView: View {
         let comps = cal.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
         let start = cal.date(from: comps)!
         return (start, now)
-    }
-    
-    private var weeklyGoalsModule: some View {
-        Button {
-            showGoals = true
-        } label: {
-            Group {
-                if collapseModules {
-                    HStack(spacing: 8) {
-                        Image(systemName: "target")
-                            .foregroundStyle(.secondary)
-                        Text("Weekly goals")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    HStack(spacing: 10) {
-                        Image(systemName: "target")
-                            .font(.headline.weight(.semibold))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Weekly goals")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Track your objectives")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-        }
-        .buttonStyle(.plain)
-    }
-    
-    private var competitionsModule: some View {
-        Button {
-            showCompetitions = true
-        } label: {
-            Group {
-                if collapseModules {
-                    HStack(spacing: 8) {
-                        Image(systemName: "trophy")
-                            .foregroundStyle(.secondary)
-                        Text("Competitions")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    HStack(spacing: 10) {
-                        Image(systemName: "trophy")
-                            .font(.headline.weight(.semibold))
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Competitions")
-                                .font(.subheadline.weight(.semibold))
-                            Text("Active & pending")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                        Spacer(minLength: 0)
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
-        }
-        .buttonStyle(.plain)
     }
 }
 

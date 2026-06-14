@@ -50,6 +50,7 @@ data class AddDuplicateFormPrefill(
     val sportSessionNotes: String,
     val sportMatchResult: AddMatchResult,
     val hyroxExercisesJson: String,
+    val climbingRoutesJson: String,
     val sportStats: Map<String, String>
 )
 
@@ -60,6 +61,7 @@ data class AddDuplicateFormPrefill(
 data class SportEditEnrichment(
     val sportStats: Map<String, String>,
     val hyroxExercisesJson: String,
+    val climbingRoutesJson: String,
     val footballPosition: AddFootballPosition,
     val racketMode: AddRacketMode,
     val racketFormat: AddRacketFormat
@@ -68,6 +70,7 @@ data class SportEditEnrichment(
         fun empty() = SportEditEnrichment(
             sportStats = emptyMap(),
             hyroxExercisesJson = "[]",
+            climbingRoutesJson = "[]",
             footballPosition = AddFootballPosition.FORWARD,
             racketMode = AddRacketMode.SINGLES,
             racketFormat = AddRacketFormat.BEST_OF_3
