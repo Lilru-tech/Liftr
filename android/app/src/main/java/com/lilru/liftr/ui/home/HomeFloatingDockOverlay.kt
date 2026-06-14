@@ -63,6 +63,10 @@ import com.lilru.liftr.ui.common.floatingEdgeAnchor
 import com.lilru.liftr.ui.common.floatingEdgeDock
 import com.lilru.liftr.ui.common.floatingDockShouldMerge
 import com.lilru.liftr.ui.common.floatingDockUnmergePositions
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.unit.IntSize
+import com.lilru.liftr.ui.common.floatingBubbleOffset
+import com.lilru.liftr.ui.common.marginPx
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradientOpaque
 import io.github.jan.supabase.SupabaseClient
 import kotlinx.coroutines.launch
@@ -123,6 +127,8 @@ fun HomeFloatingDockOverlay(
     var showMergedMenu by remember { mutableStateOf(false) }
     var showInbox by remember { mutableStateOf(false) }
     var openThread by remember { mutableStateOf<Pair<Long, ProfileLite?>?>(null) }
+    var quickTooltipSize by remember { mutableStateOf(IntSize.Zero) }
+    var chatHintSize by remember { mutableStateOf(IntSize.Zero) }
 
     var chatFabEdge by remember { mutableStateOf(chatDock.edge) }
     var chatFabPosition by remember { mutableStateOf(chatDock.position) }
@@ -336,30 +342,75 @@ fun HomeFloatingDockOverlay(
             }
 
             if (!quickHintDismissed && !showQuickMenu && !busy) {
+                val tooltipWidthPx = if (quickTooltipSize.width > 0) {
+                    quickTooltipSize.width.toFloat()
+                } else {
+                    with(density) { 280.dp.toPx() }
+                }
+                val tooltipHeightPx = if (quickTooltipSize.height > 0) {
+                    quickTooltipSize.height.toFloat()
+                } else {
+                    with(density) { 48.dp.toPx() }
+                }
                 HomeQuickActionsTooltip(
                     onDismiss = {
                         quickHintDismissed = true
                         quickPrefs.edit().putBoolean("hintDismissed", true).apply()
                     },
-                    modifier = Modifier.offset {
-                        homeQuickTooltipOffset(quickAnchor, quickEdge, widthPx, heightPx, density)
-                    }
+                    modifier = Modifier
+                        .onGloballyPositioned { coordinates ->
+                            val size = coordinates.size
+                            if (size != quickTooltipSize) {
+                                quickTooltipSize = size
+                            }
+                        }
+                        .offset {
+                            homeQuickTooltipOffset(
+                                quickAnchor,
+                                quickEdge,
+                                widthPx,
+                                heightPx,
+                                density,
+                                tooltipWidthPx,
+                                tooltipHeightPx,
+                                with(density) { 56.dp.toPx() },
+                                quickTabPx
+                            )
+                        }
                 )
             }
 
             if (!chatDragHintSeen) {
+                val chatCardWidthPx = with(density) { 280.dp.toPx() }
+                val chatCardHeightPx = if (chatHintSize.height > 0) {
+                    chatHintSize.height.toFloat()
+                } else {
+                    with(density) { 130.dp.toPx() }
+                }
+                val spacingPx = with(density) { 12.dp.toPx() }
                 Card(
                     modifier = Modifier
-                        .offset {
-                            homeChatFabDragHintOffset(
-                                chatAnchor,
-                                chatFabEdge,
-                                widthPx,
-                                heightPx,
-                                density
-                            )
+                        .width(280.dp)
+                        .onGloballyPositioned { coordinates ->
+                            val size = coordinates.size
+                            if (size != chatHintSize) {
+                                chatHintSize = size
+                            }
                         }
-                        .width(280.dp),
+                        .offset {
+                            floatingBubbleOffset(
+                                anchor = chatAnchor,
+                                edge = chatFabEdge,
+                                bubbleWidthPx = chatCardWidthPx,
+                                bubbleHeightPx = chatCardHeightPx,
+                                tabWidthPx = chatTabPx,
+                                tabHeightPx = chatTabPx,
+                                screenWidthPx = widthPx,
+                                screenHeightPx = heightPx,
+                                spacingPx = spacingPx,
+                                marginPx = density.marginPx()
+                            )
+                        },
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)
                     )
@@ -731,29 +782,5 @@ private fun homeFloatingDockMenuOffset(
     return IntOffset(
         (raw.x - menuWidth / 2f).coerceIn(12f, widthPx - menuWidth - 12f).roundToInt(),
         (raw.y - menuHeight / 2f).coerceIn(12f, heightPx - menuHeight - 12f).roundToInt()
-    )
-}
-
-private fun homeChatFabDragHintOffset(
-    anchor: Offset,
-    edge: FloatingDockEdge,
-    widthPx: Float,
-    heightPx: Float,
-    density: androidx.compose.ui.unit.Density
-): IntOffset {
-    val cardWidth = with(density) { 280.dp.toPx() }
-    val cardHeight = with(density) { 96.dp.toPx() }
-    val spacing = with(density) { 70.dp.toPx() }
-    val verticalSpacing = with(density) { 58.dp.toPx() }
-    val raw = when (edge) {
-        FloatingDockEdge.LEFT -> Offset(anchor.x + spacing, anchor.y)
-        FloatingDockEdge.RIGHT -> Offset(anchor.x - spacing - cardWidth, anchor.y)
-        FloatingDockEdge.TOP -> Offset(anchor.x - cardWidth / 2f, anchor.y + verticalSpacing)
-        FloatingDockEdge.BOTTOM -> Offset(anchor.x - cardWidth / 2f, anchor.y - verticalSpacing - cardHeight)
-    }
-
-    return IntOffset(
-        raw.x.coerceIn(12f, widthPx - cardWidth - 12f).roundToInt(),
-        (raw.y - cardHeight / 2f).coerceIn(12f, heightPx - cardHeight - 12f).roundToInt()
     )
 }

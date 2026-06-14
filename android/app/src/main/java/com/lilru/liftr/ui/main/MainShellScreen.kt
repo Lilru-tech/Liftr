@@ -89,6 +89,7 @@ import kotlinx.coroutines.launch
 import com.lilru.liftr.navigation.AppNavEvents
 import com.lilru.liftr.navigation.MainOverlay
 import com.lilru.liftr.ui.achievements.AchievementsScreen
+import com.lilru.liftr.ui.achievements.TrackedAchievementsScreen
 import com.lilru.liftr.ui.add.AddWorkoutTabScreen
 import com.lilru.liftr.ui.competition.CompetitionDetailFromIdScreen
 import com.lilru.liftr.ui.competition.CompetitionReviewsScreen
@@ -542,6 +543,14 @@ fun MainShellScreen(
                 } else {
                     clearOverlay()
                 }
+            }
+            is MainOverlay.TrackedAchievements -> {
+                TrackedAchievementsScreen(
+                    supabase = supabase,
+                    targetUserId = overlayNonNull.userId,
+                    onBack = { clearOverlay() },
+                    modifier = Modifier.fillMaxSize()
+                )
             }
             is MainOverlay.CompetitionsHub -> {
                 CompetitionsHubScreen(

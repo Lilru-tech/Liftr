@@ -48,7 +48,10 @@ import com.lilru.liftr.R
 import com.lilru.liftr.ui.add.recommendation.CardioRecommendationResult
 import com.lilru.liftr.ui.add.recommendation.RecommendationDataSource
 import com.lilru.liftr.ui.add.recommendation.SportRecommendationResult
+import androidx.compose.material3.Switch
 import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationExerciseResult
+import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationOutputResult
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.lilru.liftr.ui.add.recommendation.StrengthSuggestionMode
 import com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationError
 import java.util.Locale
@@ -70,6 +73,8 @@ fun AddWorkoutRecommendationDialog(
         mutableStateOf(StrengthSuggestionMode.PRIORITIZE_UNDERTRAINED_MUSCLES)
     }
     var errorText by remember { mutableStateOf<String?>(null) }
+    var networkInspired by rememberSaveable { mutableStateOf(false) }
+    var excludeRoutineId by remember { mutableStateOf<Long?>(null) }
     val context = LocalContext.current
     val preferSpanish = remember {
         Locale.getDefault().language.lowercase().startsWith("es")
@@ -77,9 +82,16 @@ fun AddWorkoutRecommendationDialog(
 
     val dataSources = remember(kind) {
         when (kind) {
-            AddWorkoutKind.SPORT -> RecommendationDataSource.entries.toList()
-            else -> RecommendationDataSource.entries.filter {
+            AddWorkoutKind.SPORT -> RecommendationDataSource.entries.filter {
+                it != RecommendationDataSource.NETWORK_INSPIRED
+            }
+            AddWorkoutKind.STRENGTH -> RecommendationDataSource.entries.filter {
                 it != RecommendationDataSource.HYROX && it != RecommendationDataSource.HYROX_RACE
+            }
+            AddWorkoutKind.CARDIO -> RecommendationDataSource.entries.filter {
+                it != RecommendationDataSource.HYROX &&
+                    it != RecommendationDataSource.HYROX_RACE &&
+                    it != RecommendationDataSource.MY_ROUTINES
             }
         }
     }
@@ -132,6 +144,33 @@ fun AddWorkoutRecommendationDialog(
                                 onSelect = { source = dataSources[it] }
                             )
 
+                            if (kind == AddWorkoutKind.STRENGTH || kind == AddWorkoutKind.CARDIO) {
+                                RecommendSectionHeader("NETWORK (OPTIONAL)")
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(14.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text("Include network trends", fontWeight = FontWeight.SemiBold)
+                                            Text(
+                                                "Uses anonymous exercise trends from people you follow (last 7 days).",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Switch(checked = networkInspired, onCheckedChange = { networkInspired = it })
+                                    }
+                                }
+                            }
+
                             if (kind == AddWorkoutKind.STRENGTH) {
                                 RecommendSectionHeader(stringResource(R.string.add_recommend_strength_session))
                                 RecommendationChoiceCard(
@@ -163,17 +202,19 @@ fun AddWorkoutRecommendationDialog(
                                     runCatching {
                                         when (kind) {
                                             AddWorkoutKind.STRENGTH -> {
-                                                val rows = vm.recommendStrengthForUi(source, strengthMode, preferSpanish)
-                                                phase = RecPhase.ResultStrength(rows)
+                                                val output = vm.recommendStrengthForUi(
+                                                    source, strengthMode, preferSpanish, networkInspired, excludeRoutineId
+                                                )
+                                                phase = RecPhase.ResultStrength(output)
                                             }
 
                                             AddWorkoutKind.CARDIO -> {
-                                                val r = vm.recommendCardioForUi(source)
+                                                val r = vm.recommendCardioForUi(source, networkInspired)
                                                 phase = RecPhase.ResultCardio(r)
                                             }
 
                                             AddWorkoutKind.SPORT -> {
-                                                val r = vm.recommendSportForUi(source)
+                                                val r = vm.recommendSportForUi(source, networkInspired)
                                                 phase = RecPhase.ResultSport(r)
                                             }
                                         }
@@ -231,19 +272,44 @@ fun AddWorkoutRecommendationDialog(
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth(),
+                                .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
+                            p.output.sessionRationale?.let { RecommendSectionIntro(it) }
+                            if (p.output.muscleFreshness.isNotEmpty()) {
+                                RecommendSectionHeader("MUSCLE FRESHNESS")
+                                RecommendSectionIntro(
+                                    p.output.muscleFreshness.joinToString("\n") { "${it.muscle}: ${it.status}" }
+                                )
+                            }
                             StrengthRecommendationResultList(
-                                rows = p.rows,
+                                rows = p.output.exercises,
                                 formatKg = ::formatKgForRec
                             )
                         }
                         RecommendationResultActionCard(
                             onApply = {
-                                vm.applyStrengthRecommendation(p.rows)
+                                vm.applyStrengthRecommendation(p.output.exercises)
                                 onDismiss()
                             },
+                            onRegenerate = {
+                                if (p.output.routineName != null) {
+                                    excludeRoutineId = null
+                                }
+                                phase = RecPhase.Loading
+                                scope.launch {
+                                    runCatching {
+                                        val output = vm.recommendStrengthForUi(
+                                            source, strengthMode, preferSpanish, networkInspired, excludeRoutineId
+                                        )
+                                        phase = RecPhase.ResultStrength(output)
+                                    }.onFailure { e ->
+                                        errorText = e.message
+                                        phase = RecPhase.Questions
+                                    }
+                                }
+                            },
+                            regenerateLabel = if (p.output.routineName != null) "Pick another routine" else "Regenerate",
                             onBack = { phase = RecPhase.Questions }
                         )
                     }
@@ -252,43 +318,68 @@ fun AddWorkoutRecommendationDialog(
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth(),
+                                .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            RecommendationTextResultBody(
-                                text = "${p.r.rationale}\n\nActivity: ${p.r.activityWire}\nDuration: ${p.r.durationSec} s"
-                            )
+                            RecommendSectionIntro(p.r.rationale)
+                            CardioRecommendationResultDetails(p.r)
                         }
                         RecommendationResultActionCard(
                             onApply = {
                                 onAppliedCardio(p.r)
                                 onDismiss()
                             },
+                            onRegenerate = {
+                                phase = RecPhase.Loading
+                                scope.launch {
+                                    runCatching {
+                                        phase = RecPhase.ResultCardio(vm.recommendCardioForUi(source, networkInspired))
+                                    }.onFailure {
+                                        errorText = it.message
+                                        phase = RecPhase.Questions
+                                    }
+                                }
+                            },
+                            regenerateLabel = "Regenerate",
                             onBack = { phase = RecPhase.Questions }
                         )
                     }
 
                     is RecPhase.ResultSport -> {
-                        val summary = when (val sr = p.sr) {
-                            is SportRecommendationResult.DurationOnly ->
-                                "${sr.rationale}\n\nSuggested: ${sr.durationMin} min."
-
-                            is SportRecommendationResult.Hyrox ->
-                                "${sr.rationale}\n\n${sr.exercises.size} stations, ~${sr.durationMin} min."
-                        }
                         Column(
                             modifier = Modifier
                                 .weight(1f)
-                                .fillMaxWidth(),
+                                .verticalScroll(rememberScrollState()),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            RecommendationTextResultBody(text = summary)
+                            when (val sr = p.sr) {
+                                is SportRecommendationResult.DurationOnly -> {
+                                    RecommendSectionIntro(sr.rationale)
+                                    SportDurationResultDetails(sr.durationMin)
+                                }
+                                is SportRecommendationResult.Hyrox -> {
+                                    RecommendSectionIntro(sr.rationale)
+                                    SportHyroxResultDetails(sr)
+                                }
+                            }
                         }
                         RecommendationResultActionCard(
                             onApply = {
                                 onAppliedSport(p.sr)
                                 onDismiss()
                             },
+                            onRegenerate = {
+                                phase = RecPhase.Loading
+                                scope.launch {
+                                    runCatching {
+                                        phase = RecPhase.ResultSport(vm.recommendSportForUi(source, networkInspired))
+                                    }.onFailure {
+                                        errorText = it.message
+                                        phase = RecPhase.Questions
+                                    }
+                                }
+                            },
+                            regenerateLabel = "Regenerate",
                             onBack = { phase = RecPhase.Questions }
                         )
                     }
@@ -505,8 +596,84 @@ private fun RecommendationTextResultBody(text: String) {
 }
 
 @Composable
+private fun RecLabelValueRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(value, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun CardioRecommendationResultDetails(r: CardioRecommendationResult) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            RecLabelValueRow("Activity", r.activityWire)
+            RecLabelValueRow("Duration", "${r.durationSec} s")
+            r.distanceKm?.let { RecLabelValueRow("Distance", String.format(Locale.US, "%.2f km", it)) }
+            r.avgHr?.let { RecLabelValueRow("Avg HR", "$it") }
+            r.maxHr?.let { RecLabelValueRow("Max HR", "$it") }
+            r.elevationGainM?.let { RecLabelValueRow("Elevation gain (m)", "$it") }
+            r.inclinePercent?.let { RecLabelValueRow("Incline (%)", String.format(Locale.US, "%.1f", it)) }
+            r.cadenceRpm?.let { RecLabelValueRow("Cadence", "$it") }
+            r.wattsAvg?.let { RecLabelValueRow("Avg watts", "$it") }
+            r.splitSecPer500m?.let { RecLabelValueRow("Split (sec/500m)", "$it") }
+            r.swimLaps?.let { RecLabelValueRow("Laps", "$it") }
+            r.poolLengthM?.let { RecLabelValueRow("Pool length (m)", "$it") }
+            r.swimStyle?.let { RecLabelValueRow("Swim style", it) }
+        }
+    }
+}
+
+@Composable
+private fun SportDurationResultDetails(durationMin: Int) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            RecLabelValueRow("Session length", "$durationMin min")
+        }
+    }
+}
+
+@Composable
+private fun SportHyroxResultDetails(sr: SportRecommendationResult.Hyrox) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            RecLabelValueRow("Sport", "hyrox")
+            RecLabelValueRow("Duration", "${sr.durationMin} min")
+            sr.exercises.forEach { ex ->
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+                Text("${ex.exerciseOrder}. ${ex.customDisplayName.ifBlank { ex.exerciseCode }}", fontWeight = FontWeight.SemiBold)
+                ex.distanceM?.let { RecLabelValueRow("Distance", "$it m") }
+                ex.reps?.let { RecLabelValueRow("Reps", "$it") }
+                ex.weightKg?.let { RecLabelValueRow("Weight", formatKgForRec(it) + " kg") }
+            }
+        }
+    }
+}
+
+@Composable
 private fun RecommendationResultActionCard(
     onApply: () -> Unit,
+    onRegenerate: () -> Unit,
+    regenerateLabel: String,
     onBack: () -> Unit
 ) {
     val applyLabel = stringResource(R.string.add_recommend_apply)
@@ -534,6 +701,15 @@ private fun RecommendationResultActionCard(
                 )
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            TextButton(onClick = onRegenerate, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = regenerateLabel,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
             TextButton(
                 onClick = onBack,
                 modifier = Modifier.fillMaxWidth()
@@ -553,7 +729,7 @@ private fun RecommendationResultActionCard(
 private sealed class RecPhase {
     data object Questions : RecPhase()
     data object Loading : RecPhase()
-    data class ResultStrength(val rows: List<StrengthRecommendationExerciseResult>) : RecPhase()
+    data class ResultStrength(val output: StrengthRecommendationOutputResult) : RecPhase()
     data class ResultCardio(val r: CardioRecommendationResult) : RecPhase()
     data class ResultSport(val sr: SportRecommendationResult) : RecPhase()
 }

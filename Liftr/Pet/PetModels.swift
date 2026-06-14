@@ -218,6 +218,142 @@ struct PetTypeCatalogRow: Codable, Identifiable, Equatable {
     }
 }
 
+struct PetDexStats: Codable, Equatable {
+    let totalBattles: Int
+    let wins: Int
+    let losses: Int
+    let draws: Int
+    let firstFoughtAt: Date?
+    let lastFoughtAt: Date?
+    let raritiesSeen: [String]
+    let stagesSeen: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case totalBattles = "total_battles"
+        case wins, losses, draws
+        case firstFoughtAt = "first_fought_at"
+        case lastFoughtAt = "last_fought_at"
+        case raritiesSeen = "rarities_seen"
+        case stagesSeen = "stages_seen"
+    }
+}
+
+struct PetDexSpeciesEntry: Codable, Identifiable, Equatable {
+    let petType: String
+    let displayName: String
+    let description: String
+    let imageEgg: String?
+    let isDiscovered: Bool
+    let totalBattles: Int
+    let wins: Int
+    let losses: Int
+    let draws: Int
+    let firstFoughtAt: Date?
+    let lastFoughtAt: Date?
+    let raritiesSeen: [String]
+    let stagesSeen: [String]
+
+    var id: String { petType }
+
+    enum CodingKeys: String, CodingKey {
+        case petType = "pet_type"
+        case displayName = "display_name"
+        case description
+        case imageEgg = "image_egg"
+        case isDiscovered = "is_discovered"
+        case totalBattles = "total_battles"
+        case wins, losses, draws
+        case firstFoughtAt = "first_fought_at"
+        case lastFoughtAt = "last_fought_at"
+        case raritiesSeen = "rarities_seen"
+        case stagesSeen = "stages_seen"
+    }
+
+    var eggImageURL: URL? {
+        if let imageEgg, !imageEgg.isEmpty, let url = URL(string: imageEgg) {
+            return url
+        }
+        return PetImageURLBuilder.imageURL(petType: petType, evolutionStage: "egg")
+    }
+}
+
+struct PetDexData: Codable, Equatable {
+    let speciesDiscovered: Int
+    let totalSpecies: Int
+    let raritiesDiscovered: Int
+    let totalRarities: Int
+    let stagesDiscovered: Int
+    let totalFightableStages: Int
+    let species: [PetDexSpeciesEntry]
+
+    enum CodingKeys: String, CodingKey {
+        case speciesDiscovered = "species_discovered"
+        case totalSpecies = "total_species"
+        case raritiesDiscovered = "rarities_discovered"
+        case totalRarities = "total_rarities"
+        case stagesDiscovered = "stages_discovered"
+        case totalFightableStages = "total_fightable_stages"
+        case species
+    }
+}
+
+struct PetSpeciesDetail: Codable, Equatable {
+    let petType: String
+    let displayName: String
+    let description: String
+    let imageEgg: String?
+    let imageBaby: String?
+    let imageKid: String?
+    let imageTeen: String?
+    let imageAdult: String?
+    let imageElder: String?
+    let discoveredStages: [String]
+    let dex: PetDexStats?
+
+    enum CodingKeys: String, CodingKey {
+        case petType = "pet_type"
+        case displayName = "display_name"
+        case description
+        case imageEgg = "image_egg"
+        case imageBaby = "image_baby"
+        case imageKid = "image_kid"
+        case imageTeen = "image_teen"
+        case imageAdult = "image_adult"
+        case imageElder = "image_elder"
+        case discoveredStages = "discovered_stages"
+        case dex
+    }
+
+    func imageURL(for stage: String) -> URL? {
+        let raw: String? = switch stage.lowercased() {
+        case "egg": imageEgg
+        case "baby": imageBaby
+        case "kid": imageKid
+        case "teen": imageTeen
+        case "adult": imageAdult
+        case "elder": imageElder
+        default: nil
+        }
+        if let raw, !raw.isEmpty, let url = URL(string: raw) {
+            return url
+        }
+        return PetImageURLBuilder.imageURL(petType: petType, evolutionStage: stage)
+    }
+
+    func isStageDiscovered(_ stage: String) -> Bool {
+        if stage.lowercased() == "egg" { return true }
+        return discoveredStages.contains { $0.lowercased() == stage.lowercased() }
+    }
+}
+
+enum PetEvolutionStages {
+    static let ordered: [String] = ["egg", "baby", "kid", "teen", "adult", "elder"]
+
+    static func displayName(for stage: String) -> String {
+        stage.capitalized
+    }
+}
+
 enum PetFoodItemType {
     static let all: [String] = ["food_baby", "food_kid", "food_teen", "food_adult", "food_elder"]
 

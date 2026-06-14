@@ -106,7 +106,9 @@ data class SportCheckpointPayload(
     val matchResultRaw: String = "unfinished",
     val matchScoreText: String = "",
     val locationText: String = "",
-    val sessionNotesText: String = ""
+    val sessionNotesText: String = "",
+    val climbingSportStats: Map<String, String> = emptyMap(),
+    val climbingRoutesJson: String = "[]"
 )
 
 @Serializable

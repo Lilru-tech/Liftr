@@ -20,6 +20,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.lilru.liftr.domain.formatCompactCount
 import java.text.NumberFormat
 
 @Composable
@@ -27,16 +28,22 @@ fun CoinsBalanceBadge(
     balance: Int,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    abbreviated: Boolean = false,
     onClick: (() -> Unit)? = null
 ) {
     val displayBalance = maxOf(0, balance)
     val formatted = NumberFormat.getIntegerInstance().format(displayBalance)
+    val displayText = if (abbreviated && displayBalance >= 1_000) {
+        formatCompactCount(displayBalance)
+    } else {
+        formatted
+    }
     Surface(
         modifier = modifier
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .semantics {
-            contentDescription = "Liftr Coins balance $formatted"
-        },
+                contentDescription = "Liftr Coins balance $formatted"
+            },
         shape = RoundedCornerShape(50),
         color = Color.White.copy(alpha = 0.12f),
         border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.12f))
@@ -56,13 +63,14 @@ fun CoinsBalanceBadge(
                 modifier = Modifier.padding(0.dp)
             )
             Text(
-                text = formatted,
+                text = displayText,
                 style = if (compact) {
                     MaterialTheme.typography.labelSmall
                 } else {
                     MaterialTheme.typography.labelMedium
                 },
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1
             )
         }
     }

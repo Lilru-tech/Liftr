@@ -212,6 +212,7 @@ struct EditWorkoutMetaSheet: View {
     @State private var skiResortName = ""
     @State private var skiSnowCondition = ""
     @State private var skiWeather = ""
+    @State private var climbingForm = SportForm()
     @State private var showParticipantsPicker = false
     @State private var initialParticipants = Set<UUID>()
     @State private var didEditCardioDuration = false
@@ -627,7 +628,7 @@ struct EditWorkoutMetaSheet: View {
                 .onChange(of: s_sport) { _, new in
                     if sportUsesNumericScore(new) { s_matchScoreText = "" }
                     if sportUsesSetText(new) { s_scoreFor = ""; s_scoreAgainst = "" }
-                    if new == .ski {
+                    if new == .ski || new == .climbing {
                         s_matchResult = .unfinished
                     }
                 }
@@ -656,7 +657,7 @@ struct EditWorkoutMetaSheet: View {
                     }
                 }
                 
-                if s_sport != .ski {
+                if s_sport != .ski && s_sport != .climbing {
                     Divider().padding(.vertical, 6)
 
                     FieldRowPlain("Match result") {
@@ -1284,6 +1285,89 @@ struct EditWorkoutMetaSheet: View {
                         skiResortName = ""
                         skiSnowCondition = ""
                         skiWeather = ""
+                    }
+
+                case .climbing:
+                    climbingForm = SportForm()
+                    climbingForm.sport = .climbing
+                    do {
+                        let q = try await client
+                            .from("climbing_session_stats")
+                            .select("*")
+                            .eq("session_id", value: r.id)
+                            .single()
+                            .execute()
+
+                        struct CL: Decodable {
+                            let environment: String?
+                            let primary_style: String?
+                            let routes_sent: Int?
+                            let routes_attempted: Int?
+                            let total_vertical_m: Int?
+                            let moving_time_sec: Int?
+                            let paused_time_sec: Int?
+                            let venue_name: String?
+                            let weather: String?
+                            let avg_hr: Int?
+                            let max_hr: Int?
+                            let falls: Int?
+                            let flashes: Int?
+                            let highest_grade_system: String?
+                            let highest_grade_value: String?
+                        }
+
+                        let s = try decoder.decode(CL.self, from: q.data)
+
+                        climbingForm.clEnvironment = ClimbingEnvironment(rawValue: s.environment ?? "") ?? .indoor
+                        climbingForm.clPrimaryStyle = ClimbingStyle(rawValue: s.primary_style ?? "") ?? .boulder
+                        climbingForm.clRoutesSent = s.routes_sent.map(String.init) ?? ""
+                        climbingForm.clRoutesAttempted = s.routes_attempted.map(String.init) ?? ""
+                        climbingForm.clTotalVerticalM = s.total_vertical_m.map(String.init) ?? ""
+                        climbingForm.clMovingTimeSec = s.moving_time_sec.map(String.init) ?? ""
+                        climbingForm.clPausedTimeSec = s.paused_time_sec.map(String.init) ?? ""
+                        climbingForm.clVenueName = s.venue_name ?? ""
+                        climbingForm.clWeather = s.weather ?? ""
+                        climbingForm.clAvgHR = s.avg_hr.map(String.init) ?? ""
+                        climbingForm.clMaxHR = s.max_hr.map(String.init) ?? ""
+                        climbingForm.clFalls = s.falls.map(String.init) ?? ""
+                        climbingForm.clFlashes = s.flashes.map(String.init) ?? ""
+                        climbingForm.clHighestGradeSystem = ClimbingGradeSystem(rawValue: s.highest_grade_system ?? "") ?? .v_scale
+                        climbingForm.clHighestGradeValue = s.highest_grade_value ?? ""
+
+                        let routesQ = try await client
+                            .from("climbing_session_routes")
+                            .select("*")
+                            .eq("session_id", value: r.id)
+                            .order("route_order", ascending: true)
+                            .execute()
+
+                        struct RouteRow: Decodable {
+                            let route_name: String?
+                            let style: String?
+                            let grade_system: String?
+                            let grade_value: String?
+                            let attempts: Int?
+                            let sent: Bool?
+                            let flash: Bool?
+                            let notes: String?
+                        }
+
+                        let routeRows = try decoder.decode([RouteRow].self, from: routesQ.data)
+                        climbingForm.clRoutes = routeRows.map { row in
+                            var route = ClimbingRouteForm()
+                            route.routeName = row.route_name ?? ""
+                            route.style = ClimbingStyle(rawValue: row.style ?? "") ?? .boulder
+                            route.gradeSystem = ClimbingGradeSystem(rawValue: row.grade_system ?? "") ?? .v_scale
+                            route.gradeValue = row.grade_value ?? ""
+                            route.attempts = row.attempts.map(String.init) ?? ""
+                            route.sent = row.sent ?? false
+                            route.flash = row.flash ?? false
+                            route.notes = row.notes ?? ""
+                            return route
+                        }
+                    } catch {
+                        climbingForm = SportForm()
+                        climbingForm.sport = .climbing
                     }
                     
                 case .basketball:
@@ -2675,6 +2759,9 @@ struct EditWorkoutMetaSheet: View {
                 workoutMetricField("Snow", text: $skiSnowCondition, keyboard: .default)
                 workoutMetricField("Weather", text: $skiWeather, keyboard: .default)
             }
+
+        case .climbing:
+            ClimbingSessionEditor(sport: $climbingForm)
             
         case .basketball:
             Divider().padding(.vertical, 6)
@@ -2968,6 +3055,53 @@ struct EditWorkoutMetaSheet: View {
             }
             if !skiWeather.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 out["weather"] = .s(skiWeather)
+            }
+            return out
+
+        case .climbing:
+            var out: [String: JV] = [:]
+            out["environment"] = .s(climbingForm.clEnvironment.rawValue)
+            out["primary_style"] = .s(climbingForm.clPrimaryStyle.wire)
+            if let v = parseInt(climbingForm.clRoutesSent) { out["routes_sent"] = .i(v) }
+            if let v = parseInt(climbingForm.clRoutesAttempted) { out["routes_attempted"] = .i(v) }
+            if let v = parseInt(climbingForm.clTotalVerticalM) { out["total_vertical_m"] = .i(v) }
+            if let v = parseInt(climbingForm.clMovingTimeSec) { out["moving_time_sec"] = .i(v) }
+            if let v = parseInt(climbingForm.clPausedTimeSec) { out["paused_time_sec"] = .i(v) }
+            if !climbingForm.clVenueName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out["venue_name"] = .s(climbingForm.clVenueName)
+            }
+            if !climbingForm.clWeather.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out["weather"] = .s(climbingForm.clWeather)
+            }
+            if let v = parseInt(climbingForm.clAvgHR) { out["avg_hr"] = .i(v) }
+            if let v = parseInt(climbingForm.clMaxHR) { out["max_hr"] = .i(v) }
+            if let v = parseInt(climbingForm.clFalls) { out["falls"] = .i(v) }
+            if let v = parseInt(climbingForm.clFlashes) { out["flashes"] = .i(v) }
+            if !climbingForm.clHighestGradeValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                out["highest_grade_system"] = .s(climbingForm.clHighestGradeSystem.wire)
+                out["highest_grade_value"] = .s(climbingForm.clHighestGradeValue)
+            }
+            if !climbingForm.clRoutes.isEmpty {
+                let routes: [JStats] = climbingForm.clRoutes.enumerated().map { index, route in
+                    var item: [String: JV] = [:]
+                    item["route_order"] = .i(index + 1)
+                    if !route.routeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        item["route_name"] = .s(route.routeName)
+                    }
+                    item["style"] = .s(route.style.wire)
+                    if !route.gradeValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        item["grade_system"] = .s(route.gradeSystem.wire)
+                        item["grade_value"] = .s(route.gradeValue)
+                    }
+                    if let v = parseInt(route.attempts) { item["attempts"] = .i(v) }
+                    item["sent"] = .s(route.sent ? "true" : "false")
+                    item["flash"] = .s(route.flash ? "true" : "false")
+                    if !route.notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        item["notes"] = .s(route.notes)
+                    }
+                    return JStats(values: item)
+                }
+                out["routes"] = .a(routes)
             }
             return out
         }

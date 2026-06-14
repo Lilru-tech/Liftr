@@ -110,7 +110,7 @@ val cleanDexIntermediates by tasks.registering(Delete::class) {
     )
 }
 
-tasks.matching { it.name.startsWith("mergeProjectDex") }
+tasks.matching { it.name.startsWith("dexBuilder") }
     .configureEach { dependsOn(cleanDexIntermediates) }
 
 dependencies {

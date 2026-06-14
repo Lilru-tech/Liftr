@@ -11,7 +11,7 @@ struct PetLog: Identifiable, Equatable {
     let createdAt: Date
 
     static func title(for log: PetLog) -> String {
-        switch log.eventType {
+        switch normalizedEventType(log.eventType) {
         case "item_used", "fed":
             if let name = log.details?["reason"] ?? log.itemType {
                 return "Used \(name.replacingOccurrences(of: "_", with: " ").capitalized)"
@@ -41,8 +41,8 @@ struct PetLog: Identifiable, Equatable {
             if let message = log.details?["message"], !message.isEmpty {
                 return message
             }
-            if let coins = log.details?["coins"], !coins.isEmpty {
-                return "Your pet helped you earn +\(coins) coins!"
+            if let amount = workoutBonusCoinAmount(from: log) {
+                return "Pet workout bonus: +\(amount) coins"
             }
             return "Pet workout bonus"
         case "combat":
@@ -62,17 +62,44 @@ struct PetLog: Identifiable, Equatable {
     }
 
     static func subtitle(for log: PetLog) -> String? {
-        guard log.eventType == "combat" else { return nil }
-        if log.details?["is_draw"] == "true" {
-            return combatRewardText(xp: log.expGained, coins: Int(log.details?["coins_gained"] ?? "") ?? 0)
+        switch normalizedEventType(log.eventType) {
+        case "workout_pet_bonus":
+            guard let amount = workoutBonusCoinAmount(from: log), amount > 0 else { return nil }
+            let titleText = title(for: log)
+            if textShowsCoinAmount(titleText, amount: amount) { return nil }
+            return "+\(amount) coins"
+        case "combat":
+            if log.details?["is_draw"] == "true" {
+                return combatRewardText(xp: log.expGained, coins: Int(log.details?["coins_gained"] ?? "") ?? 0)
+            }
+            if log.details?["won"] == "true" {
+                return combatRewardText(
+                    xp: log.expGained,
+                    coins: Int(log.details?["coins_gained"] ?? "") ?? 0
+                )
+            }
+            return "No rewards"
+        default:
+            return nil
         }
-        if log.details?["won"] == "true" {
-            return combatRewardText(
-                xp: log.expGained,
-                coins: Int(log.details?["coins_gained"] ?? "") ?? 0
-            )
+    }
+
+    private static func normalizedEventType(_ eventType: String) -> String {
+        eventType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func workoutBonusCoinAmount(from log: PetLog) -> Int? {
+        guard let raw = log.details?["coins"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            return nil
         }
-        return "No rewards"
+        if let amount = Int(raw) { return amount }
+        if let amount = Double(raw) { return Int(amount.rounded()) }
+        return nil
+    }
+
+    private static func textShowsCoinAmount(_ text: String, amount: Int) -> Bool {
+        text.contains("+\(amount)") || text.localizedCaseInsensitiveContains("\(amount) coin")
     }
 
     private static func combatOpponentName(from details: [String: String]?) -> String {

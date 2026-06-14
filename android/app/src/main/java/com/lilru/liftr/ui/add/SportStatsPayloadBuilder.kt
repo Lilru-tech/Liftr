@@ -29,7 +29,8 @@ object SportStatsPayloadBuilder {
         racketMode: AddRacketMode,
         racketFormat: AddRacketFormat,
         sportStats: Map<String, String>,
-        hyroxExercisesText: String
+        hyroxExercisesText: String,
+        climbingRoutesJson: String = "[]"
     ) = buildJsonObject {
         fun parseIntLocal(value: String): Int? = value.trim().toIntOrNull()
         fun parseDoubleLocal(value: String): Double? =
@@ -122,6 +123,46 @@ object SportStatsPayloadBuilder {
                 listOf("resort_name", "snow_condition", "weather")
                     .forEach { key -> statString(key)?.let { put(key, it) } }
             }
+            AddSportType.CLIMBING -> {
+                statString("environment")?.let { put("environment", it) }
+                statString("primary_style")?.let { put("primary_style", it) }
+                listOf(
+                    "routes_sent", "routes_attempted", "total_vertical_m",
+                    "moving_time_sec", "paused_time_sec", "avg_hr", "max_hr", "falls", "flashes"
+                ).forEach { key -> statInt(key)?.let { put(key, it) } }
+                listOf("venue_name", "weather")
+                    .forEach { key -> statString(key)?.let { put(key, it) } }
+                statString("highest_grade_value")?.let { gv ->
+                    statString("highest_grade_system")?.let { put("highest_grade_system", it) }
+                    put("highest_grade_value", gv)
+                }
+                val routesPayload = buildClimbingRoutesStatsPayload(climbingRoutesJson)
+                if (routesPayload.isNotEmpty()) {
+                    put("routes", routesPayload)
+                }
+            }
+        }
+    }
+
+    private fun buildClimbingRoutesStatsPayload(climbingRoutesJson: String) = buildJsonArray {
+        val root = runCatching { json.parseToJsonElement(climbingRoutesJson.trim()).jsonArray }
+            .getOrNull() ?: return@buildJsonArray
+        root.forEachIndexed { index, el ->
+            val o = el as? JsonObject ?: return@forEachIndexed
+            add(buildJsonObject {
+                put("route_order", jsonIntFromObject(o, "route_order", "routeOrder") ?: (index + 1))
+                jsonStringFromObject(o, "route_name", "routeName")?.let { put("route_name", it) }
+                jsonStringFromObject(o, "style")?.let { put("style", it) }
+                val gradeValue = jsonStringFromObject(o, "grade_value", "gradeValue")
+                if (!gradeValue.isNullOrBlank()) {
+                    jsonStringFromObject(o, "grade_system", "gradeSystem")?.let { put("grade_system", it) }
+                    put("grade_value", gradeValue)
+                }
+                jsonIntFromObject(o, "attempts")?.let { put("attempts", it) }
+                o["sent"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()?.let { put("sent", it) }
+                o["flash"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()?.let { put("flash", it) }
+                jsonStringFromObject(o, "notes")?.let { put("notes", it) }
+            })
         }
     }
 

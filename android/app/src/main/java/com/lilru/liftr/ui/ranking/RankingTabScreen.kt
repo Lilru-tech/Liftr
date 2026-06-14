@@ -124,6 +124,7 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.HYROX_BEST_TIME -> stringResource(R.string.ranking_metric_hyrox_best_time)
     RankingMetric.FOOTBALL_GOALS -> stringResource(R.string.ranking_metric_football_goals)
     RankingMetric.SKI_DISTANCE_KPI -> stringResource(R.string.ranking_metric_ski_km)
+    RankingMetric.CLIMBING_ROUTES_SENT_KPI -> stringResource(R.string.ranking_metric_climbing_routes_sent)
     RankingMetric.SEGMENT_POPULARITY -> stringResource(R.string.ranking_metric_segment_popularity)
     RankingMetric.PET_LEVEL -> stringResource(R.string.ranking_metric_pet_level)
     RankingMetric.PET_TOTAL_STATS -> stringResource(R.string.ranking_metric_pet_total_stats)

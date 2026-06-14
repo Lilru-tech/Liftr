@@ -262,6 +262,10 @@ struct WorkoutFeedCard: View {
             return "🤾‍♂️"
         case "hyrox":
             return "🔥"
+        case "ski":
+            return "⛷️"
+        case "climbing":
+            return "🧗"
         default:
             return ""
         }

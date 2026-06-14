@@ -960,6 +960,8 @@ class WorkoutDetailViewModel(
         matchScoreText: String,
         location: String,
         sessionNotes: String,
+        sportStats: Map<String, String>? = null,
+        climbingRoutesJson: String? = null,
         onResult: (Throwable?) -> Unit = {}
     ) {
         val s = _uiState.value
@@ -1015,7 +1017,7 @@ class WorkoutDetailViewModel(
                     } else {
                         put("p_score_against", JsonNull)
                     }
-                    if (sportType != AddSportType.SKI) {
+                    if (sportType != AddSportType.SKI && sportType != AddSportType.CLIMBING) {
                         val mr = normalizeSportMatchResult(matchResultRaw)
                         put("p_match_result", JsonPrimitive(mr))
                     } else {
@@ -1043,8 +1045,9 @@ class WorkoutDetailViewModel(
                     footballPosition = enrich.footballPosition,
                     racketMode = enrich.racketMode,
                     racketFormat = enrich.racketFormat,
-                    sportStats = enrich.sportStats,
-                    hyroxExercisesText = enrich.hyroxExercisesJson
+                    sportStats = sportStats ?: enrich.sportStats,
+                    hyroxExercisesText = enrich.hyroxExercisesJson,
+                    climbingRoutesJson = climbingRoutesJson ?: enrich.climbingRoutesJson
                 )
                 val wrapper = buildJsonObject {
                     put("p_workout_id", JsonPrimitive(workoutId))

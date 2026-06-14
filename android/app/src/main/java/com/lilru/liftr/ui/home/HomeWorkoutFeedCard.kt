@@ -313,6 +313,8 @@ private fun sportIconEmoji(sport: String?): String {
         "ice_hockey" -> "🏒"
         "handball" -> "🤾‍♂️"
         "hyrox" -> "🔥"
+        "ski" -> "⛷️"
+        "climbing" -> "🧗"
         else -> ""
     }
 }

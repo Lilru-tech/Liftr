@@ -268,6 +268,16 @@ struct SkiDistanceKpiLeaderRow: Decodable, Identifiable {
     let sessions_cnt: Int
 }
 
+struct ClimbingRoutesSentLeaderRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let total_routes_sent: Int
+    let sessions_cnt: Int
+}
+
 struct SegmentPopularityLeaderRow: Decodable, Identifiable {
     var id: UUID { segment_id }
     let rank: Int
@@ -328,7 +338,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
         case .sport:
             base = [
                 .sportWins, .sportWinRate, .sportDuration,
-                .hyroxBestTime, .footballGoals, .skiDistanceKpi
+                .hyroxBestTime, .footballGoals, .skiDistanceKpi, .climbingRoutesSent
             ]
         case .pets:
             base = [
@@ -372,6 +382,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case hyroxBestTime = "Hyrox best time"
     case footballGoals = "Football goals"
     case skiDistanceKpi = "Ski km"
+    case climbingRoutesSent = "Routes sent"
     case segmentPopularity = "Segment efforts"
     case petLevel = "Pet level"
     case petTotalStats = "Pet total stats"
@@ -425,7 +436,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
             return kind == .all || kind == .strength
         case .cardioDistance, .cardioElevation, .cardioDuration, .cardioBestPace, .territoryShare, .territoryCells:
             return kind == .all || kind == .cardio
-        case .sportWins, .sportWinRate, .sportDuration, .hyroxBestTime, .footballGoals, .skiDistanceKpi:
+        case .sportWins, .sportWinRate, .sportDuration, .hyroxBestTime, .footballGoals, .skiDistanceKpi, .climbingRoutesSent:
             return kind == .all || kind == .sport
         case .likesReceived, .commentsReceived, .groupSessions, .achievements:
             return kind == .all
@@ -561,6 +572,7 @@ final class RankingVM: ObservableObject {
     @Published var hyroxBestTimeRows: [HyroxBestTimeLeaderRow] = []
     @Published var footballGoalsRows: [FootballGoalsLeaderRow] = []
     @Published var skiDistanceKpiRows: [SkiDistanceKpiLeaderRow] = []
+    @Published var climbingRoutesSentRows: [ClimbingRoutesSentLeaderRow] = []
     @Published var segmentPopularityRows: [SegmentPopularityLeaderRow] = []
     @Published var petRows: [PetLeaderRow] = []
     @Published var territoryShareRows: [TerritoryShareLeaderRow] = []
@@ -636,6 +648,7 @@ final class RankingVM: ObservableObject {
         hyroxBestTimeRows = []
         footballGoalsRows = []
         skiDistanceKpiRows = []
+        climbingRoutesSentRows = []
         segmentPopularityRows = []
         petRows = []
         territoryShareRows = []
@@ -1072,6 +1085,28 @@ final class RankingVM: ObservableObject {
         }
     }
 
+    private func fetchClimbingRoutesSentLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_period"] = ajString(mapPeriod(period))
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_climbing_routes_sent_leaderboard_v1", params: params)
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode([ClimbingRoutesSentLeaderRow].self, from: res.data)
+            await MainActor.run { self.climbingRoutesSentRows = decoded }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.climbingRoutesSentRows = []
+            }
+        }
+    }
+
     private func fetchSegmentPopularityLeaderboard() async {
         do {
             var params: [String: AnyJSON] = [:]
@@ -1477,6 +1512,10 @@ final class RankingVM: ObservableObject {
         }
         if metric == .skiDistanceKpi {
             await fetchSkiDistanceKpiLeaderboard()
+            return
+        }
+        if metric == .climbingRoutesSent {
+            await fetchClimbingRoutesSentLeaderboard()
             return
         }
         if metric == .segmentPopularity {
@@ -2802,6 +2841,41 @@ struct RankingView: View {
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)
                 .scrollIndicators(.never)
+            } else if vm.metric == .climbingRoutesSent {
+                List(vm.climbingRoutesSentRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                Text("\(row.sessions_cnt) sessions")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("\(row.total_routes_sent)")
+                                .font(.headline)
+                                .monospacedDigit()
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
             } else if vm.metric == .territoryShare {
                 List(vm.territoryShareRows) { row in
                     Section {
@@ -3055,6 +3129,7 @@ struct RankingView: View {
         case .hyroxBestTime: return vm.hyroxBestTimeRows.isEmpty
         case .footballGoals: return vm.footballGoalsRows.isEmpty
         case .skiDistanceKpi: return vm.skiDistanceKpiRows.isEmpty
+        case .climbingRoutesSent: return vm.climbingRoutesSentRows.isEmpty
         case .segmentPopularity: return vm.segmentPopularityRows.isEmpty
         case .territoryShare, .territoryCells: return vm.territoryShareRows.isEmpty
         case .petLevel, .petTotalStats, .petHealth, .petStrength, .petDefense,

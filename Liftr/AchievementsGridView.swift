@@ -67,6 +67,8 @@ func symbolForAchievement(code: String, category: String) -> String {
         return "tennis.racket"
     case c.hasPrefix("ski_"):
         return "figure.skiing.downhill"
+    case c.hasPrefix("climbing_"):
+        return "figure.climbing"
     case c.hasPrefix("football_"):
         return "soccerball"
     case c.hasPrefix("basketball_"):
@@ -95,6 +97,12 @@ func symbolForAchievement(code: String, category: String) -> String {
          c.hasPrefix("multi_streak_"):
         return "flame.fill"
 
+    case c.hasPrefix("pet_"):
+        return "pawprint.fill"
+
+    case c.hasPrefix("coins_"):
+        return "bitcoinsign.circle.fill"
+
     case c.hasPrefix("first_workout"),
          c.hasPrefix("workouts_"),
          c.hasPrefix("achievements_"),
@@ -117,6 +125,8 @@ func symbolForAchievement(code: String, category: String) -> String {
     case "streak":   return "flame.fill"
     case "ranking":  return "trophy.fill"
     case "social":   return "person.2.fill"
+    case "pet":      return "pawprint.fill"
+    case "coins":    return "bitcoinsign.circle.fill"
     default:         return "star.circle.fill"
     }
 }
@@ -151,9 +161,12 @@ func prettySubtype(from code: String, fallbackCategory: String) -> String {
     case c.hasPrefix("rugby_"): return "Rugby"
     case c.hasPrefix("racket_"): return "Racket"
     case c.hasPrefix("ski_"): return "Ski"
+    case c.hasPrefix("climbing_"): return "Climbing"
     case c.hasPrefix("challenge_"): return "Challenges"
     case c.hasPrefix("strength_drop_"): return "Drop sets"
     case c.hasPrefix("strength_superset_"): return "Super series"
+    case c.hasPrefix("pet_"): return "Pets"
+    case c.hasPrefix("coins_"): return "Liftr Coins"
     default:
         return fallbackCategory.capitalized
     }
@@ -176,14 +189,28 @@ struct AchievementsGridView: View {
     @State private var shareAchievementToken: ShareAchievementChatToken?
 
     enum LockFilter: String, CaseIterable, Identifiable {
-        case all = "All", unlocked = "Unlocked", locked = "Locked"
+        case all = "All", unlocked = "Unlocked", locked = "Locked", tracked = "Tracked"
         var id: String { rawValue }
+    }
+
+    private var isOwnProfile: Bool {
+        guard let uid = userId, let me = app.userId else { return false }
+        return uid == me
+    }
+
+    private var lockFilterCases: [LockFilter] {
+        isOwnProfile ? LockFilter.allCases : [.all, .unlocked, .locked]
+    }
+
+    private var trackedCount: Int {
+        items.filter(\.is_tracked).count
     }
     enum CategoryFilter: String, CaseIterable, Identifiable {
         case all = "All"
         case general = "General"
         case strength = "Strength", cardio = "Cardio", sport = "Sport"
         case social = "Social", streak = "Streak", ranking = "Ranking"
+        case pet = "Pet", coins = "Coins"
         var id: String { rawValue }
     }
     
@@ -196,7 +223,9 @@ struct AchievementsGridView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var selected: AchievementRow?
-    
+    @State private var trackError: String?
+    @State private var trackBusy = false
+
     var body: some View {
         VStack(spacing: 10) {
             header
@@ -223,9 +252,15 @@ struct AchievementsGridView: View {
             Color.clear.frame(height: 8)
         }
         .sheet(item: $selected) { row in
-            AchievementDetailSheet(row: row) {
-                Task { await beginShareAchievement(row: row) }
-            }
+            AchievementDetailSheet(
+                row: row,
+                isOwnProfile: isOwnProfile,
+                trackedCount: trackedCount,
+                trackBusy: trackBusy,
+                trackError: trackError,
+                onShareToChat: { Task { await beginShareAchievement(row: row) } },
+                onToggleTrack: { Task { await toggleTrack(for: row) } }
+            )
             .presentationDetents([.medium])
             .presentationDragIndicator(.visible)
             .environmentObject(app)
@@ -283,7 +318,7 @@ struct AchievementsGridView: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 Picker("", selection: $lockFilter) {
-                    ForEach(LockFilter.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(lockFilterCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented)
             }
@@ -383,6 +418,7 @@ struct AchievementsGridView: View {
             case .all: true
             case .unlocked: it.is_unlocked
             case .locked: !it.is_unlocked
+            case .tracked: it.is_tracked
             }
         }
         .filter { it in
@@ -402,9 +438,10 @@ struct AchievementsGridView: View {
         }
     }
     
-    private func load() async {
+    private func load(showLoadingIndicator: Bool = true) async {
         guard let uid = userId else { return }
-        loading = true; defer { loading = false }
+        if showLoadingIndicator { loading = true }
+        defer { if showLoadingIndicator { loading = false } }
         
         do {
             let res = try await SupabaseManager.shared.client
@@ -417,6 +454,7 @@ struct AchievementsGridView: View {
                 self.error = nil
             }
         } catch {
+            guard !isBenignFetchCancellation(error) else { return }
             await MainActor.run { self.error = error.localizedDescription }
         }
     }
@@ -427,12 +465,54 @@ struct AchievementsGridView: View {
             _ = try await SupabaseManager.shared.client
                 .rpc("check_and_unlock_achievements_for", params: ["p_user_id": uid.uuidString])
                 .execute()
-        } catch { }
+        } catch {
+            guard !isBenignFetchCancellation(error) else { return }
+        }
 
         await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
-        await load()
+        await load(showLoadingIndicator: false)
     }
-    
+
+    private struct ToggleTrackResponse: Decodable {
+        let tracked: Bool
+        let tracked_count: Int
+    }
+
+    @MainActor
+    private func toggleTrack(for row: AchievementRow) async {
+        guard isOwnProfile, !trackBusy else { return }
+        trackBusy = true
+        trackError = nil
+        defer { trackBusy = false }
+
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("toggle_tracked_achievement_v1", params: ["p_achievement_id": row.achievement_id])
+                .execute()
+            let payload = try JSONDecoder.supabase().decode(ToggleTrackResponse.self, from: res.data)
+            let nowTracked = payload.tracked
+            items = items.map { item in
+                guard item.achievement_id == row.achievement_id else { return item }
+                var copy = item
+                copy.is_tracked = nowTracked
+                return copy
+            }
+            if var sel = selected, sel.achievement_id == row.achievement_id {
+                sel.is_tracked = nowTracked
+                selected = sel
+            }
+        } catch {
+            let msg = error.localizedDescription.lowercased()
+            if msg.contains("tracked_limit_reached") {
+                trackError = "You can track up to 5 achievements."
+            } else if msg.contains("already_unlocked") {
+                trackError = "Unlocked achievements cannot be tracked."
+            } else {
+                trackError = error.localizedDescription
+            }
+        }
+    }
+
     private func iconFor(_ cat: CategoryFilter) -> String {
         switch cat {
         case .all:      return "line.3.horizontal.decrease.circle"
@@ -443,6 +523,8 @@ struct AchievementsGridView: View {
         case .social:   return "person.2.fill"
         case .streak:   return "flame.fill"
         case .ranking:  return "trophy.fill"
+        case .pet:      return "pawprint.fill"
+        case .coins:    return "bitcoinsign.circle.fill"
         }
     }
 }
@@ -462,12 +544,13 @@ struct AchievementRow: Decodable, Identifiable, Equatable {
     let progress_current: Double?
     let community_pct_unlocked: Double?
     let community_sample_size: Int?
+    var is_tracked: Bool
     var id: String { "\(achievement_id)|\(code)" }
 
     enum CodingKeys: String, CodingKey {
         case achievement_id, code, title, description, category, icon_url, user_id, unlocked_at, is_unlocked
         case requirement_type, requirement_value, progress_current
-        case community_pct_unlocked, community_sample_size
+        case community_pct_unlocked, community_sample_size, is_tracked
     }
 
     init(from decoder: Decoder) throws {
@@ -486,6 +569,7 @@ struct AchievementRow: Decodable, Identifiable, Equatable {
         progress_current = try AchievementRow.decodeFlexibleDouble(c, key: .progress_current)
         community_pct_unlocked = try AchievementRow.decodeFlexibleDouble(c, key: .community_pct_unlocked)
         community_sample_size = try AchievementRow.decodeFlexibleInt(c, key: .community_sample_size)
+        is_tracked = try c.decodeIfPresent(Bool.self, forKey: .is_tracked) ?? false
     }
 
     private static func decodeFlexibleDouble(_ c: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) throws -> Double? {
@@ -498,6 +582,19 @@ struct AchievementRow: Decodable, Identifiable, Equatable {
         if let i = try c.decodeIfPresent(Int.self, forKey: key) { return i }
         if let d = try c.decodeIfPresent(Double.self, forKey: key) { return Int(d) }
         return nil
+    }
+}
+
+extension AchievementRow {
+    var progressFraction: Double {
+        if is_unlocked { return 1 }
+        guard let target = requirement_value, target > 0 else { return 0 }
+        guard let cur = progress_current, cur >= 0 else { return 0 }
+        return min(1, cur / target)
+    }
+
+    var progressPercentInt: Int {
+        Int((progressFraction * 100).rounded(.down))
     }
 }
 
@@ -557,6 +654,15 @@ private struct AchievementTile: View {
                         .offset(x: 20, y: 20)
                         .opacity(0.9)
                 }
+
+                if item.is_tracked {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.green)
+                        .padding(4)
+                        .background(.thinMaterial, in: Circle())
+                        .offset(x: -20, y: -20)
+                }
             }
             
             Text(item.title)
@@ -570,23 +676,25 @@ private struct AchievementTile: View {
 
 }
 
-private struct AchievementDetailSheet: View {
+struct AchievementDetailSheet: View {
     let row: AchievementRow
-    var onShareToChat: () -> Void
-
-    private var progressFraction: Double {
-        if row.is_unlocked { return 1 }
-        guard let target = row.requirement_value, target > 0 else { return 0 }
-        guard let cur = row.progress_current, cur >= 0 else { return 0 }
-        return min(1, cur / target)
-    }
-
-    private var progressPercentInt: Int {
-        Int((progressFraction * 100).rounded(.down))
-    }
+    var isOwnProfile: Bool = false
+    var trackedCount: Int = 0
+    var trackBusy: Bool = false
+    var trackError: String? = nil
+    var onShareToChat: () -> Void = {}
+    var onToggleTrack: (() -> Void)? = nil
 
     private var hasProgressBar: Bool {
         row.requirement_value.map { $0 > 0 } ?? false
+    }
+
+    private var canTrack: Bool {
+        isOwnProfile && !row.is_unlocked && onToggleTrack != nil
+    }
+
+    private var trackLimitReached: Bool {
+        !row.is_tracked && trackedCount >= 5
     }
 
     var body: some View {
@@ -631,13 +739,13 @@ private struct AchievementDetailSheet: View {
                         Text("Progress")
                             .font(.subheadline.weight(.semibold))
                         Spacer()
-                        Text("\(progressPercentInt)%")
+                        Text("\(row.progressPercentInt)%")
                             .font(.subheadline.weight(.bold).monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
-                    ProgressView(value: progressFraction)
+                    ProgressView(value: row.progressFraction)
                         .tint(row.is_unlocked ? .green : Color.accentColor)
-                        .accessibilityLabel("Achievement progress \(progressPercentInt) percent")
+                        .accessibilityLabel("Achievement progress \(row.progressPercentInt) percent")
                     if let cur = row.progress_current, let tgt = row.requirement_value, tgt > 0, !row.is_unlocked {
                         Text("\(formatGoalNumber(cur)) / \(formatGoalNumber(tgt))")
                             .font(.caption.weight(.medium))
@@ -652,6 +760,43 @@ private struct AchievementDetailSheet: View {
                         Text("Live progress toward this goal will appear here once the server reports it. Pull down on the achievements list to refresh.")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
+                    }
+                }
+                .padding(.horizontal)
+            }
+
+            if canTrack {
+                VStack(alignment: .leading, spacing: 8) {
+                    Button {
+                        onToggleTrack?()
+                    } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: row.is_tracked ? "checkmark.circle.fill" : "checkmark.circle")
+                                .font(.title3)
+                                .foregroundStyle(row.is_tracked ? .green : .secondary)
+                            Text(row.is_tracked ? "Tracking" : "Track this achievement")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer(minLength: 0)
+                            if trackBusy {
+                                ProgressView()
+                            }
+                        }
+                        .padding(12)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.18)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(trackBusy || trackLimitReached)
+
+                    if trackLimitReached {
+                        Text("You can track up to 5 achievements.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let trackError {
+                        Text(trackError)
+                            .font(.caption)
+                            .foregroundStyle(.red)
                     }
                 }
                 .padding(.horizontal)

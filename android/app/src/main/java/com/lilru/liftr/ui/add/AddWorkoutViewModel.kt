@@ -15,6 +15,7 @@ import com.lilru.liftr.ui.add.duplicate.DuplicateWorkoutPayload
 import com.lilru.liftr.ui.add.recommendation.ExerciseForRecommendation
 import com.lilru.liftr.ui.add.recommendation.RecommendationDataSource
 import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationExerciseResult
+import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationOutputResult
 import com.lilru.liftr.ui.add.recommendation.StrengthSuggestionMode
 import com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationEngine
 import com.lilru.liftr.ui.chat.RoutineShareSnapshot
@@ -386,7 +387,8 @@ enum class AddSportType(val wire: String) {
     HOCKEY("hockey"),
     RUGBY("rugby"),
     HYROX("hyrox"),
-    SKI("ski")
+    SKI("ski"),
+    CLIMBING("climbing")
 }
 
 enum class AddMatchResult(val wire: String) {
@@ -1289,8 +1291,10 @@ class AddWorkoutViewModel(
     suspend fun recommendStrengthForUi(
         source: RecommendationDataSource,
         mode: StrengthSuggestionMode,
-        preferSpanish: Boolean
-    ): List<StrengthRecommendationExerciseResult> {
+        preferSpanish: Boolean,
+        networkInspired: Boolean = false,
+        excludeRoutineId: Long? = null
+    ): StrengthRecommendationOutputResult {
         val userId = supabase.auth.currentUserOrNull()?.id
             ?: throw com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationError.NotSignedIn
         return recommendationEngine.recommendStrength(
@@ -1298,24 +1302,30 @@ class AddWorkoutViewModel(
             source = source,
             mode = mode,
             catalog = exerciseCatalogForRecommendation(),
-            preferSpanish = preferSpanish
+            preferSpanish = preferSpanish,
+            networkInspired = networkInspired,
+            excludeRoutineId = excludeRoutineId
         )
     }
 
     suspend fun recommendCardioForUi(
-        source: RecommendationDataSource
+        source: RecommendationDataSource,
+        networkInspired: Boolean = false
     ) = recommendationEngine.recommendCardio(
         supabase.auth.currentUserOrNull()?.id
             ?: throw com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationError.NotSignedIn,
-        source
+        source,
+        networkInspired
     )
 
     suspend fun recommendSportForUi(
-        source: RecommendationDataSource
+        source: RecommendationDataSource,
+        networkInspired: Boolean = false
     ) = recommendationEngine.recommendSport(
         supabase.auth.currentUserOrNull()?.id
             ?: throw com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationError.NotSignedIn,
-        source
+        source,
+        networkInspired
     )
 
     fun applyStrengthRecommendation(rows: List<StrengthRecommendationExerciseResult>) {
@@ -3647,6 +3657,7 @@ class AddWorkoutViewModel(
         racketFormat: AddRacketFormat,
         sportStats: Map<String, String>,
         hyroxExercisesText: String,
+        climbingRoutesJson: String = "[]",
         intensity: AddWorkoutIntensity,
         state: AddWorkoutState,
         startedAtIso: String? = null,
@@ -3693,7 +3704,7 @@ class AddWorkoutViewModel(
                     durationMin?.let { put("p_duration_min", it) }
                     parseInt(scoreForText)?.let { put("p_score_for", it) }
                     parseInt(scoreAgainstText)?.let { put("p_score_against", it) }
-                    if (sport != AddSportType.SKI) {
+                    if (sport != AddSportType.SKI && sport != AddSportType.CLIMBING) {
                         put("p_match_result", matchResult.wire)
                     }
                     if (matchScoreText.isNotBlank()) put("p_match_score_text", matchScoreText.trim())
@@ -3707,7 +3718,8 @@ class AddWorkoutViewModel(
                     racketMode = racketMode,
                     racketFormat = racketFormat,
                     sportStats = sportStats,
-                    hyroxExercisesText = hyroxExercisesText
+                    hyroxExercisesText = hyroxExercisesText,
+                    climbingRoutesJson = climbingRoutesJson
                 )
                 val wrapper = buildJsonObject {
                     put("p", p)

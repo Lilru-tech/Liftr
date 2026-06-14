@@ -117,21 +117,81 @@ enum HomeFloatingDock {
         in size: CGSize,
         spacing: CGFloat = 134
     ) -> CGPoint {
+        let origin = bubbleOrigin(
+            anchor: anchor,
+            edge: edge,
+            bubbleSize: tooltipSize,
+            tabSize: CGSize(width: 56, height: 56),
+            in: size,
+            spacing: spacing
+        )
+        return CGPoint(
+            x: origin.x + tooltipSize.width / 2,
+            y: origin.y + tooltipSize.height / 2
+        )
+    }
+
+    static func bubbleOrigin(
+        anchor: CGPoint,
+        edge: HomeFloatingDockEdge,
+        bubbleSize: CGSize,
+        tabSize: CGSize,
+        in screen: CGSize,
+        spacing: CGFloat,
+        margin: CGFloat = 12
+    ) -> CGPoint {
+        let tabHalfW = tabSize.width / 2
+        let tabHalfH = tabSize.height / 2
         let raw: CGPoint
+
         switch edge {
         case .left:
-            raw = CGPoint(x: anchor.x + spacing, y: anchor.y)
+            raw = CGPoint(
+                x: anchor.x + tabHalfW + spacing,
+                y: anchor.y - bubbleSize.height / 2
+            )
         case .right:
-            raw = CGPoint(x: anchor.x - spacing, y: anchor.y)
+            raw = CGPoint(
+                x: anchor.x - tabHalfW - spacing - bubbleSize.width,
+                y: anchor.y - bubbleSize.height / 2
+            )
         case .top:
-            raw = CGPoint(x: anchor.x, y: anchor.y + 58)
+            raw = CGPoint(
+                x: anchor.x - bubbleSize.width / 2,
+                y: anchor.y + tabHalfH + spacing
+            )
         case .bottom:
-            raw = CGPoint(x: anchor.x, y: anchor.y - 58)
+            raw = CGPoint(
+                x: anchor.x - bubbleSize.width / 2,
+                y: anchor.y - tabHalfH - spacing - bubbleSize.height
+            )
         }
 
+        let maxX = max(margin, screen.width - bubbleSize.width - margin)
+        let maxY = max(margin, screen.height - bubbleSize.height - margin)
+
         return CGPoint(
-            x: min(max(raw.x, tooltipSize.width / 2 + 12), size.width - tooltipSize.width / 2 - 12),
-            y: min(max(raw.y, tooltipSize.height / 2 + 12), size.height - tooltipSize.height / 2 - 12)
+            x: min(max(raw.x, margin), maxX),
+            y: min(max(raw.y, margin), maxY)
+        )
+    }
+
+    static func petGreetingOrigin(
+        anchor: CGPoint,
+        bubbleSize: CGSize,
+        fabRadius: CGFloat,
+        in screen: CGSize,
+        verticalGap: CGFloat = 8,
+        margin: CGFloat = 12
+    ) -> CGPoint {
+        let idealX = anchor.x - bubbleSize.width / 2
+        let maxX = max(margin, screen.width - bubbleSize.width - margin)
+        let y = anchor.y - fabRadius - verticalGap - bubbleSize.height
+        let maxY = max(margin, screen.height - bubbleSize.height - margin)
+
+        return CGPoint(
+            x: min(max(idealX, margin), maxX),
+            y: min(max(y, margin), maxY)
         )
     }
 }
