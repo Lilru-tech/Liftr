@@ -29,7 +29,7 @@ enum WorkoutStartSync {
     ]
 
     private static var monitor: NWPathMonitor?
-    private static var syncTask: Task<Void, Never>?
+    private static let syncRunner = SerialAsyncTaskRunner()
     private static var statusByWorkoutId: [Int: WorkoutStartSyncStatus] = [:]
 
     private struct StartWorkoutRPCParams: Encodable {
@@ -79,11 +79,7 @@ enum WorkoutStartSync {
     }
 
     static func syncPending() async {
-        if let running = syncTask, !running.isCancelled {
-            await running.value
-            return
-        }
-        let task = Task {
+        await syncRunner.run {
             let items = loadPending()
             guard !items.isEmpty else { return }
             for item in items {
@@ -97,9 +93,6 @@ enum WorkoutStartSync {
                 }
             }
         }
-        syncTask = task
-        await task.value
-        syncTask = nil
     }
 
     static func withRetries<T>(

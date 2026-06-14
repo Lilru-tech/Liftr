@@ -396,6 +396,8 @@ struct ActiveStrengthWorkoutView: View {
     @State private var showElborblaCelebration = false
     @State private var quickRestPresets: [Int] = StrengthRestPresetService.defaultPresets
     @State private var strengthFinishDeferral: StrengthFinishDeferral?
+    @State private var sourceStrengthRoutineId: Int64? = nil
+    @State private var didRestoreSessionCheckpoint = false
     @State private var showActiveExercisePicker = false
     @State private var showActiveExerciseSetup = false
     @State private var activeExerciseSetupLane: StrengthLaneKind = .host
@@ -1074,6 +1076,9 @@ struct ActiveStrengthWorkoutView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background || newPhase == .inactive {
+                persistSessionCheckpoint()
+            }
             guard newPhase == .active else { return }
             restoreActiveWorkoutStateOnForeground()
             guard !isSessionPaused else { return }
@@ -1170,17 +1175,17 @@ struct ActiveStrengthWorkoutView: View {
         .sheet(item: $strengthFinishDeferral) { def in
             StrengthRoutineOverwriteConfirmSheet(
                 prompt: def.prompt,
-                onUpdate: {
+                onApply: { selectedLineIds in
                     let d = def
                     strengthFinishDeferral = nil
                     isSaving = true
-                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: true) }
+                    Task { await commitDeferredStrengthFinish(deferral: d, selectedLineIds: selectedLineIds) }
                 },
                 onNotNow: {
                     let d = def
                     strengthFinishDeferral = nil
                     isSaving = true
-                    Task { await commitDeferredStrengthFinish(deferral: d, updateRoutine: false) }
+                    Task { await commitDeferredStrengthFinish(deferral: d, selectedLineIds: []) }
                 }
             )
             .presentationSizing(.fitted)
@@ -2760,6 +2765,7 @@ struct ActiveStrengthWorkoutView: View {
         showFinishEarlyConfirm = false
         showFinishConfirm = false
         showDualIncompleteFinishConfirm = false
+        clearSessionCheckpoint()
     }
 
     private func skipRest(for lane: StrengthLaneKind, exerciseId: Int) {
@@ -3130,6 +3136,7 @@ struct ActiveStrengthWorkoutView: View {
             }
             advanceToNextSupersetMemberIfNeeded(from: ex, lane: .guest2, setIndex: completedSetIndex)
         }
+        persistSessionCheckpoint()
     }
 
     private func supersetMembers(for ex: ExerciseRow, lane: StrengthLaneKind) -> [ExerciseRow] {
@@ -3332,6 +3339,7 @@ struct ActiveStrengthWorkoutView: View {
             )
 
             setsByExercise[key] = configs
+            persistProgramCacheSnapshot()
 
             let total = setsFor(ex, lane: .host).count
             let newIndex = preservedSetIndexAfterAdd(for: key, lane: .host, total: total)
@@ -4529,15 +4537,52 @@ struct ActiveStrengthWorkoutView: View {
         dragOffsetY = 0
     }
 
+    private func mergeSetConfigsPreservingLocalEdits(server: [SetRow], local: [SetRow]) -> [SetRow] {
+        if local.isEmpty { return server }
+        if server.isEmpty { return local }
+        var serverById = Dictionary(uniqueKeysWithValues: server.map { ($0.id, $0) })
+        var merged: [SetRow] = []
+        for localRow in local {
+            if let srv = serverById.removeValue(forKey: localRow.id) {
+                merged.append(SetRow(
+                    id: srv.id,
+                    workout_exercise_id: srv.workout_exercise_id,
+                    set_number: max(localRow.set_number, srv.set_number),
+                    order_index: srv.order_index ?? localRow.order_index,
+                    reps: localRow.reps ?? srv.reps,
+                    weight_kg: localRow.weight_kg ?? srv.weight_kg,
+                    rpe: localRow.rpe ?? srv.rpe,
+                    rest_sec: localRow.rest_sec ?? srv.rest_sec,
+                    weight_segments: localRow.weight_segments ?? srv.weight_segments,
+                    configId: srv.id,
+                    segmentsInRow: max(localRow.segmentsInRow, srv.segmentsInRow)
+                ))
+            } else {
+                merged.append(localRow)
+            }
+        }
+        let trailing = serverById.values.sorted {
+            ($0.order_index ?? $0.set_number, $0.id) < ($1.order_index ?? $1.set_number, $1.id)
+        }
+        merged.append(contentsOf: trailing)
+        return merged
+    }
+
     private func mergeSetsPreservingLocalOnly(
         serverSets: [Int: [SetRow]],
         existingSets: [Int: [SetRow]],
         localExerciseIds: Set<Int>
     ) -> [Int: [SetRow]] {
         var merged = serverSets
-        for localId in localExerciseIds {
-            if let localSets = existingSets[localId] {
-                merged[localId] = localSets
+        for (exerciseId, existing) in existingSets {
+            if localExerciseIds.contains(exerciseId) {
+                merged[exerciseId] = existing
+                continue
+            }
+            if let server = serverSets[exerciseId] {
+                merged[exerciseId] = mergeSetConfigsPreservingLocalEdits(server: server, local: existing)
+            } else {
+                merged[exerciseId] = existing
             }
         }
         return merged
@@ -5337,6 +5382,7 @@ struct ActiveStrengthWorkoutView: View {
                 activeElapsedSeconds: strengthSessionActiveElapsedSeconds
             )
         }
+        persistSessionCheckpoint()
     }
 
     private func activeStrengthNavFirstHintBanner() -> some View {
@@ -5820,79 +5866,254 @@ struct ActiveStrengthWorkoutView: View {
         )
     }
     
+    private func collapseLinesForRoutineOverwrite(_ performed: [PerformedSet]) -> [StrengthWorkoutFinishCollapse.Line] {
+        performed.map {
+            StrengthWorkoutFinishCollapse.Line(
+                configId: $0.configId,
+                segmentsInRow: $0.segmentsInRow,
+                reps: $0.reps,
+                weightKg: $0.weight_kg,
+                rpe: $0.rpe,
+                restSec: $0.rest_sec,
+                weightSegments: $0.weight_segments
+            )
+        }
+    }
+
+    private func strengthSegmentsFromConfigWire(_ wss: [StrengthWeightSegWire]?) -> [StrengthWeightSegment]? {
+        guard let wss, wss.count >= 2 else { return nil }
+        return wss.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
+    }
+
+    private func strengthSegmentsFromSaveInput(_ wss: [StrengthWeightSegWire]?) -> [StrengthWeightSegment]? {
+        guard let wss, wss.count >= 2 else { return nil }
+        return wss.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
+    }
+
+    private func programSetsFromConfigs(
+        configs: [SetRow],
+        expanded: [SetRow],
+        performed: [PerformedSet]
+    ) -> [StrengthProgramSet] {
+        let expandedCountByConfig = Dictionary(grouping: expanded, by: \.configId).mapValues(\.count)
+        let performedByConfig = Dictionary(grouping: performed, by: \.configId)
+        return configs.enumerated().map { idx, config in
+            let expandedCount = expandedCountByConfig[config.id] ?? 0
+            let plannedMultiplier = max(1, config.set_number, expandedCount)
+            let perfLines = collapseLinesForRoutineOverwrite(performedByConfig[config.id] ?? [])
+            var setNumber = plannedMultiplier
+            var reps = config.reps
+            var weightKg = config.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue }
+            var rpe = config.rpe.map { NSDecimalNumber(decimal: $0).doubleValue }
+            var restSec = config.rest_sec
+            var segs = strengthSegmentsFromConfigWire(config.weight_segments)
+            if !perfLines.isEmpty {
+                let saveInputs = StrengthWorkoutFinishCollapse.buildExerciseSaveInputs(
+                    exerciseIds: [config.workout_exercise_id],
+                    performedByExercise: [config.workout_exercise_id: perfLines]
+                )
+                if let s = saveInputs.first?.sets.first {
+                    reps = s.reps ?? reps
+                    weightKg = s.weight_kg ?? weightKg
+                    rpe = s.rpe ?? rpe
+                    restSec = s.rest_sec ?? restSec
+                    segs = strengthSegmentsFromSaveInput(s.weight_segments) ?? segs
+                    setNumber = max(plannedMultiplier, max(1, s.set_number))
+                }
+            }
+            return StrengthProgramSet(
+                setNumber: setNumber,
+                rowOrder: idx + 1,
+                reps: reps,
+                weightKg: weightKg,
+                rpe: rpe,
+                restSec: restSec,
+                notes: nil,
+                weightSegments: segs
+            )
+        }
+    }
+
+    private func programSetsFromPerformedOnly(
+        ex: ExerciseRow,
+        performed: [PerformedSet]
+    ) -> [StrengthProgramSet]? {
+        let lines = collapseLinesForRoutineOverwrite(performed)
+        if lines.isEmpty { return nil }
+        let saveInputs = StrengthWorkoutFinishCollapse.buildExerciseSaveInputs(
+            exerciseIds: [ex.id],
+            performedByExercise: [ex.id: lines]
+        )
+        guard let exerciseInput = saveInputs.first, !exerciseInput.sets.isEmpty else { return nil }
+        return exerciseInput.sets.enumerated().map { idx, s in
+            StrengthProgramSet(
+                setNumber: s.set_number,
+                rowOrder: idx + 1,
+                reps: s.reps,
+                weightKg: s.weight_kg,
+                rpe: s.rpe,
+                restSec: s.rest_sec,
+                notes: nil,
+                weightSegments: strengthSegmentsFromSaveInput(s.weight_segments)
+            )
+        }
+    }
+
     private func programItemsForRoutineOverwrite(
         exList: [ExerciseRow],
-        setsMap: [Int: [SetRow]],
-        performedMap: [Int: [PerformedSet]]
+        performedMap: [Int: [PerformedSet]],
+        configsByExercise: [Int: [SetRow]],
+        expandedByExercise: [Int: [SetRow]]
     ) -> [StrengthProgramItem]? {
         var items: [StrengthProgramItem] = []
         for ex in exList.sorted(by: { $0.order_index < $1.order_index }) {
-            let templateSets = orderedSetRows(setsMap[ex.id] ?? [])
-            let sets: [StrengthProgramSet]
-            if !templateSets.isEmpty {
-                sets = templateSets.map { s in
-                    let segs: [StrengthWeightSegment]? = {
-                        guard let wss = s.weight_segments, wss.count >= 2 else { return nil }
-                        return wss.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
-                    }()
-                    return StrengthProgramSet(
-                        setNumber: s.set_number,
-                        reps: s.reps,
-                        weightKg: s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
-                        rpe: s.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
-                        restSec: s.rest_sec,
-                        notes: nil,
-                        weightSegments: segs
-                    )
-                }
+            let configs = configsByExercise[ex.id] ?? []
+            let expanded = expandedByExercise[ex.id] ?? []
+            let rawSets: [StrengthProgramSet]
+            if !configs.isEmpty {
+                rawSets = programSetsFromConfigs(
+                    configs: configs,
+                    expanded: expanded,
+                    performed: performedMap[ex.id] ?? []
+                )
+            } else if !expanded.isEmpty {
+                rawSets = programSetsFromExpandedOnly(expanded: expanded, performed: performedMap[ex.id] ?? [])
+            } else if let performedSets = programSetsFromPerformedOnly(ex: ex, performed: performedMap[ex.id] ?? []) {
+                rawSets = performedSets
             } else {
-                let performed = performedMap[ex.id] ?? []
-                guard !performed.isEmpty else { return nil }
-                sets = performed.enumerated().map { idx, p in
-                    let segsFromPerformed: [StrengthWeightSegment]? = {
-                        guard let wss = p.weight_segments, wss.count >= 2 else { return nil }
-                        return wss.map { StrengthWeightSegment(reps: $0.reps, weightKg: $0.weight_kg) }
-                    }()
-                    return StrengthProgramSet(
-                        setNumber: idx + 1,
-                        reps: p.reps,
-                        weightKg: p.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
-                        rpe: p.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
-                        restSec: p.rest_sec,
-                        notes: nil,
-                        weightSegments: segsFromPerformed
-                    )
-                }
+                continue
             }
+            let programSets = expandedStrengthProgramSetsForCompare(rawSets)
             items.append(
                 StrengthProgramItem(
                     exerciseId: ex.exercise_id,
                     orderIndex: ex.order_index,
                     notes: ex.notes,
                     customName: ex.custom_name,
-                    sets: sets
+                    supersetGroupId: ex.superset_group_id,
+                    supersetPosition: ex.superset_position,
+                    sets: programSets
                 )
             )
         }
         return items.isEmpty ? nil : items
     }
 
-    private func orderedSetRows(_ rows: [SetRow]) -> [SetRow] {
-        rows.sorted { a, b in
-            let ao = a.order_index ?? Int.max
-            let bo = b.order_index ?? Int.max
-            if ao != bo { return ao < bo }
-            return a.id < b.id
+    private func programSetsFromExpandedOnly(
+        expanded: [SetRow],
+        performed: [PerformedSet]
+    ) -> [StrengthProgramSet] {
+        let configIdsInOrder = expanded.map(\.configId).reduce(into: [Int]()) { acc, id in
+            if acc.last != id { acc.append(id) }
         }
+        let expandedByConfig = Dictionary(grouping: expanded, by: \.configId)
+        let performedByConfig = Dictionary(grouping: performed, by: \.configId)
+        return configIdsInOrder.enumerated().map { idx, configId in
+            let template = expandedByConfig[configId]?.first
+            let multiplier = max(1, expandedByConfig[configId]?.count ?? 1)
+            let perfLines = collapseLinesForRoutineOverwrite(performedByConfig[configId] ?? [])
+            var setNumber = multiplier
+            var reps = template?.reps
+            var weightKg = template?.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue }
+            var rpe = template?.rpe.map { NSDecimalNumber(decimal: $0).doubleValue }
+            var restSec = template?.rest_sec
+            var segs = strengthSegmentsFromConfigWire(template?.weight_segments)
+            if !perfLines.isEmpty,
+               let exerciseId = template?.workout_exercise_id {
+                let saveInputs = StrengthWorkoutFinishCollapse.buildExerciseSaveInputs(
+                    exerciseIds: [exerciseId],
+                    performedByExercise: [exerciseId: perfLines]
+                )
+                if let s = saveInputs.first?.sets.first {
+                    reps = s.reps ?? reps
+                    weightKg = s.weight_kg ?? weightKg
+                    rpe = s.rpe ?? rpe
+                    restSec = s.rest_sec ?? restSec
+                    segs = strengthSegmentsFromSaveInput(s.weight_segments) ?? segs
+                    setNumber = max(multiplier, max(1, s.set_number))
+                }
+            }
+            return StrengthProgramSet(
+                setNumber: setNumber,
+                rowOrder: idx + 1,
+                reps: reps,
+                weightKg: weightKg,
+                rpe: rpe,
+                restSec: restSec,
+                notes: nil,
+                weightSegments: segs
+            )
+        }
+    }
+
+    private func editableSetFromCollapsedSaveInput(_ s: StrengthWorkoutSetSaveInput, orderIndex: Int) -> EditableSet {
+        let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
+        return EditableSet(
+            setNumber: max(1, min(99, s.set_number)),
+            orderIndex: orderIndex,
+            reps: s.reps,
+            weightKg: s.weight_kg.map { String(format: "%.1f", $0) } ?? "",
+            rpe: s.rpe.map { activeDoubleToRpeField(Decimal($0)) } ?? "",
+            restSec: s.rest_sec,
+            notes: "",
+            segments: segDraft
+        )
     }
 
     private func editableExercisesForRoutineUpdateFromHost(
         exList: [ExerciseRow],
-        setsMap: [Int: [SetRow]],
-        performedMap: [Int: [PerformedSet]]
+        performedMap: [Int: [PerformedSet]],
+        configsByExercise: [Int: [SetRow]],
+        expandedByExercise: [Int: [SetRow]]
     ) -> [EditableExercise] {
         exList.sorted(by: { $0.order_index < $1.order_index }).map { ex in
-            let templateSets = orderedSetRows(setsMap[ex.id] ?? [])
+            let configs = configsByExercise[ex.id] ?? []
+            let expanded = expandedByExercise[ex.id] ?? []
+            let sets: [EditableSet]
+            if !configs.isEmpty {
+                sets = programSetsFromConfigs(
+                    configs: configs,
+                    expanded: expanded,
+                    performed: performedMap[ex.id] ?? []
+                ).enumerated().map { idx, s in
+                    let segDraft = (s.weightSegments ?? []).map { seg in
+                        let str = seg.weightKg == floor(seg.weightKg) ? String(Int(seg.weightKg)) : String(format: "%.1f", seg.weightKg)
+                        return StrengthEditorSegment(reps: seg.reps, weightKg: str)
+                    }
+                    return EditableSet(
+                        setNumber: max(1, min(99, s.setNumber)),
+                        orderIndex: idx + 1,
+                        reps: s.reps,
+                        weightKg: s.weightKg.map { String(format: "%.1f", $0) } ?? "",
+                        rpe: s.rpe.map { activeDoubleToRpeField(Decimal($0)) } ?? "",
+                        restSec: s.restSec,
+                        notes: "",
+                        segments: segDraft.count >= 2 ? segDraft : []
+                    )
+                }
+            } else if !expanded.isEmpty {
+                sets = programSetsFromExpandedOnly(expanded: expanded, performed: performedMap[ex.id] ?? []).enumerated().map { idx, s in
+                    EditableSet(
+                        setNumber: max(1, min(99, s.setNumber)),
+                        orderIndex: idx + 1,
+                        reps: s.reps,
+                        weightKg: s.weightKg.map { String(format: "%.1f", $0) } ?? "",
+                        rpe: s.rpe.map { activeDoubleToRpeField(Decimal($0)) } ?? "",
+                        restSec: s.restSec,
+                        notes: "",
+                        segments: []
+                    )
+                }
+            } else {
+                let lines = collapseLinesForRoutineOverwrite(performedMap[ex.id] ?? [])
+                let saveInputs = StrengthWorkoutFinishCollapse.buildExerciseSaveInputs(
+                    exerciseIds: [ex.id],
+                    performedByExercise: [ex.id: lines]
+                )
+                sets = saveInputs.first?.sets.enumerated().map { idx, s in
+                    editableSetFromCollapsedSaveInput(s, orderIndex: idx + 1)
+                } ?? []
+            }
             var ee = EditableExercise()
             ee.exerciseId = ex.exercise_id
             ee.exerciseName = ex.custom_name ?? ""
@@ -5900,56 +6121,25 @@ struct ActiveStrengthWorkoutView: View {
             ee.supersetGroupId = ex.superset_group_id
             ee.supersetPosition = ex.superset_position
             ee.notes = ex.notes ?? ""
-            if !templateSets.isEmpty {
-                ee.sets = templateSets.enumerated().map { idx, s in
-                    let segDraft = (s.weight_segments ?? []).asEditorSegmentsIfDropSet()
-                    return EditableSet(
-                        setNumber: s.set_number,
-                        orderIndex: s.order_index ?? idx + 1,
-                        reps: s.reps,
-                        weightKg: activeDecimalToWeightField(s.weight_kg),
-                        rpe: activeDecimalToRpeField(s.rpe),
-                        restSec: s.rest_sec,
-                        notes: "",
-                        segments: segDraft
-                    )
-                }
-            } else {
-                let performed = performedMap[ex.id] ?? []
-                ee.sets = performed.enumerated().map { i, p in
-                    let segDraft = (p.weight_segments ?? []).asEditorSegmentsIfDropSet()
-                    return EditableSet(
-                        setNumber: i + 1,
-                        orderIndex: i + 1,
-                        reps: p.reps,
-                        weightKg: activeDecimalToWeightField(p.weight_kg),
-                        rpe: activeDecimalToRpeField(p.rpe),
-                        restSec: p.rest_sec,
-                        notes: "",
-                        segments: segDraft
-                    )
-                }
-            }
+            ee.sets = sets
             return ee
         }
     }
 
-    private func activeDecimalToWeightField(_ d: Decimal?) -> String {
-        guard let d else { return "" }
-        return String(format: "%.1f", NSDecimalNumber(decimal: d).doubleValue)
-    }
-
-    private func activeDecimalToRpeField(_ d: Decimal?) -> String {
-        guard let d else { return "" }
+    private func activeDoubleToRpeField(_ d: Decimal) -> String {
         let v = NSDecimalNumber(decimal: d).doubleValue
         if v == floor(v) { return String(Int(v)) }
         return String(format: "%.1f", v)
     }
 
-    private func commitDeferredStrengthFinish(deferral: StrengthFinishDeferral, updateRoutine: Bool) async {
-        let extra: (Int64, [EditableExercise])? = updateRoutine
-            ? (deferral.prompt.routineId, deferral.editableForRoutine)
-            : nil
+    private func commitDeferredStrengthFinish(deferral: StrengthFinishDeferral, selectedLineIds: Set<String>) async {
+        let extra: (StrengthRoutineOverwritePrompt, [StrengthProgramItem], Set<String>)? = selectedLineIds.isEmpty
+            ? nil
+            : (
+                deferral.prompt,
+                strengthProgramItems(from: deferral.editableForRoutine),
+                selectedLineIds
+            )
         let (wallEndedAt, pausedSec) = await MainActor.run { () -> (Date, Int) in
             let openPause = sessionPauseBegan.map { max(0, Int(floor(Date().timeIntervalSince($0)))) } ?? 0
             let total = max(0, accumulatedPausedSeconds + openPause)
@@ -5964,7 +6154,7 @@ struct ActiveStrengthWorkoutView: View {
             guest2ExList: deferral.guest2ExList,
             guest2PerformedMap: deferral.guest2PerformedMap,
             guest2WorkoutId: deferral.guest2WorkoutId,
-            routinePrescriptionOverwrite: extra,
+            routineSelectiveOverwrite: extra,
             wallEndedAt: wallEndedAt,
             pausedSec: pausedSec
         )
@@ -5979,7 +6169,11 @@ struct ActiveStrengthWorkoutView: View {
         guest2ExList: [ExerciseRow],
         guest2PerformedMap: [Int: [PerformedSet]],
         guest2WorkoutId: Int?,
-        routinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])?,
+        routineSelectiveOverwrite: (
+            prompt: StrengthRoutineOverwritePrompt,
+            proposed: [StrengthProgramItem],
+            selectedLineIds: Set<String>
+        )?,
         wallEndedAt: Date,
         pausedSec: Int
     ) async {
@@ -6066,12 +6260,13 @@ struct ActiveStrengthWorkoutView: View {
                 NotificationCenter.default.post(name: .workoutDidChange, object: result.workout_id)
             }
 
-            if let o = routinePrescriptionOverwrite, let uid = await MainActor.run(body: { app.userId }) {
-                try? await applyStrengthRoutinePrescriptionUpdate(
+            if let o = routineSelectiveOverwrite, let uid = await MainActor.run(body: { app.userId }) {
+                try? await applySelectiveStrengthRoutineOverwrite(
                     client: client,
                     userId: uid,
-                    routineId: o.routineId,
-                    exercises: o.exercises
+                    prompt: o.prompt,
+                    proposed: o.proposed,
+                    selectedLineIds: o.selectedLineIds
                 )
             }
 
@@ -6140,7 +6335,9 @@ struct ActiveStrengthWorkoutView: View {
 
         var exList: [ExerciseRow] = []
         var performedMap: [Int: [PerformedSet]] = [:]
-        var hostSetsMap: [Int: [SetRow]] = [:]
+        var configsByExercise: [Int: [SetRow]] = [:]
+        var expandedByExercise: [Int: [SetRow]] = [:]
+        var preferredRoutineId: Int64?
         var guestExList: [ExerciseRow] = []
         var guestPerformedMap: [Int: [PerformedSet]] = [:]
         var guestWorkoutId: Int?
@@ -6151,7 +6348,9 @@ struct ActiveStrengthWorkoutView: View {
         await MainActor.run {
             exList = self.orderedExercises
             performedMap = self.performedSetsByExercise
-            hostSetsMap = self.setsByExercise
+            configsByExercise = self.setsByExercise
+            expandedByExercise = Dictionary(uniqueKeysWithValues: exList.map { ($0.id, setsFor($0, lane: .host)) })
+            preferredRoutineId = self.sourceStrengthRoutineId ?? WorkoutProgramCache.sourceRoutineId(for: self.workoutId)
             guestWorkoutId = self.dualGuestWorkoutId
             guest2WorkoutId = self.dualGuest2WorkoutId
             if guestWorkoutId != nil {
@@ -6166,20 +6365,49 @@ struct ActiveStrengthWorkoutView: View {
 
         let client = SupabaseManager.shared.client
 
-        if let proposed = programItemsForRoutineOverwrite(exList: exList, setsMap: hostSetsMap, performedMap: performedMap),
+        if let proposed = programItemsForRoutineOverwrite(
+            exList: exList,
+            performedMap: performedMap,
+            configsByExercise: configsByExercise,
+            expandedByExercise: expandedByExercise
+        ),
            let session = try? await client.auth.session {
-            let candidate = (
-                try? await fetchStrengthRoutineOverwriteCandidate(
+            let expandedSetCount = proposed.reduce(0) { $0 + $1.sets.count }
+            #if DEBUG
+            print("[StrengthRoutine][ACTIVE_FINISH] proposed exercises=\(proposed.count) expandedSets=\(expandedSetCount) preferredRoutineId=\(preferredRoutineId.map(String.init) ?? "nil")")
+            #endif
+            let candidate: StrengthRoutineOverwriteCandidate
+            do {
+                candidate = try await fetchStrengthRoutineOverwriteCandidate(
                     client: client,
                     userId: session.user.id,
                     proposed: proposed,
                     exerciseDisplayName: { eid in
                         exList.first(where: { $0.exercise_id == eid })?.exercise_name ?? ""
-                    }
+                    },
+                    preferredRoutineId: preferredRoutineId
                 )
-            ) ?? .none
+            } catch {
+                #if DEBUG
+                print("[StrengthRoutine][ACTIVE_FINISH] overwrite fetch failed: \(error.localizedDescription)")
+                #endif
+                candidate = .none
+            }
+            #if DEBUG
+            switch candidate {
+            case .none:
+                print("[StrengthRoutine][ACTIVE_FINISH] candidate=none")
+            case .prompt(let pr):
+                print("[StrengthRoutine][ACTIVE_FINISH] candidate=prompt routineId=\(pr.routineId) lines=\(pr.diffLines.count)")
+            }
+            #endif
             if case .prompt(let pr) = candidate {
-                let editable = editableExercisesForRoutineUpdateFromHost(exList: exList, setsMap: hostSetsMap, performedMap: performedMap)
+                let editable = editableExercisesForRoutineUpdateFromHost(
+                    exList: exList,
+                    performedMap: performedMap,
+                    configsByExercise: configsByExercise,
+                    expandedByExercise: expandedByExercise
+                )
                 await MainActor.run {
                     self.isSaving = false
                     self.strengthFinishDeferral = StrengthFinishDeferral(
@@ -6213,7 +6441,7 @@ struct ActiveStrengthWorkoutView: View {
             guest2ExList: guest2ExList,
             guest2PerformedMap: guest2PerformedMap,
             guest2WorkoutId: guest2WorkoutId,
-            routinePrescriptionOverwrite: nil,
+            routineSelectiveOverwrite: nil,
             wallEndedAt: wallEndedAt,
             pausedSec: pausedSec
         )
@@ -6986,6 +7214,7 @@ struct ActiveStrengthWorkoutView: View {
                 )
             }
         }
+        sourceStrengthRoutineId = entry.sourceRoutineId
         error = nil
         return true
     }
@@ -7114,6 +7343,7 @@ struct ActiveStrengthWorkoutView: View {
                         + "guestDataError=\(guestErr ?? "nil") guest2Err=\(guest2Err ?? "nil")"
                 )
                 #endif
+                restoreSessionCheckpointIfNeeded()
             }
         } catch is CancellationError {
         } catch let urlError as URLError where urlError.code == .cancelled {
@@ -7196,8 +7426,146 @@ struct ActiveStrengthWorkoutView: View {
         WorkoutProgramCache.store(
             workoutId: workoutId,
             exercises: cachedExercises,
-            setsByExerciseId: cachedSets
+            setsByExerciseId: cachedSets,
+            sourceRoutineId: sourceStrengthRoutineId
         )
+    }
+
+    private func performedSetSnapshot(_ p: PerformedSet) -> ActiveWorkoutSessionCheckpoint.PerformedSetSnapshot {
+        ActiveWorkoutSessionCheckpoint.PerformedSetSnapshot(
+            reps: p.reps,
+            weight_kg: p.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rpe: p.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rest_sec: p.rest_sec,
+            configId: p.configId,
+            segmentsInRow: p.segmentsInRow,
+            weight_segments: p.weight_segments
+        )
+    }
+
+    private func setRowSnapshot(_ s: SetRow) -> ActiveWorkoutSessionCheckpoint.SetRowSnapshot {
+        ActiveWorkoutSessionCheckpoint.SetRowSnapshot(
+            id: s.id,
+            workout_exercise_id: s.workout_exercise_id,
+            set_number: s.set_number,
+            order_index: s.order_index,
+            reps: s.reps,
+            weight_kg: s.weight_kg.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rpe: s.rpe.map { NSDecimalNumber(decimal: $0).doubleValue },
+            rest_sec: s.rest_sec,
+            weight_segments: s.weight_segments
+        )
+    }
+
+    @MainActor
+    private func persistSessionCheckpoint() {
+        guard !exercises.isEmpty else { return }
+        let performedHost = performedSetsByExercise.mapValues { $0.map(performedSetSnapshot) }
+        let setsSnapshot = setsByExercise.mapValues { $0.map(setRowSnapshot) }
+        let restEpoch = restEndDateByExercise.mapValues { $0.timeIntervalSince1970 }
+        let strength = ActiveWorkoutSessionCheckpoint.StrengthPayload(
+            currentExerciseIndex: currentExerciseIndex,
+            currentSetIndex: currentSetIndex,
+            currentSetIndexByExercise: currentSetIndexByExercise,
+            performedSetsByExercise: performedHost,
+            setsByExercise: setsSnapshot,
+            restEndEpochByExercise: restEpoch,
+            isResting: isResting,
+            guestWorkoutId: dualGuestWorkoutId,
+            guest2WorkoutId: dualGuest2WorkoutId,
+            guestPerformedSetsByExercise: gPerformedSetsByExercise.mapValues { $0.map(performedSetSnapshot) },
+            guest2PerformedSetsByExercise: g2PerformedSetsByExercise.mapValues { $0.map(performedSetSnapshot) },
+            guestCurrentSetIndexByExercise: gCurrentSetIndexByExercise,
+            guest2CurrentSetIndexByExercise: g2CurrentSetIndexByExercise,
+            showCountdown: showCountdown
+        )
+        let entry = ActiveWorkoutSessionCheckpoint.Entry(
+            workoutId: workoutId,
+            kind: .strength,
+            savedAt: Date(),
+            sessionStartedAt: strengthWorkoutSessionStart,
+            accumulatedPausedSec: accumulatedPausedSeconds,
+            isSessionPaused: isSessionPaused,
+            pauseBeganAt: sessionPauseBegan,
+            strength: strength,
+            cardio: nil,
+            sport: nil
+        )
+        ActiveWorkoutSessionCheckpoint.store(entry)
+        persistProgramCacheSnapshot()
+    }
+
+    @MainActor
+    private func restoreSessionCheckpointIfNeeded() {
+        guard !didRestoreSessionCheckpoint else { return }
+        guard let entry = ActiveWorkoutSessionCheckpoint.load(),
+              entry.workoutId == workoutId,
+              entry.kind == .strength,
+              let strength = entry.strength
+        else { return }
+        didRestoreSessionCheckpoint = true
+
+        func restorePerformed(_ map: [Int: [ActiveWorkoutSessionCheckpoint.PerformedSetSnapshot]]) -> [Int: [PerformedSet]] {
+            map.mapValues { snaps in
+                snaps.map {
+                    PerformedSet(
+                        reps: $0.reps,
+                        weight_kg: $0.weight_kg.map { Decimal($0) },
+                        rpe: $0.rpe.map { Decimal($0) },
+                        rest_sec: $0.rest_sec,
+                        configId: $0.configId,
+                        segmentsInRow: $0.segmentsInRow,
+                        weight_segments: $0.weight_segments
+                    )
+                }
+            }
+        }
+
+        func restoreSets(_ map: [Int: [ActiveWorkoutSessionCheckpoint.SetRowSnapshot]]) -> [Int: [SetRow]] {
+            map.mapValues { rows in
+                rows.map {
+                    SetRow(
+                        id: $0.id,
+                        workout_exercise_id: $0.workout_exercise_id,
+                        set_number: $0.set_number,
+                        order_index: $0.order_index,
+                        reps: $0.reps,
+                        weight_kg: $0.weight_kg.map { Decimal($0) },
+                        rpe: $0.rpe.map { Decimal($0) },
+                        rest_sec: $0.rest_sec,
+                        weight_segments: $0.weight_segments,
+                        configId: $0.id,
+                        segmentsInRow: 1
+                    )
+                }
+            }
+        }
+
+        performedSetsByExercise = restorePerformed(strength.performedSetsByExercise)
+        gPerformedSetsByExercise = restorePerformed(strength.guestPerformedSetsByExercise)
+        g2PerformedSetsByExercise = restorePerformed(strength.guest2PerformedSetsByExercise)
+        if !strength.setsByExercise.isEmpty {
+            setsByExercise = restoreSets(strength.setsByExercise)
+        }
+        currentExerciseIndex = min(max(0, strength.currentExerciseIndex), max(0, exercises.count - 1))
+        currentSetIndex = strength.currentSetIndex
+        currentSetIndexByExercise = strength.currentSetIndexByExercise
+        gCurrentSetIndexByExercise = strength.guestCurrentSetIndexByExercise
+        g2CurrentSetIndexByExercise = strength.guest2CurrentSetIndexByExercise
+        isResting = strength.isResting
+        restEndDateByExercise = strength.restEndEpochByExercise.mapValues { Date(timeIntervalSince1970: $0) }
+        showCountdown = strength.showCountdown
+        strengthWorkoutSessionStart = entry.sessionStartedAt ?? strengthWorkoutSessionStart
+        accumulatedPausedSeconds = entry.accumulatedPausedSec
+        isSessionPaused = entry.isSessionPaused
+        sessionPauseBegan = entry.pauseBeganAt
+        pagerDisplayIndexHost = pagerAnchorExerciseIndex(for: currentExerciseIndex, lane: .host)
+        syncRestCountdownFromEndDate()
+    }
+
+    @MainActor
+    private func clearSessionCheckpoint() {
+        ActiveWorkoutSessionCheckpoint.clearIfWorkout(workoutId)
     }
 
     private func activeWorkoutNetworkStatusLabel() -> String {

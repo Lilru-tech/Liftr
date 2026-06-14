@@ -17,7 +17,7 @@ Tablas:
 - `basketball_session_stats`
 - `cardio_sessions`
 - `cardio_session_stats`
-- `competitions`
+- `competitions` (incl. `bet_amount int` default 0 — stake Liftr Coins en duelos; ver `20260612120000_competition_bet_escrow_v1.sql`)
 - `competition_blocks`
 - `competition_goals`
 - `competition_workouts`
@@ -35,7 +35,7 @@ Tablas:
 - `hyrox_session_stats`
 - `level_thresholds`
 - `notifications`
-- `profiles`
+- `profiles` (incl. `coins_balance int` — server-managed cached wallet; ver [`Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql`](../Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql))
 - `racket_session_stats`
 - `rugby_session_stats`
 - `ski_session_stats`
@@ -59,10 +59,16 @@ Tablas:
 - `workout_participants`
 - `workout_scores`
 - `xp_events`
+- `coin_transactions` (ledger unificado Liftr Coins; `amount` positivo = earn, negativo = futuro spend; ver migración `20260610120000_liftr_coins_ledger_v1.sql`)
+  - Columns: `id` (uuid PK), `user_id` (uuid FK `auth.users`), `amount` (int), `action_type` (text), `reference_id` (uuid nullable), `created_at` (timestamptz)
+  - RLS: `authenticated` **SELECT** own rows only; **INSERT/UPDATE/DELETE** revoked (solo triggers / `SECURITY DEFINER`)
+  - Idempotencia: índices únicos parciales en `(user_id, reference_id, action_type)` para `like_given`, `user_followed`, `earned_follower`, `comment_added`, `workout_logged`, `achievement_unlocked`, `weekly_goal_perfect_week`, `workout_consistency_streak` (solo `amount > 0`)
+- `coin_reward_rules` (matriz de recompensas; `action_type` PK, `amount`, `enabled`)
 - `segments` (PostGIS `geography(LineString,4326)`; MVP solo creación por usuario; ver `docs/migrations/segments_mvp_v1.sql` o `segments_mvp_v1_part01_*.sql`–`part06_*.sql` si el cliente parte por `;`). Tras [`Liftr/supabase/migrations/20260509120000_segment_route_coverage_v1.sql`](../Liftr/supabase/migrations/20260509120000_segment_route_coverage_v1.sql): columnas opcionales `source_workout_id`, `source_start_fraction`, `source_end_fraction`, y `geog`/`geojson` coherente con el RPC de creación.
 - `segment_efforts` (match por buffer sobre `route_geojson` + tiempo estimado; ver misma migración). Tras la migración `20260509120000_segment_route_coverage_v1.sql`: columna **`route_coverage`** (0–1); trigger antes de insert/actualizar que exige ≥0.95 salvo el entreno origen.
-- `achievements` (catálogo; filas y reglas de desbloqueo principales vía `check_and_unlock_achievements_for` en la BD)
+- `achievements` (catálogo; filas y reglas de desbloqueo principales vía `check_and_unlock_achievements_for` en la BD; opcional `coin_reward_tier` `bronze` | `silver` | `gold` para recompensas Liftr Coins)
 - `user_achievements` (desbloqueos por `user_id`)
+- `user_tracked_achievements` (logros que el usuario sigue activamente; máx. 5 por usuario)
 - `challenge_templates` (catálogo de retos; `metric_kind`, `cadence`, umbrales, ámbitos opcionales `scope_activity_code` / `scope_sport` / `scope_muscle_primary`; ver [`docs/migrations/challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql))
 - `challenge_instances` (ventana temporal por plantilla, p. ej. semana ISO)
 - `challenge_claims` (adjudicaciones: usuario, rango, `workout_id`, `adjudication_ts`)
@@ -133,10 +139,17 @@ Vistas:
 - `get_period_training_compare_v1` (helpers internas `_period_training_compare_summary`, `_period_training_compare_breakdown`; ver `docs/migrations/period_training_compare_v1.sql`)
 - `get_leaderboard_v1`
 - `get_level_leaderboard_v1`
+- `get_coins_leaderboard_v1` (`p_scope`, `p_limit`, `p_sex`, `p_age_band`) — ranking por `profiles.coins_balance`; sin periodo
+- `get_pet_leaderboard_v1` (`p_metric`, `p_scope`, `p_limit`, `p_sex`, `p_age_band`) — rankings de mascotas, sin periodo (all-time). `p_metric`: `level`, `total_stats`, `health`, `strength`, `defense` (requieren mascota activa eclosionada), `battles`, `wins`, `losses`, `win_rate` (mín. 5 combates), `max_damage_dealt`, `max_damage_taken`, `total_damage_dealt`, `total_damage_taken` (de `pet_combat_user_stats`, requieren `total_battles > 0`). Devuelve `rank`, `user_id`, `username`, `avatar_url`, `value` (numeric; `win_rate` en %), `battles`, `pet_name` (custom o display name del tipo), `pet_level`
+- `list_my_coin_transactions_v1` (`p_limit` default 20, max 50) — historial propio; `SECURITY DEFINER`
+- `get_my_coin_sources_v1` (`p_start`, `p_end` timestamptz opcionales; ambos null = all-time) — agregación de monedas **ganadas** (`amount > 0`) por categoría (`source_key`); excluye backfills de economía; `SECURITY DEFINER`
+- `clear_my_coin_history_v1` () — borra filas de `coin_transactions` del caller; **no** modifica `coins_balance`
 - `get_workout_likes_received_leaderboard_v1`, `get_workout_comments_received_leaderboard_v1`, `get_group_workout_sessions_leaderboard_v1` (social / feed quality; published workouts in period)
 - `get_achievements_unlocked_period_leaderboard_v1` (app metric **Achievements**; uses same workout-style period as other leaderboards). Optional in same migration file: `get_achievements_total_unlocked_leaderboard_v1` (no `p_period`) for ad-hoc / analytics, not wired in clients.
 - `get_hyrox_best_official_time_leaderboard_v1`, `get_football_goals_leaderboard_v1`, `get_ski_distance_leaderboard_v1`
 - `get_user_achievements`
+- `toggle_tracked_achievement_v1` (`p_achievement_id` bigint) → `{ tracked, tracked_count }`; toggle seguimiento personal (máx. 5; solo logros no desbloqueados)
+- `get_tracked_achievement_count_v1` (`p_user_id` uuid) → `{ count, top_progress_pct }`; resumen ligero para Home
 - `get_user_prs` (`p_user_id`, optional `p_kind`, optional `p_search`) — profile/compare PR lists; bypasses own-only RLS via `SECURITY DEFINER` + authenticated read policies on PR tables
 - `get_user_premium_status_v1` () → `boolean`; `auth.uid()` required; `true` iff a `user_subscriptions` row exists for the caller with `status in ('active','trialing')` and `expires_at > now()` (see migration above)
 - `get_user_level`
@@ -192,6 +205,13 @@ Vistas:
 - `recompute_weekly_goal_results`
 - `record_search`
 - `review_competition_workout`
+- `rpc_create_competition` (`p_opponent_id`, `p_time_limit_at` opcional, `p_metric` `workouts`|`calories`|`score`, `p_target_value` opcional, `p_expire_hours` default 48, `p_bet_amount` default 0) → `bigint` competition id; `SECURITY DEFINER`; valida `p_bet_amount <= LEAST(creator.coins_balance, opponent.coins_balance)`; si `p_bet_amount > 0` escolta monedas del creador y fija `invite_expires_at` a 7 días; ver [`20260612120000_competition_bet_escrow_v1.sql`](../Liftr/supabase/migrations/20260612120000_competition_bet_escrow_v1.sql)
+- `accept_competition` (`p_competition_id`) — escolta rival si `bet_amount > 0`; `SECURITY DEFINER`
+- `decline_competition` (`p_competition_id`) — reembolso creador vía trigger de liquidación
+- `cancel_competition_invite` (`p_competition_id`) — solo creador, `pending`
+- `competition_get_max_bet_v1` (`p_opponent_id`) → `integer` techo de apuesta para el caller
+- `get_my_competition_escrow_summary_v1` () → JSON `{ escrowed_total, pending_count, active_staked_count, staked_challenge_count }`
+- `expire_stale_competition_invites_v1` () → `integer` filas expiradas (`invite_expires_at` pasado)
 - `start_workout_v1` (`p_workout_id`, `p_started_at` opcional ISO8601) → JSON del workout con `started_at` y `ended_at` limpiado; owner o participante; idempotente ante reintentos
 - `submit_workout_to_competition`
 - `trending_search_queries_24h`
@@ -225,6 +245,16 @@ Migración: [`Liftr/supabase/migrations/20260522160000_cardio_workout_dedupe_v1.
 - Si hay candidato, `merge_cardio_workout_from_import` enriquece el entreno existente (HR, ruta, calorías HealthKit, `healthkit_uuid`, stats) sin sobrescribir título/notas/distancia ya rellenados.
 - El RPC sigue devolviendo `integer` (id del workout); clientes iOS detectan merge por `created_at` antiguo (>120s).
 
+## Wearable GPS route sync (Garmin / external)
+
+Migración: [`Liftr/supabase/migrations/20260608120000_wearable_route_jobs_v1.sql`](../Liftr/supabase/migrations/20260608120000_wearable_route_jobs_v1.sql).
+
+- **`wearable_connections`**: tokens OAuth por `user_id` + `provider` (`garmin` | `fitbit` | `polar`). Escritura solo vía Edge Functions (`service_role`); el cliente autenticado puede `select` la fila propia.
+- **`external_workout_route_jobs`**: cola de rutas GPS normalizadas (`route_points` jsonb). Unique `(user_id, provider, provider_activity_id)`. Estados: `pending`, `applied_healthkit`, `applied_liftr`, `skipped`, `failed`.
+- **`apply_external_route_to_cardio_workout`**: rellena `cardio_sessions.route_geojson` solo si está vacío; usa `find_cardio_workout_duplicate` con `p_healthkit_uuid` y ventana temporal. No modifica calorías.
+- **`update_external_route_job_status`**: el cliente iOS marca jobs tras escribir `HKWorkoutRoute` en HealthKit.
+- Edge Functions: `wearable-oauth-start` (JWT), `wearable-oauth-callback`, `garmin-activity-webhook` (`verify_jwt = false`). Setup: [`docs/garmin-connect-developer-setup.md`](garmin-connect-developer-setup.md).
+
 ## Retos (Challenges MVP)
 
 - **Diferencia vs logros:** los logros son hitos personales permanentes (`achievements` / `user_achievements`). Los retos son **eventos de ventana** con **plazas limitadas** (`max_winners`) e instancias por `period_start` / `period_end`. La plantilla define **`cadence`**: `week`, `month` o `once` (ventana larga para retos tipo evergreen).
@@ -246,9 +276,36 @@ Migración: [`Liftr/supabase/migrations/20260522160000_cardio_workout_dedupe_v1.
 
 ### Uso en app
 
-- Los clientes **no** hacen `select` crudo al catálogo en el flujo de UI: llaman al RPC `get_user_achievements` con `p_user_id` (uuid) y reciben filas con al menos: `achievement_id`, `code`, `title`, `description`, `category`, `icon_url`, `user_id`, `unlocked_at`, `is_unlocked`. Tras aplicar [get_user_achievements_extend_progress_v1.sql](migrations/get_user_achievements_extend_progress_v1.sql), el RPC puede incluir también `requirement_type`, `requirement_value`, `progress_current`, y agregados opcionales `community_pct_unlocked` / `community_sample_size` (% de usuarios con al menos un workout publicado que tienen el logro; `NULL` si el denominador es menor que el umbral definido en SQL).
+- Los clientes **no** hacen `select` crudo al catálogo en el flujo de UI: llaman al RPC `get_user_achievements` con `p_user_id` (uuid) y reciben filas con al menos: `achievement_id`, `code`, `title`, `description`, `category`, `icon_url`, `user_id`, `unlocked_at`, `is_unlocked`. Tras aplicar [get_user_achievements_extend_progress_v1.sql](migrations/get_user_achievements_extend_progress_v1.sql), el RPC puede incluir también `requirement_type`, `requirement_value`, `progress_current`, agregados opcionales `community_pct_unlocked` / `community_sample_size`, y desde `20260714120000_tracked_achievements_v1.sql` también **`is_tracked`** (boolean).
+- **Seguimiento personal (tracked):** tabla `user_tracked_achievements` (`user_id`, `achievement_id`, `tracked_at`); máximo **5** filas activas por usuario; RPC **`toggle_tracked_achievement_v1(p_achievement_id)`** → `{ tracked, tracked_count }`; RPC **`get_tracked_achievement_count_v1(p_user_id)`** → `{ count, top_progress_pct }` para el pill de Home; al insertar en `user_achievements` un trigger elimina la fila tracked correspondiente (auto-untrack al desbloquear).
 - `check_and_unlock_achievements_for` con el mismo `p_user_id` recalcula desbloqueos; también puede invocarse vía **triggers** al crear workouts, seguir, like, comentar, etc. (ver definición y triggers en el proyecto Supabase).
 - Mapeo de **icono por prefijo de `code` y categoría** (sustituto local si `icon_url` falla o es nulo): iOS en `Liftr/AchievementsGridView.swift` (`symbolForAchievement`, `prettySubtype`), Android en `ui/achievements/AchievementSymbol.kt`. Convención recomendable para códigos nuevos: `disciplina_umbral` (p. ej. `ski_distance_50k`) alineada con el resto de prefijos de catálogo.
+- **Categorías de filtro en app:** `general`, `strength`, `cardio`, `sport`, `social`, `streak`, `ranking`, **`pet`**, **`coins`** (iOS `CategoryFilter`, Android `AchievementCategoryFilter`).
+
+### Pet & Coins achievements (migración `20260628120000_pet_coin_achievements_v1.sql`)
+
+- **32 filas** de catálogo: 20 `pet_*` + 12 `coins_*`.
+- **Desbloqueo:** `unlock_pet_achievements(p_user_id)` y `unlock_coin_achievements(p_user_id)`, invocados desde `check_and_unlock_achievements_for` y triggers:
+  - `trg_achievements_on_coin_tx` → `coin_transactions` (INSERT, `amount > 0`)
+  - `trg_achievements_on_pet_log` → `pet_logs` (INSERT)
+  - `trg_achievements_on_pet_instance` → `pet_instances` (INSERT/UPDATE de `total_feedings`, `current_level`, `evolution_stage`, `rarity`, `reroll_count`)
+  - `trg_achievements_on_pet_combat_stats` → `pet_combat_user_stats` (INSERT/UPDATE)
+  - `trg_achievements_on_profile_energy` → `profiles` (UPDATE de `max_energy`)
+- **Progreso en UI:** `get_user_achievements` delega en `liftr_achievement_progress_current` para códigos `pet_*` y `coins_*`.
+- **Coins lifetime earned:** `liftr_user_lifetime_coins_earned` — suma de `coin_transactions.amount > 0` excluyendo backfills vía `liftr_coin_source_key() IS NOT NULL`.
+- **Verify:** [`Liftr/supabase/verify/pet_coin_achievements_v1.sql`](../Liftr/supabase/verify/pet_coin_achievements_v1.sql).
+
+Códigos `pet_*` principales: `pet_incubation_first`, `pet_hatched_first`, `pet_feed_10`, `pet_feed_100`, `pet_evolve_kid`, `pet_evolve_teen`, `pet_evolve_adult`, `pet_evolve_elder`, `pet_level_50`, `pet_level_100`, `pet_rarity_rare`, `pet_rarity_epic`, `pet_rarity_mythic`, `pet_combat_first`, `pet_combat_wins_10`, `pet_combat_streak_5`, `pet_combat_all_rarities`, `pet_combat_all_species`, `pet_combat_all_stages`, `pet_coins_passive_1000`, `pet_workout_bonus_10`, `pet_egg_reroll_5`, `pet_energy_max_7`.
+
+Códigos `coins_*` principales: `coins_earned_first`, `coins_earned_100`, `coins_earned_500`, `coins_earned_1000`, `coins_earned_5000`, `coins_earned_10000`, `coins_earned_25000`, `coins_earned_50000`, `coins_workouts_1000`, `coins_social_500`, `coins_nutrition_500`, `coins_pet_sources_1000`.
+
+### HYROX achievements (migración `20260715130000_hyrox_achievements_sport_path_v1.sql`)
+
+- **5 filas** de catálogo: `hyrox_sessions_1`, `hyrox_sessions_5`, `hyrox_sessions_10`, `hyrox_days_7`, `hyrox_days_30` (categoría `cardio` en catálogo; desbloqueo vía `unlock_hyrox_achievements`).
+- **Fuente de datos:** sesiones **sport** publicadas con `sport_sessions.sport = 'hyrox'` (`workouts.state = 'published'`). La app registra Hyrox como deporte, no como cardio; el contador también incluye filas legacy en `cardio_sessions` con `activity_type` / `activity_code = 'hyrox'` si existieran.
+- **Desbloqueo:** `unlock_hyrox_achievements(p_user_id)`, invocado desde `check_and_unlock_achievements_for` y triggers en `sport_sessions` / `workouts`. No filtra por `match_result` (p. ej. `unfinished` cuenta).
+- **Progreso en UI:** `get_user_achievements` expone `progress_current` para códigos `hyrox_sessions_*` (conteo de sesiones) y `hyrox_days_*` (días UTC distintos).
+- **Verify:** [`Liftr/supabase/verify/hyrox_achievements_sport_path_v1.sql`](../Liftr/supabase/verify/hyrox_achievements_sport_path_v1.sql).
 
 ### Inspección en Supabase (sin migraciones en este repo)
 
@@ -535,6 +592,122 @@ Cuando disparan infracombustión, proteína baja (B), carbs bajos (A), patrón a
 **Objetivo kcal en UI:** anillo de calorías y columna “Metabolism (BMR)” usan `base_calories_target` **resuelto** del RPC (BMR automático o override manual). Perfil: mostrar BMR calculado cuando `base_calories_target_is_manual = false`; al guardar solo el campo BMR, persistir override (`is_manual = true`). Macros secundarios (proteína, carbs, grasa, micros): defaults en `BackendContracts.NutritionDisplayTargets` (150 g proteína, 250 g carbs, etc.).
 
 Android: constantes en `BackendContracts` (`Tables`, `Rpc`, `NutritionColumns`, `NutritionRpcKeys`, `NutritionDisplayTargets`, `NutritionMealSlots`).
+
+## Liftr Coins (economía virtual)
+
+Moneda sin valor monetario real. Balance canónico: `profiles.coins_balance` (actualizado por trigger al insertar en `coin_transactions`). Los clientes **no** incrementan el balance localmente tras likes/comentarios; refrescar perfil desde servidor.
+
+**`reference_id`:** UUID estable vía `liftr_coin_ref_bigint(id)` para workouts/comentarios/logros; `liftr_coin_ref_uuid(user_id)` para follows; `liftr_coin_ref_date(yyyy-mm-dd)` para hitos semanales/rachas.
+
+| `action_type` | Recompensa | Disparador |
+|---------------|------------|------------|
+| `like_given` | 2 | INSERT `workout_likes` |
+| `comment_added` | 5 | INSERT `workout_comments` (no borrado) |
+| `user_followed` | 5 | INSERT `follows` (follower) |
+| `earned_follower` | 10 | INSERT `follows` (followee) |
+| `achievement_unlocked` | 25 / 50 / 100 (bronze / silver / gold) | INSERT `user_achievements` |
+| `workout_logged` | dinámico (base entrenamiento) | workout `state → published` |
+| `workout_pet_training_bonus` | `% bono mascota` sobre base | workout `state → published` (misma `reference_id`) |
+| `workout_coin_doubling_v1` | delta legacy | backfill one-shot 2× |
+| `workout_economy_rebalance_v1` | delta | backfill one-shot rebalance entrenos |
+| `pet_passive_economy_rebalance_v1` | `−75%` de `pet_coins_generated` histórico | backfill one-shot pasivo |
+| `workout_economy_reduction_30pct_v1` | clawback delta | backfill reducción 30% entrenos |
+| `pet_passive_economy_reduction_30pct_v1` | `−30%` de `pet_coins_generated` histórico | backfill reducción 30% pasivo |
+| `pet_coins_generated` | dinámico | cron horario `generate_pet_coins_v1` |
+| `weekly_goal_perfect_week` | 40 | todas las metas de la semana completadas |
+| `workout_consistency_streak` | 50 | racha de 7 días consecutivos con workout publicado |
+| `nutrition_ingredient_logged` | 3 | INSERT `nutrition_diary_logs` con `ingredient_id` |
+| `nutrition_recipe_logged` | 5 | INSERT `nutrition_diary_logs` con `recipe_id` |
+| `nutrition_ingredient_created` | 10 | INSERT `nutrition_ingredients` con `user_id` (no catálogo sistema) |
+| `nutrition_recipe_created` | 15 | INSERT `nutrition_recipes` con `user_id` (no catálogo sistema) |
+| `competition_bet_escrow` | `−bet_amount` | creación / aceptación de duelo con stake |
+| `competition_bet_win` | `+bet_amount × 2` | duelo `finished` con ganador |
+| `competition_bet_refund_draw` | `+bet_amount` | duelo `finished` sin ganador (empate) |
+| `competition_bet_refund_cancelled` | `+bet_amount` | `declined`, `cancelled`, `expired` (reembolso al creador) |
+| `pet_market_purchase` | `−price × quantity` | RPC `buy_pet_market_item_v1` |
+| `pet_egg_reroll` | `−FLOOR(50 × 1.1^reroll_count)` | RPC `reroll_pet_egg_v1` |
+| `pet_rarity_upgrade` | `−(1000 × 2^(current_sort_order − 1))` | RPC `upgrade_pet_rarity_v1` |
+
+**Apuestas en competiciones:** mutaciones solo vía RPC (`authenticated` sin `INSERT`/`UPDATE` directo en `competitions` / `competition_goals`). Liquidación idempotente en trigger `trg_competition_settle_bet` al pasar a estado terminal. Cron `expire_pending_competition_bets_hourly` expira `pending` con stake > 7 días.
+
+**`workout_logged` dinámico (escala ×5.95 sobre la base pre-doble desde `20260621120000_economy_reduction_30pct_v1`):**
+- Strength: `round((10 +` número de series completadas `) × 5.95)`.
+- Cardio: `round((base 10` + umbrales por `cardio_sessions.duration_sec` (30 min +5, 60 min +5) y `distance_km` (≥5 km +5, ≥10 km +10); fallback `workouts.duration_min` `) × 5.95)`.
+- Otros kinds publicados: `60` (base sin bono de mascota).
+- **Bono de mascota activa** (solo hatched, `baby`–`elder`): porcentaje según `pet_training_bonus_config`; fila aparte `workout_pet_training_bonus` + `pet_logs.event_type = workout_pet_bonus` con `details.message` (frase aleatoria en inglés desde `pet_workout_bonus_messages`).
+- Backfills históricos: `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1` (clawback si el total pagado supera el nuevo cálculo), `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1` (clawback 30% de `pet_coins_generated`).
+
+**Anti-exploit:** unlike / unfollow / re-like no otorgan monedas de nuevo (sin filas de revocación). Borrar un log de nutrición no revoca monedas. Reintentos devuelven `unique_violation` silenciado en `apply_liftr_coin_reward`.
+
+**Nutrición:** cada fila de diario otorga monedas (carrito, plan marcado como comido vía `complete_meal_plan_as_eaten`). Creación solo para ítems con `user_id` no nulo. Backfill histórico: `backfill_nutrition_coin_rewards_v1`.
+
+**Cliente — lectura:** `profiles.select(coins_balance)` en una petición **aparte** (falla en silencio → `0` si la migración aún no está desplegada). La cabecera de perfil no debe incluir `coins_balance` en el SELECT principal. Componentes: `CoinsBalanceBadge` (iOS/Android). Historial: `list_my_coin_transactions_v1`; desglose por fuente: `get_my_coin_sources_v1` (cliente envía `p_start`/`p_end` según periodo Week/Month/Year o omite ambos para all-time); limpiar: `clear_my_coin_history_v1`. Ranking: métrica **Liftr Coins** vía `get_coins_leaderboard_v1`. Banner efímero al ganar monedas (cliente compara balance antes/después).
+
+**`get_my_coin_sources_v1` — `source_key`:** `workouts`, `pet_workout_bonus`, `pet_coins`, `social`, `nutrition`, `achievements`, `goals_streaks`, `competition`, `pet_combat`, `other`. Excluye `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1`, `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1`.
+
+## Pets & Mascots
+
+Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); sin `INSERT`/`UPDATE` directo en `pet_instances`, `pet_instance_stats` ni `user_inventory`.
+
+**Tablas:** `pet_types`, `pet_type_stat_weights`, `pet_levels`, `pet_stage_rewards`, `pet_training_bonus_config`, `pet_food_experience`, `pet_rarity_config`, `pet_market_items`, `pet_instances`, `pet_instance_stats`, `user_inventory`, `pet_logs`.
+
+**Pasivo por hora (`pet_stage_rewards`, tras `economy_reduction_30pct_v1`):** baby 2–5, kid 4–8, teen 6–10, adult 8–13, elder 11–20 (× `pet_rarity_config.coin_multiplier`). Huevo: 0.
+
+**Bono entrenamiento (`pet_training_bonus_config`):** matriz stage × rarity; helper `get_pet_training_bonus_pct(user_id)`; histórico backfill vía `resolve_pet_bonus_at_time(user_id, at)`. Grant en publish: `grant_workout_coin_rewards_v1`.
+
+**`pet_logs.event_type = workout_pet_bonus`:** insertado al publicar entreno si hay bono > 0; `details`: `coins`, `bonus_pct`, `base_coins`, `workout_id`, `message` (rotación vía `pick_pet_workout_bonus_message`).
+
+**Sprites:** bucket Storage `pets` (público). Archivos: `{pet_type}_{stage}.png` en la raíz del bucket (`stage` = `egg|baby|kid|teen|adult|elder`). Market: `pets/market/{filename}.png`. Población inicial: `Liftr/scripts/mirror-settleit-pet-assets.sh` (copia desde SettleIt).
+
+**`pet_types` — URLs por etapa (fuente de verdad):** `image_egg`, `image_baby`, `image_kid`, `image_teen`, `image_adult`, `image_elder` (text, URL pública completa). Helper SQL: `liftr_pet_image_url_for_stage(pet_type, stage)`.
+
+**`user_inventory.item_type`:** `pet_egg`, `incubator`, `food_baby`, `food_kid`, `food_teen`, `food_adult`, `food_elder`.
+
+**RPCs (authenticated):**
+
+| RPC | Uso |
+|-----|-----|
+| `get_my_pet_v1()` | Pet activo + stats + inventario + `xp_required` + `can_evolve`; **`pet.image_url`** desde `pet_types` según `evolution_stage`; inventario siempre (también sin pet activo); hace hatch del huevo del caller si `hatch_at <= now()` |
+| `list_pet_market_items_v1()` | Catálogo Market |
+| `buy_pet_market_item_v1(p_item_type, p_quantity)` | Compra con coins (ver reglas abajo) |
+| `start_pet_incubation_v1()` | Consume `pet_egg`; requiere `incubator` en inventario |
+| `feed_pet_v1(p_item_type)` | Alimentar pet activo (no egg) |
+| `confirm_pet_evolution_v1()` | Evolución manual en niveles 25/50/75/100 |
+| `update_pet_custom_name_v1(p_name)` | Renombrar pet equipado |
+| `reroll_pet_egg_v1()` | Reroll tipo/rareza del huevo incubando; coste `floor(50 × 1.1^reroll_count)` coins |
+| `upgrade_pet_rarity_v1()` | Sube la rareza del pet activo un tier; coste `1000 × 2^(sort_order − 1)` coins; no recalcula stats históricos |
+| `get_my_pet_dex_v1()` | Pet Dex del caller: catálogo completo + stats por especie oponente (`is_discovered`, W/L/D, rarities/stages seen) + totales de colección |
+| `get_pet_species_detail_v1(p_pet_type)` | Detalle de especie: URLs de las 6 etapas, `discovered_stages` (combate o evolución propia), `dex` opcional si hubo combates |
+
+**Pet Dex (`20260629120000_pet_combat_dex_v1.sql`):** tablas `pet_combat_dex_species`, `pet_combat_dex_rarities`, `pet_combat_dex_stages`, `pet_user_discovered_stages`. Triggers: `trg_pet_combat_dex_from_history` (INSERT en `pet_combat_history`, parsea `battle_log.attacker_pet` / `defender_pet`) y `trg_pet_own_stage_discovery` (INSERT/UPDATE `evolution_stage` en `pet_instances`). Backfill desde historial existente. Logros de colección en arena: `pet_combat_all_rarities` (6 rarezas), `pet_combat_all_species` (todas las especies), `pet_combat_all_stages` (5 etapas combatibles: baby–elder). Verify: [`Liftr/supabase/verify/pet_combat_dex_v1.sql`](../Liftr/supabase/verify/pet_combat_dex_v1.sql).
+**Energía de arena (`profiles.current_energy` / `max_energy`):** regeneración por punto — **1 energía cada 4 horas** hasta `max_energy` (migración `20260615140000_liftr_pet_energy_regen_v1.sql`; sustituye al refill diario UTC). Acumulación lazy vía `liftr_refresh_profile_energy(p_user_id)` (interna, llamada desde `get_my_pet_v1`, `get_pet_combat_preview_v1`, `execute_pet_combat_v1`, `upgrade_pet_energy_capacity_v1`): `points = floor(elapsed / 4h)`; `current = least(max, current + points)`; `last_energy_refresh` avanza `points × 4h`, o se fija a `now()` cuando `current >= max` (el contador arranca al gastar un punto estando lleno). `liftr_profile_energy_json` devuelve `{current, max, last_refresh, next_refresh_at, regen_minutes: 240}` — `next_refresh_at = last_refresh + 4h` si `current < max`, `null` si está lleno. `get_pet_combat_preview_v1` usa este mismo json (clave `energy`).\n\n**Cron:** `liftr_hatch_pet_eggs_job` cada 10 min → `check_and_hatch_pet_eggs_v1` (egg → baby, stats iniciales, consume incubator).
+
+**XP:** `required_exp(level) = 50 × level²` (`pet_levels`). Comida: EXP aleatorio por matriz `pet_food_experience`.
+
+**Arena combat — stat roles (`liftr_combat_strike_v4` + turn order en `execute_pet_combat_v1`, migración `20260625120000_liftr_combat_balance_v4.sql`):** `health` → HP máximo en arena vía `liftr_combat_battle_hp_v1(health)` = `(health × 8 + 9) / 10` (80% del pool anterior); `strength` → daño base por golpe; `agility` → esquiva 3–28% (2% por punto de agi menos mitigación por int enemiga) **y** aporta daño (`×0.22`); `intelligence` → reduce esquiva enemiga, multiplicador de crítico **y** aporta daño (`×0.10`); `defense` + `resistance` → mitigación de daño recibido (promedio); `speed` → ataca primero cada ronda; `agility` también desempata turno si `speed` empata; `critical_rate` → probabilidad de crítico (hasta 50%); `stamina` → reduce penalización por fatiga tras ronda 12; `exploration` → bonus pequeño en el primer golpe; `happiness` → suelo mínimo de varianza de daño. Daño base: `1.22 × effective_strength × mitigation × …` (v3 usaba `1.4 × strength`). `liftr_combat_strike_v3` se conserva para rollback.
+
+**Arena combat — balance de arquetipos (`20260625120000` + `20260626120000`):** v4: suelo `health_weight` 3 para tipos con peso ≤2; cap tank+DPS: si `health_weight ≥ 5` y `strength_weight ≥ 5`, `strength −1` y `happiness +1`; `monkey` 4/4 HP/str; `griffin` base 4/4 HP/str. v5 (paridad mismo nivel+rareza ~40–60% entre arquetipos de producción): `neon_panther` `strength_weight` 5→4, `exploration_weight` 3→4; `griffin` movilidad `speed` 5, `agility` 4, `intelligence` 2, `exploration` 3 (mantiene `resistance_weight` 5); `dragon` override explícito 4/4/6 HP/str/def, `intelligence` 4, `resistance` 4, `happiness` 4, `exploration` 4, `critical_rate` 1 (suma 40) (el cap v4 dejaba dragon en 6/6). Recompute: `recompute_pet_stats_combat_balance_v1()` — v4 en `20260625120100`, v5 en `20260626120100`; hatch con `liftr_compute_hatch_stats_v1` + re-roll de cada `level_up` en `pet_logs`. Verificación: `supabase/verify/combat_balance_v5.sql` + `combat_balance_v5_monte_carlo.py`.
+
+Cliente: botón ⓘ en Stats del pet y en comparativa pre-combate → `PetStatCombatHelpSheet` / `PetStatCombatHelpSheetContent`.
+
+**Subida de nivel — stats (`pet_level_stat_shared_budget_v1`):** un presupuesto compartido por subida vía `compute_pet_level_stat_delta_v1(pet_type, stage, user_id)` (llamada desde `distribute_pet_stats`). (1) `total_budget = floor(random() × (max − min + 1)) + min` según `pet_stage_rewards` del stage — **una sola tirada por nivel**; (2) por stat, jitter independiente `0.5 + random()` (50%–150%); (3) `raw = total_budget × get_pet_stat_multiplier × weight/total_weight × jitter`; `health = floor(raw × 20)`; resto `round(raw)`. Varianza por stat sin 11 presupuestos independientes (evita pantallas con mayoría de +0). `pet_logs.stats_delta` conserva la misma forma jsonb. Backfill histórico: `backfill_pet_level_stat_variance_v1()` — baseline hatch = stats actuales − suma de deltas `level_up`; re-tira cada log ordenado por `new_level` con stage resuelto por `resolve_pet_stage_at_time` (último log `evolution` antes del timestamp, si no `baby`). `critical_rate` (peso 1) puede seguir en 0 en baby. Fuera de alcance: stats iniciales al hatch (`generate_initial_pet_stats`) y bono evolución (`apply_evolution_stat_bonus`).
+
+**Market — precios (`pet_market_items`):** `pet_egg` y `incubator` cuestan **2000** coins cada uno.
+
+**`buy_pet_market_item_v1` — guardas de propiedad:**
+
+| `p_item_type` | Rechaza con |
+|---------------|-------------|
+| `pet_egg` | `already_owns_egg` si `user_inventory.pet_egg` qty > 0 o hay `pet_instances` activo; `already_has_pet` si hay pet activo |
+| `incubator` | `already_owns_incubator` si `user_inventory.incubator` qty > 0 o hay pet activo; `already_has_pet` si hay pet activo |
+
+**Visibilidad Market (cliente):** ocultar `pet_egg`/`incubator` si el usuario ya los tiene en inventario o tiene pet activo; mostrar comida si hay pet activo (cualquier `evolution_stage`, incluido `egg`); mostrar `pet_rarity_upgrade` solo si hay pet activo y rareza ≠ `mythic` (precio dinámico en cliente, validado en servidor). Incubación desde **My Items**, no desde Market.
+
+**Rarity upgrade — precios exponenciales (desde tier actual):** Common→Uncommon 1 000; Uncommon→Rare 2 000; Rare→Epic 4 000; Epic→Legendary 8 000; Legendary→Mythic 16 000. Compra vía `upgrade_pet_rarity_v1` (no `buy_pet_market_item_v1`). Imagen Market dinámica en Storage: `pets/market/rarity_upgrade_{from}_to_{to}.png` (p. ej. `rarity_upgrade_rare_to_epic.png`); el cliente resuelve la ruta según la rareza activa del pet.
+
+**`pet_logs` (cliente):** lectura y borrado de filas propias vía RLS (`pet_logs_select_own`, `pet_logs_delete_own`). Paginación en cliente (5 por página). Perfil: FAB 90pt fijo abajo-derecha → sheet **Your Egg** con rarity, hatch time, tipo, Change Pet, logs.
+
+**Market info sheet (cliente):** lectura directa de catálogo público vía PostgREST (`pet_types`: `name`, `display_name`, `description`, `image_egg`; `pet_rarity_config`: todos los campos, orden `sort_order`). RLS `pet_types_read` / `pet_rarity_config_read` (`using (true)`). iOS/Android: botón ⓘ en Pet Market → sheet con rarezas (drop %, multiplicadores, coste upgrade) y grid de especies.
 
 ## Política de cambios de contrato
 

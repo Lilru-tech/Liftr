@@ -8,6 +8,8 @@ import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MilitaryTech
+import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Pool
 import androidx.compose.material.icons.filled.Sports
 import androidx.compose.material.icons.filled.SportsBasketball
@@ -45,6 +47,7 @@ fun imageVectorForAchievement(code: String, category: String): ImageVector {
         c.startsWith("hockey_") -> Icons.Filled.SportsHockey
         c.startsWith("rugby_") -> Icons.Filled.SportsRugby
         c.startsWith("ski_") -> Icons.Filled.DownhillSkiing
+        c.startsWith("climbing_") -> Icons.Filled.Sports
         c.startsWith("football_") -> Icons.Filled.SportsSoccer
         c.startsWith("basketball_") -> Icons.Filled.SportsBasketball
         c.startsWith("volleyball_") -> Icons.Filled.SportsVolleyball
@@ -55,6 +58,8 @@ fun imageVectorForAchievement(code: String, category: String): ImageVector {
         c.startsWith("ranking_") -> Icons.Filled.EmojiEvents
         c.startsWith("challenge_") -> Icons.Filled.MilitaryTech
         c.startsWith("streak_") || c.startsWith("multi_streak_") -> Icons.Filled.Bolt
+        c.startsWith("pet_") -> Icons.Filled.Pets
+        c.startsWith("coins_") -> Icons.Filled.MonetizationOn
         c.startsWith("first_workout") || c.startsWith("workouts_") || c.startsWith("achievements_") ||
             c.startsWith("first_fail") || c.startsWith("night_workout") || c.startsWith("morning_workout") ||
             c.startsWith("double_session") || c.startsWith("zero_day") -> Icons.Filled.Star
@@ -64,6 +69,8 @@ fun imageVectorForAchievement(code: String, category: String): ImageVector {
         k == "streak" -> Icons.Filled.Bolt
         k == "ranking" -> Icons.Filled.EmojiEvents
         k == "social" -> Icons.Filled.Group
+        k == "pet" -> Icons.Filled.Pets
+        k == "coins" -> Icons.Filled.MonetizationOn
         else -> Icons.Filled.Star
     }
 }
@@ -97,9 +104,12 @@ fun prettySubtypeFromCode(code: String, fallbackCategory: String): String {
         c.startsWith("rugby_") -> "Rugby"
         c.startsWith("racket_") -> "Racket"
         c.startsWith("ski_") -> "Ski"
+        c.startsWith("climbing_") -> "Climbing"
         c.startsWith("challenge_") -> "Challenges"
         c.startsWith("strength_drop_") -> "Drop sets"
         c.startsWith("strength_superset_") -> "Super series"
+        c.startsWith("pet_") -> "Pets"
+        c.startsWith("coins_") -> "Liftr Coins"
         else -> fallbackCategory.replaceFirstChar { it.titlecase() }
     }
 }

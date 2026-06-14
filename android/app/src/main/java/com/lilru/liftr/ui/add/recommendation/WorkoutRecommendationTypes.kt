@@ -9,6 +9,8 @@ import kotlinx.serialization.Serializable
 enum class RecommendationDataSource {
     RECENT_HISTORY,
     FULL_CATALOG,
+    MY_ROUTINES,
+    NETWORK_INSPIRED,
     HYROX,
     HYROX_RACE;
 
@@ -16,6 +18,8 @@ enum class RecommendationDataSource {
         get() = when (this) {
             RECENT_HISTORY -> "My last 10 workouts"
             FULL_CATALOG -> "Full app catalog"
+            MY_ROUTINES -> "My saved routines"
+            NETWORK_INSPIRED -> "Inspired by my network"
             HYROX -> "Hyrox — mixed"
             HYROX_RACE -> "Hyrox — race format"
         }
@@ -26,6 +30,10 @@ enum class RecommendationDataSource {
                 "Only exercises or activities you have already logged in your recent training."
             FULL_CATALOG ->
                 "Include any exercise or activity from the app, not only what you have used before."
+            MY_ROUTINES ->
+                "Loads a saved strength or Hyrox routine you can swap before applying."
+            NETWORK_INSPIRED ->
+                "Popular lifts among people you follow in the last 7 days—blended with your history for sets and loads."
             HYROX ->
                 "Picks stations you've trained less in your recent Hyrox sessions and suggests typical distances, loads, and reps for each."
             HYROX_RACE ->
@@ -35,20 +43,24 @@ enum class RecommendationDataSource {
 
 enum class StrengthSuggestionMode {
     PRIORITIZE_UNDERTRAINED_MUSCLES,
-    PRIORITIZE_FREQUENT_LIFTS;
+    PRIORITIZE_FREQUENT_LIFTS,
+    CHASE_PRS;
 
     val title: String
         get() = when (this) {
             PRIORITIZE_UNDERTRAINED_MUSCLES -> "Balance muscle groups"
             PRIORITIZE_FREQUENT_LIFTS -> "Frequent lifts"
+            CHASE_PRS -> "Chase PRs"
         }
 
     val detail: String
         get() = when (this) {
             PRIORITIZE_UNDERTRAINED_MUSCLES ->
-                "Favor muscles you trained less in those 10 sessions."
+                "Favor muscles you trained less in those 10 sessions; skips muscles trained in the last 48 hours when possible."
             PRIORITIZE_FREQUENT_LIFTS ->
                 "Exercises you programmed most often in those sessions—loads from your latest sets and RPE."
+            CHASE_PRS ->
+                "Exercises where you're within 5% of your best—otherwise falls back to your frequent lifts."
         }
 }
 

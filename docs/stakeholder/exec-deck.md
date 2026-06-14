@@ -95,7 +95,7 @@ Backend: **79 SQL migrations** (May 2026), **4 edge functions**, territory geoco
 | Clients | SwiftUI (iOS), Jetpack Compose (Android) |
 | Backend | Supabase — Auth, Postgres + PostGIS, Realtime, Edge Functions |
 | Push | FCM (Android) + APNs (iOS) via `send-notifications` worker |
-| Delivery | Xcode Cloud / TestFlight; GitHub Actions + Play AAB |
+| Delivery | Xcode Cloud (workflow Devel, `devel` only) / TestFlight; GitHub Actions + Play AAB |
 | Tests | Regression on territory, strength save, auth, Health import |
 
 ```mermaid

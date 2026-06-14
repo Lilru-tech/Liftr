@@ -36,18 +36,7 @@ private struct SportRecSession {
 
 enum WorkoutRecommendationService {
     
-    private static let lookbackCount = 10
-    private static let targetExerciseCount = 5
-    private static let defaultSetsPerExercise = 3
-    private static let defaultReps = 12
-    
-    private static let maxRecommendedSets = 5
-    private static let maxInferredSetsFromSetNumber = 8
-    private static let maxRecommendedReps = 22
-    private static let minRecommendedReps = 6
-    private static let highVolumeRepsThreshold = 17
-    private static let highVolumeSetsThreshold = 5
-    private static let defaultRestBetweenSetsSec = 90
+    private typealias C = WorkoutRecommendationConstants
     
     private struct FlatSet {
         let workoutId: Int
@@ -68,8 +57,26 @@ enum WorkoutRecommendationService {
         source: RecommendationDataSource,
         mode: StrengthSuggestionMode,
         catalog: [Exercise],
-        exerciseLanguage: ExerciseLanguage
-    ) async throws -> [StrengthRecommendationExercise] {
+        exerciseLanguage: ExerciseLanguage,
+        networkInspired: Bool = false,
+        excludeRoutineId: Int64? = nil
+    ) async throws -> StrengthRecommendationOutput {
+        let ctx = await WorkoutRecommendationContext.load(
+            userId: userId,
+            catalog: catalog,
+            includeNetwork: networkInspired || source == .networkInspired
+        )
+        
+        if source == .myRoutines {
+            return try await recommendFromSavedStrengthRoutine(
+                userId: userId,
+                catalog: catalog,
+                exerciseLanguage: exerciseLanguage,
+                ctx: ctx,
+                excludeRoutineId: excludeRoutineId
+            )
+        }
+        
         let client = SupabaseManager.shared.client
         let decoder = JSONDecoder.supabase()
         
@@ -82,15 +89,16 @@ enum WorkoutRecommendationService {
             .eq("kind", value: "strength")
             .eq("state", value: "published")
             .order("started_at", ascending: false)
-            .limit(lookbackCount)
+            .limit(C.lookbackCount)
             .execute()
         
         let workouts = try decoder.decode([WRow].self, from: wRes.data)
         if workouts.isEmpty {
-            guard source == .fullCatalog, !catalog.isEmpty else {
+            guard source == .fullCatalog || source == .networkInspired, !catalog.isEmpty else {
                 throw WorkoutRecommendationError.noWorkoutsInWindow
             }
-            return try coldStartStrength(catalog: catalog, exerciseLanguage: exerciseLanguage)
+            let exercises = try coldStartStrength(catalog: catalog, exerciseLanguage: exerciseLanguage, ctx: ctx)
+            return wrapStrengthOutput(exercises: exercises, ctx: ctx, flat: [], extraRationale: nil)
         }
         
         let workoutIds = workouts.map { String($0.id) }
@@ -175,36 +183,136 @@ enum WorkoutRecommendationService {
             }
         }
         
+        let exercises: [StrengthRecommendationExercise]
         switch mode {
         case .prioritizeUndertrainedMuscles:
-            return try suggestBalancedStrength(
+            exercises = try suggestBalancedStrength(
                 flat: flat,
                 catalog: catalog,
                 source: source,
-                exerciseLanguage: exerciseLanguage
+                exerciseLanguage: exerciseLanguage,
+                ctx: ctx
             )
         case .prioritizeFrequentLifts:
-            return try suggestFrequentStrength(
+            exercises = try suggestFrequentStrength(
                 flat: flat,
                 catalog: catalog,
                 source: source,
-                exerciseLanguage: exerciseLanguage
+                exerciseLanguage: exerciseLanguage,
+                ctx: ctx
+            )
+        case .chasePRs:
+            exercises = try suggestChasePRStrength(
+                flat: flat,
+                catalog: catalog,
+                source: source,
+                exerciseLanguage: exerciseLanguage,
+                ctx: ctx
             )
         }
+        return wrapStrengthOutput(exercises: exercises, ctx: ctx, flat: flat, extraRationale: ctx.partialDataNote)
+    }
+    
+    private static func wrapStrengthOutput(
+        exercises: [StrengthRecommendationExercise],
+        ctx: WorkoutRecommendationContext,
+        flat: [FlatSet],
+        extraRationale: String?,
+        routineName: String? = nil
+    ) -> StrengthRecommendationOutput {
+        let favCount = exercises.filter { ctx.favoriteExerciseIds.contains($0.exerciseId) }.count
+        var parts: [String] = []
+        if favCount > 0 {
+            parts.append(favCount == 1 ? "Includes 1 of your favorites." : "Includes \(favCount) of your favorites.")
+        }
+        if let extra = extraRationale, !extra.isEmpty { parts.append(extra) }
+        if let goal = ctx.goalNudge?.summaryLine { parts.append(goal) }
+        let freshness = muscleFreshnessEntries(from: flat)
+        return StrengthRecommendationOutput(
+            exercises: exercises,
+            sessionRationale: parts.isEmpty ? nil : parts.joined(separator: " "),
+            muscleFreshness: freshness,
+            routineName: routineName
+        )
+    }
+    
+    private static func muscleFreshnessEntries(from flat: [FlatSet]) -> [MuscleFreshnessEntry] {
+        let now = Date()
+        var lastByMuscle: [String: Date] = [:]
+        for s in flat {
+            let m = normMuscle(s.musclePrimary)
+            guard !m.isEmpty, m != "cardio", let st = s.startedAt else { continue }
+            if let prev = lastByMuscle[m] {
+                if st > prev { lastByMuscle[m] = st }
+            } else {
+                lastByMuscle[m] = st
+            }
+        }
+        return lastByMuscle.keys.sorted().map { muscle in
+            let last = lastByMuscle[muscle] ?? .distantPast
+            let hours = now.timeIntervalSince(last) / 3600
+            let status: MuscleFreshnessEntry.Status = {
+                if hours >= 72 { return .fresh }
+                if hours >= Double(C.recoveryDeprioritizeHours) { return .recent }
+                return .trainedRecently
+            }()
+            return MuscleFreshnessEntry(id: muscle, muscle: muscle.capitalized, status: status)
+        }
+    }
+    
+    private static func recommendFromSavedStrengthRoutine(
+        userId: UUID,
+        catalog: [Exercise],
+        exerciseLanguage: ExerciseLanguage,
+        ctx: WorkoutRecommendationContext,
+        excludeRoutineId: Int64?
+    ) async throws -> StrengthRecommendationOutput {
+        let client = SupabaseManager.shared.client
+        struct RoutineListRow: Decodable { let id: Int64; let name: String; let updated_at: Date? }
+        let rRes = try await client
+            .from("strength_routines")
+            .select("id, name, updated_at")
+            .eq("user_id", value: userId.uuidString)
+            .order("updated_at", ascending: true)
+            .execute()
+        var rows = try JSONDecoder.supabase().decode([RoutineListRow].self, from: rRes.data)
+        if let ex = excludeRoutineId {
+            rows = rows.filter { $0.id != ex }
+        }
+        guard let picked = rows.randomElement() ?? rows.first else {
+            throw WorkoutRecommendationError.loadFailed("Save a strength routine first, or pick another data source.")
+        }
+        let detail = try await fetchStrengthRoutineTemplateDetail(client: client, routineId: picked.id)
+        let exercises = strengthRecommendationsFromRoutineDetail(detail, catalog: catalog, exerciseLanguage: exerciseLanguage)
+        guard !exercises.isEmpty else {
+            throw WorkoutRecommendationError.loadFailed("That routine has no exercises.")
+        }
+        var out = wrapStrengthOutput(
+            exercises: exercises,
+            ctx: ctx,
+            flat: [],
+            extraRationale: "Loaded from your routine \"\(picked.name)\".",
+            routineName: picked.name
+        )
+        return out
     }
     
     private static func normMuscle(_ s: String?) -> String {
         (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
     
-    private static func coldStartStrength(catalog: [Exercise], exerciseLanguage: ExerciseLanguage) throws -> [StrengthRecommendationExercise] {
-        let pool = catalog.shuffled()
+    private static func coldStartStrength(
+        catalog: [Exercise],
+        exerciseLanguage: ExerciseLanguage,
+        ctx: WorkoutRecommendationContext
+    ) throws -> [StrengthRecommendationExercise] {
+        let pool = WorkoutRecommendationConstants.biasedShuffle(catalog) { ctx.favoriteExerciseIds.contains($0.id) }
         var result: [StrengthRecommendationExercise] = []
-        let w = 20.0
+        let w = ctx.defaultColdStartWeightKg()
         let rpe: Double? = 8
-        for ex in pool.prefix(targetExerciseCount) {
-            let setsOut = (1...defaultSetsPerExercise).map { sn in
-                StrengthRecommendationSet(setNumber: sn, reps: defaultReps, weightKg: w, rpe: rpe, restSec: defaultRestBetweenSetsSec)
+        for ex in pool.prefix(C.targetExerciseCount) {
+            let setsOut = (1...C.defaultSetsPerExercise).map { sn in
+                StrengthRecommendationSet(setNumber: sn, reps: C.defaultReps, weightKg: w, rpe: rpe, restSec: C.defaultRestBetweenSetsSec)
             }
             result.append(StrengthRecommendationExercise(
                 exerciseId: ex.id,
@@ -240,8 +348,8 @@ enum WorkoutRecommendationService {
     private static func expandToInferredFullSession(_ logged: [FlatSet]) -> [FlatSet] {
         guard !logged.isEmpty else { return [] }
         let maxSn = logged.map(\.setNumber).max() ?? 1
-        var target = max(logged.count, maxSn, defaultSetsPerExercise)
-        target = min(target, maxInferredSetsFromSetNumber)
+        var target = max(logged.count, maxSn, C.defaultSetsPerExercise)
+        target = min(target, C.maxInferredSetsFromSetNumber)
         
         func sourceForOrdinal(_ ordinal: Int) -> FlatSet {
             if let exact = logged.first(where: { $0.setNumber == ordinal }) { return exact }
@@ -291,14 +399,14 @@ enum WorkoutRecommendationService {
         guard !sets.isEmpty else { return sets }
         var out = sets
         let n = out.count
-        let maxReps = out.map(\.reps).max() ?? defaultReps
+        let maxReps = out.map(\.reps).max() ?? C.defaultReps
         
         if avgRpe < 8 {
-            let highVolume = maxReps >= highVolumeRepsThreshold || n >= highVolumeSetsThreshold
+            let highVolume = maxReps >= C.highVolumeRepsThreshold || n >= C.highVolumeSetsThreshold
             if highVolume {
                 return renumberStrengthSets(out)
             }
-            if n < maxRecommendedSets && maxReps <= highVolumeRepsThreshold - 1 {
+            if n < C.maxRecommendedSets && maxReps <= C.highVolumeRepsThreshold - 1 {
                 let last = out.last!
                 out.append(StrengthRecommendationSet(
                     setNumber: n + 1,
@@ -307,11 +415,11 @@ enum WorkoutRecommendationService {
                     rpe: last.rpe,
                     restSec: last.restSec
                 ))
-            } else if maxReps <= maxRecommendedReps - 2 {
+            } else if maxReps <= C.maxRecommendedReps - 2 {
                 out = out.map { s in
                     StrengthRecommendationSet(
                         setNumber: s.setNumber,
-                        reps: min(maxRecommendedReps, s.reps + 2),
+                        reps: min(C.maxRecommendedReps, s.reps + 2),
                         weightKg: s.weightKg,
                         rpe: s.rpe,
                         restSec: s.restSec
@@ -323,19 +431,45 @@ enum WorkoutRecommendationService {
         return renumberStrengthSets(out)
     }
     
+    private static func exercisePool(
+        catalog: [Exercise],
+        source: RecommendationDataSource,
+        historyIds: Set<Int64>,
+        ctx: WorkoutRecommendationContext
+    ) -> [Exercise] {
+        let base: [Exercise] = {
+            switch source {
+            case .recentHistory, .hyrox, .hyroxRace:
+                return catalog.filter { historyIds.contains($0.id) }
+            case .fullCatalog, .myRoutines:
+                return catalog
+            case .networkInspired:
+                let networkIds = Set(ctx.networkExerciseFrequency.keys)
+                if networkIds.isEmpty { return catalog.filter { historyIds.contains($0.id) } }
+                return catalog.filter { networkIds.contains($0.id) || historyIds.contains($0.id) }
+            }
+        }()
+        return base
+    }
+    
+    private static func rankExercisesForNetwork(_ pool: [Exercise], ctx: WorkoutRecommendationContext) -> [Exercise] {
+        pool.sorted { a, b in
+            let fa = ctx.networkExerciseFrequency[a.id] ?? 0
+            let fb = ctx.networkExerciseFrequency[b.id] ?? 0
+            if fa != fb { return fa > fb }
+            return a.id < b.id
+        }
+    }
+    
     private static func suggestFrequentStrength(
         flat: [FlatSet],
         catalog: [Exercise],
         source: RecommendationDataSource,
-        exerciseLanguage: ExerciseLanguage
+        exerciseLanguage: ExerciseLanguage,
+        ctx: WorkoutRecommendationContext
     ) throws -> [StrengthRecommendationExercise] {
         let historyIds = Set(flat.map(\.exerciseId))
-        let pool: [Exercise] = {
-            switch source {
-            case .recentHistory, .hyrox, .hyroxRace: return catalog.filter { historyIds.contains($0.id) }
-            case .fullCatalog: return catalog
-            }
-        }()
+        let pool = exercisePool(catalog: catalog, source: source, historyIds: historyIds, ctx: ctx)
         guard !pool.isEmpty else { throw WorkoutRecommendationError.loadFailed("No exercises in pool.") }
         
         var workoutsByExercise: [Int64: Set<Int>] = [:]
@@ -346,9 +480,14 @@ enum WorkoutRecommendationService {
         let ranked: [(Exercise, Int)] = pool.map { ex in
             (ex, workoutsByExercise[ex.id]?.count ?? 0)
         }
-        let sorted = ranked.sorted { a, b in
+        var sorted = ranked.sorted { a, b in
             if a.1 != b.1 { return a.1 > b.1 }
             return a.0.id < b.0.id
+        }
+        if source == .networkInspired, !ctx.networkExerciseFrequency.isEmpty {
+            sorted = rankExercisesForNetwork(pool, ctx: ctx).map { ex in
+                (ex, workoutsByExercise[ex.id]?.count ?? 0)
+            }
         }
         
         var chosen: [Exercise] = []
@@ -356,23 +495,84 @@ enum WorkoutRecommendationService {
         for (ex, _) in sorted {
             guard used.insert(ex.id).inserted else { continue }
             chosen.append(ex)
-            if chosen.count >= targetExerciseCount { break }
+            if chosen.count >= C.targetExerciseCount { break }
         }
-        if chosen.count < targetExerciseCount {
-            for ex in pool.shuffled() where chosen.count < targetExerciseCount {
+        if chosen.count < C.targetExerciseCount {
+            let shuffled = WorkoutRecommendationConstants.biasedShuffle(pool) { ctx.favoriteExerciseIds.contains($0.id) }
+            for ex in shuffled where chosen.count < C.targetExerciseCount {
                 if used.insert(ex.id).inserted { chosen.append(ex) }
             }
         }
         
+        return buildStrengthResultList(chosen: chosen.prefix(C.targetExerciseCount).map { $0 }, flat: flat, catalog: catalog, exerciseLanguage: exerciseLanguage, ctx: ctx)
+    }
+    
+    private static func suggestChasePRStrength(
+        flat: [FlatSet],
+        catalog: [Exercise],
+        source: RecommendationDataSource,
+        exerciseLanguage: ExerciseLanguage,
+        ctx: WorkoutRecommendationContext
+    ) throws -> [StrengthRecommendationExercise] {
+        let historyIds = Set(flat.map(\.exerciseId))
+        let pool = exercisePool(catalog: catalog, source: source, historyIds: historyIds, ctx: ctx)
+        guard !pool.isEmpty else { throw WorkoutRecommendationError.loadFailed("No exercises in pool.") }
+        
+        var chaseCandidates: [(Exercise, Double)] = []
+        for ex in pool {
+            guard let pr = ctx.prMaxWeightByExerciseId[ex.id], pr > 0 else { continue }
+            let latestW = latestMaxWeight(for: ex.id, flat: flat)
+            guard latestW > 0 else { continue }
+            if latestW >= pr * (1 - C.prChaseProximityRatio) {
+                chaseCandidates.append((ex, pr - latestW))
+            }
+        }
+        chaseCandidates.sort { abs($0.1) < abs($1.1) }
+        var chosen = chaseCandidates.prefix(C.targetExerciseCount).map(\.0)
+        if chosen.count < C.targetExerciseCount {
+            let fallback = try suggestFrequentStrength(
+                flat: flat,
+                catalog: catalog,
+                source: source == .networkInspired ? .recentHistory : source,
+                exerciseLanguage: exerciseLanguage,
+                ctx: ctx
+            )
+            let existing = Set(chosen.map(\.id))
+            for ex in fallback where chosen.count < C.targetExerciseCount {
+                if let match = catalog.first(where: { $0.id == ex.exerciseId }), !existing.contains(match.id) {
+                    chosen.append(match)
+                }
+            }
+        }
+        guard !chosen.isEmpty else {
+            return try suggestFrequentStrength(flat: flat, catalog: catalog, source: source, exerciseLanguage: exerciseLanguage, ctx: ctx)
+        }
+        return buildStrengthResultList(chosen: chosen, flat: flat, catalog: catalog, exerciseLanguage: exerciseLanguage, ctx: ctx)
+    }
+    
+    private static func latestMaxWeight(for exerciseId: Int64, flat: [FlatSet]) -> Double {
+        guard let wid = latestWorkoutId(forExercise: exerciseId, flat: flat) else { return 0 }
+        let weights = flat.filter { $0.exerciseId == exerciseId && $0.workoutId == wid }
+            .compactMap { $0.weightKg }.map { NSDecimalNumber(decimal: $0).doubleValue }
+        return weights.max() ?? 0
+    }
+    
+    private static func buildStrengthResultList(
+        chosen: [Exercise],
+        flat: [FlatSet],
+        catalog: [Exercise],
+        exerciseLanguage: ExerciseLanguage,
+        ctx: WorkoutRecommendationContext
+    ) -> [StrengthRecommendationExercise] {
         var result: [StrengthRecommendationExercise] = []
-        for ex in chosen.prefix(targetExerciseCount) {
+        for ex in chosen {
             let name = ex.localizedName(for: exerciseLanguage)
-            var setsOut = buildSetsForExercise(exerciseId: ex.id, flat: flat, muscle: ex.muscle_primary)
+            var setsOut = buildSetsForExercise(exerciseId: ex.id, flat: flat, muscle: ex.muscle_primary, ctx: ctx)
             if setsOut.isEmpty {
-                let w = suggestWeight(exerciseId: ex.id, flat: flat)
+                let w = suggestWeight(exerciseId: ex.id, flat: flat, ctx: ctx)
                 let rpe: Double? = 8
-                setsOut = (1...defaultSetsPerExercise).map { sn in
-                    StrengthRecommendationSet(setNumber: sn, reps: defaultReps, weightKg: w, rpe: rpe, restSec: defaultRestBetweenSetsSec)
+                setsOut = (1...C.defaultSetsPerExercise).map { sn in
+                    StrengthRecommendationSet(setNumber: sn, reps: C.defaultReps, weightKg: w, rpe: rpe, restSec: C.defaultRestBetweenSetsSec)
                 }
             }
             result.append(StrengthRecommendationExercise(
@@ -382,76 +582,80 @@ enum WorkoutRecommendationService {
                 sets: setsOut
             ))
         }
-        
-        if result.isEmpty { throw WorkoutRecommendationError.loadFailed("Could not build a session.") }
         return result
+    }
+    
+    private static func timeWeightedSetCount(flat: [FlatSet]) -> [String: Double] {
+        let now = Date()
+        var counts: [String: Double] = [:]
+        for s in flat {
+            let m = normMuscle(s.musclePrimary)
+            guard !m.isEmpty, m != "cardio" else { continue }
+            let days = max(0, now.timeIntervalSince(s.startedAt ?? now) / 86400)
+            let weight = exp(-days / 7.0)
+            counts[m, default: 0] += weight
+        }
+        return counts
+    }
+    
+    private static func recentlyTrainedMuscles(flat: [FlatSet]) -> Set<String> {
+        let cutoff = Date().addingTimeInterval(-Double(C.recoveryDeprioritizeHours) * 3600)
+        var out = Set<String>()
+        for s in flat {
+            guard let st = s.startedAt, st >= cutoff else { continue }
+            let m = normMuscle(s.musclePrimary)
+            if !m.isEmpty, m != "cardio" { out.insert(m) }
+        }
+        return out
     }
     
     private static func suggestBalancedStrength(
         flat: [FlatSet],
         catalog: [Exercise],
         source: RecommendationDataSource,
-        exerciseLanguage: ExerciseLanguage
+        exerciseLanguage: ExerciseLanguage,
+        ctx: WorkoutRecommendationContext
     ) throws -> [StrengthRecommendationExercise] {
-        var muscleSetCounts: [String: Int] = [:]
-        for s in flat {
-            let m = normMuscle(s.musclePrimary)
-            guard !m.isEmpty, m != "cardio" else { continue }
-            muscleSetCounts[m, default: 0] += 1
-        }
+        let muscleSetCounts = timeWeightedSetCount(flat: flat)
+        let recentMuscles = recentlyTrainedMuscles(flat: flat)
         
         let sortedMuscles = muscleSetCounts.keys.sorted { muscleSetCounts[$0]! < muscleSetCounts[$1]! }
         let targetMuscles: Set<String> = {
             if sortedMuscles.isEmpty {
                 return Set(catalog.map { normMuscle($0.muscle_primary) }.filter { !$0.isEmpty && $0 != "cardio" })
             }
-            return Set(sortedMuscles.prefix(min(3, sortedMuscles.count)))
+            let preferred = sortedMuscles.filter { !recentMuscles.contains($0) }
+            let base = preferred.isEmpty ? sortedMuscles : preferred
+            return Set(base.prefix(min(3, base.count)))
         }()
         
         let historyIds = Set(flat.map(\.exerciseId))
-        let pool: [Exercise] = {
-            switch source {
-            case .recentHistory, .hyrox, .hyroxRace: return catalog.filter { historyIds.contains($0.id) }
-            case .fullCatalog: return catalog
-            }
-        }()
+        let pool = exercisePool(catalog: catalog, source: source, historyIds: historyIds, ctx: ctx)
         
         let filtered = pool.filter { targetMuscles.contains(normMuscle($0.muscle_primary)) }
         let pickPool = filtered.isEmpty ? pool : filtered
         
         var chosen: [Exercise] = []
         var used = Set<Int64>()
-        let shuffled = pickPool.shuffled()
+        let shuffled = WorkoutRecommendationConstants.biasedShuffle(pickPool) { ctx.favoriteExerciseIds.contains($0.id) }
         for ex in shuffled {
             guard used.insert(ex.id).inserted else { continue }
             chosen.append(ex)
-            if chosen.count >= targetExerciseCount { break }
+            if chosen.count >= C.targetExerciseCount { break }
         }
-        if chosen.count < targetExerciseCount {
-            for ex in pool where chosen.count < targetExerciseCount {
+        if chosen.count < C.targetExerciseCount {
+            for ex in pool where chosen.count < C.targetExerciseCount {
                 if used.insert(ex.id).inserted { chosen.append(ex) }
             }
         }
         
-        var result: [StrengthRecommendationExercise] = []
-        for ex in chosen.prefix(targetExerciseCount) {
-            let name = ex.localizedName(for: exerciseLanguage)
-            var setsOut = buildSetsForExercise(exerciseId: ex.id, flat: flat, muscle: ex.muscle_primary)
-            if setsOut.isEmpty {
-                let w = suggestWeight(exerciseId: ex.id, flat: flat)
-                let rpe: Double? = 8
-                setsOut = (1...defaultSetsPerExercise).map { sn in
-                    StrengthRecommendationSet(setNumber: sn, reps: defaultReps, weightKg: w, rpe: rpe, restSec: defaultRestBetweenSetsSec)
-                }
-            }
-            result.append(StrengthRecommendationExercise(
-                exerciseId: ex.id,
-                displayName: name,
-                musclePrimary: ex.muscle_primary,
-                sets: setsOut
-            ))
-        }
-        
+        let result = buildStrengthResultList(
+            chosen: chosen.prefix(C.targetExerciseCount).map { $0 },
+            flat: flat,
+            catalog: catalog,
+            exerciseLanguage: exerciseLanguage,
+            ctx: ctx
+        )
         if result.isEmpty { throw WorkoutRecommendationError.loadFailed("Could not build a session.") }
         return result
     }
@@ -459,7 +663,8 @@ enum WorkoutRecommendationService {
     private static func buildSetsForExercise(
         exerciseId: Int64,
         flat: [FlatSet],
-        muscle: String?
+        muscle: String?,
+        ctx: WorkoutRecommendationContext
     ) -> [StrengthRecommendationSet] {
         guard let latestWid = latestWorkoutId(forExercise: exerciseId, flat: flat) else { return [] }
         let rawLast = flat.filter { $0.exerciseId == exerciseId && $0.workoutId == latestWid }
@@ -472,7 +677,8 @@ enum WorkoutRecommendationService {
         let rpes = inLast.compactMap { $0.rpe }.map { NSDecimalNumber(decimal: $0).doubleValue }
         let avgRpe = rpes.isEmpty ? 8.0 : rpes.reduce(0, +) / Double(rpes.count)
         
-        let fallbackW = suggestWeight(exerciseId: exerciseId, flat: flat)
+        let fallbackW = suggestWeight(exerciseId: exerciseId, flat: flat, ctx: ctx)
+        let prCap = ctx.prMaxWeightByExerciseId[exerciseId].map { $0 + C.prCapIncrementKg }
         var carryTemplate = 0.0
         let withWeight: [StrengthRecommendationSet] = inLast.map { s in
             var template = decimalToDouble(s.weightKg)
@@ -481,44 +687,51 @@ enum WorkoutRecommendationService {
             } else {
                 carryTemplate = template
             }
-            let adj = adjustWeight(base: template, avgRpe: avgRpe)
-            let reps = max(minRecommendedReps, min(maxRecommendedReps, s.reps ?? defaultReps))
+            var adj = adjustWeight(base: template, avgRpe: avgRpe)
+            if let cap = prCap { adj = min(adj, cap) }
+            let reps = max(C.minRecommendedReps, min(C.maxRecommendedReps, s.reps ?? C.defaultReps))
             let rpeOut = s.rpe.map { NSDecimalNumber(decimal: $0).doubleValue }
             return StrengthRecommendationSet(
                 setNumber: s.setNumber,
                 reps: reps,
-                weightKg: roundToHalf(adj),
+                weightKg: C.roundToHalf(adj),
                 rpe: rpeOut,
-                restSec: s.restSec ?? defaultRestBetweenSetsSec
+                restSec: s.restSec ?? C.defaultRestBetweenSetsSec
             )
         }
         
         return adjustVolumeForRpe(sets: withWeight, avgRpe: avgRpe)
     }
     
-    private static func suggestWeight(exerciseId: Int64, flat: [FlatSet]) -> Double {
-        guard let latestWid = latestWorkoutId(forExercise: exerciseId, flat: flat) else { return 20 }
+    private static func suggestWeight(exerciseId: Int64, flat: [FlatSet], ctx: WorkoutRecommendationContext) -> Double {
+        guard let latestWid = latestWorkoutId(forExercise: exerciseId, flat: flat) else {
+            return ctx.defaultColdStartWeightKg()
+        }
         let slice = flat.filter { $0.exerciseId == exerciseId && $0.workoutId == latestWid && $0.weightKg != nil }
         let weights = slice.compactMap { $0.weightKg }.map { NSDecimalNumber(decimal: $0).doubleValue }
         guard !weights.isEmpty else {
             let any = flat.filter { $0.exerciseId == exerciseId && $0.weightKg != nil }
             let fallback = any.compactMap { $0.weightKg }.map { NSDecimalNumber(decimal: $0).doubleValue }
-            return roundToHalf(fallback.max() ?? 20)
+            return C.roundToHalf(fallback.max() ?? ctx.defaultColdStartWeightKg())
         }
-        let base = weights.max() ?? 20
+        let base = weights.max() ?? ctx.defaultColdStartWeightKg()
         let rpes = slice.compactMap { $0.rpe }.map { NSDecimalNumber(decimal: $0).doubleValue }
         let avgRpe = rpes.isEmpty ? 8.0 : rpes.reduce(0, +) / Double(rpes.count)
-        return roundToHalf(adjustWeight(base: base, avgRpe: avgRpe))
+        var adj = adjustWeight(base: base, avgRpe: avgRpe)
+        if let pr = ctx.prMaxWeightByExerciseId[exerciseId] {
+            adj = min(adj, pr + C.prCapIncrementKg)
+        }
+        return C.roundToHalf(adj)
     }
     
     private static func adjustWeight(base: Double, avgRpe: Double) -> Double {
-        if avgRpe < 8 { return base + 2.5 }
-        if avgRpe >= 9 { return max(0, base - 2.5) }
+        if avgRpe < 8 { return base + C.rpeWeightDeltaKg }
+        if avgRpe >= 9 { return max(0, base - C.rpeWeightDeltaKg) }
         return base
     }
     
     private static func roundToHalf(_ x: Double) -> Double {
-        (x * 2).rounded() / 2
+        C.roundToHalf(x)
     }
     
     private static func beginnerCardioRecommendation(activity: CardioActivityType, rationale: String) -> CardioRecommendation {
@@ -629,7 +842,8 @@ enum WorkoutRecommendationService {
         )
     }
     
-    static func recommendCardio(userId: UUID, source: RecommendationDataSource) async throws -> CardioRecommendation {
+    static func recommendCardio(userId: UUID, source: RecommendationDataSource, networkInspired: Bool = false) async throws -> CardioRecommendation {
+        let ctx = await WorkoutRecommendationContext.load(userId: userId, catalog: [], includeNetwork: networkInspired || source == .networkInspired)
         let client = SupabaseManager.shared.client
         let decoder = JSONDecoder.supabase()
         
@@ -641,14 +855,31 @@ enum WorkoutRecommendationService {
             .eq("kind", value: "cardio")
             .eq("state", value: "published")
             .order("started_at", ascending: false)
-            .limit(lookbackCount)
+            .limit(C.lookbackCount)
             .execute()
         let wRows = try decoder.decode([WRow].self, from: wRes.data)
         if wRows.isEmpty {
-            if source == .fullCatalog {
-                return beginnerCardioRecommendation(
+            if source == .fullCatalog || source == .networkInspired {
+                var rec = beginnerCardioRecommendation(
                     activity: .walk,
-                    rationale: "You don’t have cardio workouts in your history yet. These are easy starter targets (conversation-pace effort)—adjust any field in the form."
+                    rationale: "You don't have cardio workouts in your history yet. These are easy starter targets (conversation-pace effort)—adjust any field in the form."
+                )
+                rec = scaledCardio(rec, ctx: ctx)
+                return CardioRecommendation(
+                    activity: rec.activity,
+                    durationSec: rec.durationSec,
+                    distanceKm: rec.distanceKm,
+                    elevationGainM: rec.elevationGainM,
+                    avgHr: rec.avgHr,
+                    maxHr: rec.maxHr,
+                    inclinePercent: rec.inclinePercent,
+                    cadenceRpm: rec.cadenceRpm,
+                    wattsAvg: rec.wattsAvg,
+                    splitSecPer500m: rec.splitSecPer500m,
+                    swimLaps: rec.swimLaps,
+                    poolLengthM: rec.poolLengthM,
+                    swimStyle: rec.swimStyle,
+                    rationale: ctx.appendGoalLine(to: rec.rationale)
                 )
             }
             throw WorkoutRecommendationError.noWorkoutsInWindow
@@ -727,9 +958,9 @@ enum WorkoutRecommendationService {
         
         let candidateCodes: [String] = {
             switch source {
-            case .recentHistory, .hyrox, .hyroxRace:
+            case .recentHistory, .hyrox, .hyroxRace, .myRoutines:
                 return Array(Set(sessions.map(\.code)))
-            case .fullCatalog:
+            case .fullCatalog, .networkInspired:
                 return CardioActivityType.allCases.map(\.rawValue)
             }
         }()
@@ -763,6 +994,7 @@ enum WorkoutRecommendationService {
         
         var statsBySession: [Int: CardioStatsWire.StatsPayload] = [:]
         let statsSessionIds = usedCrossActivityFallback ? sessions.map(\.id) : matching.map(\.id)
+        var statsLoadNote: String?
         if !statsSessionIds.isEmpty {
             do {
                 let stRes = try await client
@@ -775,6 +1007,7 @@ enum WorkoutRecommendationService {
                     if let st = r.stats { statsBySession[r.session_id] = st }
                 }
             } catch {
+                statsLoadNote = "Some activity stats were unavailable; core duration and distance still apply."
             }
         }
         
@@ -800,13 +1033,16 @@ enum WorkoutRecommendationService {
             ? scalarPool.compactMap { statsBySession[$0.id]?.swim_style }.first { !$0.isEmpty }
             : nil
         
-        var rationale = "Among \(source == .fullCatalog ? "all app activities" : "activities you logged"), this one was least frequent in your last \(lookbackCount) cardio workouts."
+        var rationale = "Among \(source == .fullCatalog || source == .networkInspired ? "all app activities" : "activities you logged"), this one was least frequent in your last \(C.lookbackCount) cardio workouts."
         if usedCrossActivityFallback {
-            rationale += " Values are estimated from your other cardio in this window, since you haven’t logged this activity yet."
+            rationale += " Values are estimated from your other cardio in this window, since you haven't logged this activity yet."
         }
+        if let statsLoadNote { rationale += " \(statsLoadNote)" }
+        rationale = ctx.appendGoalLine(to: rationale)
+        let scaledDur = Int(Double(medianDur) * ctx.cardioDurationMultiplier())
         return CardioRecommendation(
             activity: activity,
-            durationSec: medianDur,
+            durationSec: scaledDur,
             distanceKm: medianDist,
             elevationGainM: medianElev,
             avgHr: medAvgHr,
@@ -822,7 +1058,32 @@ enum WorkoutRecommendationService {
         )
     }
     
-    static func recommendSport(userId: UUID, source: RecommendationDataSource) async throws -> SportRecommendation {
+    private static func scaledCardio(_ rec: CardioRecommendation, ctx: WorkoutRecommendationContext) -> CardioRecommendation {
+        let mult = ctx.cardioDurationMultiplier()
+        guard mult != 1.0 else { return rec }
+        return CardioRecommendation(
+            activity: rec.activity,
+            durationSec: Int(Double(rec.durationSec) * mult),
+            distanceKm: rec.distanceKm.map { $0 * mult },
+            elevationGainM: rec.elevationGainM,
+            avgHr: rec.avgHr,
+            maxHr: rec.maxHr,
+            inclinePercent: rec.inclinePercent,
+            cadenceRpm: rec.cadenceRpm,
+            wattsAvg: rec.wattsAvg,
+            splitSecPer500m: rec.splitSecPer500m,
+            swimLaps: rec.swimLaps,
+            poolLengthM: rec.poolLengthM,
+            swimStyle: rec.swimStyle,
+            rationale: rec.rationale
+        )
+    }
+    
+    static func recommendSport(userId: UUID, source: RecommendationDataSource, networkInspired: Bool = false) async throws -> SportRecommendation {
+        if source == .myRoutines {
+            return try await recommendFromSavedHyroxRoutine(userId: userId)
+        }
+        let ctx = await WorkoutRecommendationContext.load(userId: userId, catalog: [], includeNetwork: networkInspired)
         let client = SupabaseManager.shared.client
         let decoder = JSONDecoder.supabase()
         
@@ -834,14 +1095,14 @@ enum WorkoutRecommendationService {
             .eq("kind", value: "sport")
             .eq("state", value: "published")
             .order("started_at", ascending: false)
-            .limit(lookbackCount)
+            .limit(C.lookbackCount)
             .execute()
         let wRows = try decoder.decode([WRow].self, from: wRes.data)
         if wRows.isEmpty {
             if source == .fullCatalog {
                 return .durationOnly(
                     durationMin: 60,
-                    rationale: "You don’t have sport workouts in your history yet. Here’s a session length you can use with any sport—adjust as you like."
+                    rationale: ctx.appendGoalLine(to: "You don't have sport workouts in your history yet. Here's a session length you can use with any sport—adjust as you like.")
                 )
             }
             if source == .hyrox {
@@ -934,9 +1195,9 @@ enum WorkoutRecommendationService {
         
         let candidates: [String] = {
             switch source {
-            case .recentHistory:
+            case .recentHistory, .myRoutines:
                 return Array(Set(sessions.map(\.sport)))
-            case .fullCatalog:
+            case .fullCatalog, .networkInspired:
                 return SportType.allCases.map(\.rawValue)
             case .hyrox, .hyroxRace:
                 return []
@@ -953,11 +1214,10 @@ enum WorkoutRecommendationService {
         let matchMins = matching.map(\.durationMin)
         let medianMin = medianSportMinutes(matchMins.isEmpty ? allMins : matchMins)
         
-        let baseRationale = "Among \(source == .recentHistory ? "sports you logged" : "all app sports"), this one was least frequent in your last \(lookbackCount) sessions."
+        let baseRationale = "Among \(source == .recentHistory ? "sports you logged" : "all app sports"), this one was least frequent in your last \(C.lookbackCount) sessions."
         
         guard raw == SportType.hyrox.rawValue else {
-            var rationale = baseRationale
-            rationale += " Suggested session length only—choose whichever sport fits in the form."
+            var rationale = ctx.appendGoalLine(to: baseRationale + " Suggested session length only—choose whichever sport fits in the form.")
             return .durationOnly(durationMin: medianMin, rationale: rationale)
         }
         
@@ -977,13 +1237,73 @@ enum WorkoutRecommendationService {
         }
         
         let exercises = buildHyroxExerciseRecommendations(from: exRows)
-        var rationale = baseRationale
+        var rationale = ctx.appendGoalLine(to: baseRationale)
         if exRows.isEmpty {
-            rationale += " No Hyrox stations in your history yet—here’s a starter template you can edit."
+            rationale += " No Hyrox stations in your history yet—here's a starter template you can edit."
         } else {
-            rationale += " Stations lean on ones you’ve logged less often, using typical numbers from your Hyrox sessions."
+            rationale += " Stations lean on ones you've logged less often, using typical numbers from your Hyrox sessions."
         }
         return .hyrox(durationMin: medianMin, exercises: exercises, rationale: rationale)
+    }
+    
+    private static func recommendFromSavedHyroxRoutine(userId: UUID) async throws -> SportRecommendation {
+        let client = SupabaseManager.shared.client
+        struct RoutineListRow: Decodable { let id: Int64; let name: String }
+        struct HyroxExWire: Decodable {
+            let exercise_code: String
+            let exercise_order: Int
+            let distance_m: Int?
+            let reps: Int?
+            let weight_kg: Double?
+            let duration_sec: Int?
+            let height_cm: Int?
+            let implement_count: Int?
+            let exercise_display_name: String?
+            let notes: String?
+        }
+        struct RoutineDetail: Decodable {
+            let name: String
+            let hyrox_routine_exercises: [HyroxExWire]?
+        }
+        let rRes = try await client
+            .from("hyrox_routines")
+            .select("id, name")
+            .eq("user_id", value: userId.uuidString)
+            .order("updated_at", ascending: true)
+            .execute()
+        struct IdName: Decodable { let id: Int64; let name: String }
+        let rows = try JSONDecoder.supabase().decode([IdName].self, from: rRes.data)
+        guard let picked = rows.randomElement() else {
+            throw WorkoutRecommendationError.loadFailed("Save a Hyrox routine first, or pick another data source.")
+        }
+        let detailRes = try await client
+            .from("hyrox_routines")
+            .select("name, hyrox_routine_exercises(exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name, notes)")
+            .eq("id", value: Int(picked.id))
+            .single()
+            .execute()
+        let detail = try JSONDecoder.supabase().decode(RoutineDetail.self, from: detailRes.data)
+        let ordered = (detail.hyrox_routine_exercises ?? []).sorted { $0.exercise_order < $1.exercise_order }
+        let exercises = ordered.map { ex in
+            HyroxExerciseRecommendation(
+                exerciseCode: ex.exercise_code,
+                customDisplayName: ex.exercise_display_name ?? "",
+                exerciseOrder: ex.exercise_order,
+                distanceM: ex.distance_m,
+                reps: ex.reps,
+                weightKg: ex.weight_kg,
+                durationSec: ex.duration_sec,
+                heightCm: ex.height_cm,
+                implementCount: ex.implement_count,
+                notes: ex.notes
+            )
+        }.map { HyroxExerciseFormatting.sanitizeHyroxExerciseRecommendation($0) }
+        let durationMin = max(35, min(120, exercises.count * 8))
+        return .hyrox(
+            durationMin: durationMin,
+            exercises: exercises.isEmpty ? hyroxColdStartExercises() : exercises,
+            rationale: "Loaded from your Hyrox routine \"\(detail.name)\"."
+        )
     }
     
     private static func hyroxSportRecommendation(
@@ -1014,7 +1334,7 @@ enum WorkoutRecommendationService {
         let exercises = buildHyroxExerciseRecommendations(from: exRows)
         let rationale: String = {
             if hyroxSessions.isEmpty {
-                return "No Hyrox in your last \(lookbackCount) sport sessions—duration reflects your other sports. Here’s a short race-style starter (runs + stations) you can edit."
+                return "No Hyrox in your last \(C.lookbackCount) sport sessions—duration reflects your other sports. Here's a short race-style starter (runs + stations) you can edit."
             }
             if exRows.isEmpty {
                 return "Hyrox duration from your recent Hyrox sessions; station list is a starter template until you log station details."

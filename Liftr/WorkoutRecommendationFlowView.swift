@@ -17,11 +17,14 @@ struct WorkoutRecommendationFlowView: View {
     
     @State private var source: RecommendationDataSource = .recentHistory
     @State private var strengthMode: StrengthSuggestionMode = .prioritizeUndertrainedMuscles
+    @AppStorage("workoutRecommendNetworkInspired") private var networkInspired = false
+    @State private var lastStrengthOutput: StrengthRecommendationOutput?
+    @State private var excludeRoutineId: Int64?
     
     private enum Phase {
         case questions
         case loading
-        case resultStrength([StrengthRecommendationExercise])
+        case resultStrength(StrengthRecommendationOutput)
         case resultCardio(CardioRecommendation)
         case resultSport(SportRecommendation)
     }
@@ -39,8 +42,8 @@ struct WorkoutRecommendationFlowView: View {
                 case .loading:
                     ProgressView("Building suggestion…")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                case .resultStrength(let rows):
-                    resultStrengthView(rows)
+                case .resultStrength(let output):
+                    resultStrengthView(output)
                 case .resultCardio(let r):
                     resultCardioView(r)
                 case .resultSport(let r):
@@ -61,9 +64,11 @@ struct WorkoutRecommendationFlowView: View {
     private var dataSourcesForKind: [RecommendationDataSource] {
         switch workoutKind {
         case .sport:
-            return RecommendationDataSource.allCases
-        case .strength, .cardio:
+            return RecommendationDataSource.allCases.filter { $0 != .networkInspired }
+        case .strength:
             return RecommendationDataSource.allCases.filter { $0 != .hyrox && $0 != .hyroxRace }
+        case .cardio:
+            return RecommendationDataSource.allCases.filter { $0 != .hyrox && $0 != .hyroxRace && $0 != .myRoutines }
         }
     }
     
@@ -116,6 +121,24 @@ struct WorkoutRecommendationFlowView: View {
                 Text("DATA SOURCE").foregroundStyle(.secondary)
             }
             .listRowBackground(Color.clear)
+            
+            if workoutKind == .strength || workoutKind == .cardio {
+                Section {
+                    SectionCard {
+                        Toggle(isOn: $networkInspired) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Include network trends")
+                                Text("When on, \"Inspired by my network\" and other modes can use anonymous exercise trends from people you follow (last 7 days).")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("NETWORK (OPTIONAL)").foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.clear)
+            }
             
             if workoutKind == .strength {
                 Section {
@@ -175,30 +198,59 @@ struct WorkoutRecommendationFlowView: View {
     }
     
     @MainActor
-    private func runRecommendation() async {
+    private func runRecommendation(regenerate: Bool = false) async {
         guard let uid = app.userId else {
             errorMessage = WorkoutRecommendationError.notSignedIn.localizedDescription
             showError = true
             return
         }
+        if regenerate, case .resultStrength(let out) = phase, let name = out.routineName {
+            struct RoutineListRow: Decodable { let id: Int64; let name: String }
+            if let rRes = try? await SupabaseManager.shared.client
+                .from("strength_routines")
+                .select("id, name")
+                .eq("user_id", value: uid.uuidString)
+                .eq("name", value: name)
+                .limit(1)
+                .execute(),
+               let rows = try? JSONDecoder.supabase().decode([RoutineListRow].self, from: rRes.data),
+               let id = rows.first?.id {
+                excludeRoutineId = id
+            }
+        }
         phase = .loading
         errorMessage = nil
+        let effectiveSource: RecommendationDataSource = {
+            if networkInspired && source == .recentHistory { return .networkInspired }
+            return source
+        }()
         do {
             switch workoutKind {
             case .strength:
-                let rows = try await WorkoutRecommendationService.recommendStrength(
+                let output = try await WorkoutRecommendationService.recommendStrength(
                     userId: uid,
-                    source: source,
+                    source: effectiveSource,
                     mode: strengthMode,
                     catalog: catalog,
-                    exerciseLanguage: exerciseLanguage
+                    exerciseLanguage: exerciseLanguage,
+                    networkInspired: networkInspired,
+                    excludeRoutineId: excludeRoutineId
                 )
-                phase = .resultStrength(rows)
+                lastStrengthOutput = output
+                phase = .resultStrength(output)
             case .cardio:
-                let r = try await WorkoutRecommendationService.recommendCardio(userId: uid, source: source)
+                let r = try await WorkoutRecommendationService.recommendCardio(
+                    userId: uid,
+                    source: effectiveSource,
+                    networkInspired: networkInspired
+                )
                 phase = .resultCardio(r)
             case .sport:
-                let r = try await WorkoutRecommendationService.recommendSport(userId: uid, source: source)
+                let r = try await WorkoutRecommendationService.recommendSport(
+                    userId: uid,
+                    source: effectiveSource,
+                    networkInspired: networkInspired
+                )
                 phase = .resultSport(r)
             }
         } catch let e as WorkoutRecommendationError {
@@ -212,8 +264,36 @@ struct WorkoutRecommendationFlowView: View {
         }
     }
     
-    private func resultStrengthView(_ rows: [StrengthRecommendationExercise]) -> some View {
-        Form {
+    private func resultStrengthView(_ output: StrengthRecommendationOutput) -> some View {
+        let rows = output.exercises
+        return Form {
+            if let rationale = output.sessionRationale, !rationale.isEmpty {
+                Section {
+                    SectionCard {
+                        Text(rationale)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .listRowBackground(Color.clear)
+            }
+            if !output.muscleFreshness.isEmpty {
+                Section {
+                    SectionCard {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(output.muscleFreshness) { chip in
+                                Text("\(chip.muscle): \(chip.status.rawValue)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("MUSCLE FRESHNESS").foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.clear)
+            }
             Section {
                 SectionCard {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { idx, ex in
@@ -256,6 +336,16 @@ struct WorkoutRecommendationFlowView: View {
                         dismiss()
                     } label: {
                         Text("Apply to form")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Divider().padding(.vertical, 6)
+                    
+                    Button {
+                        Task { await runRecommendation(regenerate: true) }
+                    } label: {
+                        Text(output.routineName != nil ? "Pick another routine" : "Regenerate")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.plain)
@@ -407,6 +497,16 @@ struct WorkoutRecommendationFlowView: View {
                     Divider().padding(.vertical, 6)
                     
                     Button {
+                        Task { await runRecommendation(regenerate: true) }
+                    } label: {
+                        Text("Regenerate")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Divider().padding(.vertical, 6)
+                    
+                    Button {
                         phase = .questions
                     } label: {
                         Text("Back to options")
@@ -480,6 +580,16 @@ struct WorkoutRecommendationFlowView: View {
                         dismiss()
                     } label: {
                         Text("Apply to form")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Divider().padding(.vertical, 6)
+                    
+                    Button {
+                        Task { await runRecommendation(regenerate: true) }
+                    } label: {
+                        Text("Regenerate")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.plain)

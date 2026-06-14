@@ -2,6 +2,13 @@ import CoreLocation
 import Foundation
 import Supabase
 
+struct TerritoryRpcResult<Value> {
+    let value: Value
+    let errorMessage: String?
+
+    var failed: Bool { errorMessage != nil }
+}
+
 struct TerritoryBBox: Decodable, Hashable {
     let min_lat: Double?
     let min_lon: Double?
@@ -518,7 +525,7 @@ enum TerritoryCaptureClient {
         query: String? = nil,
         ownedFirst: Bool = true,
         limit: Int = 200
-    ) async -> [TerritoryCityRegionRow] {
+    ) async -> TerritoryRpcResult<[TerritoryCityRegionRow]> {
         struct Params: Encodable {
             let p_query: String?
             let p_limit: Int
@@ -536,10 +543,10 @@ enum TerritoryCaptureClient {
                 )
                 .execute()
             let rows = try JSONDecoder.supabase().decode([TerritoryCityRegionRow].self, from: res.data)
-            return deduplicatedTerritoryCities(rows)
+            return TerritoryRpcResult(value: deduplicatedTerritoryCities(rows), errorMessage: nil)
         } catch {
             logTerritoryShare("city regions fetch failed error=\(error.localizedDescription)")
-            return []
+            return TerritoryRpcResult(value: [], errorMessage: error.localizedDescription)
         }
     }
 
@@ -664,6 +671,10 @@ enum TerritoryCaptureClient {
         cityKey?.hasPrefix("pending:") == true
     }
 
+    static func displayableTerritoryCities(_ cities: [TerritoryCityRegionRow]) -> [TerritoryCityRegionRow] {
+        cities.filter { !isPendingTerritoryCityKey($0.city_key) }
+    }
+
     static func pendingResolveCoordinates(for city: TerritoryCityRegionRow) -> (lat: Double, lon: Double)? {
         if let cityKey = city.city_key, isPendingTerritoryCityKey(cityKey) {
             let parts = cityKey.split(separator: ":", omittingEmptySubsequences: false)
@@ -718,7 +729,7 @@ enum TerritoryCaptureClient {
     ) async -> [TerritoryCityRegionRow] {
         let started = Date()
         let deadline = started.addingTimeInterval(timeBudgetSeconds)
-        var refreshed = await fetchTerritoryCityRegions()
+        var refreshed = await fetchTerritoryCityRegions().value
         var batchesRun = 0
         while batchesRun < maxBatches, Date() < deadline {
             let pending = refreshed.filter { isPendingTerritoryCityKey($0.city_key) }
@@ -736,11 +747,16 @@ enum TerritoryCaptureClient {
                     try? await Task.sleep(nanoseconds: 800_000_000)
                 }
             }
-            refreshed = await fetchTerritoryCityRegions()
+            refreshed = await fetchTerritoryCityRegions().value
             if let onUpdate {
                 await onUpdate(refreshed)
             }
             batchesRun += 1
+        }
+        _ = await reconcileUnassignedTerritoryCells()
+        refreshed = await fetchTerritoryCityRegions().value
+        if let onUpdate {
+            await onUpdate(refreshed)
         }
         let remainingPending = refreshed.filter { isPendingTerritoryCityKey($0.city_key) }.count
         let elapsedMs = Int(Date().timeIntervalSince(started) * 1000)
@@ -768,7 +784,7 @@ enum TerritoryCaptureClient {
         cityKey: String,
         scope: String = "global",
         limit: Int = 100
-    ) async -> [TerritoryShareLeaderRow] {
+    ) async -> TerritoryRpcResult<[TerritoryShareLeaderRow]> {
         let params = TerritoryCityShareLeaderboardParams(
             p_city_key: cityKey,
             p_scope: scope,
@@ -778,9 +794,11 @@ enum TerritoryCaptureClient {
             let res = try await SupabaseManager.shared.client
                 .rpc("get_territory_city_share_leaderboard_v1", params: params)
                 .execute()
-            return try JSONDecoder.supabase().decode([TerritoryShareLeaderRow].self, from: res.data)
+            let rows = try JSONDecoder.supabase().decode([TerritoryShareLeaderRow].self, from: res.data)
+            return TerritoryRpcResult(value: rows, errorMessage: nil)
         } catch {
-            return []
+            logTerritoryShare("leaderboard fetch failed error=\(error.localizedDescription)")
+            return TerritoryRpcResult(value: [], errorMessage: error.localizedDescription)
         }
     }
 
@@ -810,9 +828,9 @@ enum TerritoryCaptureClient {
     }
 
     static func fetchTerritoryShareLeaderboard(scope: String = "global", limit: Int = 100) async -> [TerritoryShareLeaderRow] {
-        let cities = await fetchTerritoryCityRegions()
+        let cities = await fetchTerritoryCityRegions().value
         guard let cityKey = cities.first?.city_key, !cityKey.isEmpty else { return [] }
-        return await fetchTerritoryCityShareLeaderboard(cityKey: cityKey, scope: scope, limit: limit)
+        return await fetchTerritoryCityShareLeaderboard(cityKey: cityKey, scope: scope, limit: limit).value
     }
 
     static func preferredCityKey(
@@ -872,6 +890,29 @@ enum TerritoryCaptureClient {
                 processQueue: true,
                 runAssignmentBackfill: false
             )
+        }
+    }
+
+    private static func reconcileUnassignedTerritoryCells(limit: Int = 500) async -> Bool {
+        struct Params: Encodable {
+            let p_limit: Int
+        }
+        struct Response: Decodable {
+            let ok: Bool?
+            let updated: Int?
+        }
+        do {
+            let res = try await SupabaseManager.shared.client
+                .rpc("reconcile_unassigned_territory_cells_v1", params: Params(p_limit: limit))
+                .execute()
+            let decoded = try JSONDecoder.supabase().decode(Response.self, from: res.data)
+            if let updated = decoded.updated, updated > 0 {
+                logTerritoryShare("reconcile unassigned cells updated=\(updated)")
+            }
+            return decoded.ok == true
+        } catch {
+            logTerritoryShare("reconcile unassigned cells failed error=\(error.localizedDescription)")
+            return false
         }
     }
 

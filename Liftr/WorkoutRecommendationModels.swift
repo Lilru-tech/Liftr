@@ -3,6 +3,8 @@ import Foundation
 enum RecommendationDataSource: String, CaseIterable, Identifiable {
     case recentHistory
     case fullCatalog
+    case myRoutines
+    case networkInspired
     case hyrox
     case hyroxRace
     
@@ -12,6 +14,8 @@ enum RecommendationDataSource: String, CaseIterable, Identifiable {
         switch self {
         case .recentHistory: return "My last 10 workouts"
         case .fullCatalog: return "Full app catalog"
+        case .myRoutines: return "My saved routines"
+        case .networkInspired: return "Inspired by my network"
         case .hyrox: return "Hyrox — mixed"
         case .hyroxRace: return "Hyrox — race format"
         }
@@ -23,8 +27,12 @@ enum RecommendationDataSource: String, CaseIterable, Identifiable {
             return "Only exercises or activities you have already logged in your recent training."
         case .fullCatalog:
             return "Include any exercise or activity from the app, not only what you have used before."
+        case .myRoutines:
+            return "Loads a saved strength or Hyrox routine you can swap before applying."
+        case .networkInspired:
+            return "Popular lifts among people you follow in the last 7 days—blended with your history for sets and loads."
         case .hyrox:
-            return "Picks stations you’ve trained less in your recent Hyrox sessions and suggests typical distances, loads, and reps for each."
+            return "Picks stations you've trained less in your recent Hyrox sessions and suggests typical distances, loads, and reps for each."
         case .hyroxRace:
             return "Like race day: easy run, then each official station in order, repeated. Run length, how many stations, and loads adapt to you."
         }
@@ -34,6 +42,7 @@ enum RecommendationDataSource: String, CaseIterable, Identifiable {
 enum StrengthSuggestionMode: String, CaseIterable, Identifiable {
     case prioritizeUndertrainedMuscles
     case prioritizeFrequentLifts
+    case chasePRs
     
     var id: String { rawValue }
     
@@ -43,20 +52,24 @@ enum StrengthSuggestionMode: String, CaseIterable, Identifiable {
             return "Balance muscle groups"
         case .prioritizeFrequentLifts:
             return "Frequent lifts"
+        case .chasePRs:
+            return "Chase PRs"
         }
     }
     
     var detail: String {
         switch self {
         case .prioritizeUndertrainedMuscles:
-            return "Favor muscles you trained less in those 10 sessions."
+            return "Favor muscles you trained less in those 10 sessions; skips muscles trained in the last 48 hours when possible."
         case .prioritizeFrequentLifts:
             return "Exercises you programmed most often in those sessions—loads from your latest sets and RPE."
+        case .chasePRs:
+            return "Exercises where you're within 5% of your best—otherwise falls back to your frequent lifts."
         }
     }
 }
 
-struct StrengthRecommendationExercise: Identifiable {
+struct StrengthRecommendationExercise: Identifiable, Equatable {
     var id: Int64 { exerciseId }
     let exerciseId: Int64
     let displayName: String
@@ -64,7 +77,7 @@ struct StrengthRecommendationExercise: Identifiable {
     let sets: [StrengthRecommendationSet]
 }
 
-struct StrengthRecommendationSet: Identifiable {
+struct StrengthRecommendationSet: Identifiable, Equatable {
     let id = UUID()
     let setNumber: Int
     let reps: Int

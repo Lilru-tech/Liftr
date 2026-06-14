@@ -78,6 +78,8 @@ import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
 import com.lilru.liftr.data.loadProfileAvatarUrl
 import com.lilru.liftr.ui.AppBannerEvent
+import com.lilru.liftr.data.CoinManager
+import com.lilru.liftr.data.PetRefreshBus
 import com.lilru.liftr.ui.AppSnackbar
 import com.lilru.liftr.ui.notifications.NotificationUnreadSync
 import com.lilru.liftr.ui.notifications.UnreadNotificationCounter
@@ -87,6 +89,7 @@ import kotlinx.coroutines.launch
 import com.lilru.liftr.navigation.AppNavEvents
 import com.lilru.liftr.navigation.MainOverlay
 import com.lilru.liftr.ui.achievements.AchievementsScreen
+import com.lilru.liftr.ui.achievements.TrackedAchievementsScreen
 import com.lilru.liftr.ui.add.AddWorkoutTabScreen
 import com.lilru.liftr.ui.competition.CompetitionDetailFromIdScreen
 import com.lilru.liftr.ui.competition.CompetitionReviewsScreen
@@ -100,6 +103,7 @@ import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.ranking.ChallengeWeeklyDetailScreen
 import com.lilru.liftr.ui.nutrition.NutritionTabScreen
 import com.lilru.liftr.ui.components.LiftrBackTopBar
+import com.lilru.liftr.ui.active.ActiveWorkoutRecoveryHost
 import com.lilru.liftr.ui.search.SearchTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
 import com.lilru.liftr.ui.territory.TerritoryMapScreen
@@ -329,6 +333,10 @@ fun MainShellScreen(
             tabUnread = UnreadNotificationCounter.count(supabase)
         }
     }
+    LaunchedEffect(isAuthenticated, supabase) {
+        if (!isAuthenticated) return@LaunchedEffect
+        CoinManager.refreshBalance(supabase, notifyIfEarned = true)
+    }
 
     LaunchedEffect(Unit) {
         HomeFeedSync.events.collect { id ->
@@ -344,6 +352,11 @@ fun MainShellScreen(
                     kindNudge = o.kind
                     kindNudgeNonce = kindNudgeNonce + 1
                     selected = MainTab.Add
+                }
+                is MainOverlay.PetHatched -> {
+                    selected = MainTab.Profile
+                    PetRefreshBus.notifyPetStateDidChange()
+                    CoinManager.refreshBalanceAfterMutation(supabase)
                 }
                 else -> {
                     selectTabForRootOverlay(o)?.let { selected = it }
@@ -531,6 +544,14 @@ fun MainShellScreen(
                     clearOverlay()
                 }
             }
+            is MainOverlay.TrackedAchievements -> {
+                TrackedAchievementsScreen(
+                    supabase = supabase,
+                    targetUserId = overlayNonNull.userId,
+                    onBack = { clearOverlay() },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             is MainOverlay.CompetitionsHub -> {
                 CompetitionsHubScreen(
                     supabase = supabase,
@@ -585,6 +606,7 @@ fun MainShellScreen(
                 )
             }
             is MainOverlay.AddWorkoutDraftKind -> { }
+            is MainOverlay.PetHatched -> { }
             is MainOverlay.ChatThread -> {
                 val ot = overlayNonNull
                 var profile by remember(ot.conversationId) { mutableStateOf<com.lilru.liftr.ui.chat.ProfileLite?>(null) }
@@ -709,5 +731,8 @@ fun MainShellScreen(
                 }
             }
         }
+    }
+    if (isAuthenticated) {
+        ActiveWorkoutRecoveryHost(supabase = supabase, isAuthenticated = true)
     }
 }

@@ -98,6 +98,16 @@ fun ActiveCardioWorkoutScreen(
         )
         onDispose { OngoingWorkoutService.stop(ctx) }
     }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                vm.saveSessionCheckpoint()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     LaunchedEffect(
         workoutId,
         ui.elapsedSec,

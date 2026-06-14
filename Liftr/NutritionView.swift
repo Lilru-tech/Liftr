@@ -334,6 +334,7 @@ final class NutritionViewModel: ObservableObject {
     @Published var highlightsLoading = false
     @Published var highlights: NutritionHighlights?
     @Published var highlightsError: String?
+    @Published var coinsBalance: Int = 0
 
     @Published var rankingRows: [NutritionRankingRow] = []
     @Published var rankingLoading = false
@@ -350,7 +351,7 @@ final class NutritionViewModel: ObservableObject {
         insightsFromDate = weekStart
     }
 
-    func load(userId: UUID?) async {
+    func load(userId: UUID?, showLoadingIndicator: Bool = true) async {
         guard let userId else {
             diaryItems = []
             plannedItems = []
@@ -360,9 +361,9 @@ final class NutritionViewModel: ObservableObject {
             error = "Sign in to track nutrition."
             return
         }
-        loading = true
+        if showLoadingIndicator { loading = true }
         error = nil
-        defer { loading = false }
+        defer { if showLoadingIndicator { loading = false } }
         do {
             async let itemsTask = NutritionManager.fetchDiaryItems(for: userId, date: selectedDate)
             async let recTask = NutritionManager.fetchRecommendation(for: userId, date: selectedDate)
@@ -378,6 +379,7 @@ final class NutritionViewModel: ObservableObject {
             plannedItems = try await plannedTask
             pendingInvites = try await invitesTask
         } catch {
+            guard !isBenignFetchCancellation(error) else { return }
             self.error = error.localizedDescription
         }
     }
@@ -406,6 +408,7 @@ final class NutritionViewModel: ObservableObject {
         guard userId != nil else { return }
         do {
             try await NutritionManager.completeMealPlanAsEaten(targetId: targetId)
+            await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             await load(userId: userId)
         } catch {
             self.error = NutritionManager.mealPlanErrorMessage(error)
@@ -529,6 +532,9 @@ final class NutritionViewModel: ObservableObject {
         let started = Date()
         defer { highlightsLoading = false }
         do {
+            if let userId = try? await SupabaseManager.shared.client.auth.session.user.id {
+                await loadCoinsBalance(userId: userId)
+            }
             let result = try await NutritionManager.fetchNutritionHighlights()
             let elapsed = Date().timeIntervalSince(started)
             if elapsed < 0.6 {
@@ -544,6 +550,26 @@ final class NutritionViewModel: ObservableObject {
         highlightsLoading = false
         highlights = nil
         highlightsError = nil
+        coinsBalance = 0
+    }
+
+    private struct CoinsProfileRow: Decodable {
+        let coins_balance: Int?
+    }
+
+    private func loadCoinsBalance(userId: UUID) async {
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("profiles")
+                .select("coins_balance")
+                .eq("user_id", value: userId.uuidString)
+                .single()
+                .execute()
+            let row = try JSONDecoder.supabase().decode(CoinsProfileRow.self, from: res.data)
+            coinsBalance = row.coins_balance ?? 0
+        } catch {
+            coinsBalance = 0
+        }
     }
 
     func beginRankingNavigation(kind: NutritionRankingKind) {
@@ -746,7 +772,7 @@ struct NutritionView: View {
                 .accessibilityLabel("Add nutrition")
             }
         }
-        .refreshable { await vm.load(userId: app.userId) }
+        .refreshable { await vm.load(userId: app.userId, showLoadingIndicator: false) }
         .task(id: taskKey) { await vm.load(userId: app.userId) }
     }
 
@@ -2515,6 +2541,7 @@ private struct NutritionLogFoodSheet: View {
                         return
                     }
                 }
+                await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             }
             dismiss()
             onDone()
@@ -2715,6 +2742,7 @@ private struct NutritionIngredientEditorSheet: View {
                     name: name,
                     profile: profile
                 )
+                await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             case .edit(let ingredient):
                 _ = try await NutritionManager.updateIngredient(
                     ingredientId: ingredient.id,
@@ -2975,6 +3003,7 @@ private struct NutritionRecipeEditorSheet: View {
                     description: description,
                     lines: committedLines
                 )
+                await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
             case .edit(let recipe):
                 _ = try await NutritionManager.updateRecipe(
                     recipeId: recipe.id,

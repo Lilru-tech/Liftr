@@ -209,6 +209,19 @@ fun CompetitionsHubScreen(
                                     )
                                 }
                             }
+                            ui.escrowSummary?.let { escrow ->
+                                if (escrow.escrowedTotal > 0) {
+                                    item {
+                                        Card(Modifier.fillMaxWidth()) {
+                                            Text(
+                                                "${escrow.escrowedTotal} coins in play across ${escrow.stakedChallengeCount} challenge${if (escrow.stakedChallengeCount == 1) "" else "s"}",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.padding(12.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                             if (ui.tab == CompetitionsHubTab.History) {
                                 item {
                                     ui.historySummary?.let { s -> HistorySummaryCard(s) }
@@ -438,6 +451,20 @@ private fun CompetitionCard(
                     Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
                         Text(opp?.username ?: stringResource(R.string.competitions_opponent), style = MaterialTheme.typography.titleSmall)
                         Text(statusLine, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (row.betAmount > 0) {
+                            Text(
+                                "${row.betAmount} coins",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            if (row.status == "pending" && myId != null && row.createdBy == myId) {
+                                Text(
+                                    "Escrowed",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.tertiary
+                                )
+                            }
+                        }
                     }
                     when (row.status) {
                         "pending" -> {

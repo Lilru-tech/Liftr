@@ -15,6 +15,7 @@ sealed class MainOverlay {
         val openAchievementCode: String? = null,
         val openAchievementId: Int? = null
     ) : MainOverlay()
+    data class TrackedAchievements(val userId: String) : MainOverlay()
     data object CompetitionsHub : MainOverlay()
     data class CompetitionDetailById(val competitionId: Int) : MainOverlay()
     data object CompetitionReviews : MainOverlay()
@@ -22,4 +23,5 @@ sealed class MainOverlay {
     data class ChallengeWeeklyDetail(val instanceId: UUID) : MainOverlay()
     data class ChatThread(val conversationId: Long, val otherUserId: String?) : MainOverlay()
     data object TerritoryMap : MainOverlay()
+    data object PetHatched : MainOverlay()
 }

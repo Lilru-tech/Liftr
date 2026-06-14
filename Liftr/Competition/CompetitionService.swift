@@ -6,19 +6,17 @@ final class CompetitionService {
     private init() {}
 
     private var client: SupabaseClient { SupabaseManager.shared.client }
-    private struct CompetitionInsertPayload: Encodable {
-        let created_by: String
-        let user_a: String
-        let user_b: String
-        let status: String
-        let invite_expires_at: String
+    private struct CreateCompetitionParams: Encodable {
+        let p_opponent_id: String
+        let p_time_limit_at: String?
+        let p_metric: String?
+        let p_target_value: Double?
+        let p_expire_hours: Int
+        let p_bet_amount: Int
     }
 
-    private struct CompetitionGoalInsertPayload: Encodable {
-        let competition_id: Int
-        let time_limit_at: String?
-        let metric: String?
-        let target_value: Double?
+    private struct CompetitionIdParams: Encodable {
+        let p_competition_id: Int
     }
 
     private struct CompetitionBlockUpsertPayload: Encodable {
@@ -32,24 +30,37 @@ final class CompetitionService {
     }
 
     func expirePendingIfNeeded() async {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        iso.timeZone = .current
-        let nowStr = iso.string(from: Date())
-
         do {
             _ = try await client
-                .from("competitions")
-                .update([
-                    "status": "expired",
-                    "finished_at": nowStr
-                ])
-                .eq("status", value: "pending")
-                .lt("invite_expires_at", value: nowStr)
+                .rpc("expire_stale_competition_invites_v1")
                 .execute()
         } catch {
             print("[Competitions][expirePendingIfNeeded] error:", error.localizedDescription)
         }
+    }
+
+    func fetchMaxBet(opponentId: UUID) async throws -> Int {
+        struct Params: Encodable {
+            let p_opponent_id: String
+        }
+        struct Row: Decodable {
+            let competition_get_max_bet_v1: Int?
+        }
+        let res = try await client
+            .rpc("competition_get_max_bet_v1", params: Params(p_opponent_id: opponentId.uuidString))
+            .execute()
+        if let scalar = try? JSONDecoder.supabase().decode(Int.self, from: res.data) {
+            return max(0, scalar)
+        }
+        let row = try JSONDecoder.supabase().decode(Row.self, from: res.data)
+        return max(0, row.competition_get_max_bet_v1 ?? 0)
+    }
+
+    func fetchEscrowSummary() async throws -> CompetitionEscrowSummary {
+        let res = try await client
+            .rpc("get_my_competition_escrow_summary_v1")
+            .execute()
+        return try JSONDecoder.supabase().decode(CompetitionEscrowSummary.self, from: res.data)
     }
 
     func fetchCompetitions(for userId: UUID) async throws -> [CompetitionRow] {
@@ -133,96 +144,57 @@ final class CompetitionService {
         metric: CompetitionMetric?,
         targetValue: Double?,
         timeLimitAt: Date?,
-        inviteHours: Int = 48
+        inviteHours: Int = 48,
+        betAmount: Int = 0
     ) async throws -> Int {
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         iso.timeZone = .current
 
-        let expires = Calendar.current.date(byAdding: .hour, value: inviteHours, to: Date()) ?? Date().addingTimeInterval(48*3600)
-
-        let insert = CompetitionInsertPayload(
-            created_by: creatorId.uuidString,
-            user_a: creatorId.uuidString,
-            user_b: opponentId.uuidString,
-            status: "pending",
-            invite_expires_at: iso.string(from: expires)
+        let params = CreateCompetitionParams(
+            p_opponent_id: opponentId.uuidString,
+            p_time_limit_at: timeLimitAt.map { iso.string(from: $0) },
+            p_metric: metric?.rawValue,
+            p_target_value: targetValue,
+            p_expire_hours: inviteHours,
+            p_bet_amount: max(0, betAmount)
         )
 
         let res = try await client
-            .from("competitions")
-            .insert(insert, returning: .representation)
-            .select("id")
-            .single()
+            .rpc("rpc_create_competition", params: params)
             .execute()
 
-        struct IdRow: Decodable { let id: Int }
+        if let scalar = try? JSONDecoder.supabase().decode(Int.self, from: res.data) {
+            await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: false)
+            return scalar
+        }
+
+        struct IdRow: Decodable { let rpc_create_competition: Int? }
         let row = try JSONDecoder.supabase().decode(IdRow.self, from: res.data)
-        let compId = row.id
-
-        let goalInsert = CompetitionGoalInsertPayload(
-            competition_id: compId,
-            time_limit_at: timeLimitAt.map { iso.string(from: $0) },
-            metric: metric?.rawValue,
-            target_value: targetValue
-        )
-
-        _ = try await client
-            .from("competition_goals")
-            .insert(goalInsert)
-            .execute()
-
+        let compId = row.rpc_create_competition ?? 0
+        await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: false)
         return compId
     }
 
     func acceptCompetition(competitionId: Int) async throws {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        iso.timeZone = .current
-        let nowStr = iso.string(from: Date())
-
-        _ = try await client
-            .from("competitions")
-            .update([
-                "status": "active",
-                "accepted_at": nowStr
-            ])
-            .eq("id", value: competitionId)
+        try await client
+            .rpc("accept_competition", params: CompetitionIdParams(p_competition_id: competitionId))
             .execute()
+        await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
     }
 
     func declineCompetition(competitionId: Int) async throws {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        iso.timeZone = .current
-        let nowStr = iso.string(from: Date())
-
-        _ = try await client
-            .from("competitions")
-            .update([
-                "status": "declined",
-                "declined_at": nowStr,
-                "finished_at": nowStr
-            ])
-            .eq("id", value: competitionId)
+        try await client
+            .rpc("decline_competition", params: CompetitionIdParams(p_competition_id: competitionId))
             .execute()
+        await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
     }
 
     func cancelCompetition(competitionId: Int) async throws {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        iso.timeZone = .current
-        let nowStr = iso.string(from: Date())
-
-        _ = try await client
-            .from("competitions")
-            .update([
-                "status": "cancelled",
-                "cancelled_at": nowStr,
-                "finished_at": nowStr
-            ])
-            .eq("id", value: competitionId)
+        try await client
+            .rpc("cancel_competition_invite", params: CompetitionIdParams(p_competition_id: competitionId))
             .execute()
+        await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
     }
 
     func blockUser(me: UUID, other: UUID) async throws {

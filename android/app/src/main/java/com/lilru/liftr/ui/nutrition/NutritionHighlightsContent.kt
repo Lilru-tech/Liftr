@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
+import com.lilru.liftr.ui.components.CoinsBalanceBadge
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -85,6 +86,9 @@ fun NutritionHighlightsContent(
             Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 HighlightsSectionCard(
                     title = stringResource(R.string.nutrition_highlights_overview),
+                    titleTrailing = {
+                        CoinsBalanceBadge(balance = ui.coinsBalance, compact = true)
+                    },
                     content = {
                         Row(
                             Modifier.horizontalScroll(rememberScrollState()),
@@ -298,6 +302,7 @@ private fun streakDaysLabel(count: Int): String {
 @Composable
 private fun HighlightsSectionCard(
     title: String,
+    titleTrailing: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     Card(
@@ -307,7 +312,14 @@ private fun HighlightsSectionCard(
         )
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                titleTrailing?.invoke()
+            }
             content()
         }
     }

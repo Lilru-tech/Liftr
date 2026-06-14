@@ -786,7 +786,7 @@ struct EditSavedStrengthRoutineSheet: View {
                                     exerciseSelected: { $0.exerciseId != nil },
                                     onRequestClearAll: { showClearAllConfirm = true },
                                     onSuggest: {},
-                                    showSuggestQuickAction: false
+                                    showSuggestQuickAction: true
                                 )
                             }
                             .padding(.horizontal, 16)

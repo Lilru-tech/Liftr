@@ -16,6 +16,11 @@ object SupabaseResponseDecoding {
         coerceInputValues = true
     }
 
+    inline fun <reified T> decodeObject(raw: String): T {
+        val trimmed = raw.trim()
+        return json.decodeFromString(trimmed)
+    }
+
     inline fun <reified T> decodeListOrObject(raw: String): List<T> {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return emptyList()

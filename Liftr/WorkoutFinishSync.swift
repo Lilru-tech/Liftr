@@ -24,7 +24,7 @@ enum WorkoutFinishSync {
     }
 
     private static let storageKey = "liftr.pendingWorkoutFinishes.v1"
-    private static var syncTask: Task<Void, Never>?
+    private static let syncRunner = SerialAsyncTaskRunner()
     private static var statusByWorkoutId: [Int: WorkoutFinishSyncStatus] = [:]
 
     static func status(for workoutId: Int) -> WorkoutFinishSyncStatus {
@@ -66,11 +66,7 @@ enum WorkoutFinishSync {
     }
 
     static func syncPending() async {
-        if let running = syncTask, !running.isCancelled {
-            await running.value
-            return
-        }
-        let task = Task {
+        await syncRunner.run {
             let items = loadPending()
             guard !items.isEmpty else { return }
             for item in items {
@@ -84,9 +80,6 @@ enum WorkoutFinishSync {
                 }
             }
         }
-        syncTask = task
-        await task.value
-        syncTask = nil
     }
 
     private static func performFinishWithRetries(item: PendingFinish) async -> Bool {

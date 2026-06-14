@@ -220,6 +220,7 @@ fun AddWorkoutTabScreen(
     var sportSessionNotes by rememberSaveable { mutableStateOf("") }
     var sportMatchResult by rememberSaveable { mutableStateOf(AddMatchResult.UNFINISHED) }
     var hyroxExercisesJson by rememberSaveable { mutableStateOf("") }
+    var climbingRoutesJson by rememberSaveable { mutableStateOf("[]") }
     var createRoutineEnabled by rememberSaveable { mutableStateOf(false) }
     var newStrengthRoutineName by rememberSaveable { mutableStateOf("") }
     var newStrengthTemplateFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -391,6 +392,7 @@ fun AddWorkoutTabScreen(
         sportSessionNotes = f.sportSessionNotes
         sportMatchResult = f.sportMatchResult
         hyroxExercisesJson = f.hyroxExercisesJson
+        climbingRoutesJson = f.climbingRoutesJson
         cardioStats.clear()
         f.cardioStats.forEach { (k, v) -> cardioStats[k] = v }
         sportStats.clear()
@@ -1174,7 +1176,7 @@ fun AddWorkoutTabScreen(
             item {
                 OutlinedTextField(value = sportSessionNotes, onValueChange = { sportSessionNotes = it }, label = { Text(stringResource(R.string.add_sport_session_notes_label)) }, modifier = Modifier.fillMaxWidth(), minLines = 2, maxLines = 4)
             }
-            if (sportType != AddSportType.SKI) {
+            if (sportType != AddSportType.SKI && sportType != AddSportType.CLIMBING) {
                 item { Text(stringResource(R.string.add_sport_match_result_label), style = MaterialTheme.typography.titleSmall) }
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1520,6 +1522,22 @@ fun AddWorkoutTabScreen(
                         )
                     }
                 }
+                AddSportType.CLIMBING -> {
+                    item {
+                        val climbingRoutes = remember(climbingRoutesJson) {
+                            com.lilru.liftr.climbing.ClimbingRouteFormatting.decodeRoutesJson(climbingRoutesJson)
+                        }
+                        ClimbingSessionEditorSection(
+                            sportStats = sportStats,
+                            onSportStatChange = { key, value -> sportStats[key] = value; vm.clearStatus() },
+                            routes = climbingRoutes,
+                            onRoutesChange = { routes ->
+                                climbingRoutesJson = com.lilru.liftr.climbing.ClimbingRouteFormatting.encodeRoutesJson(routes)
+                                vm.clearStatus()
+                            }
+                        )
+                    }
+                }
             }
         }
         item {
@@ -1593,6 +1611,7 @@ fun AddWorkoutTabScreen(
                                 racketFormat = racketFormat,
                                 sportStats = sportStats,
                                 hyroxExercisesText = hyroxExercisesJson,
+                                climbingRoutesJson = climbingRoutesJson,
                                 intensity = selectedIntensity,
                                 state = selectedState,
                                 startedAtIso = scheduleStartIso,
@@ -1626,8 +1645,8 @@ fun AddWorkoutTabScreen(
         StrengthRoutineOverwriteBottomSheet(
             prompt = pend.prompt,
             onDismissRequest = { vm.dismissStrengthRoutineOverwrite() },
-            onOverwriteTemplate = { vm.confirmStrengthRoutineOverwrite(true) },
-            onNotNow = { vm.confirmStrengthRoutineOverwrite(false) }
+            onOverwriteTemplate = { selected -> vm.confirmStrengthRoutineOverwrite(selected) },
+            onNotNow = { vm.dismissStrengthRoutineOverwrite() }
         )
     }
     if (showClearStrengthDialog) {

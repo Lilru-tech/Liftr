@@ -4,7 +4,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.20.0] - 2026-06-14
+
+### Added
+- **Liftr Coins — income graphs** — Charts to see every source of coin income (iOS + Android).
+- **Achievements — pets & coins** — New achievement milestones for pets and Liftr Coins (iOS + Android).
+- **Pets — PetDex** — Catalog of pets you have fought against in the arena (iOS + Android).
+- **Achievements — tracker** — Achievement Tracker to follow progress toward unlocks (iOS + Android).
+- **Pets — workout coin bonus** — Shows how many coins your pet earned for you when you finish a workout (iOS + Android).
+- **Cardio — climbing** — Added **climbing** as a cardio workout type (iOS + Android).
+
+### Changed
+- **Suggest next session** — Improved suggestions when building the next workout from your history (iOS + Android).
+
+### Fixed
+- **Chat — conversations list** — Fixed the last-message preview sometimes not showing the full message (iOS + Android).
+- **Profile** — Fixed the coins icon overlapping the ranking icon in the profile header (iOS + Android).
+- **Home — floating dock** — Fixed pet, quick actions, and messages labels so the full text is visible (iOS + Android).
+
+## [1.19.1] - 2026-06-12
+
+### Added
+- **Pet Market — pet information** — ⓘ guide for rarities, drop rates, stat/coin multipliers, and species (iOS + Android).
+- **Pets — Arena stats** — ⓘ guide in pet view explaining how each stat affects arena battles (iOS + Android).
+- **Pets — workout coin bonus** — Hatched pets earn a **% bonus** on workout coins (stage + rarity). Bonus appears in coin history as **Pet workout bonus** (iOS + Android).
+- **Pets — workout bonus logs** — Randomized funny messages in the pet **Logs** tab when your pet earns workout bonus coins.
+- **Strength — routines — selective overwrite** — **Review changes** sheet when finishing a workout or saving from Add Workout: choose which routine template fields to apply (**Apply N changes** / **Not now**) (iOS + Android).
+- **Active workouts — crash recovery** — Local checkpoints for in-progress strength, cardio, and sport sessions. On next launch, choose **Resume**, **Finish now**, or **Discard** (iOS + Android).
+
+### Changed
+- **Pets — stats** — Increased and rebalanced pet stats (level-up distribution and arena combat archetype tuning) for fairer same-level matchups.
+- **Active strength — finish** — Exercises with **no completed sets** are removed entirely from the saved workout; unperformed sets on partially completed exercises are also purged on finish.
+
+### Notes (database / ops)
+- **Pets — workout coin bonus & logs** — Apply migration **`20260620120000_economy_rebalance_v1.sql`** and **`20260622120000_workout_pet_bonus_logging_v1.sql`** (`pet_training_bonus_config`, `compute_workout_coin_reward_with_pet_bonus`, `pet_workout_bonus_messages`) before shipping.
+- **Pets — stat balance** — Apply migrations **`20260623120000_pet_level_stat_variance_v1.sql`**, **`20260624120000_pet_level_stat_shared_budget_v1.sql`**, **`20260625120000_liftr_combat_balance_v4.sql`**, and **`20260626120100_liftr_combat_balance_v5_recompute.sql`** (level-up shared budget + arena archetype recompute) before shipping.
+- **Active strength — finish purge** — Apply migration **`20260612111424_strength_workout_finish_purge_deploy_v1.sql`** (`_liftr_purge_incomplete_strength_workout` on workout finalize) before shipping.
+
+## [1.19.0] - 2026-06-10
+
+### Added
+- **Liftr Coins** — Earn and spend coins across the app (balance, history, and leaderboard).
+- **Pets** — Hatch, feed, and grow a pet from the Pet Market and profile.
+- **Ranking — pets** — New pet leaderboard metrics (level, stats, combat, and more).
+- **FAQs** — Updated in-app FAQ content for coins, pets, and rankings (iOS + Android).
+
+## [1.18.2] - 2026-06-08
+
+### Added
+- **Wearable routes** — Connect **Garmin Connect** and add **missing GPS routes** to workouts already synced into **Apple Health** (when Garmin’s Health sync omits the map). Liftr writes the route to Health via `HKWorkoutRoute` and backfills the **Liftr workout map**; workout calories and duration are not modified.
+- **Profile — settings** — New **Wearable routes** screen (Garmin connect, route-sync toggle, manual sync).
+
+### Fixed
+- **Wearable routes — Apple Health** — Fixed a crash when enabling **Add missing GPS routes** caused by requesting **workout route** write authorization without also requesting **workout** write authorization (required by HealthKit).
+- **Wearable routes — UI** — Wearable routes screen now uses the same **gradient background** as other settings screens.
+
+### Notes (database / ops)
+- **Wearable route sync** — Apply migration **`20260608120000_wearable_route_jobs_v1.sql`** (`wearable_connections`, `external_workout_route_jobs`, `apply_external_route_to_cardio_workout`, `update_external_route_job_status`) before shipping.
+- **Edge Functions** — Deploy **`wearable-oauth-start`**, **`wearable-oauth-callback`**, and **`garmin-activity-webhook`**; set secrets **`WEARABLE_OAUTH_STATE_SECRET`**, **`GARMIN_WEBHOOK_SECRET`**, **`GARMIN_CONSUMER_KEY`**, **`GARMIN_CONSUMER_SECRET`** (Garmin Connect Developer Program). Setup: `docs/garmin-connect-developer-setup.md`.
+- **Garmin OAuth** — Full connect flow requires **Garmin developer approval** and API keys; until then the app shows a clear configuration message instead of a generic edge-function error.
+
+## [1.18.1] - 2026-06-07
+
+### Added
+- **Notifications** — Icons for every notification type in the notifications list.
+- **Notifications — settings** — Toggle to enable or disable **meal plan invite** push notifications.
+
+### Fixed
+- **Strength — routines** — Fixed the **auto-update** option when changing any value on an already saved routine.
+- **Territory** — Fixed an issue caused by recent **RLS** changes in the database.
+
+### Notes (database / ops)
+- **Notifications — meal plan invites** — Apply migration **`20260607190000_meal_plan_invite_push_settings_v1.sql`** before shipping clients that expose the meal plan invite notification toggle.
 
 ## [1.18.0] - 2026-06-04
 

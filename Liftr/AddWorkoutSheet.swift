@@ -16,7 +16,7 @@ enum WorkoutIntensity: String, CaseIterable, Identifiable {
 }
 
 enum SportType: String, CaseIterable, Identifiable {
-    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby, hyrox, ski
+    case padel, tennis, football, basketball, badminton, squash, table_tennis, volleyball, handball, hockey, rugby, hyrox, ski, climbing
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -33,6 +33,7 @@ enum SportType: String, CaseIterable, Identifiable {
         case .rugby:         return "Rugby"
         case .hyrox:         return "Hyrox"
         case .ski:          return "Ski"
+        case .climbing:     return "Climbing"
         }
     }
 }
@@ -239,6 +240,7 @@ struct AddWorkoutSheet: View {
     @State private var loadingHyroxRoutineOnly = false
     @State private var strengthRoutineOverwritePrompt: StrengthRoutineOverwritePrompt?
     @State private var pendingStrengthRoutineOverwriteExercises: [EditableExercise] = []
+    @State private var appliedStrengthRoutineId: Int64? = nil
     @AppStorage("addWorkoutPlanTooltipSeen") private var addWorkoutPlanTooltipSeen = false
 
     var body: some View { addWorkoutRoot }
@@ -562,7 +564,8 @@ struct AddWorkoutSheet: View {
                 catalog: catalog,
                 loadingCatalog: loadingCatalog,
                 exerciseLanguage: exerciseLanguage,
-                onApply: { loaded in
+                onApply: { routineId, loaded in
+                    appliedStrengthRoutineId = routineId
                     applyLoadedStrengthRoutine(loaded)
                 }
             )
@@ -618,15 +621,15 @@ struct AddWorkoutSheet: View {
         .sheet(item: $strengthRoutineOverwritePrompt) { prompt in
             StrengthRoutineOverwriteConfirmSheet(
                 prompt: prompt,
-                onUpdate: {
+                onApply: { selectedLineIds in
                     let p = prompt
                     strengthRoutineOverwritePrompt = nil
-                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, updateRoutine: true) }
+                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, selectedLineIds: selectedLineIds) }
                 },
                 onNotNow: {
                     let p = prompt
                     strengthRoutineOverwritePrompt = nil
-                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, updateRoutine: false) }
+                    Task { await saveAfterStrengthRoutineOverwriteDecision(prompt: p, selectedLineIds: []) }
                 }
             )
             .presentationSizing(.fitted)
@@ -772,6 +775,7 @@ struct AddWorkoutSheet: View {
                 }
                 confirmRemoveStrengthExercise = nil
                 recentlyAddedExerciseId = nil
+                appliedStrengthRoutineId = nil
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -1264,7 +1268,7 @@ struct AddWorkoutSheet: View {
                             sport.scoreFor = ""; sport.scoreAgainst = ""
                         }
 
-                        if new == .ski {
+                        if new == .ski || new == .climbing {
                             sport.matchResult = .unfinished
                         }
                     }
@@ -1299,7 +1303,7 @@ struct AddWorkoutSheet: View {
                 }
                 Divider()
                 
-                if sport.sport != .ski {
+                if sport.sport != .ski && sport.sport != .climbing {
                     Divider()
 
                     FieldRowPlain {
@@ -1681,6 +1685,9 @@ struct AddWorkoutSheet: View {
             WorkoutMetricFieldsRow {
                 workoutMetricField("Weather", text: $sport.skiWeather, keyboard: .default)
             }
+
+        case .climbing:
+            ClimbingSessionEditor(sport: $sport)
         }
     }
 
@@ -1818,23 +1825,26 @@ struct AddWorkoutSheet: View {
                 let tpl = strengthExercisesForRoutineTemplate()
                 let items = strengthProgramItems(from: tpl)
                 if !items.isEmpty {
-                    let candidate = (
-                        try? await fetchStrengthRoutineOverwriteCandidate(
+                    do {
+                        let candidate = try await fetchStrengthRoutineOverwriteCandidate(
                             client: client,
                             userId: userId,
                             proposed: items,
                             exerciseDisplayName: { eid in
                                 catalog.first(where: { $0.id == eid })?.localizedName(for: exerciseLanguage) ?? ""
-                            }
+                            },
+                            preferredRoutineId: appliedStrengthRoutineId
                         )
-                    ) ?? .none
-                    if case .prompt(let pr) = candidate {
-                        let copied = tpl.map { $0.deepCopied() }
-                        await MainActor.run {
-                            pendingStrengthRoutineOverwriteExercises = copied
-                            strengthRoutineOverwritePrompt = pr
+                        if case .prompt(let pr) = candidate {
+                            let copied = tpl.map { $0.deepCopied() }
+                            await MainActor.run {
+                                pendingStrengthRoutineOverwriteExercises = copied
+                                strengthRoutineOverwritePrompt = pr
+                            }
+                            return
                         }
-                        return
+                    } catch {
+                        print("[StrengthRoutine][OVERWRITE_CHECK]", error.localizedDescription)
                     }
                 }
             }
@@ -1854,7 +1864,7 @@ struct AddWorkoutSheet: View {
             try await performSaveWorkoutAndRoutine(
                 replacingStrengthRoutineId: rid,
                 replacingHyroxRoutineId: nil,
-                strengthRoutinePrescriptionOverwrite: nil
+                strengthRoutineSelectiveOverwrite: nil
             )
         } catch {
             self.error = error.localizedDescription
@@ -1870,7 +1880,7 @@ struct AddWorkoutSheet: View {
             try await performSaveWorkoutAndRoutine(
                 replacingStrengthRoutineId: nil,
                 replacingHyroxRoutineId: rid,
-                strengthRoutinePrescriptionOverwrite: nil
+                strengthRoutineSelectiveOverwrite: nil
             )
         } catch {
             self.error = error.localizedDescription
@@ -1879,7 +1889,7 @@ struct AddWorkoutSheet: View {
 
     private func saveAfterStrengthRoutineOverwriteDecision(
         prompt: StrengthRoutineOverwritePrompt,
-        updateRoutine: Bool
+        selectedLineIds: Set<String>
     ) async {
         let exercisesCopy = pendingStrengthRoutineOverwriteExercises
         await MainActor.run { pendingStrengthRoutineOverwriteExercises = [] }
@@ -1888,13 +1898,18 @@ struct AddWorkoutSheet: View {
         loading = true
         defer { loading = false }
         do {
-            let overwrite: (routineId: Int64, exercises: [EditableExercise])? = updateRoutine
-                ? (prompt.routineId, exercisesCopy)
-                : nil
+            let overwrite: (prompt: StrengthRoutineOverwritePrompt, proposed: [StrengthProgramItem], selectedLineIds: Set<String>)? =
+                selectedLineIds.isEmpty
+                ? nil
+                : (
+                    prompt,
+                    strengthProgramItems(from: exercisesCopy),
+                    selectedLineIds
+                )
             try await performSaveWorkoutAndRoutine(
                 replacingStrengthRoutineId: nil,
                 replacingHyroxRoutineId: nil,
-                strengthRoutinePrescriptionOverwrite: overwrite
+                strengthRoutineSelectiveOverwrite: overwrite
             )
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
@@ -2043,7 +2058,11 @@ struct AddWorkoutSheet: View {
     private func performSaveWorkoutAndRoutine(
         replacingStrengthRoutineId: Int64?,
         replacingHyroxRoutineId: Int64? = nil,
-        strengthRoutinePrescriptionOverwrite: (routineId: Int64, exercises: [EditableExercise])? = nil
+        strengthRoutineSelectiveOverwrite: (
+            prompt: StrengthRoutineOverwritePrompt,
+            proposed: [StrengthProgramItem],
+            selectedLineIds: Set<String>
+        )? = nil
     ) async throws {
         let client = SupabaseManager.shared.client
         let session = try await client.auth.session
@@ -2187,7 +2206,7 @@ struct AddWorkoutSheet: View {
                 if let sf = scoreFor { pDict["p_score_for"] = try .init(sf) }
                 if let sa = scoreAgainst { pDict["p_score_against"] = try .init(sa) }
 
-                if sport.sport != .ski {
+                if sport.sport != .ski && sport.sport != .climbing {
                     pDict["p_match_result"] = try .init(sport.matchResult.rawValue)
                 }
 
@@ -2280,19 +2299,23 @@ struct AddWorkoutSheet: View {
                     }
                 }
             }
-            if let o = strengthRoutinePrescriptionOverwrite {
+            if let o = strengthRoutineSelectiveOverwrite {
                 do {
-                    try await applyStrengthRoutinePrescriptionUpdate(
+                    try await applySelectiveStrengthRoutineOverwrite(
                         client: client,
                         userId: userId,
-                        routineId: o.routineId,
-                        exercises: o.exercises
+                        prompt: o.prompt,
+                        proposed: o.proposed,
+                        selectedLineIds: o.selectedLineIds
                     )
                     routineSaveSuffix += " Routine template updated."
                 } catch {
                     routineSaveSuffix += " Could not update routine template: \(error.localizedDescription)"
                     print("[StrengthRoutine][OVERWRITE]", error.localizedDescription)
                 }
+            }
+            if kind == .strength, let wid = newWorkoutId, let routineId = appliedStrengthRoutineId {
+                WorkoutProgramCache.storeSourceRoutineId(routineId, for: Int(wid))
             }
             await showSuccessAndGoHome(successMessage + routineSaveSuffix)
     }
@@ -2327,6 +2350,7 @@ struct AddWorkoutSheet: View {
         replaceHyroxRoutinePendingId = nil
         showReplaceHyroxRoutineConfirm = false
         replaceHyroxPendingIsRoutineOnly = false
+        appliedStrengthRoutineId = nil
     }
     
     @MainActor
@@ -2614,6 +2638,45 @@ struct AddWorkoutSheet: View {
             if let s = strOrNil(f.skiResortName)    { out["resort_name"]    = try .init(s) }
             if let s = strOrNil(f.skiSnowCondition){ out["snow_condition"] = try .init(s) }
             if let s = strOrNil(f.skiWeather)      { out["weather"]        = try .init(s) }
+            return try AnyJSON(out)
+
+        case .climbing:
+            var out: [String: AnyJSON] = [:]
+            out["environment"] = try .init(f.clEnvironment.rawValue)
+            out["primary_style"] = try .init(f.clPrimaryStyle.wire)
+            if let v = parseInt(f.clRoutesSent) { out["routes_sent"] = try .init(v) }
+            if let v = parseInt(f.clRoutesAttempted) { out["routes_attempted"] = try .init(v) }
+            if let v = parseInt(f.clTotalVerticalM) { out["total_vertical_m"] = try .init(v) }
+            if let v = parseInt(f.clMovingTimeSec) { out["moving_time_sec"] = try .init(v) }
+            if let v = parseInt(f.clPausedTimeSec) { out["paused_time_sec"] = try .init(v) }
+            if let s = strOrNil(f.clVenueName) { out["venue_name"] = try .init(s) }
+            if let s = strOrNil(f.clWeather) { out["weather"] = try .init(s) }
+            if let v = parseInt(f.clAvgHR) { out["avg_hr"] = try .init(v) }
+            if let v = parseInt(f.clMaxHR) { out["max_hr"] = try .init(v) }
+            if let v = parseInt(f.clFalls) { out["falls"] = try .init(v) }
+            if let v = parseInt(f.clFlashes) { out["flashes"] = try .init(v) }
+            if let s = strOrNil(f.clHighestGradeValue) {
+                out["highest_grade_system"] = try .init(f.clHighestGradeSystem.wire)
+                out["highest_grade_value"] = try .init(s)
+            }
+            if !f.clRoutes.isEmpty {
+                let routes: [AnyJSON] = try f.clRoutes.enumerated().map { index, route in
+                    var item: [String: AnyJSON] = [:]
+                    item["route_order"] = try .init(index + 1)
+                    if let s = strOrNil(route.routeName) { item["route_name"] = try .init(s) }
+                    item["style"] = try .init(route.style.wire)
+                    if let s = strOrNil(route.gradeValue) {
+                        item["grade_system"] = try .init(route.gradeSystem.wire)
+                        item["grade_value"] = try .init(s)
+                    }
+                    if let v = parseInt(route.attempts) { item["attempts"] = try .init(v) }
+                    item["sent"] = try .init(route.sent)
+                    item["flash"] = try .init(route.flash)
+                    if let s = strOrNil(route.notes) { item["notes"] = try .init(s) }
+                    return try AnyJSON(item)
+                }
+                out["routes"] = try .init(routes)
+            }
             return try AnyJSON(out)
         }
     }
@@ -3319,6 +3382,22 @@ struct SportForm {
     var skiResortName: String = ""
     var skiSnowCondition: String = ""
     var skiWeather: String = ""
+    var clEnvironment: ClimbingEnvironment = .indoor
+    var clPrimaryStyle: ClimbingStyle = .boulder
+    var clRoutesSent: String = ""
+    var clRoutesAttempted: String = ""
+    var clTotalVerticalM: String = ""
+    var clMovingTimeSec: String = ""
+    var clPausedTimeSec: String = ""
+    var clVenueName: String = ""
+    var clWeather: String = ""
+    var clAvgHR: String = ""
+    var clMaxHR: String = ""
+    var clFalls: String = ""
+    var clFlashes: String = ""
+    var clHighestGradeSystem: ClimbingGradeSystem = .v_scale
+    var clHighestGradeValue: String = ""
+    var clRoutes: [ClimbingRouteForm] = []
 }
 
 struct RPCStrengthParams: Encodable {
@@ -3619,7 +3698,7 @@ private struct StrengthRoutinesPickerSheet: View {
     let catalog: [Exercise]
     let loadingCatalog: Bool
     let exerciseLanguage: ExerciseLanguage
-    let onApply: ([EditableExercise]) -> Void
+    let onApply: (Int64, [EditableExercise]) -> Void
 
     @State private var routines: [StrengthRoutineListRow] = []
     @State private var folders: [StrengthRoutineFolderRow] = []
@@ -4604,7 +4683,7 @@ private struct StrengthRoutinesPickerSheet: View {
                 return
             }
             await MainActor.run {
-                onApply(built)
+                onApply(id, built)
                 if dismissRoutinesPicker {
                     dismiss()
                 }

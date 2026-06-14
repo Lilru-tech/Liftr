@@ -136,7 +136,10 @@ struct ProfileView: View {
     init(userId: UUID? = nil) {
         self.userId = userId
     }
+    @State private var profileContentWidth: CGFloat = UIScreen.main.bounds.width
+    @State private var profileHeaderMiddleWidth: CGFloat = max(120, UIScreen.main.bounds.width * 0.38)
     @State private var counts: ProfileCounts?
+    @State private var coinsBalance: Int = 0
     @State private var username: String = ""
     @State private var avatarURL: String?
     @State private var loading = false
@@ -192,6 +195,10 @@ struct ProfileView: View {
     @State private var profileAchievementsTotal: Int = 0
     @State private var profileWeeklyGoalsDone: Int = 0
     @State private var profileWeeklyGoalsTotal: Int = 0
+    @State private var petCombatPreview: PetCombatPreview?
+    @State private var petCombatHeadToHead: PetCombatHeadToHeadSummary?
+    @State private var petCombatPreviewLoading = false
+    @State private var showPetCombatArena = false
     @State private var consistencyWorkoutMeta: [Int: ConsistencyWorkoutMeta] = [:]
     @AppStorage("consistencyRootChartMetric") private var consistencyRootChartMetricRaw: String = ConsistencyChartMetric.duration.rawValue
     @State private var email: String? = nil
@@ -213,7 +220,11 @@ struct ProfileView: View {
     @State private var isPurchasingPremium = false
     @State private var premiumError: String?
     private let premiumProductID = "com.liftr.premium.monthly"
-    private let profileHeaderAvatarSize: CGFloat = 96
+    private var usesCompactProfileLayout: Bool { profileContentWidth < 390 }
+    private var profileUsesScrollableTabs: Bool { isOwnProfile && profileContentWidth < 410 }
+    private var profileHeaderAvatarSize: CGFloat { usesCompactProfileLayout ? 80 : 96 }
+    private var profileHeaderStackSpacing: CGFloat { usesCompactProfileLayout ? 10 : 14 }
+    private var profileCalendarDayCellHeight: CGFloat { usesCompactProfileLayout ? 32 : 36 }
     private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
     private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     private var hasAnyUnread: Bool {
@@ -243,11 +254,50 @@ struct ProfileView: View {
     @State private var mySegmentsError: String?
     
     var body: some View {
-        profileRootView
+        ZStack {
+            profileRootView
+
+            if !isOwnProfile,
+               let preview = petCombatPreview,
+               viewingUserId != nil,
+               let defenderPet = preview.defender?.pet,
+               defenderPet.evolutionStage.lowercased() != "egg" {
+                ProfileOpponentPetFloatingOverlay(
+                    preview: preview,
+                    defenderPet: defenderPet,
+                    headToHead: petCombatHeadToHead,
+                    opponentUsername: username.isEmpty ? nil : username,
+                    bannerInset: app.isPremium ? 0 : 58,
+                    onChallenge: { showPetCombatArena = true }
+                )
+            }
+        }
         .foregroundStyle(.primary)
-        .padding(.vertical, 12)
+        .padding(.vertical, usesCompactProfileLayout ? 8 : 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .banner($banner)
+        .onAppear {
+            app.profileSurfaceUserId = isOwnProfile ? nil : userId
+        }
+        .onDisappear {
+            if !isOwnProfile, app.profileSurfaceUserId == userId {
+                app.profileSurfaceUserId = nil
+            }
+        }
+        .onChange(of: userId) { _, newUserId in
+            app.profileSurfaceUserId = (newUserId != nil && newUserId != app.userId) ? newUserId : nil
+        }
+        .navigationDestination(isPresented: $showPetCombatArena) {
+            if let opponentId = viewingUserId, let preview = petCombatPreview {
+                PetCombatArenaView(opponentUserId: opponentId, preview: preview)
+                    .gradientBG()
+            }
+        }
+        .onChange(of: showPetCombatArena) { _, isShowing in
+            if !isShowing, let opponentId = viewingUserId, !isOwnProfile {
+                Task { await loadPetCombatPreview(opponentId: opponentId) }
+            }
+        }
         .task {
             let session = try? await SupabaseManager.shared.client.auth.session
             print("[Auth] user.id:", session?.user.id.uuidString ?? "nil")
@@ -259,6 +309,8 @@ struct ProfileView: View {
             await loadUnreadNotifications()
             if isOwnProfile {
                 await loadPremiumProduct()
+            } else if let opponentId = viewingUserId {
+                await loadPetCombatPreview(opponentId: opponentId)
             }
         }
         .onChange(of: app.userId) { _, _ in
@@ -271,6 +323,8 @@ struct ProfileView: View {
                 await loadUnreadNotifications()
                 if isOwnProfile {
                     await loadPremiumProduct()
+                } else if let opponentId = viewingUserId {
+                    await loadPetCombatPreview(opponentId: opponentId)
                 }
             }
         }
@@ -304,20 +358,10 @@ struct ProfileView: View {
     }
 
     private var profileRootView: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: usesCompactProfileLayout ? 10 : 12) {
             headerCard
 
-            Picker("", selection: $tab) {
-                Text("Calendar").tag(Tab.calendar)
-                Text("PRs").tag(Tab.prs)
-                Text("Progress").tag(Tab.progress)
-                Text("Explore").tag(Tab.segments)
-                if isOwnProfile {
-                    Text("Settings").tag(Tab.settings)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal)
+            profileMainTabPicker
 
             Group {
                 switch tab {
@@ -338,6 +382,62 @@ struct ProfileView: View {
                     .background(.ultraThinMaterial)
             }
         }
+        .background {
+            GeometryReader { geo in
+                Color.clear.preference(key: ProfileContentWidthKey.self, value: geo.size.width)
+            }
+        }
+        .onPreferenceChange(ProfileContentWidthKey.self) { profileContentWidth = $0 }
+        .onPreferenceChange(ProfileHeaderMiddleWidthKey.self) { profileHeaderMiddleWidth = $0 }
+    }
+
+    @ViewBuilder
+    private var profileMainTabPicker: some View {
+        if profileUsesScrollableTabs {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    profileTabChip(title: "Calendar", targetTab: .calendar)
+                    profileTabChip(title: "PRs", targetTab: .prs)
+                    profileTabChip(title: "Progress", targetTab: .progress)
+                    profileTabChip(title: "Explore", targetTab: .segments)
+                    profileTabChip(title: "Settings", targetTab: .settings)
+                }
+                .padding(.horizontal, 4)
+            }
+            .padding(.horizontal, 12)
+        } else {
+            Picker("", selection: $tab) {
+                Text("Calendar").tag(Tab.calendar)
+                Text("PRs").tag(Tab.prs)
+                Text("Progress").tag(Tab.progress)
+                Text("Explore").tag(Tab.segments)
+                if isOwnProfile {
+                    Text("Settings").tag(Tab.settings)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+        }
+    }
+
+    private func profileTabChip(title: String, targetTab: Tab) -> some View {
+        Button {
+            tab = targetTab
+        } label: {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+                .padding(.vertical, 7)
+                .padding(.horizontal, 12)
+                .background(
+                    Capsule().fill(
+                        tab == targetTab
+                            ? Color(.systemBackground).opacity(0.85)
+                            : Color(.systemBackground).opacity(0.25)
+                    )
+                )
+        }
+        .buttonStyle(.plain)
     }
 
     private var calendarTabContent: some View {
@@ -1192,9 +1292,187 @@ struct ProfileView: View {
         }
     }
     
+    private var profileHeaderFollowersPill: some View {
+        NavigationLink {
+            if let uid = viewingUserId {
+                FollowersListView(userId: uid, mode: .followers).gradientBG()
+            }
+        } label: {
+            Label {
+                Text("\(counts?.followers ?? 0)")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            } icon: {
+                Image(systemName: "person.2.fill")
+            }
+            .labelStyle(.titleAndIcon)
+            .font(.caption.weight(.semibold))
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(Capsule().fill(Color.white.opacity(0.12)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var profileHeaderFollowingPill: some View {
+        NavigationLink {
+            if let uid = viewingUserId {
+                FollowersListView(userId: uid, mode: .following).gradientBG()
+            }
+        } label: {
+            Label {
+                Text("\(counts?.following ?? 0)")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            } icon: {
+                Image(systemName: "arrowshape.turn.up.right.fill")
+            }
+            .labelStyle(.titleAndIcon)
+            .font(.caption.weight(.semibold))
+            .padding(.vertical, 4)
+            .padding(.horizontal, 8)
+            .background(Capsule().fill(Color.white.opacity(0.12)))
+            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+            .fixedSize(horizontal: true, vertical: false)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func profileHeaderCoinsPill(compact: Bool = false, abbreviated: Bool = false) -> some View {
+        if isOwnProfile {
+            NavigationLink {
+                CoinTransactionsView()
+                    .gradientBG()
+            } label: {
+                CoinsBalanceBadge(balance: coinsBalance, compact: compact, abbreviated: abbreviated)
+            }
+            .buttonStyle(.plain)
+        } else {
+            CoinsBalanceBadge(balance: coinsBalance, compact: compact, abbreviated: abbreviated)
+        }
+    }
+
+    @ViewBuilder
+    private func profileHeaderStatPillsRow(compact: Bool, abbreviated: Bool) -> some View {
+        HStack(spacing: 8) {
+            profileHeaderFollowersPill
+            profileHeaderFollowingPill
+            profileHeaderCoinsPill(compact: compact, abbreviated: abbreviated)
+        }
+    }
+
+    private func profileHeaderStatPills(maxWidth: CGFloat) -> some View {
+        ViewThatFits(in: .horizontal) {
+            profileHeaderStatPillsRow(compact: false, abbreviated: false)
+            profileHeaderStatPillsRow(compact: true, abbreviated: false)
+            profileHeaderStatPillsRow(compact: true, abbreviated: true)
+        }
+        .frame(maxWidth: maxWidth > 0 ? maxWidth : nil, alignment: .leading)
+        .clipped()
+    }
+
+    private var profileHeaderTrailingActions: some View {
+        let actionPadding: CGFloat = usesCompactProfileLayout ? 6 : 8
+        return HStack(spacing: usesCompactProfileLayout ? 6 : 8) {
+            NavigationLink {
+                RankingView(presetMetric: .level)
+                    .gradientBG()
+                    .navigationTitle("Level Ranking")
+            } label: {
+                Image(systemName: "trophy.fill")
+                    .font(.subheadline.weight(.bold))
+                    .padding(actionPadding)
+                    .background(.thinMaterial, in: Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Ranking")
+
+            Menu {
+                if isOwnProfile {
+                    NavigationLink {
+                        NotificationsListView()
+                            .gradientBG()
+                    } label: {
+                        Label(notificationsMenuTitle, systemImage: "bell.fill")
+                    }
+
+                    NavigationLink {
+                        MarketView()
+                            .gradientBG()
+                    } label: {
+                        Label("Market", systemImage: "cart.fill")
+                    }
+
+                    NavigationLink {
+                        PetDexView()
+                            .gradientBG()
+                            .navigationTitle("Pet Dex")
+                    } label: {
+                        Label("Pet Dex", systemImage: "book.closed.fill")
+                    }
+                }
+
+                NavigationLink {
+                    AchievementsGridView(userId: viewingUserId, viewedUsername: username)
+                        .gradientBG()
+                        .navigationTitle("@\(username) · Achievements")
+                } label: {
+                    Label("Achievements", systemImage: "rosette")
+                }
+
+                NavigationLink {
+                    GoalsView(userId: viewingUserId, viewedUsername: username)
+                        .gradientBG()
+                } label: {
+                    Label("Goals", systemImage: "target")
+                }
+
+                if isOwnProfile {
+                    NavigationLink {
+                        CompetitionsHubView()
+                            .gradientBG()
+                    } label: {
+                        HStack {
+                            Label("Competitions", systemImage: "figure.fencing")
+                            if pendingCompetitionsCount > 0 {
+                                Spacer(minLength: 8)
+                                Text(pendingCompetitionsCount > 99 ? "99+" : "\(pendingCompetitionsCount)")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(Color.red.opacity(0.92)))
+                            }
+                        }
+                    }
+                }
+
+            } label: {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "ellipsis")
+                        .font(.subheadline.weight(.bold))
+                        .padding(actionPadding)
+                        .background(.thinMaterial, in: Circle())
+
+                    if hasAnyUnread {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 10, height: 10)
+                            .offset(x: 4, y: -4)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .padding(.top, 2)
+    }
+
     private var headerCard: some View {
-        ZStack(alignment: .topTrailing) {
-            HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .top, spacing: profileHeaderStackSpacing) {
                 if isOwnProfile {
                     PhotosPicker(selection: $pickedItem, matching: .images) {
                         ZStack {
@@ -1217,42 +1495,13 @@ struct ProfileView: View {
                         .accessibilityHint("Tap to preview")
                 }
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: usesCompactProfileLayout ? 4 : 6) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(username.isEmpty ? "user" : username)")
-                        .font(.title3).fontWeight(.semibold)
-                    HStack(spacing: 8) {
-                        NavigationLink {
-                            if let uid = viewingUserId {
-                                FollowersListView(userId: uid, mode: .followers).gradientBG()
-                            }
-                        } label: {
-                            Label("\(counts?.followers ?? 0)", systemImage: "person.2.fill")
-                                .labelStyle(.titleAndIcon)
-                                .font(.caption.weight(.semibold))
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 8)
-                                .background(Capsule().fill(Color.white.opacity(0.12)))
-                                .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                        }
-                        .buttonStyle(.plain)
-
-                        NavigationLink {
-                            if let uid = viewingUserId {
-                                FollowersListView(userId: uid, mode: .following).gradientBG()
-                            }
-                        } label: {
-                            Label("\(counts?.following ?? 0)", systemImage: "arrowshape.turn.up.right.fill")
-                                .labelStyle(.titleAndIcon)
-                                .font(.caption.weight(.semibold))
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 8)
-                                .background(Capsule().fill(Color.white.opacity(0.12)))
-                                .overlay(Capsule().stroke(Color.white.opacity(0.12)))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .foregroundStyle(.secondary)
+                        .font(usesCompactProfileLayout ? .headline : .title3)
+                        .fontWeight(.semibold)
+                    profileHeaderStatPills(maxWidth: profileHeaderMiddleWidth)
+                        .foregroundStyle(.secondary)
 
                     if let uid = viewingUserId {
                         NavigationLink {
@@ -1347,90 +1596,18 @@ struct ProfileView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 8) {
-                NavigationLink {
-                    RankingView(presetMetric: .level)
-                        .gradientBG()
-                        .navigationTitle("Level Ranking")
-                } label: {
-                    Image(systemName: "trophy.fill")
-                        .font(.subheadline.weight(.bold))
-                        .padding(8)
-                        .background(.thinMaterial, in: Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Ranking")
-
-            Menu {
-                if isOwnProfile {
-                    NavigationLink {
-                        NotificationsListView()
-                            .gradientBG()
-                    } label: {
-                        Label(notificationsMenuTitle, systemImage: "bell.fill")
+                .background {
+                    GeometryReader { geo in
+                        Color.clear.preference(key: ProfileHeaderMiddleWidthKey.self, value: geo.size.width)
                     }
                 }
 
-                NavigationLink {
-                    AchievementsGridView(userId: viewingUserId, viewedUsername: username)
-                        .gradientBG()
-                        .navigationTitle("@\(username) · Achievements")
-                } label: {
-                    Label("Achievements", systemImage: "rosette")
-                }
-
-                NavigationLink {
-                    GoalsView(userId: viewingUserId, viewedUsername: username)
-                        .gradientBG()
-                } label: {
-                    Label("Goals", systemImage: "target")
-                }
-
-                if isOwnProfile {
-                    NavigationLink {
-                        CompetitionsHubView()
-                            .gradientBG()
-                    } label: {
-                        HStack {
-                            Label("Competitions", systemImage: "figure.fencing")
-                            if pendingCompetitionsCount > 0 {
-                                Spacer(minLength: 8)
-                                Text(pendingCompetitionsCount > 99 ? "99+" : "\(pendingCompetitionsCount)")
-                                    .font(.caption2.weight(.bold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Capsule().fill(Color.red.opacity(0.92)))
-                            }
-                        }
-                    }
-                }
-
-            } label: {
-                ZStack(alignment: .topTrailing) {
-                    Image(systemName: "ellipsis")
-                        .font(.subheadline.weight(.bold))
-                        .padding(8)
-                        .background(.thinMaterial, in: Circle())
-
-                    if hasAnyUnread {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 10, height: 10)
-                            .offset(x: 4, y: -4)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            }
-            .padding(.top, 2)
+            profileHeaderTrailingActions
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 20)
-        .padding(.bottom, 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, usesCompactProfileLayout ? 12 : 16)
+        .padding(.top, usesCompactProfileLayout ? 14 : 20)
+        .padding(.bottom, usesCompactProfileLayout ? 12 : 16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -1456,6 +1633,7 @@ struct ProfileView: View {
                 draftActivity: draftActivity,
                 monthTitle: monthTitle(for: monthDate),
                 weekdays: weekdays(),
+                dayCellHeight: profileCalendarDayCellHeight,
                 onToday: selectTodayInCalendar
             )
 
@@ -1914,6 +2092,38 @@ struct ProfileView: View {
                     .listRowBackground(Color.clear)
                 } header: {
                     Text("Apple Health (HealthKit)")
+                }
+                Section {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.ultraThinMaterial)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(.white.opacity(0.18))
+                            )
+
+                        NavigationLink {
+                            WearableConnectView()
+                                .gradientBG()
+                        } label: {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "map.fill")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Wearable routes")
+                                        .font(.body.weight(.semibold))
+                                    Text("Connect Garmin and add missing GPS routes to Apple Health and Liftr.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(12)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                    .listRowBackground(Color.clear)
                 }
             }
             Section("Appearance") {
@@ -2489,10 +2699,32 @@ struct ProfileView: View {
         return rows.filter { ($0.state ?? "published") != "planned" }.count
     }
     
+    private struct CoinsProfileRow: Decodable {
+        let coins_balance: Int?
+    }
+
+    private func loadCoinsBalance(userId: UUID) async {
+        do {
+            let res = try await SupabaseManager.shared.client
+                .from("profiles")
+                .select("coins_balance")
+                .eq("user_id", value: userId.uuidString)
+                .single()
+                .execute()
+            let row = try JSONDecoder.supabase().decode(CoinsProfileRow.self, from: res.data)
+            coinsBalance = row.coins_balance ?? 0
+            if isOwnProfile {
+                CoinManager.shared.syncBalance(coinsBalance)
+            }
+        } catch {
+            coinsBalance = 0
+        }
+    }
+
     private func loadProfileHeader() async {
         guard let uid = viewingUserId else { return }
         loading = true; defer { loading = false }
-        
+
         do {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
@@ -2500,7 +2732,7 @@ struct ProfileView: View {
                 .eq("user_id", value: uid.uuidString)
                 .single()
                 .execute()
-            
+
             let profile = try JSONDecoder.supabase().decode(ProfileRow.self, from: res1.data)
             username = profile.username
             avatarURL = profile.avatar_url
@@ -2508,7 +2740,7 @@ struct ProfileView: View {
             if isOwnProfile {
                 await app.syncTabBarProfileAvatar(urlString: profile.avatar_url)
             }
-            
+
             if let session = try? await SupabaseManager.shared.client.auth.session {
                 self.email = session.user.email
             }
@@ -2528,19 +2760,34 @@ struct ProfileView: View {
             self.baseCaloriesTargetLoadedSnapshot = "\(displayKcal)"
             self.hasBirthDate = profile.birth_date != nil
             self.birthDate = profile.birth_date ?? Date()
+            await loadCoinsBalance(userId: uid)
             let res2 = try await SupabaseManager.shared.client
                 .from("vw_profile_counts")
                 .select()
                 .eq("user_id", value: uid.uuidString)
                 .execute()
-            
+
             let rows = try JSONDecoder.supabase().decode([ProfileCounts].self, from: res2.data)
             counts = rows.first ?? ProfileCounts(user_id: uid, followers: 0, following: 0)
         } catch {
             self.error = error.localizedDescription
         }
     }
-    
+
+    private func loadPetCombatPreview(opponentId: UUID) async {
+        petCombatPreviewLoading = true
+        defer { petCombatPreviewLoading = false }
+        do {
+            async let previewTask = PetService.shared.fetchCombatPreview(targetUserId: opponentId)
+            async let headToHeadTask = PetService.shared.fetchCombatHeadToHead(opponentUserId: opponentId)
+            petCombatPreview = try await previewTask
+            petCombatHeadToHead = try await headToHeadTask
+        } catch {
+            petCombatPreview = nil
+            petCombatHeadToHead = nil
+        }
+    }
+
     private func prepareMonthAndLoad() async {
         monthDays = monthDaysGrid(for: monthDate)
         await loadMonthActivity()
@@ -3210,6 +3457,7 @@ struct ProfileView: View {
 
             await refreshFollowState()
             await loadProfileHeader()
+            await CoinManager.shared.refreshBalanceAfterMutation(notifyIfEarned: true)
         } catch {
             await MainActor.run { self.error = "Follow failed: \(error.localizedDescription)" }
             print("[Follow][ERROR]", error.localizedDescription)
@@ -3476,6 +3724,20 @@ struct AvatarZoomPreview: View {
     }
 }
 
+private struct ProfileContentWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct ProfileHeaderMiddleWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 private enum ProfileCalendarActivityPalette {
     static let own = WorkoutTint.strength
     static let joined = WorkoutTint.cardio
@@ -3508,6 +3770,7 @@ private struct ProfileCalendarView: View {
     let draftActivity: [Date: Bool]
     let monthTitle: String
     let weekdays: [String]
+    var dayCellHeight: CGFloat = 36
     let onToday: () -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 6), count: 7)
@@ -3568,7 +3831,8 @@ private struct ProfileCalendarView: View {
                         day: day,
                         activity: activityState(for: day),
                         isSelected: isSelected(day),
-                        isToday: isToday(day)
+                        isToday: isToday(day),
+                        cellHeight: dayCellHeight
                     ) {
                         if let day {
                             selectedDay = day
@@ -3623,6 +3887,7 @@ private struct ProfileCalendarDayCell: View {
     let activity: ProfileCalendarDayActivity
     let isSelected: Bool
     let isToday: Bool
+    var cellHeight: CGFloat = 36
     let action: () -> Void
 
     var body: some View {
@@ -3649,7 +3914,7 @@ private struct ProfileCalendarDayCell: View {
                     }
                 }
             }
-            .frame(height: 36)
+            .frame(height: cellHeight)
             .overlay {
                 if isSelected {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)

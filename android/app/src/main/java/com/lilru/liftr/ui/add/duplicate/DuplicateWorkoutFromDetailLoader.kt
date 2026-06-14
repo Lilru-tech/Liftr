@@ -216,6 +216,7 @@ suspend fun loadDuplicateForAdd(
         sportSessionNotes = "",
         sportMatchResult = AddMatchResult.UNFINISHED,
         hyroxExercisesJson = "[]",
+        climbingRoutesJson = "[]",
         sportStats = emptyMap()
     )
 
@@ -471,6 +472,12 @@ private suspend fun mergeSportVw(
             sMap["raw_stats_json"] = runCatching { skiRawFromTable(supabase, sessionId) }
                 .getOrNull() ?: p.sportStats["raw_stats_json"].orEmpty()
         }
+        "climbing" -> {
+            runCatching { climbingStatsFromTables(supabase, sessionId) }.getOrNull()?.let { (stats, routesJson) ->
+                sMap.putAll(stats)
+                p = p.copy(climbingRoutesJson = routesJson)
+            }
+        }
     }
     return p.copy(sportStats = sMap)
 }
@@ -566,6 +573,88 @@ private suspend fun skiRawFromTable(
         put("weather", o.optString("weather", ""))
     }.toString()
 }
+
+private suspend fun climbingStatsFromTables(
+    supabase: SupabaseClient,
+    sessionId: Int
+): Pair<Map<String, String>, String> {
+    val sRes = supabase
+        .from(BackendContracts.Tables.CLIMBING_SESSION_STATS)
+        .select { filter { eq("session_id", sessionId) } }
+    val o = firstObjectFromSelect(sRes.data) ?: return emptyMap<String, String>() to "[]"
+    fun n(key: String): String {
+        if (!o.has(key)) return ""
+        val v = o.get(key)
+        return when (v) {
+            null, org.json.JSONObject.NULL -> ""
+            is Number -> v.toString()
+            else -> o.optString(key, "")
+        }
+    }
+    val stats = mutableMapOf(
+        "environment" to o.optString("environment", "indoor"),
+        "primary_style" to o.optString("primary_style", "boulder"),
+        "routes_sent" to n("routes_sent"),
+        "routes_attempted" to n("routes_attempted"),
+        "total_vertical_m" to n("total_vertical_m"),
+        "moving_time_sec" to n("moving_time_sec"),
+        "paused_time_sec" to n("paused_time_sec"),
+        "venue_name" to o.optString("venue_name", ""),
+        "weather" to o.optString("weather", ""),
+        "avg_hr" to n("avg_hr"),
+        "max_hr" to n("max_hr"),
+        "falls" to n("falls"),
+        "flashes" to n("flashes"),
+        "highest_grade_system" to o.optString("highest_grade_system", ""),
+        "highest_grade_value" to o.optString("highest_grade_value", "")
+    )
+    val routesJson = loadClimbingRoutesJson(supabase, sessionId)
+    return stats to routesJson
+}
+
+private suspend fun loadClimbingRoutesJson(
+    supabase: SupabaseClient,
+    sessionId: Int
+): String {
+    val exRes = supabase.from(BackendContracts.Tables.CLIMBING_SESSION_ROUTES)
+        .select(
+            columns = Columns.raw(
+                "route_order, route_name, style, grade_system, grade_value, attempts, sent, flash, notes"
+            )
+        ) {
+            filter { eq("session_id", sessionId) }
+            order("route_order", Order.ASCENDING)
+        }
+    val rows = runCatching { loaderJson.decodeFromString<List<ClimbingRouteDbRow>>(exRes.data) }
+        .getOrDefault(emptyList())
+    if (rows.isEmpty()) return "[]"
+    val forms = rows.map { r ->
+        com.lilru.liftr.climbing.ClimbingRouteForm(
+            routeName = r.routeName.orEmpty(),
+            style = com.lilru.liftr.climbing.ClimbingStyle.fromWire(r.style),
+            gradeSystem = com.lilru.liftr.climbing.ClimbingGradeSystem.fromWire(r.gradeSystem),
+            gradeValue = r.gradeValue.orEmpty(),
+            attempts = r.attempts?.toString().orEmpty(),
+            sent = r.sent == true,
+            flash = r.flash == true,
+            notes = r.notes.orEmpty()
+        )
+    }
+    return com.lilru.liftr.climbing.ClimbingRouteFormatting.encodeRoutesJson(forms)
+}
+
+@kotlinx.serialization.Serializable
+private data class ClimbingRouteDbRow(
+    @kotlinx.serialization.SerialName("route_order") val routeOrder: Int? = null,
+    @kotlinx.serialization.SerialName("route_name") val routeName: String? = null,
+    val style: String? = null,
+    @kotlinx.serialization.SerialName("grade_system") val gradeSystem: String? = null,
+    @kotlinx.serialization.SerialName("grade_value") val gradeValue: String? = null,
+    val attempts: Int? = null,
+    val sent: Boolean? = null,
+    val flash: Boolean? = null,
+    val notes: String? = null
+)
 
 private suspend fun loadHyroxExercisesJson(supabase: SupabaseClient, sessionId: Int): String {
     val exRes = supabase.from(BackendContracts.Tables.HYROX_SESSION_EXERCISES)
@@ -673,12 +762,14 @@ suspend fun loadSportEditEnrichment(
         sportSessionNotes = "",
         sportMatchResult = AddMatchResult.UNFINISHED,
         hyroxExercisesJson = "[]",
+        climbingRoutesJson = "[]",
         sportStats = emptyMap()
     )
     val merged = mergeSportVw(dummy, full, supabase, sessionId, spFromSession)
     return SportEditEnrichment(
         sportStats = merged.sportStats,
         hyroxExercisesJson = merged.hyroxExercisesJson,
+        climbingRoutesJson = merged.climbingRoutesJson,
         footballPosition = merged.footballPosition,
         racketMode = merged.racketMode,
         racketFormat = merged.racketFormat

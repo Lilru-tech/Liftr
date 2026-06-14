@@ -330,6 +330,19 @@ struct NotificationsListView: View {
                 Text("Challenge not found")
             }
 
+        case "pet_hatched":
+            PetHatchNotificationDestinationView()
+                .gradientBG()
+
+        case "pet_combat_challenged":
+            if let attackerIdStr = n.data?["attacker_user_id"]?.stringValue,
+               let attackerId = UUID(uuidString: attackerIdStr) {
+                ProfileView(userId: attackerId)
+                    .gradientBG()
+            } else {
+                Text("Challenge not found")
+            }
+
         case "dm_message":
             if let cid = dmConversationId(from: n.data) {
                 DeepLinkedChatThread(conversationId: cid, senderId: dmSenderId(from: n.data))
@@ -422,14 +435,28 @@ struct NotificationsListView: View {
     }
 
     @ViewBuilder
+    private func notificationTypeIcon(_ type: String) -> some View {
+        Image(systemName: notificationSystemImage(for: type))
+            .font(.title2)
+            .foregroundStyle(.secondary)
+            .padding(.top, 2)
+    }
+
+    @ViewBuilder
+    private func notificationUnreadDot(isUnread: Bool) -> some View {
+        if isUnread {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 8, height: 8)
+                .padding(.top, 10)
+        }
+    }
+
+    @ViewBuilder
     private func defaultNotificationLabel(_ n: NotificationRow, isUnread: Bool) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            if isUnread {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 8)
-            }
+        HStack(alignment: .top, spacing: 10) {
+            notificationUnreadDot(isUnread: isUnread)
+            notificationTypeIcon(n.type)
             VStack(alignment: .leading, spacing: 4) {
                 Text(n.title)
                     .font(.subheadline.weight(.semibold))
@@ -468,16 +495,8 @@ struct NotificationsListView: View {
         let foodName = n.data?["food_name"]?.stringValue
         let mealSlot = n.data?["meal_slot"]?.stringValue
         HStack(alignment: .top, spacing: 10) {
-            if isUnread {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 10)
-            }
-            Image(systemName: "fork.knife.circle.fill")
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .padding(.top, 2)
+            notificationUnreadDot(isUnread: isUnread)
+            notificationTypeIcon(n.type)
             VStack(alignment: .leading, spacing: 4) {
                 Text(n.title)
                     .font(.subheadline.weight(.semibold))
@@ -672,6 +691,40 @@ struct NotificationsListView: View {
         }
     }
     
+    private func notificationSystemImage(for type: String) -> String {
+        switch type {
+        case "dm_message": return "message.circle.fill"
+        case "new_follower": return "person.crop.circle.badge.plus"
+        case "workout_like": return "heart.circle.fill"
+        case "workout_comment": return "text.bubble.fill"
+        case "comment_like": return "hand.thumbsup.circle.fill"
+        case "comment_reply": return "arrowshape.turn.up.left.circle.fill"
+        case "comment_mention": return "at.circle.fill"
+        case "added_as_participant": return "person.2.circle.fill"
+        case "achievement_unlocked": return "trophy.circle.fill"
+        case "goal_completed", "goal_almost_done": return "target"
+        case "competition_invite": return "envelope.circle.fill"
+        case "competition_accepted": return "checkmark.circle.fill"
+        case "competition_declined": return "xmark.circle.fill"
+        case "competition_cancelled", "competition_expired": return "clock.circle.fill"
+        case "competition_result_win": return "trophy.circle.fill"
+        case "competition_result_lose": return "flag.checkered.circle.fill"
+        case "competition_workout_pending_review": return "doc.text.magnifyingglass"
+        case "competition_workout_accepted": return "checkmark.seal.fill"
+        case "competition_workout_rejected": return "xmark.seal.fill"
+        case "meal_plan_invite": return "fork.knife.circle.fill"
+        case "apple_health_cardio_imported": return "heart.text.square.fill"
+        case "segment_you_are_first": return "flag.checkered.circle.fill"
+        case "segment_lost_first": return "flag.slash.circle.fill"
+        case "territory_capture_from_user", "territory_lost_to_user": return "map.circle.fill"
+        case "challenge_won", "challenge_won_weekly": return "medal.star.fill"
+        case "workout_kind_inactive": return "bell.circle.fill"
+        case "pet_hatched": return "pawprint.circle.fill"
+        case "pet_combat_challenged": return "bolt.horizontal.circle.fill"
+        default: return "bell.circle.fill"
+        }
+    }
+
     private func shortType(_ t: String) -> String {
         switch t {
         case "new_follower":          return "Follower"
@@ -702,6 +755,8 @@ struct NotificationsListView: View {
         case "challenge_won", "challenge_won_weekly": return "Challenge"
         case "territory_capture_from_user": return "Territory captured"
         case "territory_lost_to_user":      return "Territory lost"
+        case "pet_hatched":                 return "Pet hatched"
+        case "pet_combat_challenged":       return "Pet arena challenge"
         default:                      return t.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

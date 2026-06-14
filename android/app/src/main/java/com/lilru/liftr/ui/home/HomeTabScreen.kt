@@ -89,7 +89,10 @@ import com.lilru.liftr.ui.active.ActiveSportWorkoutScreen
 import com.lilru.liftr.ui.active.ActiveStrengthWorkoutScreen
 import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddSportType
+import androidx.compose.ui.unit.IntSize
 import com.lilru.liftr.ui.common.FloatingDockEdge
+import com.lilru.liftr.ui.common.floatingBubbleOffset
+import com.lilru.liftr.ui.common.marginPx
 import com.lilru.liftr.ui.common.floatingEdgeAnchor
 import com.lilru.liftr.ui.common.floatingEdgeDock
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
@@ -326,6 +329,14 @@ fun HomeTabScreen(
                         me?.let { u -> AppNavEvents.send(MainOverlay.Goals(u)) }
                     },
                     onOpenCompetitions = { AppNavEvents.send(MainOverlay.CompetitionsHub) },
+                    onOpenTrackedAchievements = {
+                        me?.let { AppNavEvents.send(MainOverlay.TrackedAchievements(it)) }
+                    },
+                    onToggleDataPanel = {
+                        scope.launch {
+                            HomeUiPreferences.setCollapseModules(homeContext, !collapse.collapseModules)
+                        }
+                    },
                     onSetCollapse = { c ->
                         scope.launch {
                             HomeUiPreferences.setAllCollapsed(homeContext, c)
@@ -473,6 +484,8 @@ private fun HomeContentColumn(
     me: String?,
     onOpenGoals: () -> Unit,
     onOpenCompetitions: () -> Unit,
+    onOpenTrackedAchievements: () -> Unit,
+    onToggleDataPanel: () -> Unit,
     onSetCollapse: (Boolean) -> Unit
 ) {
     val todayFeedLabel = stringResource(R.string.home_feed_today)
@@ -530,62 +543,22 @@ private fun HomeContentColumn(
                         }
                     }
                 }
-                if (hasDataModule) {
-                    if (collapse.collapseModules) {
-                        item {
-                            Card(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onSetCollapse(false) }
-                            ) {
-                                Row(
-                                    Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Text("📊", style = MaterialTheme.typography.bodyLarge)
-                                        Text(
-                                            stringResource(R.string.home_data_title),
-                                            style = MaterialTheme.typography.labelLarge
-                                        )
-                                    }
-                                    Text(
-                                        "▾",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    } else {
-                        item {
-                            Card(Modifier.fillMaxWidth()) {
-                                Row(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        stringResource(R.string.home_data_title),
-                                        style = MaterialTheme.typography.titleSmall
-                                    )
-                                    Text(
-                                        "▲",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier
-                                            .clickable { onSetCollapse(true) }
-                                            .padding(4.dp)
-                                    )
-                                }
-                            }
-                        }
+                if (hasDataModule || me != null) {
+                    item {
+                        HomeModulePillRow(
+                            showData = hasDataModule,
+                            dataExpanded = !collapse.collapseModules,
+                            onToggleData = onToggleDataPanel,
+                            showGoals = me != null,
+                            showCompetitions = me != null,
+                            showAchievements = me != null && ui.trackedAchievementCount > 0,
+                            trackedAchievementCount = ui.trackedAchievementCount,
+                            onGoals = onOpenGoals,
+                            onCompetitions = onOpenCompetitions,
+                            onAchievements = onOpenTrackedAchievements
+                        )
+                    }
+                    if (hasDataModule && !collapse.collapseModules) {
                         if (ui.todayCount > 0) {
                             item {
                                 HomeTodayCard(
@@ -614,6 +587,11 @@ private fun HomeContentColumn(
                                     bestSportLabel = ui.bestSportLabel,
                                     bestSportScore = ui.bestSportScore
                                 )
+                            }
+                        }
+                        item {
+                            TextButton(onClick = { onSetCollapse(true) }) {
+                                Text(stringResource(R.string.home_collapse_data))
                             }
                         }
                     }
@@ -650,15 +628,6 @@ private fun HomeContentColumn(
                                 }
                             }
                         }
-                    }
-                }
-                if (me != null) {
-                    item {
-                        HomeGoalsCompetitionsRow(
-                            compact = collapse.collapseModules,
-                            onGoals = onOpenGoals,
-                            onCompetitions = onOpenCompetitions
-                        )
                     }
                 }
                 if (ui.workouts.isEmpty()) {
@@ -908,22 +877,24 @@ internal fun homeQuickTooltipOffset(
     edge: FloatingDockEdge,
     widthPx: Float,
     heightPx: Float,
-    density: androidx.compose.ui.unit.Density
+    density: androidx.compose.ui.unit.Density,
+    bubbleWidthPx: Float,
+    bubbleHeightPx: Float,
+    tabWidthPx: Float,
+    tabHeightPx: Float
 ): IntOffset {
-    val tooltipWidth = with(density) { 228.dp.toPx() }
-    val tooltipHeight = with(density) { 48.dp.toPx() }
-    val spacing = with(density) { 142.dp.toPx() }
-    val verticalSpacing = with(density) { 58.dp.toPx() }
-    val raw = when (edge) {
-        FloatingDockEdge.LEFT -> Offset(anchor.x + spacing, anchor.y)
-        FloatingDockEdge.RIGHT -> Offset(anchor.x - spacing, anchor.y)
-        FloatingDockEdge.TOP -> Offset(anchor.x, anchor.y + verticalSpacing)
-        FloatingDockEdge.BOTTOM -> Offset(anchor.x, anchor.y - verticalSpacing)
-    }
-
-    return IntOffset(
-        (raw.x - tooltipWidth / 2f).coerceIn(12f, widthPx - tooltipWidth - 12f).roundToInt(),
-        (raw.y - tooltipHeight / 2f).coerceIn(12f, heightPx - tooltipHeight - 12f).roundToInt()
+    val spacingPx = with(density) { 12.dp.toPx() }
+    return floatingBubbleOffset(
+        anchor = anchor,
+        edge = edge,
+        bubbleWidthPx = bubbleWidthPx,
+        bubbleHeightPx = bubbleHeightPx,
+        tabWidthPx = tabWidthPx,
+        tabHeightPx = tabHeightPx,
+        screenWidthPx = widthPx,
+        screenHeightPx = heightPx,
+        spacingPx = spacingPx,
+        marginPx = density.marginPx()
     )
 }
 

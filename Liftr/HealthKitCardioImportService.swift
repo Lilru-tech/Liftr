@@ -440,6 +440,14 @@ final class HealthKitCardioImportService {
         [.running, .walking, .hiking, .cycling, .swimming, .rowing]
     }()
 
+    func fetchWorkoutsForRouteMatching(from: Date, to: Date) async throws -> [HKWorkout] {
+        try await fetchWorkouts(from: from, to: to)
+    }
+
+    func workoutRoutes(for workout: HKWorkout) async throws -> [HKWorkoutRoute] {
+        try await fetchWorkoutRoutes(for: workout)
+    }
+
     private func fetchWorkouts(from: Date, to: Date) async throws -> [HKWorkout] {
         let datePred = HKQuery.predicateForSamples(withStart: from, end: to, options: .strictStartDate)
         let activityPredicates = Self.supportedWorkoutActivityTypes.map {
@@ -852,16 +860,26 @@ final class HealthKitCardioImportService {
     }
 
     private func fetchWorkoutIdByHealthKitUUID(_ uuid: String, userId: UUID) async throws -> Int? {
-        let res = try await SupabaseManager.shared.client
+        struct Row: Decodable { let id: Int }
+        let primary = try await SupabaseManager.shared.client
             .from("workouts")
             .select("id")
             .eq("user_id", value: userId)
             .eq("healthkit_uuid", value: uuid)
             .limit(1)
             .execute()
-        struct Row: Decodable { let id: Int }
-        let rows = try JSONDecoder.supabase().decode([Row].self, from: res.data)
-        return rows.first?.id
+        if let id = try JSONDecoder.supabase().decode([Row].self, from: primary.data).first?.id {
+            return id
+        }
+        let alias = try await SupabaseManager.shared.client
+            .from("workout_healthkit_uuid_aliases")
+            .select("workout_id")
+            .eq("user_id", value: userId)
+            .eq("healthkit_uuid", value: uuid)
+            .limit(1)
+            .execute()
+        struct AliasRow: Decodable { let workout_id: Int }
+        return try JSONDecoder.supabase().decode([AliasRow].self, from: alias.data).first?.workout_id
     }
 
     private static func geoJSONLineString(from coordinates: [CLLocationCoordinate2D]) -> String? {

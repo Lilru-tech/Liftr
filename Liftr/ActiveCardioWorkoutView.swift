@@ -8,8 +8,11 @@ import UIKit
 struct ActiveCardioWorkoutView: View {
     let workoutId: Int
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject var app: AppState
     @AppStorage("cardioGPSProfile") private var cardioGPSProfileRaw: String = CardioGPSProfile.balanced.rawValue
+    @State private var didRestoreCardioCheckpoint = false
+    @State private var cardioCheckpointDebounceTask: Task<Void, Never>?
 
     @StateObject private var gpsTracker = CardioWorkoutLocationTracker()
     @State private var showCountdown = true
@@ -443,6 +446,15 @@ struct ActiveCardioWorkoutView: View {
         }
         .task {
             await loadCardio()
+            await MainActor.run { restoreCardioCheckpointIfNeeded() }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background || newPhase == .inactive {
+                persistCardioCheckpoint()
+            }
+        }
+        .onChange(of: elapsedSec) { _, _ in
+            persistCardioCheckpointDebounced()
         }
         .onAppear {
             if let p = CardioGPSProfile(rawValue: cardioGPSProfileRaw) {
@@ -955,6 +967,7 @@ struct ActiveCardioWorkoutView: View {
 
             await MainActor.run {
                 isSaving = false
+                clearCardioCheckpoint()
                 dismiss()
             }
         } catch {
@@ -963,6 +976,79 @@ struct ActiveCardioWorkoutView: View {
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    @MainActor
+    private func persistCardioCheckpointDebounced() {
+        cardioCheckpointDebounceTask?.cancel()
+        cardioCheckpointDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { persistCardioCheckpoint() }
+        }
+    }
+
+    @MainActor
+    private func persistCardioCheckpoint() {
+        let routePoints = gpsTracker.routeCoordinates.map { [$0.latitude, $0.longitude] }
+        let cardioPayload = ActiveWorkoutSessionCheckpoint.CardioPayload(
+            elapsedSec: elapsedSec,
+            isSessionRunning: isRunning,
+            distanceText: distanceText,
+            routePoints: routePoints,
+            kmSplitCumulativeSec: splitEndElapsedSec,
+            timerMode: mode == .countdown ? "countdown" : "stopwatch",
+            remainingSec: remainingSec,
+            initialTargetSec: initialTargetSec,
+            gpsProfileRaw: cardioGPSProfileRaw,
+            showCountdown: showCountdown
+        )
+        let entry = ActiveWorkoutSessionCheckpoint.Entry(
+            workoutId: workoutId,
+            kind: .cardio,
+            savedAt: Date(),
+            sessionStartedAt: nil,
+            accumulatedPausedSec: 0,
+            isSessionPaused: !isRunning,
+            pauseBeganAt: nil,
+            strength: nil,
+            cardio: cardioPayload,
+            sport: nil
+        )
+        ActiveWorkoutSessionCheckpoint.store(entry)
+    }
+
+    @MainActor
+    private func restoreCardioCheckpointIfNeeded() {
+        guard !didRestoreCardioCheckpoint else { return }
+        guard let entry = ActiveWorkoutSessionCheckpoint.load(),
+              entry.workoutId == workoutId,
+              entry.kind == .cardio,
+              let cardio = entry.cardio
+        else { return }
+        didRestoreCardioCheckpoint = true
+        elapsedSec = cardio.elapsedSec
+        isRunning = cardio.isSessionRunning
+        distanceText = cardio.distanceText
+        splitEndElapsedSec = cardio.kmSplitCumulativeSec
+        remainingSec = cardio.remainingSec
+        initialTargetSec = cardio.initialTargetSec
+        showCountdown = cardio.showCountdown
+        cardioGPSProfileRaw = cardio.gpsProfileRaw
+        mode = cardio.timerMode == "countdown" ? .countdown : .stopwatch
+        if !cardio.routePoints.isEmpty {
+            let coords = cardio.routePoints.compactMap { pair -> CLLocationCoordinate2D? in
+                guard pair.count >= 2 else { return nil }
+                return CLLocationCoordinate2D(latitude: pair[0], longitude: pair[1])
+            }
+            let dist = Double(distanceText.replacingOccurrences(of: ",", with: ".")) ?? gpsTracker.distanceKm
+            gpsTracker.restoreRoute(coordinates: coords, distanceKm: dist)
+        }
+    }
+
+    @MainActor
+    private func clearCardioCheckpoint() {
+        ActiveWorkoutSessionCheckpoint.clearIfWorkout(workoutId)
     }
 
     private func formatTime(_ total: Int) -> String {

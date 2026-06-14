@@ -11,11 +11,13 @@ Track your workouts, manage progress, and stay motivated.
 ## 🧰 Tech Stack
 - SwiftUI
 - Supabase
-- Fastlane + GitHub Actions (CI/CD)
-- TestFlight distribution
+- Xcode Cloud (iOS builds / TestFlight)
+- GitHub Actions (Android, Supabase edge, `devel` → `main` sync)
 
 ## ☁️ CI/CD
-This project uses **Xcode Cloud** for building, testing, and distributing TestFlight builds.
+**iOS:** **Xcode Cloud** workflow **Devel** — one build per push to branch `devel` (TestFlight). Do not add a second workflow on `devel`; see [docs/xcode-cloud-workflows.md](../docs/xcode-cloud-workflows.md).
+
+**Other:** GitHub Actions under `.github/workflows/` (not iOS archives).
 
 ## 🏗️ Project Structure
 📁 Liftr

@@ -11,6 +11,7 @@ import com.google.firebase.messaging.RemoteMessage
 import com.lilru.liftr.MainActivity
 import com.lilru.liftr.R
 import com.lilru.liftr.data.LiftrSupabase
+import com.lilru.liftr.ui.pets.PetHatchEventHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +31,13 @@ class LiftrFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         val data = message.data
         if (data.isNotEmpty()) {
+            val type = data["type"] ?: data["notification_type"]
+            if (type == "pet_hatched") {
+                PetHatchEventHandler.handleHatchEvent(
+                    context = applicationContext,
+                    navigateToProfile = false
+                )
+            }
             showDataNotification(
                 title = message.notification?.title ?: data["title"] ?: getString(R.string.app_name),
                 body = message.notification?.body ?: data["body"] ?: "",

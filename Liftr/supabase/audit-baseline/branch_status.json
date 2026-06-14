@@ -1,0 +1,8 @@
+{
+  "branch_name": "db-audit-remediation",
+  "branch_id": "2f98e845-aade-425d-8c24-50613881f4c6",
+  "branch_project_ref": "syxsgzeguszuszkdqpom",
+  "status": "MIGRATIONS_FAILED",
+  "failure_reason": "Early migration 20260509130000 references public.spatial_ref_sys before PostGIS creates it on fresh branch databases.",
+  "remediation": "Applied audit migrations directly to production with before/after visibility snapshots. Branch retained for future fix of migration ordering."
+}

@@ -136,6 +136,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     ) -> Bool {
         let source = options[.sourceApplication] as? String ?? "unknown"
         AuthCallbackLogger.log("application(open:) sourceApplication=\(source)", url: url, source: "AppDelegate")
+        if WearableRedirect.isWearableCallback(url) {
+            Task {
+                await ExternalRouteSyncService.shared.handleWearableCallbackURL(url)
+            }
+            return true
+        }
         guard AuthRedirect.isAuthCallback(url) else { return false }
         Task { @MainActor in
             await AppState.shared.handleAuthCallbackURL(url)
@@ -166,6 +172,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        let (_, type, _) = Self.notificationPayload(from: notification.request.content.userInfo)
+        if type == "pet_hatched" {
+            Task { @MainActor in
+                PetHatchEventHandler.handleHatchEvent(navigateToProfile: false)
+            }
+        }
 
         completionHandler([.banner, .list, .sound])
     }

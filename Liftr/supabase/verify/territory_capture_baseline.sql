@@ -367,4 +367,23 @@ from public.get_territory_total_cells_leaderboard_v1('global', 10);
 
 select
   has_function_privilege('authenticated', 'public.list_territory_city_regions_v1(text,integer,boolean)', 'execute') as authenticated_can_search_city_regions,
-  has_function_privilege('authenticated', 'public.get_territory_total_cells_leaderboard_v1(text,integer)', 'execute') as authenticated_can_call_total_cells_leaderboard;
+  has_function_privilege('authenticated', 'public.get_territory_city_share_leaderboard_v1(text,text,integer)', 'execute') as authenticated_can_call_city_share_leaderboard,
+  has_function_privilege('authenticated', 'public.list_user_territory_top_cities_v1(uuid,integer)', 'execute') as authenticated_can_call_user_top_cities,
+  has_function_privilege('authenticated', 'public.get_territory_total_cells_leaderboard_v1(text,integer)', 'execute') as authenticated_can_call_total_cells_leaderboard,
+  has_function_privilege('authenticated', 'public.get_territory_map_v1(double precision,double precision,double precision,double precision,integer)', 'execute') as authenticated_can_call_territory_map,
+  has_function_privilege('authenticated', 'public._liftr_territory_municipality_label(text,text)', 'execute') as authenticated_can_call_municipality_label_helper,
+  has_function_privilege('authenticated', 'public._liftr_territory_city_geocode_bucket(double precision,double precision)', 'execute') as authenticated_can_call_city_geocode_bucket_helper;
+
+select
+  p.proname,
+  p.prosecdef as is_security_definer
+from pg_proc p
+  join pg_namespace n on n.oid = p.pronamespace
+where
+  n.nspname = 'public'
+  and p.proname in (
+    'list_territory_city_regions_v1',
+    'get_territory_city_share_leaderboard_v1',
+    'list_user_territory_top_cities_v1'
+  )
+order by p.proname;

@@ -50,7 +50,7 @@ fun TerritoryProfileHubCard(
         loading = true
         if (isOwnProfile) {
             summary = TerritoryCaptureClient.fetchTerritorySummary(supabase, userId = null)
-            val loadedCities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase)
+            val loadedCities = TerritoryCaptureClient.fetchTerritoryCityRegions(supabase).value
             cities = loadedCities
             takeovers = TerritoryCaptureClient.fetchRecentTakeovers(supabase, userId = null, limit = 3)
             if (loadedCities.any { TerritoryCaptureClient.isPendingTerritoryCityKey(it.cityKey) }) {

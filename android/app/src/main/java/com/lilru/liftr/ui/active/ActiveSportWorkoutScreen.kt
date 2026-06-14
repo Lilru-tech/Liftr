@@ -40,7 +40,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.R
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
+import com.lilru.liftr.climbing.ClimbingRouteFormatting
 import com.lilru.liftr.hyrox.HyroxExerciseFormatting
+import com.lilru.liftr.ui.add.ClimbingSessionEditorSection
 import com.lilru.liftr.ui.chat.MessagesFloatingButton
 import io.github.jan.supabase.SupabaseClient
 
@@ -58,6 +60,16 @@ fun ActiveSportWorkoutScreen(
     val ui by vm.uiState.collectAsStateWithLifecycle()
     val ctx = LocalContext.current
     val ongoingSubtitle = stringResource(R.string.active_sport_title)
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                vm.saveSessionCheckpoint()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     DisposableEffect(ongoingSubtitle, workoutId) {
         OngoingWorkoutService.start(ctx, ongoingSubtitle, trackLocation = false, workoutId = workoutId)
         onDispose { OngoingWorkoutService.stop(ctx) }
@@ -328,7 +340,30 @@ fun ActiveSportWorkoutScreen(
                                     hyroxOrdered.isNotEmpty() && ui.hyroxExerciseIndex < hyroxOrdered.lastIndex
                             ) { Text(stringResource(R.string.active_sport_hyrox_next)) }
                         }
-                    } else {
+                    } else if (ui.isClimbing) {
+                        val climbingRoutes = remember(ui.climbingRoutesJson) {
+                            com.lilru.liftr.climbing.ClimbingRouteFormatting.decodeRoutesJson(ui.climbingRoutesJson)
+                        }
+                        ClimbingSessionEditorSection(
+                            sportStats = ui.climbingSportStats,
+                            onSportStatChange = vm::setClimbingStat,
+                            routes = climbingRoutes,
+                            onRoutesChange = { routes ->
+                                vm.setClimbingRoutesJson(ClimbingRouteFormatting.encodeRoutesJson(routes))
+                            },
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+                        OutlinedTextField(
+                            value = ui.locationText,
+                            onValueChange = vm::setLocationText,
+                            label = { Text(stringResource(R.string.active_sport_location)) },
+                            singleLine = true,
+                            enabled = !ui.finishing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp)
+                        )
+                    } else if (!ui.isSki) {
                         OutlinedTextField(
                             value = ui.scoreForText,
                             onValueChange = vm::setScoreForText,

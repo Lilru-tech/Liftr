@@ -11,6 +11,7 @@ struct RootView: View {
     @State private var territoryBackfillStartedForUserId: UUID?
     
     var body: some View {
+        ZStack {
         TabView(selection: $app.selectedTab) {
             NavigationStack { HomeView().gradientBG() }
                 .tag(Tab.home)
@@ -49,6 +50,16 @@ struct RootView: View {
                 }
                 .badge(app.unreadNotificationsCount)
         }
+
+        if app.selectedTab == .profile, app.isAuthenticated, app.profileSurfaceUserId == nil {
+            ProfilePetFloatingOverlay(bannerInset: app.isPremium ? 0 : 58)
+        }
+        }
+        .onChange(of: app.selectedTab) { _, tab in
+            if tab == .profile {
+                PetRefreshCenter.notifyPetStateDidChange()
+            }
+        }
         .task(id: app.userId) {
             guard let userId = app.userId else { return }
             guard territoryBackfillStartedForUserId != userId else { return }
@@ -62,22 +73,40 @@ struct RootView: View {
             }
         }
         .overlay(alignment: .top) {
-            if let message = app.territoryCaptureToast {
-                Text(message)
-                    .font(.subheadline.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                    .padding(.top, 8)
-                    .padding(.horizontal, 16)
-                    .onAppear {
-                        Task {
-                            try? await Task.sleep(nanoseconds: 4_000_000_000)
-                            await MainActor.run { app.territoryCaptureToast = nil }
+            VStack(spacing: 8) {
+                if let message = app.coinEarnToast {
+                    Text(message)
+                        .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.green.opacity(0.95), in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 16)
+                        .onAppear {
+                            Task {
+                                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                                await MainActor.run { app.coinEarnToast = nil }
+                            }
                         }
-                    }
+                }
+                if let message = app.territoryCaptureToast {
+                    Text(message)
+                        .font(.subheadline.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .padding(.horizontal, 16)
+                        .onAppear {
+                            Task {
+                                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                                await MainActor.run { app.territoryCaptureToast = nil }
+                            }
+                        }
+                }
             }
+            .padding(.top, 8)
         }
         .onAppear {
             if !didRunUpdateCheck {
@@ -102,6 +131,7 @@ struct RootView: View {
             Task {
                 await HealthKitBodyWeightSyncService.shared.handleAppForegroundIfNeeded()
                 await HealthKitCardioSyncService.shared.handleAppForegroundIfNeeded()
+                await CoinManager.shared.refreshBalance(notifyIfEarned: true)
             }
         }
         .onReceive(app.$pendingNotification) { pending in
@@ -259,6 +289,7 @@ struct RootView: View {
                 AuthCallbackLogger.log("RootView presenting password recovery fullScreenCover", source: "RootView")
             }
         }
+        .activeWorkoutRecoveryOverlay()
     }
 
     @ViewBuilder

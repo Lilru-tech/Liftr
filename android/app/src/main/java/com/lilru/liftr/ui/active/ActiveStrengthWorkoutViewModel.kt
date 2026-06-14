@@ -14,6 +14,12 @@ import com.lilru.liftr.workout.StrengthWorkoutFinishCollapse
 import com.lilru.liftr.workout.StrengthWorkoutSaveRpc
 import com.lilru.liftr.workout.StrengthFinishExercisePayload
 import com.lilru.liftr.workout.WorkoutFinishSync
+import com.lilru.liftr.workout.ActiveWorkoutCheckpointEntry
+import com.lilru.liftr.workout.ActiveWorkoutCheckpointKind
+import com.lilru.liftr.workout.ActiveWorkoutSessionCheckpoint
+import com.lilru.liftr.workout.PerformedSetSnapshot
+import com.lilru.liftr.workout.SetRowSnapshot
+import com.lilru.liftr.workout.StrengthCheckpointPayload
 import com.lilru.liftr.workout.WorkoutProgramCache
 import com.lilru.liftr.workout.WorkoutProgramCacheEntry
 import com.lilru.liftr.workout.WorkoutStartSync
@@ -56,7 +62,8 @@ import com.lilru.liftr.ui.add.StrengthRoutineOverwritePrompt
 import com.lilru.liftr.ui.add.StrengthSegmentPayload
 import com.lilru.liftr.ui.add.StrengthSetDraft
 import com.lilru.liftr.ui.add.StrengthSegmentDraft
-import com.lilru.liftr.ui.add.applyStrengthRoutinePrescriptionUpdate
+import com.lilru.liftr.ui.add.applySelectiveStrengthRoutineOverwrite
+import com.lilru.liftr.ui.add.expandedStrengthProgramSetsForCompare
 import com.lilru.liftr.ui.add.fetchStrengthRoutineOverwriteCandidate
 import com.lilru.liftr.ui.add.weightSegmentsToJsonArray
 import kotlinx.serialization.json.buildJsonArray
@@ -202,6 +209,7 @@ class ActiveStrengthWorkoutViewModel(
     private var pendingFinishOnDone: ((offlineQueued: Boolean) -> Unit)? = null
     private var accumulatedPausedSeconds: Int = 0
     private var pauseBeganEpochMs: Long? = null
+    private var didRestoreSessionCheckpoint = false
 
     init {
         load()
@@ -250,6 +258,7 @@ class ActiveStrengthWorkoutViewModel(
             pauseBeganEpochMs = System.currentTimeMillis()
             _ui.value = s.copy(isSessionPaused = true)
         }
+        saveSessionCheckpoint()
     }
 
     fun updateStartSyncStatus(status: WorkoutStartSync.Status) {
@@ -404,6 +413,7 @@ class ActiveStrengthWorkoutViewModel(
                         isSessionPaused = false
                     )
                 )
+                restoreFromCheckpointIfNeeded()
             }.onFailure { e ->
                 hostWeRows = emptyList()
                 Log.e(TAG, "load failed", e)
@@ -918,6 +928,7 @@ class ActiveStrengthWorkoutViewModel(
         } else {
             _ui.value = baseState
         }
+        saveSessionCheckpoint()
     }
 
     fun onSetDone() {
@@ -1001,6 +1012,7 @@ class ActiveStrengthWorkoutViewModel(
         } else {
             _ui.value = baseState
         }
+        saveSessionCheckpoint()
     }
 
     fun goToExercise(index: Int) {
@@ -1037,10 +1049,134 @@ class ActiveStrengthWorkoutViewModel(
         }
     }
 
-    /**
-     * Paridad con iOS: al reabrir Active, la sesión visual empieza desde 0 aunque los datos ya
-     * editados (reps/peso/rpe/rest) permanezcan guardados en memoria/BD.
-     */
+    fun saveSessionCheckpoint(showCountdown: Boolean = true) {
+        val ctx = LiftrSupabase.appContext ?: return
+        val s = _ui.value
+        if (s.exercises.isEmpty()) return
+        fun performedSnap(lines: List<CompletedSetLine>): List<PerformedSetSnapshot> {
+            return lines.map { line ->
+                PerformedSetSnapshot(
+                    reps = line.reps,
+                    weightKg = line.weightKg,
+                    rpe = line.rpe,
+                    restSec = line.restSec,
+                    configId = line.configId,
+                    segmentsInRow = line.segmentsInRow,
+                    weightSegmentsJson = line.weightSegments?.toString()
+                )
+            }
+        }
+        val performedByWe = s.completedSetsByExerciseId.mapValues { (_, lines) -> performedSnap(lines) }
+        val setsSnapshot = s.exercises.associate { ex ->
+            ex.workoutExerciseId to ex.sets.map { set ->
+                SetRowSnapshot(
+                    id = set.setId,
+                    workoutExerciseId = ex.workoutExerciseId,
+                    setNumber = set.setNumber,
+                    reps = set.reps,
+                    weightKg = set.weightKg,
+                    rpe = set.rpe,
+                    restSec = set.restSec,
+                    weightSegmentsJson = set.weightSegments?.toString()
+                )
+            }
+        }
+        val restEpoch = restDeadlineMsByExerciseId.mapValues { it.value }
+        val strength = StrengthCheckpointPayload(
+            currentExerciseIndex = s.currentExerciseIndex,
+            currentSetIndex = s.currentSetIndex,
+            currentSetIndexByExercise = s.currentSetIndexByExerciseId,
+            performedSetsByExercise = performedByWe,
+            setsByExercise = setsSnapshot,
+            restEndEpochByExercise = restEpoch,
+            isResting = s.isResting,
+            guestWorkoutId = dualGuestWorkoutId,
+            guest2WorkoutId = dualGuest2WorkoutId,
+            guestPerformedSetsByExercise = emptyMap(),
+            guest2PerformedSetsByExercise = emptyMap(),
+            guestCurrentSetIndexByExercise = emptyMap(),
+            guest2CurrentSetIndexByExercise = emptyMap(),
+            showCountdown = showCountdown
+        )
+        val entry = ActiveWorkoutCheckpointEntry(
+            workoutId = workoutId,
+            kind = ActiveWorkoutCheckpointKind.STRENGTH,
+            savedAtEpochMs = System.currentTimeMillis(),
+            sessionStartedAtEpochMs = null,
+            accumulatedPausedSec = accumulatedPausedSeconds,
+            isSessionPaused = s.isSessionPaused,
+            pauseBeganAtEpochMs = pauseBeganEpochMs,
+            strength = strength
+        )
+        ActiveWorkoutSessionCheckpoint.store(ctx, entry)
+    }
+
+    fun clearSessionCheckpoint() {
+        LiftrSupabase.appContext?.let { ActiveWorkoutSessionCheckpoint.clearIfWorkout(it, workoutId) }
+    }
+
+    private fun restoreFromCheckpointIfNeeded(): Boolean {
+        if (didRestoreSessionCheckpoint) return false
+        val ctx = LiftrSupabase.appContext ?: return false
+        val entry = ActiveWorkoutSessionCheckpoint.load(ctx) ?: return false
+        if (entry.workoutId != workoutId || entry.kind != ActiveWorkoutCheckpointKind.STRENGTH) return false
+        val strength = entry.strength ?: return false
+        didRestoreSessionCheckpoint = true
+
+        fun linesFromSnaps(map: Map<Int, List<PerformedSetSnapshot>>): Map<Int, List<CompletedSetLine>> {
+            return map.mapValues { (weId, snaps) ->
+                snaps.map { snap ->
+                    val segments: JsonArray? = snap.weightSegmentsJson?.let { raw ->
+                        runCatching { json.parseToJsonElement(raw) as JsonArray }.getOrNull()
+                    }
+                    CompletedSetLine(
+                        workoutExerciseId = weId,
+                        configId = snap.configId,
+                        segmentsInRow = snap.segmentsInRow,
+                        reps = snap.reps,
+                        weightKg = snap.weightKg,
+                        rpe = snap.rpe,
+                        restSec = snap.restSec,
+                        weightSegments = segments
+                    )
+                }
+            }
+        }
+
+        val completedMap = linesFromSnaps(strength.performedSetsByExercise)
+        completedSetLines.clear()
+        completedSetLines.addAll(completedMap.values.flatten())
+        restDeadlineMsByExerciseId.clear()
+        restPlannedTotalSecByExerciseIdMutable.clear()
+        strength.restEndEpochByExercise.forEach { (weId, endMs) ->
+            if (endMs > System.currentTimeMillis()) {
+                restDeadlineMsByExerciseId[weId] = endMs
+                val planned = ((endMs - System.currentTimeMillis()) / 1000L).toInt().coerceAtLeast(1)
+                restPlannedTotalSecByExerciseIdMutable[weId] = planned
+            }
+        }
+        accumulatedPausedSeconds = entry.accumulatedPausedSec
+        pauseBeganEpochMs = entry.pauseBeganAtEpochMs
+        val s = _ui.value
+        val exerciseIndex = strength.currentExerciseIndex.coerceIn(0, s.exercises.lastIndex.coerceAtLeast(0))
+        _ui.value = withSyncedEditFields(
+            syncRestDeadlinesToUi(
+                s.copy(
+                    currentExerciseIndex = exerciseIndex,
+                    currentSetIndex = strength.currentSetIndex,
+                    currentSetIndexByExerciseId = strength.currentSetIndexByExercise.ifEmpty {
+                        s.exercises.associate { it.workoutExerciseId to 0 }
+                    },
+                    completedSetsByExerciseId = completedMap,
+                    isResting = strength.isResting,
+                    isSessionPaused = entry.isSessionPaused
+                )
+            )
+        )
+        if (restDeadlineMsByExerciseId.isNotEmpty()) startRestTicker()
+        return true
+    }
+
     fun resetSessionProgress() {
         restJob?.cancel()
         restJob = null
@@ -1066,6 +1202,7 @@ class ActiveStrengthWorkoutViewModel(
                 isSessionPaused = false
             )
         )
+        clearSessionCheckpoint()
     }
 
     private fun syncRestDeadlinesToUi(s: ActiveStrengthUiState): ActiveStrengthUiState {
@@ -1144,17 +1281,18 @@ class ActiveStrengthWorkoutViewModel(
     }
 
     fun dismissStrengthRoutineOverwrite() {
-        pendingFinishOnDone = null
-        _ui.value = _ui.value.copy(strengthRoutineOverwritePrompt = null)
+        confirmStrengthRoutineOverwrite(emptySet())
     }
 
-    fun confirmStrengthRoutineOverwrite(updateRoutine: Boolean) {
+    fun confirmStrengthRoutineOverwrite(selectedLineIds: Set<String>) {
         val cb = pendingFinishOnDone ?: return
         val prompt = _ui.value.strengthRoutineOverwritePrompt ?: return
         pendingFinishOnDone = null
         _ui.value = _ui.value.copy(strengthRoutineOverwritePrompt = null)
-        val routineUpdate: Pair<Long, List<StrengthExerciseDraft>>? =
-            if (updateRoutine) prompt.routineId to draftsForRoutineUpdateFromPerformed() else null
+        val proposed = programItemsForRoutineOverwrite()
+        val routineUpdate: Triple<StrengthRoutineOverwritePrompt, List<StrengthProgramItem>, Set<String>>? =
+            if (selectedLineIds.isEmpty() || proposed == null) null
+            else Triple(prompt, proposed, selectedLineIds)
         viewModelScope.launch {
             runFinishPersistence(onDone = cb, routineUpdate = routineUpdate)
         }
@@ -1171,12 +1309,13 @@ class ActiveStrengthWorkoutViewModel(
                         fetchStrengthRoutineOverwriteCandidate(
                             supabase,
                             uid,
-                            proposed
-                        ) { eid ->
-                            val we = hostWeRows.firstOrNull { it.exerciseId == eid }
-                            we?.customName?.trim()?.takeIf { it.isNotEmpty() }
-                                ?: "Exercise ${we?.exerciseId ?: eid}"
-                        }
+                            proposed,
+                            exerciseDisplayName = { eid ->
+                                val we = hostWeRows.firstOrNull { it.exerciseId == eid }
+                                we?.customName?.trim()?.takeIf { it.isNotEmpty() }
+                                    ?: "Exercise ${we?.exerciseId ?: eid}"
+                            }
+                        )
                     }.getOrNull() ?: StrengthRoutineOverwriteCandidate.None
                     if (candidate is StrengthRoutineOverwriteCandidate.Prompt) {
                         pendingFinishOnDone = onDone
@@ -1210,7 +1349,7 @@ class ActiveStrengthWorkoutViewModel(
 
     private suspend fun runFinishPersistence(
         onDone: (offlineQueued: Boolean) -> Unit,
-        routineUpdate: Pair<Long, List<StrengthExerciseDraft>>?
+        routineUpdate: Triple<StrengthRoutineOverwritePrompt, List<StrengthProgramItem>, Set<String>>?
     ) {
         _ui.value = _ui.value.copy(finishing = true, error = null)
         val openPauseSec = pauseBeganEpochMs?.let {
@@ -1230,11 +1369,12 @@ class ActiveStrengthWorkoutViewModel(
                 hostExercises = hostExercises
             )
             if (routineUpdate != null) {
-                applyStrengthRoutinePrescriptionUpdate(
+                applySelectiveStrengthRoutineOverwrite(
                     supabase,
                     userId,
                     routineUpdate.first,
-                    routineUpdate.second
+                    routineUpdate.second,
+                    routineUpdate.third
                 )
             }
         }
@@ -1275,34 +1415,44 @@ class ActiveStrengthWorkoutViewModel(
 
     private fun programItemsForRoutineOverwrite(): List<StrengthProgramItem>? {
         if (hostWeRows.isEmpty()) return null
+        val s = _ui.value
         val items = mutableListOf<StrengthProgramItem>()
         for (we in hostWeRows.sortedBy { it.orderIndex }) {
-            val lines = completedSetLines.filter { it.workoutExerciseId == we.id }
-            if (lines.isEmpty()) return null
-            val rows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
-            val sets = rows.mapIndexed { idx, row ->
-                val segList = row.weightSegments?.takeIf { it.size >= 2 }?.mapNotNull { el ->
-                    val o = el.jsonObject
-                    val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
-                    val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
-                    StrengthSegmentPayload(r, w)
-                }?.takeIf { it.size >= 2 }
-                StrengthProgramSet(
-                    setNumber = idx + 1,
-                    reps = row.reps,
-                    weightKg = row.weightKg,
-                    rpe = row.rpe,
-                    restSec = row.restSec,
-                    notes = null,
-                    weightSegments = segList
-                )
+            val exLine = s.exercises.firstOrNull { it.workoutExerciseId == we.id }
+            val completed = completedSetLines.filter { it.workoutExerciseId == we.id }
+            val rawSets = if (exLine != null && exLine.sets.isNotEmpty()) {
+                programSetsFromExpandedPlanned(exLine.sets, completed)
+            } else {
+                if (completed.isEmpty()) continue
+                val rows = chunkCompletedLines(completed).flatMap { chunkToPersistRows(it) }
+                rows.map { row ->
+                    val segList = row.weightSegments?.takeIf { it.size >= 2 }?.mapNotNull { el ->
+                        val o = el.jsonObject
+                        val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                        val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+                        StrengthSegmentPayload(r, w)
+                    }?.takeIf { it.size >= 2 }
+                    StrengthProgramSet(
+                        setNumber = row.count.coerceIn(1, 99),
+                        reps = row.reps,
+                        weightKg = row.weightKg,
+                        rpe = row.rpe,
+                        restSec = row.restSec,
+                        notes = null,
+                        weightSegments = segList
+                    )
+                }
             }
+            if (rawSets.isEmpty()) continue
+            val sets = expandedStrengthProgramSetsForCompare(rawSets)
             items.add(
                 StrengthProgramItem(
                     exerciseId = we.exerciseId,
                     orderIndex = we.orderIndex,
                     notes = we.notes,
                     customName = we.customName,
+                    supersetGroupId = we.supersetGroupId,
+                    supersetPosition = we.supersetPosition,
                     sets = sets
                 )
             )
@@ -1311,10 +1461,32 @@ class ActiveStrengthWorkoutViewModel(
     }
 
     private fun draftsForRoutineUpdateFromPerformed(): List<StrengthExerciseDraft> {
+        val s = _ui.value
         return hostWeRows.sortedBy { it.orderIndex }.map { we ->
-            val lines = completedSetLines.filter { it.workoutExerciseId == we.id }
+            val exLine = s.exercises.firstOrNull { it.workoutExerciseId == we.id }
+            val completed = completedSetLines.filter { it.workoutExerciseId == we.id }
             val custom = we.customName?.trim().orEmpty()
-            val rows = chunkCompletedLines(lines).flatMap { chunkToPersistRows(it) }
+            val programSets = if (exLine != null && exLine.sets.isNotEmpty()) {
+                programSetsFromExpandedPlanned(exLine.sets, completed)
+            } else {
+                val rows = chunkCompletedLines(completed).flatMap { chunkToPersistRows(it) }
+                rows.map { row ->
+                    StrengthProgramSet(
+                        setNumber = row.count.coerceIn(1, 99),
+                        reps = row.reps,
+                        weightKg = row.weightKg,
+                        rpe = row.rpe,
+                        restSec = row.restSec,
+                        notes = null,
+                        weightSegments = row.weightSegments?.takeIf { it.size >= 2 }?.mapNotNull { el ->
+                            val o = el.jsonObject
+                            val r = o["reps"]?.jsonPrimitive?.content?.toIntOrNull() ?: return@mapNotNull null
+                            val w = o["weight_kg"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: return@mapNotNull null
+                            StrengthSegmentPayload(r, w)
+                        }?.takeIf { it.size >= 2 }
+                    )
+                }
+            }
             StrengthExerciseDraft(
                 exerciseId = we.exerciseId,
                 customName = custom,
@@ -1322,9 +1494,33 @@ class ActiveStrengthWorkoutViewModel(
                 notes = we.notes.orEmpty(),
                 supersetGroupId = we.supersetGroupId,
                 supersetPosition = we.supersetPosition,
-                sets = rows.map { row -> strengthSetDraftFromPersistRow(row) }
+                sets = programSets.map { ps -> strengthSetDraftFromProgramSet(ps) }
             )
         }
+    }
+
+    private fun strengthSetDraftFromProgramSet(ps: StrengthProgramSet): StrengthSetDraft {
+        val segs = ps.weightSegments.orEmpty()
+        val segDrafts = if (segs.size >= 2) {
+            segs.map { seg ->
+                StrengthSegmentDraft(
+                    repsText = seg.reps.toString(),
+                    weightText = formatDoubleField(seg.weightKg)
+                )
+            }
+        } else {
+            emptyList()
+        }
+        return StrengthSetDraft(
+            setNumber = ps.setNumber.coerceIn(1, 99),
+            repsText = ps.reps?.toString().orEmpty(),
+            weightText = ps.weightKg?.let { formatDoubleField(it) }.orEmpty(),
+            rpeText = ps.rpe?.let { r ->
+                if (r == r.toInt().toDouble()) r.toInt().toString() else String.format(Locale.US, "%.1f", r)
+            }.orEmpty(),
+            restSecText = ps.restSec?.toString().orEmpty(),
+            segments = segDrafts
+        )
     }
 
     private fun strengthSetDraftFromPersistRow(row: CollapsedPersistRow): StrengthSetDraft {

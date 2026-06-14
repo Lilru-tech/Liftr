@@ -27,6 +27,13 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.UUID
 
+data class TerritoryRpcResult<T>(
+    val value: T,
+    val errorMessage: String? = null
+) {
+    val failed: Boolean get() = errorMessage != null
+}
+
 @Serializable
 data class TerritoryBBoxWire(
     @SerialName("min_lat") val minLat: Double? = null,
@@ -143,6 +150,13 @@ data class TerritoryBackfillResponseWire(
     val processed: Int? = null,
     @SerialName("cells_gained") val cellsGained: Int? = null,
     @SerialName("cells_taken") val cellsTaken: Int? = null,
+    @SerialName("has_more") val hasMore: Boolean? = null
+)
+
+@Serializable
+data class ReconcileUnassignedCellsResponseWire(
+    val ok: Boolean? = null,
+    val updated: Int? = null,
     @SerialName("has_more") val hasMore: Boolean? = null
 )
 
@@ -452,7 +466,7 @@ object TerritoryCaptureClient {
         query: String? = null,
         ownedFirst: Boolean = true,
         limit: Int = 200
-    ): List<TerritoryCityRegionRowWire> {
+    ): TerritoryRpcResult<List<TerritoryCityRegionRowWire>> {
         return runCatching {
             val trimmedQuery = query?.trim()?.takeIf { it.isNotEmpty() }
             val res = supabase.postgrest.rpc(
@@ -463,10 +477,11 @@ object TerritoryCaptureClient {
                     put("p_owned_first", ownedFirst)
                 }
             )
-            json.decodeFromString<List<TerritoryCityRegionRowWire>>(res.data)
-        }.onFailure { error ->
+            TerritoryRpcResult(json.decodeFromString<List<TerritoryCityRegionRowWire>>(res.data))
+        }.getOrElse { error ->
             logTerritoryShare("city regions fetch failed error=${error.message}")
-        }.getOrDefault(emptyList())
+            TerritoryRpcResult(emptyList(), error.message)
+        }
     }
 
     fun filterTerritoryCities(
@@ -538,6 +553,10 @@ object TerritoryCaptureClient {
         return cityKey?.startsWith("pending:") == true
     }
 
+    fun displayableTerritoryCities(cities: List<TerritoryCityRegionRowWire>): List<TerritoryCityRegionRowWire> {
+        return cities.filter { !isPendingTerritoryCityKey(it.cityKey) }
+    }
+
     fun pendingResolveCoordinates(city: TerritoryCityRegionRowWire): Pair<Double, Double>? {
         val key = city.cityKey
         if (key != null && isPendingTerritoryCityKey(key)) {
@@ -578,7 +597,7 @@ object TerritoryCaptureClient {
     ): List<TerritoryCityRegionRowWire> {
         val started = System.currentTimeMillis()
         val deadline = started + timeBudgetMillis
-        var refreshed = fetchTerritoryCityRegions(supabase)
+        var refreshed = fetchTerritoryCityRegions(supabase).value
         var batchesRun = 0
         while (batchesRun < maxBatches && System.currentTimeMillis() < deadline) {
             val pending = refreshed.filter { isPendingTerritoryCityKey(it.cityKey) }
@@ -599,10 +618,13 @@ object TerritoryCaptureClient {
                     delay(800)
                 }
             }
-            refreshed = fetchTerritoryCityRegions(supabase)
+            refreshed = fetchTerritoryCityRegions(supabase).value
             onUpdate?.invoke(refreshed)
             batchesRun += 1
         }
+        reconcileUnassignedTerritoryCells(supabase)
+        refreshed = fetchTerritoryCityRegions(supabase).value
+        onUpdate?.invoke(refreshed)
         val remainingPending = refreshed.count { isPendingTerritoryCityKey(it.cityKey) }
         logTerritoryShare(
             "refresh finished batches=$batchesRun elapsedMs=${System.currentTimeMillis() - started} pending=$remainingPending"
@@ -634,7 +656,7 @@ object TerritoryCaptureClient {
         cityKey: String,
         scope: String = "global",
         limit: Int = 100
-    ): List<TerritoryShareLeaderRowWire> {
+    ): TerritoryRpcResult<List<TerritoryShareLeaderRowWire>> {
         return runCatching {
             val res = supabase.postgrest.rpc(
                 BackendContracts.Rpc.GET_TERRITORY_CITY_SHARE_LEADERBOARD_V1,
@@ -644,8 +666,11 @@ object TerritoryCaptureClient {
                     put("p_limit", limit)
                 }
             )
-            json.decodeFromString<List<TerritoryShareLeaderRowWire>>(res.data)
-        }.getOrDefault(emptyList())
+            TerritoryRpcResult(json.decodeFromString<List<TerritoryShareLeaderRowWire>>(res.data))
+        }.getOrElse { error ->
+            logTerritoryShare("leaderboard fetch failed error=${error.message}")
+            TerritoryRpcResult(emptyList(), error.message)
+        }
     }
 
     fun nearestCityKey(
@@ -680,9 +705,9 @@ object TerritoryCaptureClient {
         scope: String = "global",
         limit: Int = 100
     ): List<TerritoryShareLeaderRowWire> {
-        val cities = fetchTerritoryCityRegions(supabase)
+        val cities = fetchTerritoryCityRegions(supabase).value
         val cityKey = cities.firstOrNull()?.cityKey ?: return emptyList()
-        return fetchTerritoryCityShareLeaderboard(supabase, cityKey, scope, limit)
+        return fetchTerritoryCityShareLeaderboard(supabase, cityKey, scope, limit).value
     }
 
     fun shouldMarkHistoricalBackfillDone(hasMore: Boolean): Boolean = !hasMore
@@ -728,6 +753,28 @@ object TerritoryCaptureClient {
                 runAssignmentBackfill = false
             )
         }
+    }
+
+    private suspend fun reconcileUnassignedTerritoryCells(
+        supabase: SupabaseClient,
+        limit: Int = 500
+    ): Boolean {
+        return runCatching {
+            val res = supabase.postgrest.rpc(
+                BackendContracts.Rpc.RECONCILE_UNASSIGNED_TERRITORY_CELLS_V1,
+                buildJsonObject {
+                    put("p_limit", limit)
+                }
+            )
+            val payload = json.decodeFromString<ReconcileUnassignedCellsResponseWire>(res.data)
+            val updated = payload.updated ?: 0
+            if (updated > 0) {
+                logTerritoryShare("reconcile unassigned cells updated=$updated")
+            }
+            payload.ok == true
+        }.onFailure { error ->
+            logTerritoryShare("reconcile unassigned cells failed error=${error.message}")
+        }.getOrDefault(false)
     }
 
     private suspend fun invokeTerritoryMunicipalityResolve(

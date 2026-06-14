@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinManager
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -19,6 +20,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
@@ -64,7 +66,15 @@ data class CompetitionRowUi(
     val acceptedAt: String? = null,
     val finishedAt: String? = null,
     val winnerUserId: String? = null,
+    val betAmount: Int = 0,
     val createdAt: String
+)
+
+data class CompetitionEscrowSummaryUi(
+    val escrowedTotal: Int = 0,
+    val pendingCount: Int = 0,
+    val activeStakedCount: Int = 0,
+    val stakedChallengeCount: Int = 0
 )
 
 data class CompetitionHistorySummaryUi(
@@ -98,7 +108,8 @@ data class CompetitionsHubUiState(
     val goalsByCompId: Map<Int, CompetitionGoalUi> = emptyMap(),
     val profilesById: Map<String, ProfileLiteUi> = emptyMap(),
     val progressByCompId: Map<Int, Map<String, CompetitionProgressUi>> = emptyMap(),
-    val historySummary: CompetitionHistorySummaryUi? = null
+    val historySummary: CompetitionHistorySummaryUi? = null,
+    val escrowSummary: CompetitionEscrowSummaryUi? = null
 ) {
     val active: List<CompetitionRowUi> get() = competitions.filter { it.status == "active" }
     val pending: List<CompetitionRowUi> get() = competitions.filter { it.status == "pending" }
@@ -118,7 +129,16 @@ private data class CompetitionRowWire(
     @SerialName("accepted_at") val acceptedAt: String? = null,
     @SerialName("finished_at") val finishedAt: String? = null,
     @SerialName("winner_user_id") val winnerUserId: String? = null,
+    @SerialName("bet_amount") val betAmount: Int = 0,
     @SerialName("created_at") val createdAt: String
+)
+
+@Serializable
+private data class CompetitionEscrowSummaryWire(
+    @SerialName("escrowed_total") val escrowedTotal: Int = 0,
+    @SerialName("pending_count") val pendingCount: Int = 0,
+    @SerialName("active_staked_count") val activeStakedCount: Int = 0,
+    @SerialName("staked_challenge_count") val stakedChallengeCount: Int = 0
 )
 
 @Serializable
@@ -156,7 +176,8 @@ private data class CompetitionLoadResult(
     val goals: Map<Int, CompetitionGoalUi>,
     val profiles: Map<String, ProfileLiteUi>,
     val progress: Map<Int, Map<String, CompetitionProgressUi>>,
-    val summary: CompetitionHistorySummaryUi
+    val summary: CompetitionHistorySummaryUi,
+    val escrow: CompetitionEscrowSummaryUi?
 )
 
 class CompetitionsHubViewModel(
@@ -239,7 +260,8 @@ class CompetitionsHubViewModel(
             }
             val progress = fetchProgressMap(ids)
             val summary = computeHistorySummary(me, uis, goals, profiles)
-            CompetitionLoadResult(uis, goals, profiles, progress, summary)
+            val escrow = fetchEscrowSummary()
+            CompetitionLoadResult(uis, goals, profiles, progress, summary, escrow)
         }
         result.onSuccess { p ->
             _uiState.update {
@@ -251,9 +273,11 @@ class CompetitionsHubViewModel(
                     goalsByCompId = p.goals,
                     profilesById = p.profiles,
                     progressByCompId = p.progress,
-                    historySummary = p.summary
+                    historySummary = p.summary,
+                    escrowSummary = p.escrow
                 )
             }
+            CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = false)
         }
         result.onFailure { e ->
             _uiState.update {
@@ -419,58 +443,47 @@ class CompetitionsHubViewModel(
     }
 
     private suspend fun expirePendingIfNeeded() {
-        val nowStr = java.time.Instant.now().toString()
         runCatching {
-            supabase.from(BackendContracts.Tables.COMPETITIONS).update(
-                buildJsonObject {
-                    put("status", JsonPrimitive("expired"))
-                    put("finished_at", JsonPrimitive(nowStr))
-                }
-            ) {
-                filter {
-                    eq("status", "pending")
-                    lt("invite_expires_at", nowStr)
-                }
-            }
+            supabase.postgrest.rpc(BackendContracts.Rpc.EXPIRE_STALE_COMPETITION_INVITES_V1) { }
         }
+    }
+
+    private suspend fun fetchEscrowSummary(): CompetitionEscrowSummaryUi? {
+        return runCatching {
+            val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_MY_COMPETITION_ESCROW_SUMMARY_V1) { }
+            res.decodeAs<CompetitionEscrowSummaryWire>().let { w ->
+                CompetitionEscrowSummaryUi(
+                    escrowedTotal = w.escrowedTotal,
+                    pendingCount = w.pendingCount,
+                    activeStakedCount = w.activeStakedCount,
+                    stakedChallengeCount = w.stakedChallengeCount
+                )
+            }
+        }.getOrNull()
     }
 
     fun acceptCompetition(id: Int) = runAction {
-        val now = Instant.now().toString()
-        supabase.from(BackendContracts.Tables.COMPETITIONS).update(
-            buildJsonObject {
-                put("status", JsonPrimitive("active"))
-                put("accepted_at", JsonPrimitive(now))
-            }
-        ) {
-            filter { eq("id", id) }
-        }
+        supabase.postgrest.rpc(
+            BackendContracts.Rpc.ACCEPT_COMPETITION,
+            buildJsonObject { put("p_competition_id", id) }
+        ) { }
+        CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
     }
 
     fun declineCompetition(id: Int) = runAction {
-        val now = Instant.now().toString()
-        supabase.from(BackendContracts.Tables.COMPETITIONS).update(
-            buildJsonObject {
-                put("status", JsonPrimitive("declined"))
-                put("declined_at", JsonPrimitive(now))
-                put("finished_at", JsonPrimitive(now))
-            }
-        ) {
-            filter { eq("id", id) }
-        }
+        supabase.postgrest.rpc(
+            BackendContracts.Rpc.DECLINE_COMPETITION,
+            buildJsonObject { put("p_competition_id", id) }
+        ) { }
+        CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
     }
 
     fun cancelCompetition(id: Int) = runAction {
-        val now = Instant.now().toString()
-        supabase.from(BackendContracts.Tables.COMPETITIONS).update(
-            buildJsonObject {
-                put("status", JsonPrimitive("cancelled"))
-                put("cancelled_at", JsonPrimitive(now))
-                put("finished_at", JsonPrimitive(now))
-            }
-        ) {
-            filter { eq("id", id) }
-        }
+        supabase.postgrest.rpc(
+            BackendContracts.Rpc.CANCEL_COMPETITION_INVITE,
+            buildJsonObject { put("p_competition_id", id) }
+        ) { }
+        CoinManager.refreshBalanceAfterMutation(supabase, notifyIfEarned = true)
     }
 
     fun blockUser(opponentId: String) {
@@ -517,6 +530,7 @@ class CompetitionsHubViewModel(
         acceptedAt = acceptedAt,
         finishedAt = finishedAt,
         winnerUserId = winnerUserId,
+        betAmount = betAmount,
         createdAt = createdAt
     )
 

@@ -15,6 +15,7 @@ import com.lilru.liftr.ui.add.duplicate.DuplicateWorkoutPayload
 import com.lilru.liftr.ui.add.recommendation.ExerciseForRecommendation
 import com.lilru.liftr.ui.add.recommendation.RecommendationDataSource
 import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationExerciseResult
+import com.lilru.liftr.ui.add.recommendation.StrengthRecommendationOutputResult
 import com.lilru.liftr.ui.add.recommendation.StrengthSuggestionMode
 import com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationEngine
 import com.lilru.liftr.ui.chat.RoutineShareSnapshot
@@ -114,6 +115,7 @@ data class AddWorkoutUiState(
      */
     val postPublishHomeNonce: Int = 0,
     val strengthRoutineOverwritePending: StrengthRoutineOverwritePending? = null,
+    val appliedStrengthRoutineId: Long? = null,
     /** Edición in-place del contenido de una plantilla (menú ⋯ → Edit); el nombre sigue en Rename. */
     val strengthRoutineTemplateEdit: StrengthRoutineTemplateEdit? = null,
     val hyroxRoutineTemplateEdit: HyroxRoutineTemplateEdit? = null
@@ -385,7 +387,8 @@ enum class AddSportType(val wire: String) {
     HOCKEY("hockey"),
     RUGBY("rugby"),
     HYROX("hyrox"),
-    SKI("ski")
+    SKI("ski"),
+    CLIMBING("climbing")
 }
 
 enum class AddMatchResult(val wire: String) {
@@ -517,6 +520,7 @@ class AddWorkoutViewModel(
     }
 
     fun clearAllStrengthExercises() {
+        _uiState.value = _uiState.value.copy(appliedStrengthRoutineId = null)
         updateActiveExercises { listOf(StrengthExerciseDraft()) }
     }
 
@@ -1287,8 +1291,10 @@ class AddWorkoutViewModel(
     suspend fun recommendStrengthForUi(
         source: RecommendationDataSource,
         mode: StrengthSuggestionMode,
-        preferSpanish: Boolean
-    ): List<StrengthRecommendationExerciseResult> {
+        preferSpanish: Boolean,
+        networkInspired: Boolean = false,
+        excludeRoutineId: Long? = null
+    ): StrengthRecommendationOutputResult {
         val userId = supabase.auth.currentUserOrNull()?.id
             ?: throw com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationError.NotSignedIn
         return recommendationEngine.recommendStrength(
@@ -1296,24 +1302,30 @@ class AddWorkoutViewModel(
             source = source,
             mode = mode,
             catalog = exerciseCatalogForRecommendation(),
-            preferSpanish = preferSpanish
+            preferSpanish = preferSpanish,
+            networkInspired = networkInspired,
+            excludeRoutineId = excludeRoutineId
         )
     }
 
     suspend fun recommendCardioForUi(
-        source: RecommendationDataSource
+        source: RecommendationDataSource,
+        networkInspired: Boolean = false
     ) = recommendationEngine.recommendCardio(
         supabase.auth.currentUserOrNull()?.id
             ?: throw com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationError.NotSignedIn,
-        source
+        source,
+        networkInspired
     )
 
     suspend fun recommendSportForUi(
-        source: RecommendationDataSource
+        source: RecommendationDataSource,
+        networkInspired: Boolean = false
     ) = recommendationEngine.recommendSport(
         supabase.auth.currentUserOrNull()?.id
             ?: throw com.lilru.liftr.ui.add.recommendation.WorkoutRecommendationError.NotSignedIn,
-        source
+        source,
+        networkInspired
     )
 
     fun applyStrengthRecommendation(rows: List<StrengthRecommendationExerciseResult>) {
@@ -1665,6 +1677,7 @@ class AddWorkoutViewModel(
                     if (laneId != null) {
                         current.copy(
                             applyingRoutine = false,
+                            appliedStrengthRoutineId = routineId,
                             laneExercisesByUser = current.laneExercisesByUser.toMutableMap().apply {
                                 put(laneId, mapped)
                             },
@@ -1677,6 +1690,7 @@ class AddWorkoutViewModel(
                 } else {
                     current.copy(
                         applyingRoutine = false,
+                        appliedStrengthRoutineId = routineId,
                         selectedExercises = mapped,
                         message = "Routine applied.",
                         error = null
@@ -3260,13 +3274,15 @@ class AddWorkoutViewModel(
                             fetchStrengthRoutineOverwriteCandidate(
                                 supabase,
                                 uid,
-                                items
-                            ) { eid ->
-                                val ex = snap.exercises.firstOrNull { it.id == eid }
-                                ex?.nameEn?.takeIf { it.isNotBlank() }
-                                    ?: ex?.nameEs?.takeIf { it.isNotBlank() }
-                                    ?: ex?.name.orEmpty()
-                            }
+                                items,
+                                exerciseDisplayName = { eid ->
+                                    val ex = snap.exercises.firstOrNull { it.id == eid }
+                                    ex?.nameEn?.takeIf { it.isNotBlank() }
+                                        ?: ex?.nameEs?.takeIf { it.isNotBlank() }
+                                        ?: ex?.name.orEmpty()
+                                },
+                                preferredRoutineId = snap.appliedStrengthRoutineId
+                            )
                         }.getOrNull() ?: StrengthRoutineOverwriteCandidate.None
                         if (candidate is StrengthRoutineOverwriteCandidate.Prompt) {
                             _uiState.value = snap.copy(
@@ -3303,21 +3319,26 @@ class AddWorkoutViewModel(
                 endedAtIso = endedAtIso,
                 useCustomSchedule = useCustomSchedule,
                 scheduleEndedEnabled = scheduleEndedEnabled,
-                routinePrescriptionOverwrite = null
+                routineSelectiveOverwrite = null
             )
         }
     }
 
     fun dismissStrengthRoutineOverwrite() {
-        _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
+        confirmStrengthRoutineOverwrite(emptySet())
     }
 
-    fun confirmStrengthRoutineOverwrite(updateRoutine: Boolean) {
+    fun confirmStrengthRoutineOverwrite(selectedLineIds: Set<String>) {
         val pending = _uiState.value.strengthRoutineOverwritePending ?: return
         val p = pending.createParams
         _uiState.value = _uiState.value.copy(strengthRoutineOverwritePending = null)
-        val overwrite: Pair<Long, List<StrengthExerciseDraft>>? =
-            if (updateRoutine) pending.prompt.routineId to pending.exercisesSnapshot else null
+        val overwrite: Triple<StrengthRoutineOverwritePrompt, List<StrengthProgramItem>, Set<String>>? =
+            if (selectedLineIds.isEmpty()) null
+            else Triple(
+                pending.prompt,
+                strengthProgramItemsFromDrafts(pending.exercisesSnapshot) ?: emptyList(),
+                selectedLineIds
+            )
         beginCreateStrengthWorkout(
             title = p.title,
             notes = p.notes,
@@ -3328,7 +3349,7 @@ class AddWorkoutViewModel(
             endedAtIso = p.endedAtIso,
             useCustomSchedule = p.useCustomSchedule,
             scheduleEndedEnabled = p.scheduleEndedEnabled,
-            routinePrescriptionOverwrite = overwrite
+            routineSelectiveOverwrite = overwrite
         )
     }
 
@@ -3342,7 +3363,7 @@ class AddWorkoutViewModel(
         endedAtIso: String?,
         useCustomSchedule: Boolean,
         scheduleEndedEnabled: Boolean,
-        routinePrescriptionOverwrite: Pair<Long, List<StrengthExerciseDraft>>?
+        routineSelectiveOverwrite: Triple<StrengthRoutineOverwritePrompt, List<StrengthProgramItem>, Set<String>>?
     ) {
         viewModelScope.launch {
             val snap = _uiState.value
@@ -3462,7 +3483,7 @@ class AddWorkoutViewModel(
                     }
                     patchWorkoutSupersetsForCreatedWorkouts(supabase, squadIds, lanePrograms)
                 } else {
-                    val selected = routinePrescriptionOverwrite?.second ?: snap.selectedExercises
+                    val selected = snap.selectedExercises
                     if (selected.isEmpty()) error("Add at least one exercise first.")
                     val normalized = normalizedSupersetDrafts(selected)
                     val params = paramsForState(targetState, buildStrengthPayloadItems(selected))
@@ -3481,17 +3502,18 @@ class AddWorkoutViewModel(
                         )
                     }
                 }
-                if (routinePrescriptionOverwrite != null) {
-                    applyStrengthRoutinePrescriptionUpdate(
+                if (routineSelectiveOverwrite != null) {
+                    applySelectiveStrengthRoutineOverwrite(
                         supabase,
                         userId,
-                        routinePrescriptionOverwrite.first,
-                        routinePrescriptionOverwrite.second
+                        routineSelectiveOverwrite.first,
+                        routineSelectiveOverwrite.second,
+                        routineSelectiveOverwrite.third
                     )
                 }
             }.onSuccess {
                 var msg = strengthSuccessMessage(perPersonStrength, state)
-                if (routinePrescriptionOverwrite != null) {
+                if (routineSelectiveOverwrite != null) {
                     msg += " Routine template updated."
                 }
                 onWorkoutCreatedUi(msg)
@@ -3635,6 +3657,7 @@ class AddWorkoutViewModel(
         racketFormat: AddRacketFormat,
         sportStats: Map<String, String>,
         hyroxExercisesText: String,
+        climbingRoutesJson: String = "[]",
         intensity: AddWorkoutIntensity,
         state: AddWorkoutState,
         startedAtIso: String? = null,
@@ -3681,7 +3704,7 @@ class AddWorkoutViewModel(
                     durationMin?.let { put("p_duration_min", it) }
                     parseInt(scoreForText)?.let { put("p_score_for", it) }
                     parseInt(scoreAgainstText)?.let { put("p_score_against", it) }
-                    if (sport != AddSportType.SKI) {
+                    if (sport != AddSportType.SKI && sport != AddSportType.CLIMBING) {
                         put("p_match_result", matchResult.wire)
                     }
                     if (matchScoreText.isNotBlank()) put("p_match_score_text", matchScoreText.trim())
@@ -3695,7 +3718,8 @@ class AddWorkoutViewModel(
                     racketMode = racketMode,
                     racketFormat = racketFormat,
                     sportStats = sportStats,
-                    hyroxExercisesText = hyroxExercisesText
+                    hyroxExercisesText = hyroxExercisesText,
+                    climbingRoutesJson = climbingRoutesJson
                 )
                 val wrapper = buildJsonObject {
                     put("p", p)

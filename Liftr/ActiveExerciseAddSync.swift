@@ -63,7 +63,7 @@ enum ActiveExerciseAddSync {
 
     private static let storageKey = "liftr.pendingActiveExerciseAdds.v1"
     private static let localIdCounterKey = "liftr.pendingActiveExerciseAdds.localIdCounter"
-    private static var syncTask: Task<Void, Never>?
+    private static let syncRunner = SerialAsyncTaskRunner()
     private static var statusByWorkoutId: [Int: ActiveExerciseAddSyncStatus] = [:]
 
     static func nextLocalExerciseId() -> Int {
@@ -118,11 +118,7 @@ enum ActiveExerciseAddSync {
     }
 
     static func syncPending() async {
-        if let running = syncTask, !running.isCancelled {
-            await running.value
-            return
-        }
-        let task = Task {
+        await syncRunner.run {
             let items = loadPending().sorted {
                 if $0.workoutId != $1.workoutId { return $0.workoutId < $1.workoutId }
                 if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
@@ -146,34 +142,30 @@ enum ActiveExerciseAddSync {
                 }
             }
         }
-        syncTask = task
-        await task.value
-        syncTask = nil
     }
 
     static func syncPending(forWorkoutId workoutId: Int) async {
-        if let running = syncTask, !running.isCancelled {
-            await running.value
-        }
-        let items = loadPending()
-            .filter { $0.workoutId == workoutId }
-            .sorted {
-                if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
-                return $0.localExerciseId < $1.localExerciseId
+        await syncRunner.run {
+            let items = loadPending()
+                .filter { $0.workoutId == workoutId }
+                .sorted {
+                    if $0.orderIndex != $1.orderIndex { return $0.orderIndex < $1.orderIndex }
+                    return $0.localExerciseId < $1.localExerciseId
+                }
+            guard !items.isEmpty else { return }
+            await setStatusAsync(.syncing, workoutId: workoutId)
+            for item in items {
+                let ok = await performInsertWithRetries(item: item)
+                if ok {
+                    removePending(localExerciseId: item.localExerciseId)
+                } else {
+                    await setStatusAsync(.willRetry, workoutId: workoutId)
+                    return
+                }
             }
-        guard !items.isEmpty else { return }
-        await setStatusAsync(.syncing, workoutId: workoutId)
-        for item in items {
-            let ok = await performInsertWithRetries(item: item)
-            if ok {
-                removePending(localExerciseId: item.localExerciseId)
-            } else {
-                await setStatusAsync(.willRetry, workoutId: workoutId)
-                return
+            if !loadPending().contains(where: { $0.workoutId == workoutId }) {
+                await setStatusAsync(.synced, workoutId: workoutId)
             }
-        }
-        if !loadPending().contains(where: { $0.workoutId == workoutId }) {
-            await setStatusAsync(.synced, workoutId: workoutId)
         }
     }
 

@@ -14,7 +14,11 @@ struct LiftrApp: App {
                 }
                 .onOpenURL { url in
                     AuthCallbackLogger.log("SwiftUI onOpenURL", url: url, source: "LiftrApp")
-                    Task { await appState.handleAuthCallbackURL(url) }
+                    if WearableRedirect.isWearableCallback(url) {
+                        Task { await ExternalRouteSyncService.shared.handleWearableCallbackURL(url) }
+                    } else {
+                        Task { await appState.handleAuthCallbackURL(url) }
+                    }
                 }
         }
     }
