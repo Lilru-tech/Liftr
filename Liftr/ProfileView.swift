@@ -127,6 +127,53 @@ private func fetchParticipantWorkoutIds(for userId: UUID) async throws -> [Int] 
         .map(\.workout_id)
 }
 
+private struct ProfileLayoutMetrics: Equatable {
+    let usesCompactLayout: Bool
+    let usesScrollableTabs: Bool
+
+    static func from(contentWidth: CGFloat, isOwnProfile: Bool) -> ProfileLayoutMetrics {
+        ProfileLayoutMetrics(
+            usesCompactLayout: contentWidth < 390,
+            usesScrollableTabs: isOwnProfile && contentWidth < 410
+        )
+    }
+
+    var headerAvatarSize: CGFloat { usesCompactLayout ? 80 : 96 }
+    var headerStackSpacing: CGFloat { usesCompactLayout ? 10 : 14 }
+    var calendarDayCellHeight: CGFloat { usesCompactLayout ? 32 : 36 }
+    var verticalPadding: CGFloat { usesCompactLayout ? 8 : 12 }
+    var rootVStackSpacing: CGFloat { usesCompactLayout ? 10 : 12 }
+    var actionPadding: CGFloat { usesCompactLayout ? 6 : 8 }
+    var actionSpacing: CGFloat { usesCompactLayout ? 6 : 8 }
+}
+
+private struct ProfileRootContent<Header: View, TabPicker: View, TabContent: View>: View {
+    let layout: ProfileLayoutMetrics
+    @ViewBuilder let header: () -> Header
+    @ViewBuilder let tabPicker: () -> TabPicker
+    @ViewBuilder let tabContent: () -> TabContent
+    @EnvironmentObject var app: AppState
+
+    var body: some View {
+        VStack(spacing: layout.rootVStackSpacing) {
+            header()
+            tabPicker()
+            Group {
+                tabContent()
+            }
+            .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+
+            if !app.isPremium {
+                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                    .frame(height: 50)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .background(.ultraThinMaterial)
+            }
+        }
+    }
+}
+
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
     @AppStorage("backgroundTheme") private var backgroundTheme: String = "mintBlue"
@@ -136,8 +183,6 @@ struct ProfileView: View {
     init(userId: UUID? = nil) {
         self.userId = userId
     }
-    @State private var profileContentWidth: CGFloat = UIScreen.main.bounds.width
-    @State private var profileHeaderMiddleWidth: CGFloat = max(120, UIScreen.main.bounds.width * 0.38)
     @State private var counts: ProfileCounts?
     @State private var coinsBalance: Int = 0
     @State private var username: String = ""
@@ -220,11 +265,6 @@ struct ProfileView: View {
     @State private var isPurchasingPremium = false
     @State private var premiumError: String?
     private let premiumProductID = "com.liftr.premium.monthly"
-    private var usesCompactProfileLayout: Bool { profileContentWidth < 390 }
-    private var profileUsesScrollableTabs: Bool { isOwnProfile && profileContentWidth < 410 }
-    private var profileHeaderAvatarSize: CGFloat { usesCompactProfileLayout ? 80 : 96 }
-    private var profileHeaderStackSpacing: CGFloat { usesCompactProfileLayout ? 10 : 14 }
-    private var profileCalendarDayCellHeight: CGFloat { usesCompactProfileLayout ? 32 : 36 }
     private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
     private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     private var hasAnyUnread: Bool {
@@ -254,8 +294,30 @@ struct ProfileView: View {
     @State private var mySegmentsError: String?
     
     var body: some View {
+        GeometryReader { geo in
+            let layout = ProfileLayoutMetrics.from(contentWidth: geo.size.width, isOwnProfile: isOwnProfile)
+            profileScreen(layout: layout)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+        }
+    }
+
+    @ViewBuilder
+    private func profileScreen(layout: ProfileLayoutMetrics) -> some View {
         ZStack {
-            profileRootView
+            ProfileRootContent(
+                layout: layout,
+                header: { headerCard(layout: layout) },
+                tabPicker: { profileMainTabPicker(layout: layout) },
+                tabContent: {
+                    switch tab {
+                    case .calendar: calendarTabContent(layout: layout)
+                    case .prs: prsTabContent
+                    case .progress: progressTabContent
+                    case .segments: mySegmentsTabContent
+                    case .settings: settingsView
+                    }
+                }
+            )
 
             if !isOwnProfile,
                let preview = petCombatPreview,
@@ -273,7 +335,7 @@ struct ProfileView: View {
             }
         }
         .foregroundStyle(.primary)
-        .padding(.vertical, usesCompactProfileLayout ? 8 : 12)
+        .padding(.vertical, layout.verticalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .banner($banner)
         .onAppear {
@@ -357,43 +419,9 @@ struct ProfileView: View {
         }
     }
 
-    private var profileRootView: some View {
-        VStack(spacing: usesCompactProfileLayout ? 10 : 12) {
-            headerCard
-
-            profileMainTabPicker
-
-            Group {
-                switch tab {
-                case .calendar: calendarTabContent
-                case .prs: prsTabContent
-                case .progress: progressTabContent
-                case .segments: mySegmentsTabContent
-                case .settings: settingsView
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-
-            if !app.isPremium {
-                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
-                    .frame(height: 50)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .background(.ultraThinMaterial)
-            }
-        }
-        .background {
-            GeometryReader { geo in
-                Color.clear.preference(key: ProfileContentWidthKey.self, value: geo.size.width)
-            }
-        }
-        .onPreferenceChange(ProfileContentWidthKey.self) { profileContentWidth = $0 }
-        .onPreferenceChange(ProfileHeaderMiddleWidthKey.self) { profileHeaderMiddleWidth = $0 }
-    }
-
     @ViewBuilder
-    private var profileMainTabPicker: some View {
-        if profileUsesScrollableTabs {
+    private func profileMainTabPicker(layout: ProfileLayoutMetrics) -> some View {
+        if layout.usesScrollableTabs {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     profileTabChip(title: "Calendar", targetTab: .calendar)
@@ -440,9 +468,9 @@ struct ProfileView: View {
         .buttonStyle(.plain)
     }
 
-    private var calendarTabContent: some View {
+    private func calendarTabContent(layout: ProfileLayoutMetrics) -> some View {
         ScrollView {
-            calendarView
+            calendarView(layout: layout)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -1364,19 +1392,18 @@ struct ProfileView: View {
         }
     }
 
-    private func profileHeaderStatPills(maxWidth: CGFloat) -> some View {
+    private func profileHeaderStatPills() -> some View {
         ViewThatFits(in: .horizontal) {
             profileHeaderStatPillsRow(compact: false, abbreviated: false)
             profileHeaderStatPillsRow(compact: true, abbreviated: false)
             profileHeaderStatPillsRow(compact: true, abbreviated: true)
         }
-        .frame(maxWidth: maxWidth > 0 ? maxWidth : nil, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
     }
 
-    private var profileHeaderTrailingActions: some View {
-        let actionPadding: CGFloat = usesCompactProfileLayout ? 6 : 8
-        return HStack(spacing: usesCompactProfileLayout ? 6 : 8) {
+    private func profileHeaderTrailingActions(layout: ProfileLayoutMetrics) -> some View {
+        HStack(spacing: layout.actionSpacing) {
             NavigationLink {
                 RankingView(presetMetric: .level)
                     .gradientBG()
@@ -1384,7 +1411,7 @@ struct ProfileView: View {
             } label: {
                 Image(systemName: "trophy.fill")
                     .font(.subheadline.weight(.bold))
-                    .padding(actionPadding)
+                    .padding(layout.actionPadding)
                     .background(.thinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
@@ -1454,7 +1481,7 @@ struct ProfileView: View {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "ellipsis")
                         .font(.subheadline.weight(.bold))
-                        .padding(actionPadding)
+                        .padding(layout.actionPadding)
                         .background(.thinMaterial, in: Circle())
 
                     if hasAnyUnread {
@@ -1471,13 +1498,13 @@ struct ProfileView: View {
         .padding(.top, 2)
     }
 
-    private var headerCard: some View {
-        HStack(alignment: .top, spacing: profileHeaderStackSpacing) {
+    private func headerCard(layout: ProfileLayoutMetrics) -> some View {
+        HStack(alignment: .top, spacing: layout.headerStackSpacing) {
                 if isOwnProfile {
                     PhotosPicker(selection: $pickedItem, matching: .images) {
                         ZStack {
                             AvatarView(urlString: avatarURL)
-                                .frame(width: profileHeaderAvatarSize, height: profileHeaderAvatarSize)
+                                .frame(width: layout.headerAvatarSize, height: layout.headerAvatarSize)
                                 .overlay(
                                     Group { if uploadingAvatar { ProgressView().scaleEffect(0.8) } },
                                     alignment: .bottomTrailing
@@ -1489,18 +1516,18 @@ struct ProfileView: View {
                     }
                 } else {
                     AvatarView(urlString: avatarURL)
-                        .frame(width: profileHeaderAvatarSize, height: profileHeaderAvatarSize)
+                        .frame(width: layout.headerAvatarSize, height: layout.headerAvatarSize)
                         .contentShape(Rectangle())
                         .onTapGesture { if avatarURL != nil { showAvatarPreview = true } }
                         .accessibilityHint("Tap to preview")
                 }
 
-                VStack(alignment: .leading, spacing: usesCompactProfileLayout ? 4 : 6) {
+                VStack(alignment: .leading, spacing: layout.usesCompactLayout ? 4 : 6) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(username.isEmpty ? "user" : username)")
-                        .font(usesCompactProfileLayout ? .headline : .title3)
+                        .font(layout.usesCompactLayout ? .headline : .title3)
                         .fontWeight(.semibold)
-                    profileHeaderStatPills(maxWidth: profileHeaderMiddleWidth)
+                    profileHeaderStatPills()
                         .foregroundStyle(.secondary)
 
                     if let uid = viewingUserId {
@@ -1596,18 +1623,13 @@ struct ProfileView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
-                .background {
-                    GeometryReader { geo in
-                        Color.clear.preference(key: ProfileHeaderMiddleWidthKey.self, value: geo.size.width)
-                    }
-                }
 
-            profileHeaderTrailingActions
+            profileHeaderTrailingActions(layout: layout)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, usesCompactProfileLayout ? 12 : 16)
-        .padding(.top, usesCompactProfileLayout ? 14 : 20)
-        .padding(.bottom, usesCompactProfileLayout ? 12 : 16)
+        .padding(.horizontal, layout.usesCompactLayout ? 12 : 16)
+        .padding(.top, layout.usesCompactLayout ? 14 : 20)
+        .padding(.bottom, layout.usesCompactLayout ? 12 : 16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -1621,7 +1643,7 @@ struct ProfileView: View {
         .padding(.horizontal)
     }
     
-    private var calendarView: some View {
+    private func calendarView(layout: ProfileLayoutMetrics) -> some View {
         VStack(spacing: 14) {
             ProfileCalendarView(
                 monthDate: $monthDate,
@@ -1633,7 +1655,7 @@ struct ProfileView: View {
                 draftActivity: draftActivity,
                 monthTitle: monthTitle(for: monthDate),
                 weekdays: weekdays(),
-                dayCellHeight: profileCalendarDayCellHeight,
+                dayCellHeight: layout.calendarDayCellHeight,
                 onToday: selectTodayInCalendar
             )
 
@@ -3721,20 +3743,6 @@ struct AvatarZoomPreview: View {
 
     private func clamp(_ v: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
         Swift.min(Swift.max(v, min), max)
-    }
-}
-
-private struct ProfileContentWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-private struct ProfileHeaderMiddleWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 
