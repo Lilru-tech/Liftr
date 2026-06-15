@@ -287,7 +287,7 @@ enum WorkoutRecommendationService {
         guard !exercises.isEmpty else {
             throw WorkoutRecommendationError.loadFailed("That routine has no exercises.")
         }
-        var out = wrapStrengthOutput(
+        let out = wrapStrengthOutput(
             exercises: exercises,
             ctx: ctx,
             flat: [],
@@ -1217,7 +1217,7 @@ enum WorkoutRecommendationService {
         let baseRationale = "Among \(source == .recentHistory ? "sports you logged" : "all app sports"), this one was least frequent in your last \(C.lookbackCount) sessions."
         
         guard raw == SportType.hyrox.rawValue else {
-            var rationale = ctx.appendGoalLine(to: baseRationale + " Suggested session length only—choose whichever sport fits in the form.")
+            let rationale = ctx.appendGoalLine(to: baseRationale + " Suggested session length only—choose whichever sport fits in the form.")
             return .durationOnly(durationMin: medianMin, rationale: rationale)
         }
         
