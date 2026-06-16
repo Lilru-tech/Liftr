@@ -181,8 +181,8 @@ DO \$\$
 BEGIN
   IF to_regclass('public.exercises') IS NOT NULL THEN
     IF (SELECT count(*) FROM public.exercises WHERE is_public = true AND modality = 'strength') = 0 THEN
-      INSERT INTO public.exercises (name, name_en, modality, is_public)
-      VALUES ('UI Test Squat', 'UI Test Squat', 'strength', true);
+      INSERT INTO public.exercises (name, name_en, modality, category, is_public)
+      VALUES ('UI Test Squat', 'UI Test Squat', 'strength', 'Barbell', true);
     END IF;
   END IF;
 END \$\$;
