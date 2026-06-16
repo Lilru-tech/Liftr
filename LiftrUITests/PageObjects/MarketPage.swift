@@ -18,6 +18,10 @@ struct MarketPage {
             coinBanner.waitForExistence(timeout: UITestWait.network),
             "Market coin banner did not appear."
         )
+
+        let itemReady = app.descendants(matching: .any)["market.item.food_baby"]
+            .waitForExistence(timeout: UITestWait.network)
+        XCTAssertTrue(itemReady, "food_baby market item did not appear.")
     }
 
     func currentCoinBalance() -> Int? {

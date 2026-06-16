@@ -114,4 +114,36 @@ if [ "$sign_in_status" != "200" ]; then
   exit 1
 fi
 
+echo "Verifying pet and market RPC prerequisites for UI regression"
+rpc_validation="$(
+  branch_psql -v ON_ERROR_STOP=1 -tA -c "
+    select
+      coalesce(to_regprocedure('public.get_my_pet_v1()')::text, ''),
+      coalesce(to_regprocedure('public.list_pet_market_items_v1()')::text, ''),
+      coalesce(to_regprocedure('public.buy_pet_market_item_v1(text,integer)')::text, ''),
+      coalesce((
+        select count(*)::text
+        from public.pet_instances pi
+        join auth.users u on u.id = pi.user_id
+        where u.email = '${escaped_email}'
+          and pi.is_active = true
+      ), '0');
+  "
+)"
+
+IFS='|' read -r get_my_pet_rpc list_market_rpc buy_item_rpc active_pet_ok <<< "$rpc_validation"
+
+if [ -z "$get_my_pet_rpc" ] || [ -z "$list_market_rpc" ] || [ -z "$buy_item_rpc" ]; then
+  echo "Pet market RPCs are missing on the branch database."
+  echo "  get_my_pet_v1: ${get_my_pet_rpc:-MISSING}"
+  echo "  list_pet_market_items_v1: ${list_market_rpc:-MISSING}"
+  echo "  buy_pet_market_item_v1: ${buy_item_rpc:-MISSING}"
+  exit 1
+fi
+
+if [ "$active_pet_ok" != "1" ]; then
+  echo "UI regression seed incomplete — active pet instance missing for ${UI_TEST_EMAIL}"
+  exit 1
+fi
+
 echo "UI regression user seeded successfully."
