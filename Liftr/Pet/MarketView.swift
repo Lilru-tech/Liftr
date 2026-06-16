@@ -80,6 +80,7 @@ struct MarketView: View {
                         )
                     }
                 }
+                .accessibilityIdentifier("market.overlay")
                 .transition(.scale)
                 .zIndex(2)
             }

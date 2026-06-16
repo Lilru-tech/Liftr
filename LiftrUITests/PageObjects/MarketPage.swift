@@ -25,15 +25,10 @@ struct MarketPage {
             "Market coin banner did not appear."
         )
 
-        let itemReady = app.buttons["market.item.food_baby"].firstMatch
-            .waitForExistence(timeout: UITestWait.network)
-        if !itemReady {
-            XCTAssertTrue(
-                app.descendants(matching: .any)["market.item.food_baby"].firstMatch
-                    .waitForExistence(timeout: UITestWait.standard),
-                "food_baby market item did not appear."
-            )
-        }
+        XCTAssertTrue(
+            waitForMarketItem(itemType: "food_baby"),
+            "food_baby market item did not appear."
+        )
     }
 
     func currentCoinBalance() -> Int? {
@@ -54,20 +49,26 @@ struct MarketPage {
     }
 
     func openItem(itemType: String) {
-        let identifier = "market.item.\(itemType)"
-        let item = app.buttons[identifier].firstMatch
-        if !item.waitForExistence(timeout: 3) {
-            let fallback = app.descendants(matching: .any)[identifier].firstMatch
-            XCTAssertTrue(
-                fallback.waitForExistence(timeout: UITestWait.network),
-                "Market item \(itemType) was not visible."
-            )
-            fallback.tap()
-        } else {
-            item.tap()
-        }
+        let item = marketItemElement(itemType: itemType)
         XCTAssertTrue(
-            app.buttons["market.overlay.close"].waitForExistence(timeout: UITestWait.network),
+            waitForMarketItem(itemType: itemType),
+            "Market item \(itemType) was not visible."
+        )
+
+        var scrollAttempts = 0
+        while scrollAttempts < 8, !item.isHittable {
+            app.swipeLeft()
+            scrollAttempts += 1
+        }
+
+        if item.isHittable {
+            item.tap()
+        } else {
+            item.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        }
+
+        XCTAssertTrue(
+            waitForPurchaseOverlay(),
             "Market item overlay for \(itemType) did not open."
         )
     }
@@ -79,12 +80,18 @@ struct MarketPage {
             return
         }
 
-        let quantityByLabel = app.buttons["\(quantity)"]
+        let quantityByLabel = app.buttons["Buy quantity \(quantity)"]
+        if quantityByLabel.waitForExistence(timeout: UITestWait.standard) {
+            quantityByLabel.tap()
+            return
+        }
+
+        let quantityByText = app.buttons["\(quantity)"]
         XCTAssertTrue(
-            quantityByLabel.waitForExistence(timeout: UITestWait.standard),
+            quantityByText.waitForExistence(timeout: UITestWait.standard),
             "Market quantity button for \(quantity) was not visible."
         )
-        quantityByLabel.tap()
+        quantityByText.tap()
     }
 
     func purchaseGenericItem() {
@@ -101,5 +108,42 @@ struct MarketPage {
             return true
         }
         return app.buttons["market.overlay.close"].waitForExistence(timeout: 2) == false
+    }
+
+    private func marketItemElement(itemType: String) -> XCUIElement {
+        let identifier = "market.item.\(itemType)"
+        let button = app.buttons[identifier].firstMatch
+        if button.waitForExistence(timeout: 2) {
+            return button
+        }
+        return app.descendants(matching: .any)[identifier].firstMatch
+    }
+
+    private func waitForMarketItem(itemType: String) -> Bool {
+        let item = marketItemElement(itemType: itemType)
+        if item.waitForExistence(timeout: UITestWait.network) {
+            return true
+        }
+
+        for _ in 0..<8 {
+            app.swipeLeft()
+            if item.waitForExistence(timeout: 2) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func waitForPurchaseOverlay() -> Bool {
+        if app.otherElements["market.overlay"].waitForExistence(timeout: UITestWait.network) {
+            return true
+        }
+        if app.buttons["market.overlay.close"].waitForExistence(timeout: 2) {
+            return true
+        }
+        if app.buttons["Close"].waitForExistence(timeout: 2) {
+            return true
+        }
+        return app.buttons["market.overlay.qty.1"].waitForExistence(timeout: UITestWait.network)
     }
 }
