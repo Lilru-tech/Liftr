@@ -69,10 +69,9 @@ jobs:
           open -a Simulator
 
       - name: Run LiftrUITests regression suite
-        working-directory: Liftr
         run: |
           set -a
-          source ../scripts/ci/.branch.env
+          source scripts/ci/.branch.env
           set +a
           export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-${ANON_KEY:-}}"
           xcodebuild test \
