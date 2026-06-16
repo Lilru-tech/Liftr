@@ -28,7 +28,8 @@ struct Banner: Identifiable, Equatable {
 
 private struct BannerView: View {
     let banner: Banner
-    
+    var accessibilityIdentifier: String?
+
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: banner.type.icon).imageScale(.large)
@@ -42,6 +43,7 @@ private struct BannerView: View {
         .shadow(radius: 10, y: 6)
         .padding(.horizontal, 16)
         .padding(.top, 12)
+        .accessibilityIdentifier(accessibilityIdentifier ?? "")
     }
 }
 
@@ -49,12 +51,16 @@ struct BannerPresenter: ViewModifier {
     @Binding var banner: Banner?
     let autoHide: Bool
     let duration: Double
-    
+    var successAccessibilityIdentifier: String?
+
     func body(content: Content) -> some View {
         ZStack(alignment: .top) {
             content
             if let b = banner {
-                BannerView(banner: b)
+                BannerView(
+                    banner: b,
+                    accessibilityIdentifier: b.type == .success ? successAccessibilityIdentifier : nil
+                )
                     .transition(.move(edge: .top).combined(with: .opacity))
                     .onAppear {
                         let gen = UINotificationFeedbackGenerator()
@@ -77,8 +83,20 @@ struct BannerPresenter: ViewModifier {
 }
 
 extension View {
-    func banner(_ banner: Binding<Banner?>, autoHide: Bool = true, duration: Double = 2.5) -> some View {
-        modifier(BannerPresenter(banner: banner, autoHide: autoHide, duration: duration))
+    func banner(
+        _ banner: Binding<Banner?>,
+        autoHide: Bool = true,
+        duration: Double = 2.5,
+        successAccessibilityIdentifier: String? = nil
+    ) -> some View {
+        modifier(
+            BannerPresenter(
+                banner: banner,
+                autoHide: autoHide,
+                duration: duration,
+                successAccessibilityIdentifier: successAccessibilityIdentifier
+            )
+        )
     }
 }
 

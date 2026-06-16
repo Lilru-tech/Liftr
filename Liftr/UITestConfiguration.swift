@@ -19,6 +19,21 @@ enum UITestConfiguration {
         return value.isEmpty ? nil : value
     }
 
+    static var signupEmail: String? {
+        let value = ProcessInfo.processInfo.environment["UI_TEST_SIGNUP_EMAIL"] ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    static var signupUsername: String? {
+        let value = ProcessInfo.processInfo.environment["UI_TEST_SIGNUP_USERNAME"] ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    static var signupPassword: String? {
+        let value = ProcessInfo.processInfo.environment["UI_TEST_SIGNUP_PASSWORD"] ?? ""
+        return value.isEmpty ? nil : value
+    }
+
     static func configureIfNeeded() {
         guard isEnabled else { return }
         UIView.setAnimationsEnabled(false)

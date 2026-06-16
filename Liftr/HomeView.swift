@@ -935,6 +935,7 @@ struct HomeView: View {
         .onChange(of: showTrackedAchievements) { _, show in
             if !show { Task { await loadTrackedAchievementSummary() } }
         }
+        .accessibilityIdentifier("home.screen")
     }
 
     private var quickStartLoadingOverlay: some View {

@@ -69,6 +69,23 @@ enum UITestCredentials {
         value(for: "UI_TEST_PASSWORD")
     }
 
+    static var signupEmail: String {
+        value(for: "UI_TEST_SIGNUP_EMAIL")
+    }
+
+    static var signupUsername: String {
+        value(for: "UI_TEST_SIGNUP_USERNAME")
+    }
+
+    static var signupPassword: String {
+        let configured = value(for: "UI_TEST_SIGNUP_PASSWORD")
+        return configured.isEmpty ? "12345678" : configured
+    }
+
+    static var isSignupConfigured: Bool {
+        !signupEmail.isEmpty && !signupUsername.isEmpty
+    }
+
     static var supabaseURL: String {
         value(for: "SUPABASE_URL")
     }

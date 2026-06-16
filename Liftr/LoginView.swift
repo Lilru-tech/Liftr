@@ -102,6 +102,7 @@ struct LoginView: View {
                             Text("Create an account")
                                 .fontWeight(.semibold)
                         }
+                        .accessibilityIdentifier("login.register")
                         .padding(.top, 4)
                     }
                     .padding(20)

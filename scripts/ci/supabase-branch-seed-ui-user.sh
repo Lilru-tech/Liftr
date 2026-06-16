@@ -175,4 +175,40 @@ if [ "$active_pet_ok" != "1" ]; then
   exit 1
 fi
 
+echo "Ensuring strength exercise catalog is available for UI tests"
+branch_psql -v ON_ERROR_STOP=1 -c "
+DO \$\$
+BEGIN
+  IF to_regclass('public.exercises') IS NOT NULL THEN
+    IF (SELECT count(*) FROM public.exercises WHERE is_public = true AND modality = 'strength') = 0 THEN
+      INSERT INTO public.exercises (name, name_en, modality, is_public)
+      VALUES ('UI Test Squat', 'UI Test Squat', 'strength', true);
+    END IF;
+  END IF;
+END \$\$;
+"
+
+exercise_count="$(
+  branch_psql -v ON_ERROR_STOP=1 -tA -c "
+    select coalesce(count(*)::text, '0')
+    from public.exercises
+    where is_public = true
+      and modality = 'strength';
+  "
+)"
+
+if [ "${exercise_count:-0}" = "0" ]; then
+  echo "UI regression seed incomplete — no public strength exercises available"
+  exit 1
+fi
+
+echo "Clearing existing weekly workouts goals for ${UI_TEST_EMAIL}"
+branch_psql -v ON_ERROR_STOP=1 -c "
+  delete from public.weekly_goals wg
+  using auth.users u
+  where wg.user_id = u.id
+    and u.email = '${escaped_email}'
+    and wg.metric = 'workouts';
+"
+
 echo "UI regression user seeded successfully."

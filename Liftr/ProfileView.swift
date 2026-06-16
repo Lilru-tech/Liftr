@@ -1450,6 +1450,7 @@ struct ProfileView: View {
                 } label: {
                     Label("Achievements", systemImage: "rosette")
                 }
+                .accessibilityIdentifier("profile.menu.achievements")
 
                 NavigationLink {
                     GoalsView(userId: viewingUserId, viewedUsername: username)
@@ -1457,6 +1458,7 @@ struct ProfileView: View {
                 } label: {
                     Label("Goals", systemImage: "target")
                 }
+                .accessibilityIdentifier("profile.menu.goals")
 
                 if isOwnProfile {
                     NavigationLink {
@@ -2492,6 +2494,7 @@ struct ProfileView: View {
                         .padding(12)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile.menu.logout")
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)

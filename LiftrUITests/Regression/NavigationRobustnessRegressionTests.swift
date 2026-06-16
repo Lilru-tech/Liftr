@@ -1,10 +1,8 @@
 import XCTest
 
-final class NavigationRobustnessRegressionTests: XCTestCase {
-    private var app: LiftrUIApplication!
-
+final class NavigationRobustnessRegressionTests: RegressionTestCase {
     override func setUpWithError() throws {
-        continueAfterFailure = false
+        try super.setUpWithError()
         app = LiftrUIApplication()
         app.launchForRegression()
     }
@@ -12,8 +10,11 @@ final class NavigationRobustnessRegressionTests: XCTestCase {
     @MainActor
     func testMainTabsRenderWithoutCrash() throws {
         let tabs = TabBarPage(app: app)
-
-        tabs.visitAllTabs()
-        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: UITestWait.standard))
+        try step("Visit every main tab") {
+            tabs.visitAllTabs()
+        }
+        try step("Confirm tab bar still visible") {
+            XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: UITestWait.standard))
+        }
     }
 }

@@ -10,40 +10,59 @@ struct TabBarPage {
         )
     }
 
-    func selectTab(at index: Int) {
+    private func tabElement(_ identifier: String) -> XCUIElement {
+        let candidates: [XCUIElement] = [
+            app.buttons[identifier],
+            app.otherElements[identifier],
+            app.tabBars.buttons[identifier],
+        ]
+        for candidate in candidates where candidate.exists {
+            return candidate
+        }
+        return app.buttons[identifier]
+    }
+
+    func selectTab(identifier: String, fallbackIndex: Int) {
         waitForTabBar()
-        let tabButton = app.tabBars.buttons.element(boundBy: index)
+        let tab = tabElement(identifier)
+        if tab.waitForExistence(timeout: UITestWait.standard) {
+            tab.tap()
+            return
+        }
+        let tabButton = app.tabBars.buttons.element(boundBy: fallbackIndex)
         XCTAssertTrue(
             tabButton.waitForExistence(timeout: UITestWait.standard),
-            "Tab bar button at index \(index) was not found."
+            "Tab bar button at index \(fallbackIndex) was not found."
         )
         tabButton.tap()
     }
 
     func selectHome() {
-        selectTab(at: 0)
+        selectTab(identifier: "tab.home", fallbackIndex: 0)
     }
 
     func selectExplore() {
-        selectTab(at: 1)
+        selectTab(identifier: "tab.explore", fallbackIndex: 1)
     }
 
     func selectAdd() {
-        selectTab(at: 2)
+        selectTab(identifier: "tab.add", fallbackIndex: 2)
     }
 
     func selectFood() {
-        selectTab(at: 3)
+        selectTab(identifier: "tab.food", fallbackIndex: 3)
     }
 
     func selectProfile() {
-        selectTab(at: 4)
+        selectTab(identifier: "tab.profile", fallbackIndex: 4)
     }
 
     func visitAllTabs() {
         waitForTabBar()
-        for index in 0..<5 {
-            selectTab(at: index)
-        }
+        selectHome()
+        selectExplore()
+        selectAdd()
+        selectFood()
+        selectProfile()
     }
 }

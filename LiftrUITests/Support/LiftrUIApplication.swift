@@ -14,6 +14,13 @@ final class LiftrUIApplication: XCUIApplication {
         launchEnvironment["SUPABASE_ANON_KEY"] = credentials.supabaseAnonKey
         launchEnvironment["UI_TEST_EMAIL"] = credentials.email
         launchEnvironment["UI_TEST_PASSWORD"] = credentials.password
+        if !credentials.signupEmail.isEmpty {
+            launchEnvironment["UI_TEST_SIGNUP_EMAIL"] = credentials.signupEmail
+        }
+        if !credentials.signupUsername.isEmpty {
+            launchEnvironment["UI_TEST_SIGNUP_USERNAME"] = credentials.signupUsername
+        }
+        launchEnvironment["UI_TEST_SIGNUP_PASSWORD"] = credentials.signupPassword
         launch()
 
         XCTAssertTrue(

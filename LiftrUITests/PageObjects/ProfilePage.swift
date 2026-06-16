@@ -5,6 +5,54 @@ struct ProfilePage {
 
     var menuButton: XCUIElement { app.buttons["profile.menu"] }
     var marketMenuItem: XCUIElement { app.buttons["profile.menu.market"] }
+    var goalsMenuItem: XCUIElement { app.buttons["profile.menu.goals"] }
+    var achievementsMenuItem: XCUIElement { app.buttons["profile.menu.achievements"] }
+    var logoutButton: XCUIElement { app.buttons["profile.menu.logout"] }
+
+    func openMenuItem(_ element: XCUIElement, fallbackLabel: String) {
+        XCTAssertTrue(menuButton.waitForExistence(timeout: UITestWait.standard))
+        menuButton.tap()
+
+        if element.waitForExistence(timeout: UITestWait.standard) {
+            element.tap()
+            return
+        }
+
+        let candidates: [XCUIElement] = [
+            app.menuItems[fallbackLabel],
+            app.buttons[fallbackLabel],
+            app.staticTexts[fallbackLabel],
+        ]
+        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.standard) {
+            candidate.tap()
+            return
+        }
+        XCTFail("\(fallbackLabel) menu item was not found.")
+    }
+
+    func openGoalsFromMenu() {
+        openMenuItem(goalsMenuItem, fallbackLabel: "Goals")
+    }
+
+    func openAchievementsFromMenu() {
+        openMenuItem(achievementsMenuItem, fallbackLabel: "Achievements")
+    }
+
+    func openSettingsTab() {
+        let settings = app.buttons["Settings"]
+        if settings.waitForExistence(timeout: UITestWait.standard) {
+            settings.tap()
+            return
+        }
+        app.staticTexts["Settings"].tap()
+    }
+
+    func signOutFromSettings() {
+        openSettingsTab()
+        app.swipeUp()
+        XCTAssertTrue(logoutButton.waitForExistence(timeout: UITestWait.network))
+        logoutButton.tap()
+    }
 
     func dismissUpdateBannerIfPresent() {
         app.buttons["Later"].tapIfExists(timeout: 2)

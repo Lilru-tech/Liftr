@@ -61,8 +61,10 @@ struct RegisterView: View {
                             .keyboardType(.emailAddress)
                             .textContentType(.emailAddress)
                             .autocorrectionDisabled(true)
+                            .accessibilityIdentifier("register.email")
                         SecureField("Password (min. 8)", text: $password)
                             .textContentType(.newPassword)
+                            .accessibilityIdentifier("register.password")
                         
                         if !isEmailValid && !email.isEmpty {
                             Text("Invalid email format.")
@@ -79,6 +81,7 @@ struct RegisterView: View {
                             .textInputAutocapitalization(.never)
                             .textContentType(.nickname)
                             .autocorrectionDisabled(true)
+                            .accessibilityIdentifier("register.username")
                             .onChange(of: username, initial: false) { _, _ in
                                 usernameDirty = true
                             }
@@ -147,6 +150,7 @@ struct RegisterView: View {
                                 .foregroundStyle(.white)
                             }
                             .disabled(loading || !isFormValid)
+                            .accessibilityIdentifier("register.submit")
                         }
                         .padding(.top, 6)
                     }
@@ -161,6 +165,21 @@ struct RegisterView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .banner($banner)
+        }
+        .accessibilityIdentifier("register.screen")
+        .onAppear { prefillUITestSignupIfNeeded() }
+    }
+
+    private func prefillUITestSignupIfNeeded() {
+        guard UITestConfiguration.isEnabled else { return }
+        if let email = UITestConfiguration.signupEmail {
+            self.email = email
+        }
+        if let password = UITestConfiguration.signupPassword {
+            self.password = password
+        }
+        if let username = UITestConfiguration.signupUsername {
+            self.username = username
         }
     }
     

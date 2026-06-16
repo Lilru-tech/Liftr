@@ -6,6 +6,21 @@ struct LoginPage {
     var emailField: XCUIElement { app.textFields["login.email"] }
     var passwordField: XCUIElement { app.secureTextFields["login.password"] }
     var submitButton: XCUIElement { app.buttons["login.submit"] }
+    var registerLink: XCUIElement { app.buttons["login.register"] }
+    var forgotPasswordLink: XCUIElement { app.staticTexts["Forgot password?"] }
+
+    func openRegister() {
+        if registerLink.waitForExistence(timeout: UITestWait.standard) {
+            registerLink.tap()
+            return
+        }
+        app.staticTexts["Create an account"].tap()
+    }
+
+    func openForgotPassword() {
+        XCTAssertTrue(forgotPasswordLink.waitForExistence(timeout: UITestWait.standard))
+        forgotPasswordLink.tap()
+    }
 
     func signIn(email: String, password: String) {
         XCTAssertTrue(emailField.waitForExistence(timeout: UITestWait.standard))

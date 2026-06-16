@@ -1,10 +1,8 @@
 import XCTest
 
-final class AuthSessionRegressionTests: XCTestCase {
-    private var app: LiftrUIApplication!
-
+final class AuthSessionRegressionTests: RegressionTestCase {
     override func setUpWithError() throws {
-        continueAfterFailure = false
+        try super.setUpWithError()
         app = LiftrUIApplication()
         app.launchForRegression(autoSignIn: false)
     }
@@ -15,9 +13,15 @@ final class AuthSessionRegressionTests: XCTestCase {
         let login = LoginPage(app: app)
         let profile = ProfilePage(app: app)
 
-        tabs.selectProfile()
-        profile.dismissUpdateBannerIfPresent()
-        login.signInWithConfiguredCredentials()
-        profile.waitForAuthenticatedProfile()
+        try step("Open profile tab") {
+            tabs.selectProfile()
+            profile.dismissUpdateBannerIfPresent()
+        }
+        try step("Sign in with configured credentials") {
+            login.signInWithConfiguredCredentials()
+        }
+        try step("Wait for authenticated profile") {
+            profile.waitForAuthenticatedProfile()
+        }
     }
 }

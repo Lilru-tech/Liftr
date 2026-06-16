@@ -663,6 +663,7 @@ struct NutritionView: View {
                     }
                 }
         }
+        .accessibilityIdentifier("nutrition.screen")
         .onChange(of: insightsPath.count) { oldCount, newCount in
             #if DEBUG
             print("[NutritionInsights] path count \(oldCount) -> \(newCount)")
