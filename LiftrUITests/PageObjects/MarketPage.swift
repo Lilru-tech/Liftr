@@ -25,10 +25,15 @@ struct MarketPage {
             "Market coin banner did not appear."
         )
 
-        let itemReady = app.descendants(matching: .any)["market.item.food_baby"]
-            .firstMatch
+        let itemReady = app.buttons["market.item.food_baby"].firstMatch
             .waitForExistence(timeout: UITestWait.network)
-        XCTAssertTrue(itemReady, "food_baby market item did not appear.")
+        if !itemReady {
+            XCTAssertTrue(
+                app.descendants(matching: .any)["market.item.food_baby"].firstMatch
+                    .waitForExistence(timeout: UITestWait.standard),
+                "food_baby market item did not appear."
+            )
+        }
     }
 
     func currentCoinBalance() -> Int? {
@@ -50,21 +55,36 @@ struct MarketPage {
 
     func openItem(itemType: String) {
         let identifier = "market.item.\(itemType)"
-        let item = app.descendants(matching: .any)[identifier].firstMatch
+        let item = app.buttons[identifier].firstMatch
+        if !item.waitForExistence(timeout: 3) {
+            let fallback = app.descendants(matching: .any)[identifier].firstMatch
+            XCTAssertTrue(
+                fallback.waitForExistence(timeout: UITestWait.network),
+                "Market item \(itemType) was not visible."
+            )
+            fallback.tap()
+        } else {
+            item.tap()
+        }
         XCTAssertTrue(
-            item.waitForExistence(timeout: UITestWait.network),
-            "Market item \(itemType) was not visible."
+            app.buttons["market.overlay.close"].waitForExistence(timeout: UITestWait.network),
+            "Market item overlay for \(itemType) did not open."
         )
-        item.tap()
     }
 
     func purchaseFoodQuantity(_ quantity: Int) {
         let quantityButton = app.buttons["market.overlay.qty.\(quantity)"]
+        if quantityButton.waitForExistence(timeout: UITestWait.network) {
+            quantityButton.tap()
+            return
+        }
+
+        let quantityByLabel = app.buttons["\(quantity)"]
         XCTAssertTrue(
-            quantityButton.waitForExistence(timeout: UITestWait.network),
+            quantityByLabel.waitForExistence(timeout: UITestWait.standard),
             "Market quantity button for \(quantity) was not visible."
         )
-        quantityButton.tap()
+        quantityByLabel.tap()
     }
 
     func purchaseGenericItem() {
