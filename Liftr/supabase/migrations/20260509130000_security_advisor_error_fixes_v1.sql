@@ -124,41 +124,56 @@ $$;
 --     Schema mutations stay possible via service_role / migrations.
 -- ---------------------------------------------------------------------------
 
--- public.cardio_activity_types
-alter table public.cardio_activity_types enable row level security;
-revoke insert, update, delete, truncate on public.cardio_activity_types
-  from anon, authenticated;
-drop policy if exists "cardio_activity_types_read_public"
-  on public.cardio_activity_types;
-create policy "cardio_activity_types_read_public"
-  on public.cardio_activity_types
-  for select
-  to anon, authenticated
-  using (true);
+# public.cardio_activity_types
+do $$
+begin
+  if to_regclass('public.cardio_activity_types') is not null then
+    execute 'alter table public.cardio_activity_types enable row level security';
+    execute 'revoke insert, update, delete, truncate on public.cardio_activity_types from anon, authenticated';
+    execute 'drop policy if exists "cardio_activity_types_read_public" on public.cardio_activity_types';
+    execute $p$
+      create policy "cardio_activity_types_read_public"
+        on public.cardio_activity_types
+        for select
+        to anon, authenticated
+        using (true)
+    $p$;
+  end if;
+end $$;
 
 -- public.level_thresholds
-alter table public.level_thresholds enable row level security;
-revoke insert, update, delete, truncate on public.level_thresholds
-  from anon, authenticated;
-drop policy if exists "level_thresholds_read_public"
-  on public.level_thresholds;
-create policy "level_thresholds_read_public"
-  on public.level_thresholds
-  for select
-  to anon, authenticated
-  using (true);
+do $$
+begin
+  if to_regclass('public.level_thresholds') is not null then
+    execute 'alter table public.level_thresholds enable row level security';
+    execute 'revoke insert, update, delete, truncate on public.level_thresholds from anon, authenticated';
+    execute 'drop policy if exists "level_thresholds_read_public" on public.level_thresholds';
+    execute $p$
+      create policy "level_thresholds_read_public"
+        on public.level_thresholds
+        for select
+        to anon, authenticated
+        using (true)
+    $p$;
+  end if;
+end $$;
 
 -- public.user_rankings_daily — public ranking snapshot.
-alter table public.user_rankings_daily enable row level security;
-revoke insert, update, delete, truncate on public.user_rankings_daily
-  from anon, authenticated;
-drop policy if exists "user_rankings_daily_read_public"
-  on public.user_rankings_daily;
-create policy "user_rankings_daily_read_public"
-  on public.user_rankings_daily
-  for select
-  to anon, authenticated
-  using (true);
+do $$
+begin
+  if to_regclass('public.user_rankings_daily') is not null then
+    execute 'alter table public.user_rankings_daily enable row level security';
+    execute 'revoke insert, update, delete, truncate on public.user_rankings_daily from anon, authenticated';
+    execute 'drop policy if exists "user_rankings_daily_read_public" on public.user_rankings_daily';
+    execute $p$
+      create policy "user_rankings_daily_read_public"
+        on public.user_rankings_daily
+        for select
+        to anon, authenticated
+        using (true)
+    $p$;
+  end if;
+end $$;
 
 -- idle_game.vocations
 do $$

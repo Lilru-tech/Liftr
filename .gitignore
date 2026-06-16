@@ -94,3 +94,4 @@ docs/*.sql
 # Migraciones SQL (esquema, RPCs, RLS): no subir en remoto público — conservar solo en local o repo privado.
 # Si ya estaban trackeadas: git rm -r --cached docs/migrations
 scripts/ci/.branch.env
+scripts/ci/.parent-schema.sql
