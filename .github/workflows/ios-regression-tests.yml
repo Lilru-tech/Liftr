@@ -74,12 +74,17 @@ jobs:
           source scripts/ci/.branch.env
           set +a
           export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-${ANON_KEY:-}}"
+          cp scripts/ci/.branch.env scripts/ci/.ui-test.env
+          {
+            echo "UI_TEST_EMAIL=${UI_TEST_EMAIL}"
+            echo "UI_TEST_PASSWORD=${UI_TEST_PASSWORD}"
+            echo "SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}"
+          } >> scripts/ci/.ui-test.env
           xcodebuild test \
             -project Liftr.xcodeproj \
             -scheme Liftr \
             -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.device_name }}" \
             -only-testing:LiftrUITests \
-            -test-arguments SUPABASE_URL="$SUPABASE_URL" SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" UI_TEST_EMAIL="$UI_TEST_EMAIL" UI_TEST_PASSWORD="$UI_TEST_PASSWORD" \
             -resultBundlePath TestResults.xcresult
 
       - name: Upload test results
