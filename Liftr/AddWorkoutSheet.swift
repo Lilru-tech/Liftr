@@ -243,7 +243,10 @@ struct AddWorkoutSheet: View {
     @State private var appliedStrengthRoutineId: Int64? = nil
     @AppStorage("addWorkoutPlanTooltipSeen") private var addWorkoutPlanTooltipSeen = false
 
-    var body: some View { addWorkoutRoot }
+    var body: some View {
+        addWorkoutRoot
+            .accessibilityIdentifier("addWorkout.screen")
+    }
 
     @ViewBuilder
     private var addWorkoutGeneralFormSection: some View {
@@ -744,7 +747,6 @@ struct AddWorkoutSheet: View {
             }
         }
         .banner($banner, successAccessibilityIdentifier: "addWorkout.success")
-        .accessibilityIdentifier("addWorkout.screen")
         .alert(
             "Are you sure you want to remove the exercise?",
             isPresented: removeStrengthExerciseAlertBinding
