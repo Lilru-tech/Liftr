@@ -16,6 +16,42 @@ require_env() {
   fi
 }
 
+fetch_branch_env() {
+  if supabase branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"; then
+    return 0
+  fi
+
+  supabase --experimental branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"
+}
+
+export_branch_env_to_github() {
+  if [ -z "${GITHUB_ENV:-}" ]; then
+    return 0
+  fi
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    echo "$line" >>"$GITHUB_ENV"
+  done <"$ENV_FILE"
+
+  if grep -q '^ANON_KEY=' "$ENV_FILE" && ! grep -q '^SUPABASE_ANON_KEY=' "$ENV_FILE"; then
+    anon_key="$(grep '^ANON_KEY=' "$ENV_FILE" | cut -d= -f2-)"
+    echo "SUPABASE_ANON_KEY=${anon_key}" >>"$GITHUB_ENV"
+    echo "SUPABASE_ANON_KEY=${anon_key}" >>"$ENV_FILE"
+  fi
+
+  echo "BRANCH_NAME=${BRANCH_NAME}" >>"$GITHUB_ENV"
+}
+
+recover_migrations_failed_branch() {
+  echo "Branch ${BRANCH_NAME} hit MIGRATIONS_FAILED."
+  echo "This project relies on a production baseline schema that is not fully represented in migration history."
+  echo "Bootstrapping branch schema from the parent project..."
+
+  fetch_branch_env
+  bash "${ROOT_DIR}/scripts/ci/supabase-branch-bootstrap-schema.sh"
+}
+
 require_env SUPABASE_ACCESS_TOKEN
 require_env SUPABASE_PROJECT_ID
 
@@ -43,7 +79,7 @@ if ! create_branch; then
   fi
 fi
 
-echo "Waiting for branch ${BRANCH_NAME} to become healthy (timeout ${TIMEOUT_SECONDS}s)"
+echo "Waiting for branch ${BRANCH_NAME} to become ready (timeout ${TIMEOUT_SECONDS}s)"
 elapsed=0
 branch_status=""
 while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
@@ -61,7 +97,12 @@ while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
       ACTIVE_HEALTHY|FUNCTIONS_DEPLOYED|RUNNING)
         break
         ;;
-      MIGRATIONS_FAILED|FAILED|UNHEALTHY)
+      MIGRATIONS_FAILED)
+        recover_migrations_failed_branch
+        branch_status="ACTIVE_HEALTHY"
+        break
+        ;;
+      FAILED|UNHEALTHY)
         echo "Branch ${BRANCH_NAME} failed with status ${branch_status}"
         supabase branches list --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" -o json \
           | jq --arg name "$BRANCH_NAME" '.[] | select(.name == $name)'
@@ -75,33 +116,21 @@ while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
 done
 
 if [ "$elapsed" -ge "$TIMEOUT_SECONDS" ]; then
-  echo "Timed out waiting for branch ${BRANCH_NAME} to become healthy"
+  echo "Timed out waiting for branch ${BRANCH_NAME} to become ready"
   exit 1
 fi
 
-echo "Fetching branch credentials"
-fetch_branch_env() {
-  supabase branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR"
-}
-
-if ! fetch_branch_env | tee "$ENV_FILE"; then
-  supabase --experimental branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" | tee "$ENV_FILE"
-fi
-
-if [ -n "${GITHUB_ENV:-}" ]; then
-  while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    echo "$line" >>"$GITHUB_ENV"
-  done <"$ENV_FILE"
-
-  if grep -q '^ANON_KEY=' "$ENV_FILE" && ! grep -q '^SUPABASE_ANON_KEY=' "$ENV_FILE"; then
-    anon_key="$(grep '^ANON_KEY=' "$ENV_FILE" | cut -d= -f2-)"
-    echo "SUPABASE_ANON_KEY=${anon_key}" >>"$GITHUB_ENV"
-    echo "SUPABASE_ANON_KEY=${anon_key}" >>"$ENV_FILE"
+if [ "$branch_status" != "ACTIVE_HEALTHY" ]; then
+  echo "Fetching branch credentials"
+  fetch_branch_env
+else
+  if [ ! -s "$ENV_FILE" ]; then
+    echo "Fetching branch credentials"
+    fetch_branch_env
   fi
-
-  echo "BRANCH_NAME=${BRANCH_NAME}" >>"$GITHUB_ENV"
 fi
 
 echo "BRANCH_NAME=${BRANCH_NAME}" >>"$ENV_FILE"
+export_branch_env_to_github
+
 echo "Branch ${BRANCH_NAME} is ready."
