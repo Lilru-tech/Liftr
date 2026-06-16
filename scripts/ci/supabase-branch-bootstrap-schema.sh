@@ -35,10 +35,10 @@ if ! command -v pg_dump >/dev/null 2>&1; then
   exit 1
 fi
 
-PARENT_DB_HOST="${SUPABASE_DB_HOST:-db.${SUPABASE_PROJECT_ID}.supabase.co}"
+PARENT_DB_HOST="${SUPABASE_DB_HOST:-aws-1-eu-west-1.pooler.supabase.com}"
 PARENT_DB_PORT="${SUPABASE_DB_PORT:-5432}"
 PARENT_DB_NAME="postgres"
-PARENT_DB_USER="postgres"
+PARENT_DB_USER="${SUPABASE_DB_USER:-postgres.${SUPABASE_PROJECT_ID}}"
 
 echo "PostgreSQL client versions:"
 pg_dump --version

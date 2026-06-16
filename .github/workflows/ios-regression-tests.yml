@@ -22,6 +22,8 @@ jobs:
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_DB_HOST: aws-1-eu-west-1.pooler.supabase.com
+      SUPABASE_DB_PORT: "5432"
       UI_TEST_EMAIL: ${{ secrets.UI_TEST_EMAIL }}
       UI_TEST_PASSWORD: ${{ secrets.UI_TEST_PASSWORD }}
       BRANCH_NAME: ui-regression-${{ github.run_id }}
