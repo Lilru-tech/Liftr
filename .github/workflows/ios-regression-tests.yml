@@ -86,7 +86,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ios-ui-test-results-${{ github.run_id }}
-          path: Liftr/TestResults.xcresult
+          path: TestResults.xcresult
           if-no-files-found: ignore
 
       - name: Tear down Supabase preview branch
