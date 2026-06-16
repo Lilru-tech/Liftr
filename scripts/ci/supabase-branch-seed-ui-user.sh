@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ROOT_DIR}/scripts/ci/.branch.env"
 SEED_SQL="${ROOT_DIR}/Liftr/supabase/seed/ui_regression_user.sql"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/ci/supabase-branch-psql.sh"
 
 require_env() {
   local name="$1"
@@ -36,7 +38,7 @@ fi
 
 echo "Verifying required tables exist before seeding"
 validation_output="$(
-  psql "$POSTGRES_URL_NON_POOLING" -v ON_ERROR_STOP=1 -tA -c "
+  branch_psql -v ON_ERROR_STOP=1 -tA -c "
     select
       coalesce(to_regclass('public.profiles')::text, ''),
       coalesce(to_regclass('auth.users')::text, '');
@@ -53,7 +55,7 @@ if [ -z "$profiles_ok" ] || [ -z "$auth_ok" ]; then
 fi
 
 echo "Seeding UI regression user ${UI_TEST_EMAIL}"
-psql "$POSTGRES_URL_NON_POOLING" \
+branch_psql \
   -v ON_ERROR_STOP=1 \
   -v email="'${UI_TEST_EMAIL}'" \
   -v password="'${UI_TEST_PASSWORD}'" \

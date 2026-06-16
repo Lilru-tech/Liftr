@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 ENV_FILE="${ROOT_DIR}/scripts/ci/.branch.env"
 SCHEMA_DUMP_FILE="${ROOT_DIR}/scripts/ci/.parent-schema.sql"
+# shellcheck disable=SC1091
+source "${ROOT_DIR}/scripts/ci/supabase-branch-psql.sh"
 
 if [ -f "$ENV_FILE" ]; then
   set -a
@@ -85,11 +87,12 @@ if [ ! -s "$SCHEMA_DUMP_FILE" ]; then
 fi
 
 echo "Applying parent schema to branch database"
-psql "$POSTGRES_URL_NON_POOLING" -v ON_ERROR_STOP=0 -f "$SCHEMA_DUMP_FILE"
+echo "Branch database host: ${SUPABASE_DB_HOST:-aws-1-eu-west-1.pooler.supabase.com}:${SUPABASE_DB_PORT:-5432}"
+branch_psql -v ON_ERROR_STOP=0 -f "$SCHEMA_DUMP_FILE"
 
 echo "Validating restored schema on branch"
 validation_output="$(
-  psql "$POSTGRES_URL_NON_POOLING" -v ON_ERROR_STOP=1 -tA -c "
+  branch_psql -v ON_ERROR_STOP=1 -tA -c "
     select
       coalesce(to_regclass('public.profiles')::text, ''),
       coalesce(to_regclass('public.pet_market_items')::text, ''),
