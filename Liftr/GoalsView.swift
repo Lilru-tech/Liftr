@@ -455,7 +455,6 @@ struct GoalsView: View {
             goalCardContent(g)
         }
         .buttonStyle(.plain)
-        .navigationLinkIndicatorVisibility(.hidden)
         .overlay(alignment: .bottomTrailing) {
             if isOwnProfile && !g.isCompleted && !isFinished(g) {
                 Button {
