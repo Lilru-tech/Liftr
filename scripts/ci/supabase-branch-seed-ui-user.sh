@@ -34,6 +34,24 @@ if [ ! -f "$SEED_SQL" ]; then
   exit 1
 fi
 
+echo "Verifying required tables exist before seeding"
+validation_output="$(
+  psql "$POSTGRES_URL_NON_POOLING" -v ON_ERROR_STOP=1 -tA -c "
+    select
+      coalesce(to_regclass('public.profiles')::text, ''),
+      coalesce(to_regclass('auth.users')::text, '');
+  "
+)"
+
+IFS='|' read -r profiles_ok auth_ok <<< "$validation_output"
+
+if [ -z "$profiles_ok" ] || [ -z "$auth_ok" ]; then
+  echo "Schema bootstrap incomplete — bootstrap step did not restore required tables:"
+  echo "  public.profiles: ${profiles_ok:-MISSING}"
+  echo "  auth.users: ${auth_ok:-MISSING}"
+  exit 1
+fi
+
 echo "Seeding UI regression user ${UI_TEST_EMAIL}"
 psql "$POSTGRES_URL_NON_POOLING" \
   -v ON_ERROR_STOP=1 \

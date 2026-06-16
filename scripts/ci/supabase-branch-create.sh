@@ -48,8 +48,41 @@ recover_migrations_failed_branch() {
   echo "This project relies on a production baseline schema that is not fully represented in migration history."
   echo "Bootstrapping branch schema from the parent project..."
 
+  if [ -z "${SUPABASE_DB_PASSWORD:-}" ]; then
+    echo "SUPABASE_DB_PASSWORD is required for schema bootstrap recovery."
+    echo "Add it in GitHub Actions secrets (Supabase Dashboard → Project Settings → Database)."
+    exit 1
+  fi
+
   fetch_branch_env
-  bash "${ROOT_DIR}/scripts/ci/supabase-branch-bootstrap-schema.sh"
+
+  if [ -z "${POSTGRES_URL_NON_POOLING:-}" ]; then
+    echo "POSTGRES_URL_NON_POOLING was not returned by supabase branches get."
+    echo "Branch env file contents (redacted):"
+    sed 's/=.*/=***REDACTED***/' "$ENV_FILE" || true
+    exit 1
+  fi
+
+  if command -v pg_dump >/dev/null 2>&1; then
+    pg_dump --version
+  else
+    echo "pg_dump not found in PATH"
+  fi
+
+  if command -v psql >/dev/null 2>&1; then
+    psql --version
+  else
+    echo "psql not found in PATH"
+  fi
+
+  if ! bash "${ROOT_DIR}/scripts/ci/supabase-branch-bootstrap-schema.sh"; then
+    echo "Schema bootstrap failed for branch ${BRANCH_NAME}."
+    if [ -f "${ROOT_DIR}/scripts/ci/.parent-schema.sql" ]; then
+      dump_lines="$(wc -l < "${ROOT_DIR}/scripts/ci/.parent-schema.sql" | tr -d ' ')"
+      echo "Parent schema dump line count: ${dump_lines}"
+    fi
+    exit 1
+  fi
 }
 
 require_env SUPABASE_ACCESS_TOKEN

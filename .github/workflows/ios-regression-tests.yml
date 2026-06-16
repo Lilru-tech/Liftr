@@ -30,17 +30,29 @@ jobs:
 
       - uses: supabase/setup-cli@v2
         with:
-          version: 2.84.2
+          version: 2.106.0
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install PostgreSQL client
-        run: brew install libpq && echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
+        run: |
+          brew install libpq
+          echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify PostgreSQL client
+        run: |
+          export PATH="$(brew --prefix libpq)/bin:$PATH"
+          pg_dump --version
+          psql --version
 
       - name: Create ephemeral Supabase branch
-        run: bash scripts/ci/supabase-branch-create.sh
+        run: |
+          export PATH="$(brew --prefix libpq)/bin:$PATH"
+          bash scripts/ci/supabase-branch-create.sh
 
       - name: Seed UI regression user
-        run: bash scripts/ci/supabase-branch-seed-ui-user.sh
+        run: |
+          export PATH="$(brew --prefix libpq)/bin:$PATH"
+          bash scripts/ci/supabase-branch-seed-ui-user.sh
 
       - name: Select iOS simulator
         id: simulator
