@@ -79,6 +79,7 @@ jobs:
             -scheme Liftr \
             -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.device_name }}" \
             -only-testing:LiftrUITests \
+            -test-arguments SUPABASE_URL="$SUPABASE_URL" SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" UI_TEST_EMAIL="$UI_TEST_EMAIL" UI_TEST_PASSWORD="$UI_TEST_PASSWORD" \
             -resultBundlePath TestResults.xcresult
 
       - name: Upload test results
