@@ -76,8 +76,12 @@ $$;
 --     Strip API access instead — clients should never read it directly.
 -- ---------------------------------------------------------------------------
 
-revoke all on table public.spatial_ref_sys from anon, authenticated;
--- service_role keeps full access (needed for spatial helpers and admin tasks).
+do $$
+begin
+  if to_regclass('public.spatial_ref_sys') is not null then
+    revoke all on table public.spatial_ref_sys from anon, authenticated;
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- 2b) Backup / scratch tables: lock down (RLS on, no policies, no API access).

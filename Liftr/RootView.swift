@@ -15,10 +15,12 @@ struct RootView: View {
         TabView(selection: $app.selectedTab) {
             NavigationStack { HomeView().gradientBG() }
                 .tag(Tab.home)
+                .accessibilityIdentifier("tab.home")
                 .tabItem { Label("", systemImage: "house.fill") }
             
             NavigationStack { SearchView().gradientBG() }
                 .tag(Tab.search)
+                .accessibilityIdentifier("tab.explore")
                 .tabItem { Label("", systemImage: "magnifyingglass") }
             
             NavigationStack {
@@ -27,15 +29,18 @@ struct RootView: View {
                     .id(app.addDraftKey)
             }
             .tag(Tab.add)
+            .accessibilityIdentifier("tab.add")
             .tabItem { Label("", systemImage: "plus.circle.fill") }
             
             NutritionView()
                 .gradientBG()
                 .tag(Tab.nutrition)
+                .accessibilityIdentifier("tab.food")
                 .tabItem { Label("", systemImage: "fork.knife") }
             
             NavigationStack { ProfileGate().gradientBG() }
                 .tag(Tab.profile)
+                .accessibilityIdentifier("tab.profile")
                 .tabItem {
                     if let tabImg = app.tabBarProfileAvatar {
                         Image(uiImage: tabImg)

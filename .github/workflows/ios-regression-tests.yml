@@ -1,0 +1,79 @@
+name: iOS regression tests
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-regression:
+    runs-on: macos-15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      UI_TEST_EMAIL: ${{ secrets.UI_TEST_EMAIL }}
+      UI_TEST_PASSWORD: ${{ secrets.UI_TEST_PASSWORD }}
+      BRANCH_NAME: ui-regression-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Install PostgreSQL client
+        run: brew install libpq && echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
+
+      - name: Create ephemeral Supabase branch
+        run: bash scripts/ci/supabase-branch-create.sh
+
+      - name: Seed UI regression user
+        run: bash scripts/ci/supabase-branch-seed-ui-user.sh
+
+      - name: Select iOS simulator
+        id: simulator
+        run: |
+          eval "$(bash scripts/ci/select-ios-simulator.sh)"
+          echo "device_name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Boot iOS simulator
+        run: |
+          DEVICE_NAME="${{ steps.simulator.outputs.device_name }}"
+          xcrun simctl boot "$DEVICE_NAME" || true
+          open -a Simulator
+
+      - name: Run LiftrUITests regression suite
+        working-directory: Liftr
+        run: |
+          set -a
+          source ../scripts/ci/.branch.env
+          set +a
+          export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-${ANON_KEY:-}}"
+          xcodebuild test \
+            -project Liftr.xcodeproj \
+            -scheme Liftr \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.device_name }}" \
+            -only-testing:LiftrUITests \
+            -resultBundlePath TestResults.xcresult
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-test-results-${{ github.run_id }}
+          path: Liftr/TestResults.xcresult
+          if-no-files-found: ignore
+
+      - name: Tear down Supabase preview branch
+        if: always()
+        run: bash scripts/ci/supabase-branch-teardown.sh

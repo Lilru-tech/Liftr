@@ -47,6 +47,7 @@ struct PetMarketItemCard: View {
         .frame(width: 100, height: 168)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+        .accessibilityIdentifier("market.item.\(item.itemType)")
         .onTapGesture(perform: onTap)
     }
 }

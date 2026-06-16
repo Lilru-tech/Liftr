@@ -72,9 +72,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
     ) -> Bool {
 
+        UITestConfiguration.configureIfNeeded()
         FirebaseApp.configure()
         configurePushNotifications(application: application)
-        MobileAds.shared.start(completionHandler: nil)
+        if !UITestConfiguration.isEnabled {
+            MobileAds.shared.start(completionHandler: nil)
+        }
 
         if let launchURL = launchOptions?[.url] as? URL {
             AuthCallbackLogger.log("cold start launchOptions URL", url: launchURL, source: "AppDelegate")
