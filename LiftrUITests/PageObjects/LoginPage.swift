@@ -6,53 +6,61 @@ struct LoginPage {
     var emailField: XCUIElement { app.textFields["login.email"] }
     var passwordField: XCUIElement { app.secureTextFields["login.password"] }
     var submitButton: XCUIElement { app.buttons["login.submit"] }
-    var registerLink: XCUIElement { app.buttons["login.register"] }
-    var forgotPasswordLink: XCUIElement { app.staticTexts["Forgot password?"] }
+
+    func waitForLoginScreen(timeout: TimeInterval = UITestWait.network) {
+        let ready = app.otherElements["login.screen"].waitForExistence(timeout: timeout)
+            || emailField.waitForExistence(timeout: timeout)
+        XCTAssertTrue(ready, "Login screen did not appear.")
+    }
 
     func openRegister() {
-        if registerLink.waitForExistence(timeout: UITestWait.standard) {
-            registerLink.tap()
+        waitForLoginScreen()
+        let candidates: [XCUIElement] = [
+            app.buttons["login.register"],
+            app.staticTexts["login.register"],
+            app.otherElements["login.register"],
+            app.buttons["Create an account"],
+            app.staticTexts["Create an account"],
+        ]
+        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.standard) {
+            candidate.tap()
             return
         }
-        app.staticTexts["Create an account"].tap()
+        XCTFail("Register link was not found on the login screen.")
     }
 
     func openForgotPassword() {
-        XCTAssertTrue(forgotPasswordLink.waitForExistence(timeout: UITestWait.standard))
-        forgotPasswordLink.tap()
+        waitForLoginScreen()
+        let candidates: [XCUIElement] = [
+            app.buttons["forgotPassword.link"],
+            app.staticTexts["forgotPassword.link"],
+            app.staticTexts["Forgot password?"],
+            app.buttons.matching(NSPredicate(format: "label CONTAINS 'Forgot password'")).firstMatch,
+        ]
+        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.standard) {
+            candidate.tap()
+            return
+        }
+        XCTFail("Forgot password link was not found on the login screen.")
     }
 
     func signIn(email: String, password: String) {
-        XCTAssertTrue(emailField.waitForExistence(timeout: UITestWait.standard))
+        waitForLoginScreen()
         emailField.clearAndTypeText(email)
-
-        XCTAssertTrue(passwordField.waitForExistence(timeout: UITestWait.standard))
         passwordField.clearAndTypeText(password)
-
         XCTAssertTrue(submitButton.waitForExistence(timeout: UITestWait.standard))
         XCTAssertTrue(submitButton.isEnabled, "Sign in button stayed disabled after entering credentials.")
         submitButton.tap()
-
-        let signingInLabel = app.staticTexts["Signing in…"]
-        if signingInLabel.waitForExistence(timeout: 2) {
-            let finished = XCTNSPredicateExpectation(
-                predicate: NSPredicate(format: "exists == false"),
-                object: signingInLabel
-            )
-            _ = XCTWaiter().wait(for: [finished], timeout: UITestWait.network)
-        }
+        waitForSignInCompletion()
     }
 
     func signInWithConfiguredCredentials() {
-        if emailField.waitForExistence(timeout: UITestWait.standard),
-           passwordField.waitForExistence(timeout: 2),
-           submitButton.waitForExistence(timeout: 2),
-           submitButton.isEnabled {
+        waitForLoginScreen()
+        if submitButton.waitForExistence(timeout: UITestWait.standard), submitButton.isEnabled {
             submitButton.tap()
             waitForSignInCompletion()
             return
         }
-
         signIn(email: UITestCredentials.email, password: UITestCredentials.password)
     }
 

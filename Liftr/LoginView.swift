@@ -68,6 +68,7 @@ struct LoginView: View {
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                         }
+                        .accessibilityIdentifier("forgotPassword.link")
                         .frame(maxWidth: .infinity, alignment: .trailing)
 
                         Toggle("Remember me", isOn: $rememberMe)
@@ -118,6 +119,7 @@ struct LoginView: View {
                 .padding(.horizontal, 24)
             }
         }
+        .accessibilityIdentifier("login.screen")
         .toolbarBackground(.hidden, for: .navigationBar)
         .onAppear {
             loadRemembered()

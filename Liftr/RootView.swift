@@ -141,6 +141,7 @@ struct RootView: View {
         }
         .task {
             guard UITestConfiguration.isEnabled else { return }
+            await app.signOutForUITestsIfNeeded()
             await app.signInForUITestsIfNeeded()
         }
         .overlay(alignment: .topLeading) {

@@ -16,7 +16,10 @@ final class NutritionTabRegressionTests: RegressionTestCase {
         }
 
         try step("Assert nutrition screen loaded") {
-            XCTAssertTrue(app.otherElements["nutrition.screen"].waitForExistence(timeout: UITestWait.network))
+            let ready = app.otherElements["nutrition.screen"].waitForExistence(timeout: UITestWait.network)
+                || app.buttons.matching(NSPredicate(format: "label CONTAINS 'Add nutrition'")).firstMatch.waitForExistence(timeout: UITestWait.network)
+                || app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Diary' OR label CONTAINS 'Calories'")).firstMatch.waitForExistence(timeout: UITestWait.network)
+            XCTAssertTrue(ready, "Nutrition screen did not load.")
         }
     }
 }

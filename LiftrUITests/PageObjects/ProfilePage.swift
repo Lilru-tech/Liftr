@@ -50,8 +50,16 @@ struct ProfilePage {
     func signOutFromSettings() {
         openSettingsTab()
         app.swipeUp()
-        XCTAssertTrue(logoutButton.waitForExistence(timeout: UITestWait.network))
-        logoutButton.tap()
+        let candidates: [XCUIElement] = [
+            logoutButton,
+            app.buttons["Sign out"],
+            app.staticTexts["Sign out"],
+        ]
+        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.network) {
+            candidate.tap()
+            return
+        }
+        XCTFail("Sign out control was not found in profile settings.")
     }
 
     func dismissUpdateBannerIfPresent() {

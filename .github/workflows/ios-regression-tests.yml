@@ -102,6 +102,7 @@ jobs:
             -scheme Liftr \
             -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.device_name }}" \
             -maximum-concurrent-test-simulator-destinations 1 \
+            -parallel-testing-enabled NO \
             -only-testing:LiftrUITests/ExploreTabRegressionTests \
             -only-testing:LiftrUITests/NutritionTabRegressionTests \
             -only-testing:LiftrUITests/HomeFeedRegressionTests \
@@ -123,6 +124,7 @@ jobs:
 
       - name: Publish UI test summary and screenshots
         if: always() && !cancelled()
+        continue-on-error: true
         run: |
           if [ -d TestResults.xcresult ]; then
             bash scripts/ci/generate-ios-test-summary.sh TestResults.xcresult

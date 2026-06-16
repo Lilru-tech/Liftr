@@ -132,7 +132,11 @@ for t in tests:
     if "fail" in normalized or "error" in normalized:
         screenshot = f"[artifact `ios-ui-screenshots-{run_id}`](https://github.com/actions/runs/{run_id})" if run_id != "local" else "see test-attachments artifact"
 
-    rows.append((name, result, f"{dur:.1f}s", step_text if "fail" not in normalized else (step_text + ("<br>" + msg.replace("\n", "<br>") if msg else ""))), screenshot))
+    detail = step_text
+    if ("fail" in normalized or "error" in normalized) and msg:
+        detail = step_text + "<br>" + msg.replace("\n", "<br>")
+
+    rows.append((name, result, f"{dur:.1f}s", detail, screenshot))
 
     if "fail" in normalized or "error" in normalized:
         failed_details.append((name, msg, steps))

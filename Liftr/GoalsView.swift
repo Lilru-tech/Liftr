@@ -240,6 +240,7 @@ struct GoalsView: View {
                         Image(systemName: "plus.circle.fill")
                     }
                     .accessibilityIdentifier("goals.create")
+                    .accessibilityLabel("Create goal")
                 }
             }
         }

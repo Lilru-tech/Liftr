@@ -35,6 +35,13 @@ final class LiftrUIApplication: XCUIApplication {
                 otherElements["uitest.authenticated"].waitForExistence(timeout: UITestWait.network),
                 "UI test auto sign-in did not complete."
             )
+        } else {
+            XCTAssertTrue(
+                otherElements["uitest.guest"].waitForExistence(timeout: UITestWait.network)
+                    || textFields["login.email"].waitForExistence(timeout: UITestWait.network)
+                    || otherElements["login.screen"].waitForExistence(timeout: UITestWait.network),
+                "UI test guest session did not become ready."
+            )
         }
     }
 }

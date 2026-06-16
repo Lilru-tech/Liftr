@@ -626,6 +626,18 @@ final class AppState: ObservableObject {
     }
 
     @MainActor
+    func signOutForUITestsIfNeeded() async {
+        guard UITestConfiguration.isEnabled, !UITestConfiguration.autoSignInEnabled else { return }
+        try? await SupabaseManager.shared.client.auth.signOut()
+        isAuthenticated = false
+        userId = nil
+        isPremium = false
+        clearTabBarProfileAvatar()
+        unreadNotificationsCount = 0
+        await stopChatUnreadRealtime()
+    }
+
+    @MainActor
     func signInForUITestsIfNeeded() async {
         guard UITestConfiguration.isEnabled, UITestConfiguration.autoSignInEnabled else { return }
         guard let email = UITestConfiguration.testEmail,
