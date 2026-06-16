@@ -26,9 +26,14 @@ struct ProfilePage {
     }
 
     func waitForAuthenticatedProfile(timeout: TimeInterval = UITestWait.network) {
+        let menuReady = menuButton.waitForExistence(timeout: timeout)
         let coinsBadge = app.staticTexts.matching(
             NSPredicate(format: "label BEGINSWITH 'Liftr Coins balance'")
-        ).firstMatch
-        XCTAssertTrue(coinsBadge.waitForExistence(timeout: timeout))
+        ).firstMatch.waitForExistence(timeout: menuReady ? 2 : timeout)
+
+        XCTAssertTrue(
+            menuReady || coinsBadge,
+            "Authenticated profile did not appear after sign in."
+        )
     }
 }

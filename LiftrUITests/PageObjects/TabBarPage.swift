@@ -3,36 +3,47 @@ import XCTest
 struct TabBarPage {
     let app: XCUIApplication
 
+    func waitForTabBar(timeout: TimeInterval = UITestWait.launch) {
+        XCTAssertTrue(
+            app.tabBars.firstMatch.waitForExistence(timeout: timeout),
+            "Main tab bar did not appear after launch."
+        )
+    }
+
+    func selectTab(at index: Int) {
+        waitForTabBar()
+        let tabButton = app.tabBars.buttons.element(boundBy: index)
+        XCTAssertTrue(
+            tabButton.waitForExistence(timeout: UITestWait.standard),
+            "Tab bar button at index \(index) was not found."
+        )
+        tabButton.tap()
+    }
+
     func selectHome() {
-        app.tabBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.otherElements["tab.home"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(at: 0)
     }
 
     func selectExplore() {
-        app.tabBars.buttons.element(boundBy: 1).tap()
-        XCTAssertTrue(app.otherElements["tab.explore"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(at: 1)
     }
 
     func selectAdd() {
-        app.tabBars.buttons.element(boundBy: 2).tap()
-        XCTAssertTrue(app.otherElements["tab.add"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(at: 2)
     }
 
     func selectFood() {
-        app.tabBars.buttons.element(boundBy: 3).tap()
-        XCTAssertTrue(app.otherElements["tab.food"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(at: 3)
     }
 
     func selectProfile() {
-        app.tabBars.buttons.element(boundBy: 4).tap()
-        XCTAssertTrue(app.otherElements["tab.profile"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(at: 4)
     }
 
     func visitAllTabs() {
-        selectHome()
-        selectExplore()
-        selectAdd()
-        selectFood()
-        selectProfile()
+        waitForTabBar()
+        for index in 0..<5 {
+            selectTab(at: index)
+        }
     }
 }

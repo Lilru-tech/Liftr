@@ -1,5 +1,25 @@
 create extension if not exists pgcrypto with schema extensions;
 
+insert into public.pet_types (name, display_name, description)
+values ('bunny', 'Bunny', 'Fast, adorable, and always hopping around.')
+on conflict (name) do nothing;
+
+insert into public.pet_market_items (item_type, display_name, description, price, category, image_path, is_active)
+values ('food_baby', 'Baby Snack', 'Best food for baby-stage pets.', 250, 'pet_food', 'market/food_baby.png', true)
+on conflict (item_type) do update
+set display_name = excluded.display_name,
+    description = excluded.description,
+    price = excluded.price,
+    category = excluded.category,
+    image_path = excluded.image_path,
+    is_active = excluded.is_active;
+
+insert into public.pet_food_experience (item_type, pet_stage, min_exp, max_exp)
+values ('food_baby', 'baby', 200, 300)
+on conflict (item_type, pet_stage) do update
+set min_exp = excluded.min_exp,
+    max_exp = excluded.max_exp;
+
 do $$
 declare
   v_email text := '__EMAIL__';
@@ -31,6 +51,7 @@ begin
       email,
       encrypted_password,
       email_confirmed_at,
+      raw_app_meta_data,
       raw_user_meta_data,
       created_at,
       updated_at
@@ -43,6 +64,7 @@ begin
       v_email,
       extensions.crypt(v_password, extensions.gen_salt('bf')),
       now(),
+      jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
       jsonb_build_object('username', 'ui_regression_tester'),
       now(),
       now()
@@ -51,9 +73,38 @@ begin
     update auth.users
     set encrypted_password = extensions.crypt(v_password, extensions.gen_salt('bf')),
         email_confirmed_at = coalesce(email_confirmed_at, now()),
+        raw_app_meta_data = coalesce(
+          raw_app_meta_data,
+          jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email'))
+        ),
         updated_at = now()
     where id = v_user_id;
   end if;
+
+  delete from auth.identities
+  where user_id = v_user_id
+    and provider = 'email';
+
+  insert into auth.identities (
+    id,
+    user_id,
+    provider_id,
+    identity_data,
+    provider,
+    last_sign_in_at,
+    created_at,
+    updated_at
+  )
+  values (
+    v_user_id,
+    v_user_id,
+    v_user_id::text,
+    jsonb_build_object('sub', v_user_id::text, 'email', v_email),
+    'email',
+    now(),
+    now(),
+    now()
+  );
 
   insert into public.profiles (user_id, username)
   values (v_user_id, 'ui_regression_tester')

@@ -12,9 +12,7 @@ final class NavigationRobustnessRegressionTests: XCTestCase {
     @MainActor
     func testMainTabsRenderWithoutCrash() throws {
         let tabs = TabBarPage(app: app)
-        let profile = ProfilePage(app: app)
 
-        profile.dismissUpdateBannerIfPresent()
         tabs.visitAllTabs()
         XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: UITestWait.standard))
     }

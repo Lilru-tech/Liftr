@@ -63,4 +63,36 @@ seed_sql="$(sed \
   "$SEED_SQL")"
 printf '%s\n' "$seed_sql" | branch_psql -v ON_ERROR_STOP=1 -f -
 
+echo "Verifying seeded auth identity and market fixtures"
+seed_validation="$(
+  branch_psql -v ON_ERROR_STOP=1 -tA -c "
+    select
+      coalesce((
+        select count(*)::text
+        from auth.identities i
+        join auth.users u on u.id = i.user_id
+        where u.email = '${escaped_email}'
+          and i.provider = 'email'
+      ), '0'),
+      coalesce((
+        select count(*)::text
+        from public.pet_market_items
+        where item_type = 'food_baby'
+          and is_active = true
+      ), '0');
+  "
+)"
+
+IFS='|' read -r identity_ok market_ok <<< "$seed_validation"
+
+if [ "$identity_ok" != "1" ]; then
+  echo "UI regression seed incomplete — auth.identities row missing for ${UI_TEST_EMAIL}"
+  exit 1
+fi
+
+if [ "$market_ok" != "1" ]; then
+  echo "UI regression seed incomplete — active food_baby market item missing"
+  exit 1
+fi
+
 echo "UI regression user seeded successfully."
