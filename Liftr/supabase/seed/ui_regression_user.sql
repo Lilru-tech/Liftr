@@ -81,46 +81,46 @@ begin
   limit 1;
 
   if v_pet_type is null then
-    raise exception 'no pet types seeded';
-  end if;
+    raise notice 'no pet types seeded; skipping pet instance creation';
+  else
+    if not exists (
+      select 1
+      from public.pet_instances
+      where user_id = v_user_id
+        and is_active = true
+    ) then
+      v_instance_id := gen_random_uuid();
+      insert into public.pet_instances (
+        id,
+        user_id,
+        pet_type,
+        custom_name,
+        evolution_stage,
+        current_xp,
+        current_level,
+        rarity,
+        hatch_at,
+        is_equipped,
+        is_active,
+        reroll_count
+      )
+      values (
+        v_instance_id,
+        v_user_id,
+        v_pet_type,
+        'RegressionPet',
+        'baby',
+        0,
+        1,
+        'common',
+        now() - interval '1 hour',
+        true,
+        true,
+        0
+      );
 
-  if not exists (
-    select 1
-    from public.pet_instances
-    where user_id = v_user_id
-      and is_active = true
-  ) then
-    v_instance_id := gen_random_uuid();
-    insert into public.pet_instances (
-      id,
-      user_id,
-      pet_type,
-      custom_name,
-      evolution_stage,
-      current_xp,
-      current_level,
-      rarity,
-      hatch_at,
-      is_equipped,
-      is_active,
-      reroll_count
-    )
-    values (
-      v_instance_id,
-      v_user_id,
-      v_pet_type,
-      'RegressionPet',
-      'baby',
-      0,
-      1,
-      'common',
-      now() - interval '1 hour',
-      true,
-      true,
-      0
-    );
-
-    perform public.generate_initial_pet_stats(v_instance_id);
+      perform public.generate_initial_pet_stats(v_instance_id);
+    end if;
   end if;
 
   raise notice 'ui regression user seeded for % with % coins', v_email, v_balance;
