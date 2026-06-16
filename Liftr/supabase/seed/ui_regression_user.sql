@@ -1,3 +1,5 @@
+create extension if not exists pgcrypto with schema extensions;
+
 do $$
 declare
   v_email text := '__EMAIL__';
@@ -39,7 +41,7 @@ begin
       'authenticated',
       'authenticated',
       v_email,
-      crypt(v_password, gen_salt('bf')),
+      crypt(v_password, extensions.gen_salt('bf')),
       now(),
       jsonb_build_object('username', 'ui_regression_tester'),
       now(),
@@ -47,7 +49,7 @@ begin
     );
   else
     update auth.users
-    set encrypted_password = crypt(v_password, gen_salt('bf')),
+    set encrypted_password = crypt(v_password, extensions.gen_salt('bf')),
         email_confirmed_at = coalesce(email_confirmed_at, now()),
         updated_at = now()
     where id = v_user_id;
