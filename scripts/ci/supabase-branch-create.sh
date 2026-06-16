@@ -16,6 +16,18 @@ require_env() {
   fi
 }
 
+load_branch_env() {
+  if [ ! -s "$ENV_FILE" ]; then
+    echo "Branch env file is missing or empty: ${ENV_FILE}"
+    return 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+}
+
 fetch_branch_env() {
   if supabase branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"; then
     return 0
@@ -55,6 +67,7 @@ recover_migrations_failed_branch() {
   fi
 
   fetch_branch_env
+  load_branch_env
 
   if [ -z "${POSTGRES_URL_NON_POOLING:-}" ]; then
     echo "POSTGRES_URL_NON_POOLING was not returned by supabase branches get."
@@ -156,10 +169,14 @@ fi
 if [ "$branch_status" != "ACTIVE_HEALTHY" ]; then
   echo "Fetching branch credentials"
   fetch_branch_env
+  load_branch_env
 else
   if [ ! -s "$ENV_FILE" ]; then
     echo "Fetching branch credentials"
     fetch_branch_env
+    load_branch_env
+  else
+    load_branch_env
   fi
 fi
 
