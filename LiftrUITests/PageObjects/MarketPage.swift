@@ -26,6 +26,7 @@ struct MarketPage {
         )
 
         let itemReady = app.descendants(matching: .any)["market.item.food_baby"]
+            .firstMatch
             .waitForExistence(timeout: UITestWait.network)
         XCTAssertTrue(itemReady, "food_baby market item did not appear.")
     }
@@ -49,7 +50,7 @@ struct MarketPage {
 
     func openItem(itemType: String) {
         let identifier = "market.item.\(itemType)"
-        let item = app.descendants(matching: .any)[identifier]
+        let item = app.descendants(matching: .any)[identifier].firstMatch
         XCTAssertTrue(
             item.waitForExistence(timeout: UITestWait.network),
             "Market item \(itemType) was not visible."
