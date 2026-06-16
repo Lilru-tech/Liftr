@@ -30,10 +30,21 @@ load_branch_env() {
 
 fetch_branch_env() {
   if supabase branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"; then
-    return 0
+    :
+  else
+    supabase --experimental branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"
   fi
 
-  supabase --experimental branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"
+  if ! grep -q '^POSTGRES_URL=' "$ENV_FILE"; then
+    postgres_url="$(
+      supabase branches get "$BRANCH_NAME" -o json --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" 2>/dev/null \
+        | jq -r '.POSTGRES_URL // empty' \
+        | head -n 1
+    )"
+    if [ -n "$postgres_url" ] && [ "$postgres_url" != "null" ]; then
+      echo "POSTGRES_URL=${postgres_url}" >>"$ENV_FILE"
+    fi
+  fi
 }
 
 export_branch_env_to_github() {
@@ -69,11 +80,15 @@ recover_migrations_failed_branch() {
   fetch_branch_env
   load_branch_env
 
-  if [ -z "${POSTGRES_URL_NON_POOLING:-}" ]; then
-    echo "POSTGRES_URL_NON_POOLING was not returned by supabase branches get."
+  if [ -z "${POSTGRES_URL:-}" ] && [ -z "${POSTGRES_URL_NON_POOLING:-}" ]; then
+    echo "POSTGRES_URL was not returned by supabase branches get."
     echo "Branch env file contents (redacted):"
     sed 's/=.*/=***REDACTED***/' "$ENV_FILE" || true
     exit 1
+  fi
+
+  if [ -z "${POSTGRES_URL:-}" ]; then
+    echo "Warning: POSTGRES_URL missing; branch restore requires the pooler URL from branches get."
   fi
 
   if command -v pg_dump >/dev/null 2>&1; then

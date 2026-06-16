@@ -24,8 +24,12 @@ require_env() {
 
 require_env SUPABASE_ACCESS_TOKEN
 require_env SUPABASE_PROJECT_ID
-require_env POSTGRES_URL_NON_POOLING
 require_env SUPABASE_DB_PASSWORD
+
+if [ -z "${POSTGRES_URL:-}" ] && [ -z "${POSTGRES_URL_NON_POOLING:-}" ]; then
+  echo "Missing branch database URL: POSTGRES_URL or POSTGRES_URL_NON_POOLING"
+  exit 1
+fi
 
 if ! command -v psql >/dev/null 2>&1; then
   echo "psql is required to bootstrap branch schema"
@@ -87,7 +91,7 @@ if [ ! -s "$SCHEMA_DUMP_FILE" ]; then
 fi
 
 echo "Applying parent schema to branch database"
-echo "Branch database host: ${SUPABASE_DB_HOST:-aws-1-eu-west-1.pooler.supabase.com}:${SUPABASE_DB_PORT:-5432}"
+wait_for_branch_db
 branch_psql -v ON_ERROR_STOP=0 -f "$SCHEMA_DUMP_FILE"
 
 echo "Validating restored schema on branch"

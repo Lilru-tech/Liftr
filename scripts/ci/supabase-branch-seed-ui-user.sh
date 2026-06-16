@@ -22,7 +22,7 @@ if [ -f "$ENV_FILE" ]; then
   set +a
 fi
 
-require_env POSTGRES_URL_NON_POOLING
+require_env POSTGRES_URL
 require_env UI_TEST_EMAIL
 require_env UI_TEST_PASSWORD
 

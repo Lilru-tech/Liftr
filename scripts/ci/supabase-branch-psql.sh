@@ -1,51 +1,46 @@
 #!/usr/bin/env bash
 
 branch_psql_url() {
-  local url="${1:-${POSTGRES_URL_NON_POOLING:-}}"
-  local pooler_host="${SUPABASE_DB_HOST:-aws-1-eu-west-1.pooler.supabase.com}"
-  local pooler_port="${SUPABASE_DB_PORT:-5432}"
+  if [ -n "${POSTGRES_URL:-}" ]; then
+    echo "$POSTGRES_URL"
+    return 0
+  fi
 
-  if [ -z "$url" ]; then
-    echo "branch_psql_url: POSTGRES_URL_NON_POOLING is empty" >&2
+  if [ -n "${POSTGRES_URL_NON_POOLING:-}" ]; then
+    echo "POSTGRES_URL is missing. supabase branches get must return the pooler URL for CI." >&2
+    echo "db.<ref>.supabase.co is IPv6-only and branch tenants are not registered on the parent pooler host." >&2
     return 1
   fi
 
-  python3 - "$url" "$pooler_host" "$pooler_port" <<'PY'
-import sys
-import urllib.parse
+  echo "No branch database URL available." >&2
+  return 1
+}
 
-url, pooler_host, pooler_port = sys.argv[1:4]
-parsed = urllib.parse.urlparse(url)
-user = parsed.username or "postgres"
-host = parsed.hostname or ""
-password = parsed.password or ""
-dbname = (parsed.path or "/postgres").lstrip("/") or "postgres"
+wait_for_branch_db() {
+  local max_wait="${BRANCH_DB_WAIT_SECONDS:-300}"
+  local interval="${BRANCH_DB_POLL_SECONDS:-10}"
+  local elapsed=0
+  local db_url
 
-if host.endswith("pooler.supabase.com"):
-    print(url)
-    sys.exit(0)
+  db_url="$(branch_psql_url)" || return 1
 
-ref = ""
-if host.startswith("db.") and host.endswith(".supabase.co"):
-    ref = host[3 : -len(".supabase.co")]
+  echo "Waiting for branch database connectivity (timeout ${max_wait}s)..."
+  while [ "$elapsed" -lt "$max_wait" ]; do
+    if psql "$db_url" -v ON_ERROR_STOP=1 -c 'select 1 as branch_db_ok' >/dev/null 2>&1; then
+      echo "Branch database is reachable."
+      return 0
+    fi
+    echo "Branch database not ready yet (elapsed ${elapsed}s)"
+    sleep "$interval"
+    elapsed=$((elapsed + interval))
+  done
 
-if user == "postgres" and ref:
-    user = f"postgres.{ref}"
-
-netloc = (
-    f"{urllib.parse.quote(user, safe='')}:"
-    f"{urllib.parse.quote(password, safe='')}"
-    f"@{pooler_host}:{pooler_port}"
-)
-rewritten = urllib.parse.urlunparse(
-    (parsed.scheme or "postgresql", netloc, f"/{dbname}", "", "", "")
-)
-print(rewritten)
-PY
+  echo "Timed out waiting for branch database."
+  return 1
 }
 
 branch_psql() {
   local db_url
-  db_url="$(branch_psql_url)"
+  db_url="$(branch_psql_url)" || return 1
   psql "$db_url" "$@"
 }
