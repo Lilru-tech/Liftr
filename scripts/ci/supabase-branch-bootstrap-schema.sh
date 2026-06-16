@@ -94,6 +94,35 @@ echo "Applying parent schema to branch database"
 wait_for_branch_db
 branch_psql -v ON_ERROR_STOP=0 -f "$SCHEMA_DUMP_FILE"
 
+echo "Restoring API role grants stripped by pg_dump --no-privileges"
+branch_psql -v ON_ERROR_STOP=1 <<'SQL'
+grant usage on schema public to postgres, anon, authenticated, service_role;
+grant usage on schema extensions to postgres, anon, authenticated, service_role;
+
+grant all privileges on all tables in schema public to postgres, service_role;
+grant all privileges on all tables in schema public to anon, authenticated;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated;
+
+grant all privileges on all sequences in schema public to postgres, service_role;
+grant usage, select, update on all sequences in schema public to anon, authenticated;
+
+grant all privileges on all routines in schema public to postgres, service_role;
+grant execute on all routines in schema public to anon, authenticated;
+
+alter default privileges in schema public
+  grant all on tables to postgres, service_role;
+alter default privileges in schema public
+  grant select, insert, update, delete on tables to anon, authenticated;
+alter default privileges in schema public
+  grant all on sequences to postgres, service_role;
+alter default privileges in schema public
+  grant usage, select, update on sequences to anon, authenticated;
+alter default privileges in schema public
+  grant all on routines to postgres, service_role;
+alter default privileges in schema public
+  grant execute on routines to anon, authenticated;
+SQL
+
 echo "Validating restored schema on branch"
 validation_output="$(
   branch_psql -v ON_ERROR_STOP=1 -tA -c "
