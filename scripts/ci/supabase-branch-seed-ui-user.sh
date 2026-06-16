@@ -114,6 +114,35 @@ if [ "$sign_in_status" != "200" ]; then
   exit 1
 fi
 
+access_token="$(python3 -c 'import json; print(json.load(open("/tmp/ui-regression-gotrue.json")).get("access_token",""))')"
+if [ -z "$access_token" ]; then
+  echo "GoTrue sign-in response did not include an access token"
+  cat /tmp/ui-regression-gotrue.json || true
+  exit 1
+fi
+
+echo "Verifying authenticated pet RPC for ${UI_TEST_EMAIL}"
+pet_rpc_status="$(
+  curl -sS -o /tmp/ui-regression-pet.json -w "%{http_code}" \
+    -X POST "${SUPABASE_URL}/rest/v1/rpc/get_my_pet_v1" \
+    -H "apikey: ${SUPABASE_ANON_KEY}" \
+    -H "Authorization: Bearer ${access_token}" \
+    -H "Content-Type: application/json" \
+    -d '{}'
+)"
+
+if [ "$pet_rpc_status" != "200" ]; then
+  echo "get_my_pet_v1 verification failed with HTTP ${pet_rpc_status}"
+  cat /tmp/ui-regression-pet.json || true
+  exit 1
+fi
+
+if ! python3 -c 'import json,sys; data=json.load(open("/tmp/ui-regression-pet.json")); pet=data.get("pet") if isinstance(data,dict) else None; sys.exit(0 if pet else 1)'; then
+  echo "get_my_pet_v1 returned no active pet for ${UI_TEST_EMAIL}"
+  cat /tmp/ui-regression-pet.json || true
+  exit 1
+fi
+
 echo "Verifying pet and market RPC prerequisites for UI regression"
 rpc_validation="$(
   branch_psql -v ON_ERROR_STOP=1 -tA -c "

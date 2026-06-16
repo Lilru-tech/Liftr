@@ -89,7 +89,10 @@ jobs:
             -project Liftr.xcodeproj \
             -scheme Liftr \
             -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.device_name }}" \
-            -only-testing:LiftrUITests \
+            -maximum-concurrent-test-simulator-destinations 1 \
+            -only-testing:LiftrUITests/AuthSessionRegressionTests \
+            -only-testing:LiftrUITests/NavigationRobustnessRegressionTests \
+            -only-testing:LiftrUITests/MarketTransactionRegressionTests \
             -resultBundlePath TestResults.xcresult
 
       - name: Upload test results

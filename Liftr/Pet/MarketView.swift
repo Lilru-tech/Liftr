@@ -168,6 +168,7 @@ struct MarketView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal)
         .padding(.top, 8)
+        .accessibilityElement(children: .combine)
         .accessibilityIdentifier("market.coinBanner")
     }
 

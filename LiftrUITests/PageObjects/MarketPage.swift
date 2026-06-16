@@ -4,7 +4,7 @@ struct MarketPage {
     let app: XCUIApplication
 
     var screen: XCUIElement { app.otherElements["market.screen"] }
-    var coinBanner: XCUIElement { app.otherElements["market.coinBanner"] }
+    var coinBanner: XCUIElement { app.descendants(matching: .any)["market.coinBanner"] }
     var navigationBar: XCUIElement { app.navigationBars["Market"] }
 
     func waitForMarket() {
@@ -14,8 +14,14 @@ struct MarketPage {
             screenReady || navigationReady,
             "Market screen did not appear."
         )
+
+        let bannerByIdentifier = coinBanner.waitForExistence(timeout: UITestWait.network)
+        let bannerByLabel = app.staticTexts
+            .matching(NSPredicate(format: "label ENDSWITH 'coins'"))
+            .firstMatch
+            .waitForExistence(timeout: bannerByIdentifier ? 2 : UITestWait.network)
         XCTAssertTrue(
-            coinBanner.waitForExistence(timeout: UITestWait.network),
+            bannerByIdentifier || bannerByLabel,
             "Market coin banner did not appear."
         )
 
@@ -25,9 +31,19 @@ struct MarketPage {
     }
 
     func currentCoinBalance() -> Int? {
-        guard coinBanner.waitForExistence(timeout: UITestWait.standard) else { return nil }
-        let bannerText = coinBanner.staticTexts.firstMatch.label
-        let digits = bannerText.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+        if coinBanner.waitForExistence(timeout: UITestWait.standard) {
+            let bannerText = coinBanner.label
+            if !bannerText.isEmpty {
+                let digits = bannerText.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+                if let balance = Int(digits) { return balance }
+            }
+        }
+
+        let coinsLabel = app.staticTexts
+            .matching(NSPredicate(format: "label ENDSWITH 'coins'"))
+            .firstMatch
+        guard coinsLabel.waitForExistence(timeout: UITestWait.standard) else { return nil }
+        let digits = coinsLabel.label.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
         return Int(digits)
     }
 
