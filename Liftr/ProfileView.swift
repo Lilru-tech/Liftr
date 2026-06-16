@@ -1431,6 +1431,7 @@ struct ProfileView: View {
                             .gradientBG()
                     } label: {
                         Label("Market", systemImage: "cart.fill")
+                            .accessibilityIdentifier("profile.menu.market")
                     }
 
                     NavigationLink {
@@ -1492,6 +1493,7 @@ struct ProfileView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("profile.menu")
             .buttonStyle(.plain)
         }
         .fixedSize(horizontal: true, vertical: false)

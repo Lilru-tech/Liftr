@@ -55,9 +55,11 @@ struct LoginView: View {
                             .keyboardType(.emailAddress)
                             .textContentType(.username)
                             .autocorrectionDisabled(true)
+                            .accessibilityIdentifier("login.email")
                         
                         SecureField("Password", text: $password)
                             .textContentType(.password)
+                            .accessibilityIdentifier("login.password")
 
                         NavigationLink {
                             ForgotPasswordView()
@@ -86,6 +88,7 @@ struct LoginView: View {
                             .foregroundStyle(.white)
                         }
                         .disabled(!isButtonEnabled)
+                        .accessibilityIdentifier("login.submit")
                         
                         HStack {
                             Rectangle().frame(height: 1).foregroundStyle(.quaternary)

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ENV_FILE="${ROOT_DIR}/scripts/ci/.branch.env"
+SEED_SQL="${ROOT_DIR}/Liftr/supabase/seed/ui_regression_user.sql"
+
+require_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    echo "Missing required environment variable: ${name}"
+    exit 1
+  fi
+}
+
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+require_env POSTGRES_URL_NON_POOLING
+require_env UI_TEST_EMAIL
+require_env UI_TEST_PASSWORD
+
+if ! command -v psql >/dev/null 2>&1; then
+  echo "psql is required to seed the UI regression user"
+  exit 1
+fi
+
+if [ ! -f "$SEED_SQL" ]; then
+  echo "Seed SQL not found at ${SEED_SQL}"
+  exit 1
+fi
+
+echo "Seeding UI regression user ${UI_TEST_EMAIL}"
+psql "$POSTGRES_URL_NON_POOLING" \
+  -v ON_ERROR_STOP=1 \
+  -v email="'${UI_TEST_EMAIL}'" \
+  -v password="'${UI_TEST_PASSWORD}'" \
+  -f "$SEED_SQL"
+
+echo "UI regression user seeded successfully."
