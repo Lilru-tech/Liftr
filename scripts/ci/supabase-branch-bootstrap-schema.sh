@@ -24,6 +24,7 @@ require_env() {
 require_env SUPABASE_ACCESS_TOKEN
 require_env SUPABASE_PROJECT_ID
 require_env POSTGRES_URL_NON_POOLING
+require_env SUPABASE_DB_PASSWORD
 
 if ! command -v psql >/dev/null 2>&1; then
   echo "psql is required to bootstrap branch schema"
@@ -32,23 +33,28 @@ fi
 
 export SUPABASE_ACCESS_TOKEN
 
-echo "Dumping parent project schema from ${SUPABASE_PROJECT_ID}"
-dump_args=(
-  db dump
-  --linked
-  --workdir "$WORK_DIR"
-  -f "$SCHEMA_DUMP_FILE"
-)
-
-if [ -n "${SUPABASE_DB_PASSWORD:-}" ]; then
-  dump_args+=(--password "$SUPABASE_DB_PASSWORD")
-fi
-
-if ! supabase "${dump_args[@]}"; then
-  echo "Failed to dump parent schema."
-  echo "Add SUPABASE_DB_PASSWORD to GitHub Actions secrets (Supabase Dashboard → Project Settings → Database)."
+if ! command -v pg_dump >/dev/null 2>&1; then
+  echo "pg_dump is required to bootstrap branch schema"
   exit 1
 fi
+
+PARENT_DB_HOST="db.${SUPABASE_PROJECT_ID}.supabase.co"
+PARENT_DB_NAME="postgres"
+PARENT_DB_USER="postgres"
+
+echo "Dumping parent project schema from ${SUPABASE_PROJECT_ID} via native pg_dump (no Docker)"
+export PGPASSWORD="${SUPABASE_DB_PASSWORD}"
+pg_dump \
+  --schema-only \
+  --no-owner \
+  --no-privileges \
+  --format=p \
+  --file "$SCHEMA_DUMP_FILE" \
+  --host "$PARENT_DB_HOST" \
+  --username "$PARENT_DB_USER" \
+  --dbname "$PARENT_DB_NAME" \
+  --sslmode=require
+unset PGPASSWORD
 
 if [ ! -s "$SCHEMA_DUMP_FILE" ]; then
   echo "Parent schema dump is empty."
