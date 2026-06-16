@@ -55,10 +55,12 @@ if [ -z "$profiles_ok" ] || [ -z "$auth_ok" ]; then
 fi
 
 echo "Seeding UI regression user ${UI_TEST_EMAIL}"
-branch_psql \
-  -v ON_ERROR_STOP=1 \
-  -v email="'${UI_TEST_EMAIL}'" \
-  -v password="'${UI_TEST_PASSWORD}'" \
-  -f "$SEED_SQL"
+escaped_email="$(printf '%s' "$UI_TEST_EMAIL" | sed "s/'/''/g")"
+escaped_password="$(printf '%s' "$UI_TEST_PASSWORD" | sed "s/'/''/g")"
+seed_sql="$(sed \
+  -e "s/__EMAIL__/${escaped_email}/g" \
+  -e "s/__PASSWORD__/${escaped_password}/g" \
+  "$SEED_SQL")"
+printf '%s\n' "$seed_sql" | branch_psql -v ON_ERROR_STOP=1 -f -
 
 echo "UI regression user seeded successfully."

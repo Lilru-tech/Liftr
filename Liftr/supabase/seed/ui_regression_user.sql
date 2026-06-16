@@ -1,7 +1,7 @@
 do $$
 declare
-  v_email text := :'email';
-  v_password text := :'password';
+  v_email text := '__EMAIL__';
+  v_password text := '__PASSWORD__';
   v_user_id uuid;
   v_pet_type text;
   v_instance_id uuid;
