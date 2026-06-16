@@ -95,4 +95,23 @@ if [ "$market_ok" != "1" ]; then
   exit 1
 fi
 
+export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-${ANON_KEY:-}}"
+require_env SUPABASE_URL
+require_env SUPABASE_ANON_KEY
+
+echo "Verifying GoTrue password sign-in for ${UI_TEST_EMAIL}"
+sign_in_status="$(
+  curl -sS -o /tmp/ui-regression-gotrue.json -w "%{http_code}" \
+    -X POST "${SUPABASE_URL}/auth/v1/token?grant_type=password" \
+    -H "apikey: ${SUPABASE_ANON_KEY}" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"${UI_TEST_EMAIL}\",\"password\":\"${UI_TEST_PASSWORD}\"}"
+)"
+
+if [ "$sign_in_status" != "200" ]; then
+  echo "GoTrue sign-in verification failed with HTTP ${sign_in_status}"
+  cat /tmp/ui-regression-gotrue.json || true
+  exit 1
+fi
+
 echo "UI regression user seeded successfully."

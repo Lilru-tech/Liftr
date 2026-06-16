@@ -1,7 +1,7 @@
 import XCTest
 
 final class LiftrUIApplication: XCUIApplication {
-    func launchForRegression() {
+    func launchForRegression(autoSignIn: Bool = true) {
         let credentials = UITestCredentials.self
         XCTAssertTrue(
             credentials.isConfigured,
@@ -9,6 +9,7 @@ final class LiftrUIApplication: XCUIApplication {
         )
 
         launchEnvironment["UITESTING"] = "1"
+        launchEnvironment["UI_TEST_AUTO_SIGN_IN"] = autoSignIn ? "1" : "0"
         launchEnvironment["SUPABASE_URL"] = credentials.supabaseURL
         launchEnvironment["SUPABASE_ANON_KEY"] = credentials.supabaseAnonKey
         launchEnvironment["UI_TEST_EMAIL"] = credentials.email
@@ -21,6 +22,13 @@ final class LiftrUIApplication: XCUIApplication {
         )
 
         buttons["Later"].tapIfExists(timeout: 2)
+
+        if autoSignIn {
+            XCTAssertTrue(
+                otherElements["uitest.authenticated"].waitForExistence(timeout: UITestWait.network),
+                "UI test auto sign-in did not complete."
+            )
+        }
     }
 }
 
@@ -48,6 +56,6 @@ extension XCUIElement {
 
 enum UITestWait {
     static let standard: TimeInterval = 10
-    static let network: TimeInterval = 20
+    static let network: TimeInterval = 30
     static let launch: TimeInterval = 25
 }

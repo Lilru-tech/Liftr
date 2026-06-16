@@ -624,6 +624,23 @@ final class AppState: ObservableObject {
         }
         isPremium = await PremiumStatusClient.fetchIsPremium()
     }
+
+    @MainActor
+    func signInForUITestsIfNeeded() async {
+        guard UITestConfiguration.isEnabled, UITestConfiguration.autoSignInEnabled else { return }
+        guard let email = UITestConfiguration.testEmail,
+              let password = UITestConfiguration.testPassword else { return }
+        if isAuthenticated { return }
+        if (try? await SupabaseManager.shared.client.auth.session) != nil {
+            await refreshSession()
+            return
+        }
+        do {
+            try await SupabaseManager.shared.client.auth.signIn(email: email, password: password)
+            await refreshSession()
+        } catch {
+        }
+    }
     
     private func listenAuth() {
         authTask?.cancel()

@@ -118,7 +118,20 @@ struct LoginView: View {
             }
         }
         .toolbarBackground(.hidden, for: .navigationBar)
-        .onAppear { loadRemembered() }
+        .onAppear {
+            loadRemembered()
+            prefillUITestCredentialsIfNeeded()
+        }
+    }
+    
+    private func prefillUITestCredentialsIfNeeded() {
+        guard UITestConfiguration.isEnabled, !UITestConfiguration.autoSignInEnabled else { return }
+        if let email = UITestConfiguration.testEmail {
+            self.email = email
+        }
+        if let password = UITestConfiguration.testPassword {
+            self.password = password
+        }
     }
     
     private func loadRemembered() {

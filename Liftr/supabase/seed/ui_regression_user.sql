@@ -25,6 +25,7 @@ declare
   v_email text := '__EMAIL__';
   v_password text := '__PASSWORD__';
   v_user_id uuid;
+  v_identity_id uuid;
   v_pet_type text;
   v_instance_id uuid;
   v_balance integer;
@@ -35,6 +36,14 @@ begin
 
   if v_password is null or length(v_password) < 8 then
     raise exception 'password must be at least 8 characters';
+  end if;
+
+  select id into v_instance_id
+  from auth.instances
+  limit 1;
+
+  if v_instance_id is null then
+    v_instance_id := '00000000-0000-0000-0000-000000000000'::uuid;
   end if;
 
   select id into v_user_id
@@ -51,6 +60,10 @@ begin
       email,
       encrypted_password,
       email_confirmed_at,
+      confirmation_token,
+      recovery_token,
+      email_change_token_new,
+      email_change,
       raw_app_meta_data,
       raw_user_meta_data,
       created_at,
@@ -58,12 +71,16 @@ begin
     )
     values (
       v_user_id,
-      '00000000-0000-0000-0000-000000000000',
+      v_instance_id,
       'authenticated',
       'authenticated',
       v_email,
       extensions.crypt(v_password, extensions.gen_salt('bf')),
       now(),
+      '',
+      '',
+      '',
+      '',
       jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
       jsonb_build_object('username', 'ui_regression_tester'),
       now(),
@@ -73,6 +90,11 @@ begin
     update auth.users
     set encrypted_password = extensions.crypt(v_password, extensions.gen_salt('bf')),
         email_confirmed_at = coalesce(email_confirmed_at, now()),
+        instance_id = coalesce(instance_id, v_instance_id),
+        confirmation_token = coalesce(confirmation_token, ''),
+        recovery_token = coalesce(recovery_token, ''),
+        email_change_token_new = coalesce(email_change_token_new, ''),
+        email_change = coalesce(email_change, ''),
         raw_app_meta_data = coalesce(
           raw_app_meta_data,
           jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email'))
@@ -85,6 +107,8 @@ begin
   where user_id = v_user_id
     and provider = 'email';
 
+  v_identity_id := gen_random_uuid();
+
   insert into auth.identities (
     id,
     user_id,
@@ -96,10 +120,10 @@ begin
     updated_at
   )
   values (
-    v_user_id,
+    v_identity_id,
     v_user_id,
     v_user_id::text,
-    jsonb_build_object('sub', v_user_id::text, 'email', v_email),
+    jsonb_build_object('sub', v_user_id::text, 'email', v_email, 'email_verified', true),
     'email',
     now(),
     now(),

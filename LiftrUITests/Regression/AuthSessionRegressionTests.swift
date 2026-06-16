@@ -6,7 +6,7 @@ final class AuthSessionRegressionTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
         app = LiftrUIApplication()
-        app.launchForRegression()
+        app.launchForRegression(autoSignIn: false)
     }
 
     @MainActor

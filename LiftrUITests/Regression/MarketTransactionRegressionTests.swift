@@ -12,13 +12,11 @@ final class MarketTransactionRegressionTests: XCTestCase {
     @MainActor
     func testPurchasePetFoodUpdatesCoinBalance() throws {
         let tabs = TabBarPage(app: app)
-        let login = LoginPage(app: app)
         let profile = ProfilePage(app: app)
         let market = MarketPage(app: app)
 
         tabs.selectProfile()
         profile.dismissUpdateBannerIfPresent()
-        login.signInWithConfiguredCredentials()
         profile.waitForAuthenticatedProfile()
 
         profile.openMarketFromMenu()

@@ -29,6 +29,26 @@ struct LoginPage {
     }
 
     func signInWithConfiguredCredentials() {
+        if emailField.waitForExistence(timeout: UITestWait.standard),
+           passwordField.waitForExistence(timeout: 2),
+           submitButton.waitForExistence(timeout: 2),
+           submitButton.isEnabled {
+            submitButton.tap()
+            waitForSignInCompletion()
+            return
+        }
+
         signIn(email: UITestCredentials.email, password: UITestCredentials.password)
+    }
+
+    private func waitForSignInCompletion() {
+        let signingInLabel = app.staticTexts["Signing in…"]
+        if signingInLabel.waitForExistence(timeout: 2) {
+            let finished = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == false"),
+                object: signingInLabel
+            )
+            _ = XCTWaiter().wait(for: [finished], timeout: UITestWait.network)
+        }
     }
 }
