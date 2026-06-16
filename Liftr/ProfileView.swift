@@ -1431,8 +1431,8 @@ struct ProfileView: View {
                             .gradientBG()
                     } label: {
                         Label("Market", systemImage: "cart.fill")
-                            .accessibilityIdentifier("profile.menu.market")
                     }
+                    .accessibilityIdentifier("profile.menu.market")
 
                     NavigationLink {
                         PetDexView()

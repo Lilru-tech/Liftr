@@ -106,6 +106,7 @@ struct MarketView: View {
         .animation(.easeInOut(duration: 0.3), value: isLoading)
         .animation(.easeInOut(duration: 0.25), value: purchaseFeedback.toastMessage)
         .navigationTitle("Market")
+        .accessibilityIdentifier("market.screen")
         .gradientBG()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

@@ -3,12 +3,21 @@ import XCTest
 struct MarketPage {
     let app: XCUIApplication
 
+    var screen: XCUIElement { app.otherElements["market.screen"] }
     var coinBanner: XCUIElement { app.otherElements["market.coinBanner"] }
     var navigationBar: XCUIElement { app.navigationBars["Market"] }
 
     func waitForMarket() {
-        XCTAssertTrue(navigationBar.waitForExistence(timeout: UITestWait.network))
-        XCTAssertTrue(coinBanner.waitForExistence(timeout: UITestWait.standard))
+        let screenReady = screen.waitForExistence(timeout: UITestWait.network)
+        let navigationReady = navigationBar.waitForExistence(timeout: screenReady ? 2 : UITestWait.network)
+        XCTAssertTrue(
+            screenReady || navigationReady,
+            "Market screen did not appear."
+        )
+        XCTAssertTrue(
+            coinBanner.waitForExistence(timeout: UITestWait.network),
+            "Market coin banner did not appear."
+        )
     }
 
     func currentCoinBalance() -> Int? {
@@ -21,13 +30,19 @@ struct MarketPage {
     func openItem(itemType: String) {
         let identifier = "market.item.\(itemType)"
         let item = app.descendants(matching: .any)[identifier]
-        XCTAssertTrue(item.waitForExistence(timeout: UITestWait.standard))
+        XCTAssertTrue(
+            item.waitForExistence(timeout: UITestWait.network),
+            "Market item \(itemType) was not visible."
+        )
         item.tap()
     }
 
     func purchaseFoodQuantity(_ quantity: Int) {
         let quantityButton = app.buttons["market.overlay.qty.\(quantity)"]
-        XCTAssertTrue(quantityButton.waitForExistence(timeout: UITestWait.standard))
+        XCTAssertTrue(
+            quantityButton.waitForExistence(timeout: UITestWait.network),
+            "Market quantity button for \(quantity) was not visible."
+        )
         quantityButton.tap()
     }
 

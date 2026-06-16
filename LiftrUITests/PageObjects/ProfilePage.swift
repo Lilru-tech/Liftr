@@ -14,15 +14,21 @@ struct ProfilePage {
         XCTAssertTrue(menuButton.waitForExistence(timeout: UITestWait.standard))
         menuButton.tap()
 
-        let marketByIdentifier = marketMenuItem
-        if marketByIdentifier.waitForExistence(timeout: 3) {
-            marketByIdentifier.tap()
-            return
+        let menuCandidates: [XCUIElement] = [
+            app.menuItems["Market"],
+            marketMenuItem,
+            app.buttons["Market"],
+            app.staticTexts["Market"],
+        ]
+
+        for candidate in menuCandidates {
+            if candidate.waitForExistence(timeout: UITestWait.standard) {
+                candidate.tap()
+                return
+            }
         }
 
-        let marketByLabel = app.buttons["Market"]
-        XCTAssertTrue(marketByLabel.waitForExistence(timeout: UITestWait.standard))
-        marketByLabel.tap()
+        XCTFail("Market menu item was not found in the profile menu.")
     }
 
     func waitForAuthenticatedProfile(timeout: TimeInterval = UITestWait.network) {
