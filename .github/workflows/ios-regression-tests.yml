@@ -76,10 +76,15 @@ jobs:
           export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-${ANON_KEY:-}}"
           cp scripts/ci/.branch.env scripts/ci/.ui-test.env
           {
+            echo "SUPABASE_URL=${SUPABASE_URL}"
             echo "UI_TEST_EMAIL=${UI_TEST_EMAIL}"
             echo "UI_TEST_PASSWORD=${UI_TEST_PASSWORD}"
             echo "SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}"
           } >> scripts/ci/.ui-test.env
+          export TEST_RUNNER_SUPABASE_URL="${SUPABASE_URL}"
+          export TEST_RUNNER_SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}"
+          export TEST_RUNNER_UI_TEST_EMAIL="${UI_TEST_EMAIL}"
+          export TEST_RUNNER_UI_TEST_PASSWORD="${UI_TEST_PASSWORD}"
           xcodebuild test \
             -project Liftr.xcodeproj \
             -scheme Liftr \

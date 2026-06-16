@@ -2,31 +2,30 @@ import Foundation
 import XCTest
 
 enum UITestCredentials {
-    private static let envFileCandidates = [
-        "scripts/ci/.ui-test.env",
-        "scripts/ci/.branch.env",
-        "../scripts/ci/.ui-test.env",
-        "../scripts/ci/.branch.env",
-    ]
+    private static let repoRoot = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
 
-    private static let fileValues: [String: String] = {
-        for path in envFileCandidates {
-            let url = URL(fileURLWithPath: path)
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
-            let parsed = parseEnvFile(content)
-            if !parsed.isEmpty {
-                return parsed
+    private static let envFileCandidates: [URL] = {
+        var candidates: [URL] = []
+        let ciDirectory = repoRoot.appendingPathComponent("scripts/ci")
+        candidates.append(ciDirectory.appendingPathComponent(".ui-test.env"))
+        candidates.append(ciDirectory.appendingPathComponent(".branch.env"))
+
+        var directory = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        for _ in 0..<8 {
+            let ci = directory.appendingPathComponent("scripts/ci")
+            candidates.append(ci.appendingPathComponent(".ui-test.env"))
+            candidates.append(ci.appendingPathComponent(".branch.env"))
+            if directory.pathComponents.count <= 1 {
+                break
             }
+            directory = directory.deletingLastPathComponent()
         }
-        return [:]
-    }()
 
-    private static func value(for key: String) -> String {
-        let env = ProcessInfo.processInfo.environment
-        if let v = env[key], !v.isEmpty { return v }
-        if let v = fileValues[key], !v.isEmpty { return v }
-        return ""
-    }
+        return candidates
+    }()
 
     private static func parseEnvFile(_ content: String) -> [String: String] {
         var values: [String: String] = [:]
@@ -42,6 +41,24 @@ enum UITestCredentials {
             values[key] = rawValue
         }
         return values
+    }
+
+    private static let fileValues: [String: String] = {
+        for url in envFileCandidates {
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { continue }
+            let parsed = parseEnvFile(content)
+            if !parsed.isEmpty {
+                return parsed
+            }
+        }
+        return [:]
+    }()
+
+    private static func value(for key: String) -> String {
+        let env = ProcessInfo.processInfo.environment
+        if let v = env[key], !v.isEmpty { return v }
+        if let v = fileValues[key], !v.isEmpty { return v }
+        return ""
     }
 
     static var email: String {
