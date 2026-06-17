@@ -21,6 +21,7 @@ final class LogoutReloginRegressionTests: RegressionTestCase {
         }
 
         try step("Sign in again manually") {
+            tabs.selectProfile()
             login.signIn(email: UITestCredentials.email, password: UITestCredentials.password)
             profile.waitForAuthenticatedProfile()
         }

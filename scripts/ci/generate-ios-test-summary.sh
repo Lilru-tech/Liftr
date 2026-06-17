@@ -25,12 +25,10 @@ if [ -f "$BRANCH_ENV" ]; then
 fi
 
 python3 - "$XC_RESULT" "$SUMMARY_FILE" "$RUN_ID" "$BRANCH_URL" "$ATTACHMENTS_DIR" "$SERVER_URL" "$REPOSITORY" <<'PY'
-import base64
 import json
 import re
 import subprocess
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -135,53 +133,22 @@ def artifacts_url():
     url = run_url()
     return f"{url}#artifacts" if url else ""
 
-def artifact_link():
-    url = artifacts_url()
-    if not url:
-        return "see test-attachments artifact"
-    return f"[download screenshots]({url})"
-
-def thumbnail_img_tag(png_path):
-    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-        thumb_path = Path(tmp.name)
-    try:
-        subprocess.run(
-            [
-                "sips",
-                "-Z",
-                "320",
-                "-s",
-                "format",
-                "jpeg",
-                "-s",
-                "formatOptions",
-                "55",
-                str(png_path),
-                "--out",
-                str(thumb_path),
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        encoded = base64.b64encode(thumb_path.read_bytes()).decode("ascii")
-        return f'<img alt="failure screenshot" src="data:image/jpeg;base64,{encoded}" width="220" />'
-    except (subprocess.CalledProcessError, OSError):
-        return ""
-    finally:
-        thumb_path.unlink(missing_ok=True)
-
-def screenshot_cell(test_name, failed):
+def screenshot_cell(file_key, failed):
     if not failed:
         return "—"
-    safe_name = safe_test_file_name(test_name)
-    png_path = attachments_path / f"{safe_name}.png"
-    link = artifact_link()
-    if png_path.is_file():
-        img = thumbnail_img_tag(png_path)
-        if img:
-            return f"{img}<br>{link}"
-    return link
+    url = artifacts_url()
+    if not url:
+        return "see screenshots artifact"
+    safe = safe_test_file_name(file_key)
+    png_name = f"{safe}.png"
+    has_report = (attachments_path / "report.html").is_file()
+    has_png = (attachments_path / png_name).is_file()
+    parts = [f"[Artifacts]({url})"]
+    if has_report:
+        parts.append("`report.html`")
+    if has_png:
+        parts.append(f"`{png_name}`")
+    return "<br>".join(parts)
 
 passed = failed = skipped = 0
 rows = []
@@ -224,6 +191,7 @@ for t in tests:
 total = len(rows)
 now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 run_link = run_url()
+artifacts = artifacts_url()
 
 lines = [
     "## iOS UI regression results",
@@ -234,6 +202,11 @@ if run_link:
     lines.append(f"Workflow run: [{run_link}]({run_link})")
 if branch_url:
     lines.append(f"Supabase branch: `{branch_url}`")
+if failed > 0 and artifacts:
+    lines.extend([
+        "",
+        f"> **View failure screenshots:** download artifact **`ios-ui-screenshots-{run_id}`** from [Artifacts]({artifacts}), then open **`report.html`** in your browser. Each failed test also has a matching `.png` in that artifact.",
+    ])
 lines.extend(["", "| Test | Result | Duration | Steps / failure | Screenshot |", "| --- | --- | --- | --- | --- |"])
 
 for name, result, dur, detail, shot in rows:
@@ -256,19 +229,16 @@ if failed_details:
             lines.append("```")
             lines.append(msg)
             lines.append("```")
-        safe_name = safe_test_file_name(file_key)
-        png_path = attachments_path / f"{safe_name}.png"
-        if png_path.is_file():
-            img = thumbnail_img_tag(png_path)
-            if img:
-                lines.append("")
-                lines.append(img)
+        safe = safe_test_file_name(file_key)
+        if (attachments_path / f"{safe}.png").is_file():
+            lines.append("")
+            lines.append(f"Screenshot file: `{safe}.png` (inside screenshots artifact)")
         lines.append("")
 
 if run_id != "local" and repository:
     lines.extend([
         "",
-        f"Full-resolution failure screenshots: download artifact **`ios-ui-screenshots-{run_id}`** from [this workflow run]({artifacts_url()}).",
+        f"Artifacts: **`ios-ui-screenshots-{run_id}`** (PNGs + `report.html`) and **`ios-ui-visual-report-{run_id}`** (`report.html` only) on [this workflow run]({artifacts}).",
     ])
 
 content = "\n".join(lines) + "\n"

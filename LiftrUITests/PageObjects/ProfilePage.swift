@@ -72,6 +72,7 @@ struct ProfilePage {
         ]
         for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.network) {
             candidate.tap()
+            _ = app.otherElements["uitest.guest"].waitForExistence(timeout: UITestWait.network)
             return
         }
         XCTFail("Sign out control was not found in profile settings.")

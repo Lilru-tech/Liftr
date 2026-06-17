@@ -331,8 +331,19 @@ final class AppState: ObservableObject {
     @MainActor
     func signOut() {
         CoinManager.shared.resetSession()
+        if UITestConfiguration.isEnabled {
+            isAuthenticated = false
+            userId = nil
+            isPremium = false
+            passwordRecoveryPending = false
+            authCallbackError = nil
+            clearTabBarProfileAvatar()
+            unreadNotificationsCount = 0
+            unreadChatMessagesCount = 0
+            Task { await stopChatUnreadRealtime() }
+        }
         Task {
-            try? await SupabaseManager.shared.client.auth.signOut()
+            try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
         }
     }
     

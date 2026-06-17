@@ -746,7 +746,12 @@ struct AddWorkoutSheet: View {
                 }
             }
         }
-        .banner($banner, successAccessibilityIdentifier: "addWorkout.success")
+        .banner(
+            $banner,
+            autoHide: !UITestConfiguration.isEnabled,
+            duration: UITestConfiguration.isEnabled ? 8 : 2.5,
+            successAccessibilityIdentifier: "addWorkout.success"
+        )
         .alert(
             "Are you sure you want to remove the exercise?",
             isPresented: removeStrengthExerciseAlertBinding
