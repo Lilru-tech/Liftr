@@ -20,6 +20,7 @@ final class AddWorkoutCardioRegressionTests: RegressionTestCase {
 
         try step("Select cardio and save") {
             addWorkout.selectWorkoutType("Cardio")
+            addWorkout.enableFinishedWorkoutIfNeeded()
             addWorkout.saveWorkout()
         }
 

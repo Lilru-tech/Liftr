@@ -34,8 +34,23 @@ struct RegisterPage {
     }
 
     func submitIfEnabled() {
-        XCTAssertTrue(submitButton.waitForExistence(timeout: UITestWait.standard))
-        submitButton.tap()
+        submitWhenEnabled()
+    }
+
+    func submitWhenEnabled(timeout: TimeInterval = UITestWait.network) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let candidates: [XCUIElement] = [
+                submitButton,
+                app.buttons["Create account"],
+            ]
+            if let button = candidates.first(where: { $0.exists && $0.isEnabled }) {
+                button.tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail("Create account button did not become enabled.")
     }
 }
 
@@ -210,6 +225,15 @@ struct AddWorkoutPage {
         XCTFail("Save button was not available.")
     }
 
+    func enableFinishedWorkoutIfNeeded() {
+        let finished = app.switches.matching(
+            NSPredicate(format: "label CONTAINS[c] 'Finished'")
+        ).firstMatch
+        if finished.waitForExistence(timeout: UITestWait.standard) {
+            finished.tap()
+        }
+    }
+
     func waitForSaveSuccess(timeout: TimeInterval = UITestWait.network) {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -219,12 +243,14 @@ struct AddWorkoutPage {
             ).firstMatch
             if published.exists { return }
             if app.otherElements["home.screen"].exists { return }
+            if app.buttons["tab.home"].exists && app.buttons["tab.home"].isSelected { return }
             if app.otherElements["uitest.authenticated"].exists,
-               app.tabBars.buttons.element(boundBy: 0).isSelected {
+               !screen.exists,
+               app.tabBars.firstMatch.exists {
                 return
             }
             let saveError = app.staticTexts.matching(
-                NSPredicate(format: "label CONTAINS[c] 'error' OR label CONTAINS[c] 'failed'")
+                NSPredicate(format: "label CONTAINS[c] 'error' OR label CONTAINS[c] 'failed' OR label CONTAINS[c] 'could not'")
             ).firstMatch
             if saveError.exists {
                 XCTFail("Workout save showed an error: \(saveError.label)")

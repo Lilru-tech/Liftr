@@ -30,8 +30,7 @@ final class RegisterFullRegressionTests: RegressionTestCase {
                 password: UITestCredentials.signupPassword,
                 username: UITestCredentials.signupUsername
             )
-            XCTAssertTrue(register.submitButton.isEnabled)
-            register.submitIfEnabled()
+            register.submitWhenEnabled()
         }
 
         try step("Wait for authenticated profile after signup") {

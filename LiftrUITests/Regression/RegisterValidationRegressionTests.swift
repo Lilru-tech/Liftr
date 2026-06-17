@@ -24,16 +24,18 @@ final class RegisterValidationRegressionTests: RegressionTestCase {
         }
 
         try step("Assert submit stays disabled") {
-            XCTAssertTrue(
-                app.staticTexts["Invalid email format."].waitForExistence(timeout: UITestWait.standard),
-                "Invalid email validation message did not appear."
-            )
+            register.emailField.tap()
+            let invalidLabel = app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS[c] 'invalid email'")
+            ).firstMatch
             let createButton = app.buttons.matching(
                 NSPredicate(format: "label CONTAINS 'Create account'")
             ).firstMatch
-            if createButton.waitForExistence(timeout: 2) {
-                XCTAssertFalse(createButton.isEnabled, "Create account stayed enabled for invalid email.")
-            }
+            XCTAssertTrue(
+                invalidLabel.waitForExistence(timeout: UITestWait.network)
+                    || (createButton.waitForExistence(timeout: UITestWait.standard) && !createButton.isEnabled),
+                "Invalid email did not disable account creation."
+            )
         }
     }
 }

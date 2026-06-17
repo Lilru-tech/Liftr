@@ -73,6 +73,9 @@ struct ProfilePage {
         for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.network) {
             candidate.tap()
             _ = app.otherElements["uitest.guest"].waitForExistence(timeout: UITestWait.network)
+            let loginReady = app.textFields["login.email"].waitForExistence(timeout: UITestWait.network)
+                || app.staticTexts["Sign in to continue tracking your workouts."].waitForExistence(timeout: UITestWait.network)
+            XCTAssertTrue(loginReady, "Login screen did not appear after sign out.")
             return
         }
         XCTFail("Sign out control was not found in profile settings.")
