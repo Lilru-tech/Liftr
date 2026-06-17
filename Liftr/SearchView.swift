@@ -168,6 +168,7 @@ struct SearchView: View {
                 Task { await clearRecents() }
             }
         }
+        .accessibilityIdentifier("explore.screen")
     }
 
     @ViewBuilder

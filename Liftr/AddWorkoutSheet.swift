@@ -243,7 +243,10 @@ struct AddWorkoutSheet: View {
     @State private var appliedStrengthRoutineId: Int64? = nil
     @AppStorage("addWorkoutPlanTooltipSeen") private var addWorkoutPlanTooltipSeen = false
 
-    var body: some View { addWorkoutRoot }
+    var body: some View {
+        addWorkoutRoot
+            .accessibilityIdentifier("addWorkout.screen")
+    }
 
     @ViewBuilder
     private var addWorkoutGeneralFormSection: some View {
@@ -256,6 +259,7 @@ struct AddWorkoutSheet: View {
                         Text("Sport").tag(WorkoutKind.sport)
                     }
                     .pickerStyle(.menu)
+                    .accessibilityIdentifier("addWorkout.type")
                     .onChange(of: kind) { _, new in
                         onKindChangedFromTypePicker(new)
                     }
@@ -742,7 +746,7 @@ struct AddWorkoutSheet: View {
                 }
             }
         }
-        .banner($banner)
+        .banner($banner, successAccessibilityIdentifier: "addWorkout.success")
         .alert(
             "Are you sure you want to remove the exercise?",
             isPresented: removeStrengthExerciseAlertBinding
@@ -808,6 +812,7 @@ struct AddWorkoutSheet: View {
             .foregroundStyle(.white)
         }
         .disabled(loading || loadingRoutineOnly || loadingHyroxRoutineOnly || !canSave)
+        .accessibilityIdentifier("addWorkout.save")
     }
 
     private var saveRoutineOnlyButton: some View {

@@ -12,7 +12,7 @@ available_devices="$(xcrun simctl list devices available)"
 
 for name in "${preferred_names[@]}"; do
   if echo "$available_devices" | grep -F "$name (" >/dev/null 2>&1; then
-    echo "name=${name}"
+    echo "name=\"${name}\""
     exit 0
   fi
 done
@@ -23,4 +23,4 @@ if [ -z "$fallback_name" ]; then
   exit 1
 fi
 
-echo "name=${fallback_name}"
+echo "name=\"${fallback_name}\""

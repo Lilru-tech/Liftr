@@ -16,12 +16,35 @@ require_env() {
   fi
 }
 
-fetch_branch_env() {
-  if supabase branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"; then
-    return 0
+load_branch_env() {
+  if [ ! -s "$ENV_FILE" ]; then
+    echo "Branch env file is missing or empty: ${ENV_FILE}"
+    return 1
   fi
 
-  supabase --experimental branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+}
+
+fetch_branch_env() {
+  if supabase branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"; then
+    :
+  else
+    supabase --experimental branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"
+  fi
+
+  if ! grep -q '^POSTGRES_URL=' "$ENV_FILE"; then
+    postgres_url="$(
+      supabase branches get "$BRANCH_NAME" -o json --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" 2>/dev/null \
+        | jq -r '.POSTGRES_URL // empty' \
+        | head -n 1
+    )"
+    if [ -n "$postgres_url" ] && [ "$postgres_url" != "null" ]; then
+      echo "POSTGRES_URL=${postgres_url}" >>"$ENV_FILE"
+    fi
+  fi
 }
 
 export_branch_env_to_github() {
@@ -48,8 +71,46 @@ recover_migrations_failed_branch() {
   echo "This project relies on a production baseline schema that is not fully represented in migration history."
   echo "Bootstrapping branch schema from the parent project..."
 
+  if [ -z "${SUPABASE_DB_PASSWORD:-}" ]; then
+    echo "SUPABASE_DB_PASSWORD is required for schema bootstrap recovery."
+    echo "Add it in GitHub Actions secrets (Supabase Dashboard → Project Settings → Database)."
+    exit 1
+  fi
+
   fetch_branch_env
-  bash "${ROOT_DIR}/scripts/ci/supabase-branch-bootstrap-schema.sh"
+  load_branch_env
+
+  if [ -z "${POSTGRES_URL:-}" ] && [ -z "${POSTGRES_URL_NON_POOLING:-}" ]; then
+    echo "POSTGRES_URL was not returned by supabase branches get."
+    echo "Branch env file contents (redacted):"
+    sed 's/=.*/=***REDACTED***/' "$ENV_FILE" || true
+    exit 1
+  fi
+
+  if [ -z "${POSTGRES_URL:-}" ]; then
+    echo "Warning: POSTGRES_URL missing; branch restore requires the pooler URL from branches get."
+  fi
+
+  if command -v pg_dump >/dev/null 2>&1; then
+    pg_dump --version
+  else
+    echo "pg_dump not found in PATH"
+  fi
+
+  if command -v psql >/dev/null 2>&1; then
+    psql --version
+  else
+    echo "psql not found in PATH"
+  fi
+
+  if ! bash "${ROOT_DIR}/scripts/ci/supabase-branch-bootstrap-schema.sh"; then
+    echo "Schema bootstrap failed for branch ${BRANCH_NAME}."
+    if [ -f "${ROOT_DIR}/scripts/ci/.parent-schema.sql" ]; then
+      dump_lines="$(wc -l < "${ROOT_DIR}/scripts/ci/.parent-schema.sql" | tr -d ' ')"
+      echo "Parent schema dump line count: ${dump_lines}"
+    fi
+    exit 1
+  fi
 }
 
 require_env SUPABASE_ACCESS_TOKEN
@@ -123,10 +184,14 @@ fi
 if [ "$branch_status" != "ACTIVE_HEALTHY" ]; then
   echo "Fetching branch credentials"
   fetch_branch_env
+  load_branch_env
 else
   if [ ! -s "$ENV_FILE" ]; then
     echo "Fetching branch credentials"
     fetch_branch_env
+    load_branch_env
+  else
+    load_branch_env
   fi
 fi
 

@@ -139,6 +139,20 @@ struct RootView: View {
                 await CoinManager.shared.refreshBalance(notifyIfEarned: true)
             }
         }
+        .task {
+            guard UITestConfiguration.isEnabled else { return }
+            await app.signOutForUITestsIfNeeded()
+            await app.signInForUITestsIfNeeded()
+        }
+        .overlay(alignment: .topLeading) {
+            if UITestConfiguration.isEnabled {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier(app.isAuthenticated ? "uitest.authenticated" : "uitest.guest")
+                    .accessibilityElement(children: .ignore)
+                    .allowsHitTesting(false)
+            }
+        }
         .onReceive(app.$pendingNotification) { pending in
             guard let pending else { return }
             print("🧭 [RootView] onReceive pendingNotification:", pending)

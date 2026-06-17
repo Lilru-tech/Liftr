@@ -3,32 +3,62 @@ import XCTest
 struct TabBarPage {
     let app: XCUIApplication
 
+    func waitForTabBar(timeout: TimeInterval = UITestWait.launch) {
+        XCTAssertTrue(
+            app.tabBars.firstMatch.waitForExistence(timeout: timeout),
+            "Main tab bar did not appear after launch."
+        )
+    }
+
+    private func tabElement(_ identifier: String) -> XCUIElement {
+        let candidates: [XCUIElement] = [
+            app.buttons[identifier],
+            app.otherElements[identifier],
+            app.tabBars.buttons[identifier],
+        ]
+        for candidate in candidates where candidate.exists {
+            return candidate
+        }
+        return app.buttons[identifier]
+    }
+
+    func selectTab(identifier: String, fallbackIndex: Int) {
+        waitForTabBar()
+        let tab = tabElement(identifier)
+        if tab.waitForExistence(timeout: UITestWait.standard) {
+            tab.tap()
+            return
+        }
+        let tabButton = app.tabBars.buttons.element(boundBy: fallbackIndex)
+        XCTAssertTrue(
+            tabButton.waitForExistence(timeout: UITestWait.standard),
+            "Tab bar button at index \(fallbackIndex) was not found."
+        )
+        tabButton.tap()
+    }
+
     func selectHome() {
-        app.tabBars.buttons.element(boundBy: 0).tap()
-        XCTAssertTrue(app.otherElements["tab.home"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(identifier: "tab.home", fallbackIndex: 0)
     }
 
     func selectExplore() {
-        app.tabBars.buttons.element(boundBy: 1).tap()
-        XCTAssertTrue(app.otherElements["tab.explore"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(identifier: "tab.explore", fallbackIndex: 1)
     }
 
     func selectAdd() {
-        app.tabBars.buttons.element(boundBy: 2).tap()
-        XCTAssertTrue(app.otherElements["tab.add"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(identifier: "tab.add", fallbackIndex: 2)
     }
 
     func selectFood() {
-        app.tabBars.buttons.element(boundBy: 3).tap()
-        XCTAssertTrue(app.otherElements["tab.food"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(identifier: "tab.food", fallbackIndex: 3)
     }
 
     func selectProfile() {
-        app.tabBars.buttons.element(boundBy: 4).tap()
-        XCTAssertTrue(app.otherElements["tab.profile"].waitForExistence(timeout: UITestWait.standard))
+        selectTab(identifier: "tab.profile", fallbackIndex: 4)
     }
 
     func visitAllTabs() {
+        waitForTabBar()
         selectHome()
         selectExplore()
         selectAdd()

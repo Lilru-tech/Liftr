@@ -192,6 +192,7 @@ struct ExercisePickerSheet: View {
                                         selected = ex
                                         dismiss()
                                     }
+                                    .accessibilityIdentifier(idx == 0 ? "exercisePicker.firstRow" : "exercisePicker.row.\(ex.id)")
                                     if idx < filtered.count - 1 {
                                         Divider()
                                             .padding(.leading, 8)

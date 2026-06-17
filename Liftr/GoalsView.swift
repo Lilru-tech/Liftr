@@ -230,6 +230,7 @@ struct GoalsView: View {
             }
         }
         .navigationTitle(isOwnProfile ? "My Goals" : "\(viewedUsername)'s Goals")
+        .accessibilityIdentifier("goals.screen")
         .toolbar {
             if isOwnProfile {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -238,6 +239,8 @@ struct GoalsView: View {
                     } label: {
                         Image(systemName: "plus.circle.fill")
                     }
+                    .accessibilityIdentifier("goals.create")
+                    .accessibilityLabel("Create goal")
                 }
             }
         }
@@ -455,7 +458,6 @@ struct GoalsView: View {
             goalCardContent(g)
         }
         .buttonStyle(.plain)
-        .navigationLinkIndicatorVisibility(.hidden)
         .overlay(alignment: .bottomTrailing) {
             if isOwnProfile && !g.isCompleted && !isFinished(g) {
                 Button {
@@ -651,6 +653,7 @@ private struct NewGoalSheet: View {
             Picker("Metric", selection: $metric) {
                 ForEach(GoalMetric.allCases) { m in
                     Text(m.title).tag(m)
+                        .accessibilityIdentifier("goals.metric.\(m.rawValue)")
                 }
             }
             .pickerStyle(.segmented)
@@ -687,6 +690,7 @@ private struct NewGoalSheet: View {
                 TextField(metric.unit, text: $target)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
+                    .accessibilityIdentifier("goals.target")
 
                 Text("Recommendation reflects your recent activity (about the last 8 weeks). If you’re new, we use a typical average.")
                     .font(.caption2)
@@ -724,6 +728,7 @@ private struct NewGoalSheet: View {
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("goals.submit")
             .disabled(
                 metricAlreadyExists ||
                 title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
@@ -731,6 +736,7 @@ private struct NewGoalSheet: View {
             )
         }
         .padding(16)
+        .accessibilityIdentifier("goals.sheet")
         .task { await loadSuggestion() }
     }
 

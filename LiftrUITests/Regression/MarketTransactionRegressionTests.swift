@@ -1,10 +1,8 @@
 import XCTest
 
-final class MarketTransactionRegressionTests: XCTestCase {
-    private var app: LiftrUIApplication!
-
+final class MarketTransactionRegressionTests: RegressionTestCase {
     override func setUpWithError() throws {
-        continueAfterFailure = false
+        try super.setUpWithError()
         app = LiftrUIApplication()
         app.launchForRegression()
     }
@@ -12,33 +10,39 @@ final class MarketTransactionRegressionTests: XCTestCase {
     @MainActor
     func testPurchasePetFoodUpdatesCoinBalance() throws {
         let tabs = TabBarPage(app: app)
-        let login = LoginPage(app: app)
         let profile = ProfilePage(app: app)
         let market = MarketPage(app: app)
 
-        tabs.selectProfile()
-        profile.dismissUpdateBannerIfPresent()
-        login.signInWithConfiguredCredentials()
-        profile.waitForAuthenticatedProfile()
-
-        profile.openMarketFromMenu()
-        market.waitForMarket()
-
-        let balanceBefore = try XCTUnwrap(market.currentCoinBalance())
-        market.openItem(itemType: "food_baby")
-        market.purchaseFoodQuantity(1)
-
-        let deadline = Date().addingTimeInterval(UITestWait.network)
-        var balanceAfter = balanceBefore
-        while Date() < deadline {
-            if let updated = market.currentCoinBalance(), updated < balanceBefore {
-                balanceAfter = updated
-                break
-            }
-            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        try step("Open market from profile menu") {
+            tabs.selectProfile()
+            profile.dismissUpdateBannerIfPresent()
+            profile.waitForAuthenticatedProfile()
+            profile.openMarketFromMenu()
+            market.waitForMarket()
         }
 
-        XCTAssertLessThan(balanceAfter, balanceBefore)
-        _ = market.waitForPurchaseFeedback()
+        var balanceBefore = 0
+        try step("Read coin balance") {
+            balanceBefore = try XCTUnwrap(market.currentCoinBalance())
+        }
+
+        try step("Purchase food_baby") {
+            market.openItem(itemType: "food_baby")
+            market.purchaseFoodQuantity(1)
+        }
+
+        try step("Verify balance decreased") {
+            let deadline = Date().addingTimeInterval(UITestWait.network)
+            var balanceAfter = balanceBefore
+            while Date() < deadline {
+                if let updated = market.currentCoinBalance(), updated < balanceBefore {
+                    balanceAfter = updated
+                    break
+                }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            }
+            XCTAssertLessThan(balanceAfter, balanceBefore)
+            _ = market.waitForPurchaseFeedback()
+        }
     }
 }

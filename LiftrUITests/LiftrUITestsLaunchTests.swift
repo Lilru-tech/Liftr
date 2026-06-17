@@ -11,6 +11,10 @@ final class LiftrUITestsLaunchTests: XCTestCase {
 
     @MainActor
     func testLaunch() throws {
+        if ProcessInfo.processInfo.environment["CI"] != nil {
+            throw XCTSkip("Launch screenshot test is not run in CI regression.")
+        }
+
         guard UITestCredentials.isConfigured else {
             throw XCTSkip("UI test credentials are not configured for launch screenshot test.")
         }

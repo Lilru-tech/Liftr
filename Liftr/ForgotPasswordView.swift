@@ -53,6 +53,7 @@ struct ForgotPasswordView: View {
                             .keyboardType(.emailAddress)
                             .textContentType(.emailAddress)
                             .autocorrectionDisabled(true)
+                            .accessibilityIdentifier("forgotPassword.email")
 
                         Button {
                             Task { await sendResetLink() }
@@ -69,6 +70,7 @@ struct ForgotPasswordView: View {
                             .foregroundStyle(.white)
                         }
                         .disabled(!isButtonEnabled)
+                        .accessibilityIdentifier("forgotPassword.submit")
                     }
                 }
                 .padding(20)
@@ -84,6 +86,7 @@ struct ForgotPasswordView: View {
             }
             }
         }
+        .accessibilityIdentifier("forgotPassword.screen")
         .navigationTitle("Forgot password")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)

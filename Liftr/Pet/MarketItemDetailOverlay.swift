@@ -62,6 +62,7 @@ struct MarketItemDetailOverlay: View {
                                 Task { await purchase(quantity: qty) }
                             }
                             .accessibilityIdentifier("market.overlay.qty.\(qty)")
+                            .accessibilityLabel("Buy quantity \(qty)")
                             .disabled(item.price * qty > userCoins || isBuying)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
