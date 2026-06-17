@@ -25,6 +25,14 @@ struct LoginPage {
         XCTAssertTrue(false, "Login screen did not appear.")
     }
 
+    private func tapFirstExisting(_ candidates: [XCUIElement], timeout: TimeInterval = UITestWait.standard) -> Bool {
+        for candidate in candidates where candidate.waitForExistence(timeout: timeout) {
+            candidate.tap()
+            return true
+        }
+        return false
+    }
+
     func openRegister() {
         waitForLoginScreen()
         let candidates: [XCUIElement] = [
@@ -34,10 +42,7 @@ struct LoginPage {
             app.buttons["Create an account"],
             app.staticTexts["Create an account"],
         ]
-        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.standard) {
-            candidate.tap()
-            break
-        } else {
+        guard tapFirstExisting(candidates) else {
             XCTFail("Register link was not found on the login screen.")
             return
         }
@@ -55,10 +60,7 @@ struct LoginPage {
             app.staticTexts["Forgot password?"],
             app.buttons.matching(NSPredicate(format: "label CONTAINS 'Forgot password'")).firstMatch,
         ]
-        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.standard) {
-            candidate.tap()
-            break
-        } else {
+        guard tapFirstExisting(candidates) else {
             XCTFail("Forgot password link was not found on the login screen.")
             return
         }
