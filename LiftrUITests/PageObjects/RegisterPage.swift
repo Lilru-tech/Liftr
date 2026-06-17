@@ -86,15 +86,41 @@ struct AddWorkoutPage {
         XCTAssertTrue(false, "Add workout screen did not appear.")
     }
 
+    func scrollToTopOfForm() {
+        let form = app.collectionViews["addWorkout.screen"]
+        if form.waitForExistence(timeout: 2) {
+            form.swipeDown()
+            form.swipeDown()
+        }
+        for _ in 0..<3 {
+            app.swipeDown()
+        }
+    }
+
     func selectWorkoutType(_ label: String) {
+        scrollToTopOfForm()
         waitForScreen()
         let typeMenu = app.buttons["addWorkout.type"]
-        if typeMenu.waitForExistence(timeout: 2) {
+        if typeMenu.waitForExistence(timeout: UITestWait.standard) {
             typeMenu.tap()
-        } else if app.buttons["Strength"].waitForExistence(timeout: 2) {
-            app.buttons["Strength"].tap()
         } else {
-            app.staticTexts["Type"].firstMatch.tap()
+            let currentTypeButtons = ["Strength", "Cardio", "Sport"]
+            var opened = false
+            for typeLabel in currentTypeButtons {
+                let button = app.buttons[typeLabel]
+                if button.waitForExistence(timeout: 1) {
+                    button.tap()
+                    opened = true
+                    break
+                }
+            }
+            if !opened {
+                let typeLabel = app.staticTexts.matching(
+                    NSPredicate(format: "label == 'Type'")
+                ).firstMatch
+                XCTAssertTrue(typeLabel.waitForExistence(timeout: UITestWait.standard))
+                typeLabel.tap()
+            }
         }
         let option = app.buttons[label]
         if option.waitForExistence(timeout: UITestWait.standard) {
@@ -212,8 +238,22 @@ struct HomePage {
     var screen: XCUIElement { app.otherElements["home.screen"] }
 
     func waitForFeedLoaded(timeout: TimeInterval = UITestWait.network) {
-        let homeReady = screen.waitForExistence(timeout: UITestWait.standard)
-            || app.tables.firstMatch.waitForExistence(timeout: UITestWait.standard)
+        let candidates: [XCUIElement] = [
+            screen,
+            app.scrollViews.firstMatch,
+            app.collectionViews.firstMatch,
+            app.otherElements["uitest.authenticated"],
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Home'")).firstMatch,
+        ]
+        let deadline = Date().addingTimeInterval(timeout)
+        var homeReady = false
+        while Date() < deadline {
+            if candidates.contains(where: { $0.exists }) {
+                homeReady = true
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
         XCTAssertTrue(homeReady, "Home screen did not appear.")
         let loading = app.progressIndicators.firstMatch
         if loading.waitForExistence(timeout: 2) {

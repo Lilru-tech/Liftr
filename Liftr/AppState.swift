@@ -628,13 +628,22 @@ final class AppState: ObservableObject {
     @MainActor
     func signOutForUITestsIfNeeded() async {
         guard UITestConfiguration.isEnabled, !UITestConfiguration.autoSignInEnabled else { return }
-        try? await SupabaseManager.shared.client.auth.signOut()
+        try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
+        LoginView.KeychainHelper.delete(key: "settleit.email")
+        LoginView.KeychainHelper.delete(key: "settleit.password")
         isAuthenticated = false
         userId = nil
         isPremium = false
+        passwordRecoveryPending = false
+        authCallbackError = nil
         clearTabBarProfileAvatar()
         unreadNotificationsCount = 0
+        unreadChatMessagesCount = 0
         await stopChatUnreadRealtime()
+        for _ in 0..<30 {
+            if (try? await SupabaseManager.shared.client.auth.session) == nil { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
     }
 
     @MainActor
@@ -654,12 +663,29 @@ final class AppState: ObservableObject {
         }
     }
     
+    private var shouldStaySignedOutForUITests: Bool {
+        UITestConfiguration.isEnabled && !UITestConfiguration.autoSignInEnabled
+    }
+
     private func listenAuth() {
         authTask?.cancel()
         authTask = Task { [weak self] in
             guard let self else { return }
-            
-            if let session = try? await SupabaseManager.shared.client.auth.session {
+
+            if shouldStaySignedOutForUITests {
+                try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
+                await MainActor.run {
+                    self.isAuthenticated = false
+                    self.userId = nil
+                    self.isPremium = false
+                    self.passwordRecoveryPending = false
+                    self.authCallbackError = nil
+                    self.clearTabBarProfileAvatar()
+                    self.unreadNotificationsCount = 0
+                    self.unreadChatMessagesCount = 0
+                }
+                await self.stopChatUnreadRealtime()
+            } else if let session = try? await SupabaseManager.shared.client.auth.session {
                 await MainActor.run {
                     self.userId = session.user.id
                     if !self.passwordRecoveryPending {
@@ -691,6 +717,20 @@ final class AppState: ObservableObject {
             for await state in SupabaseManager.shared.client.auth.authStateChanges {
                 let event = state.event
                 let session = state.session
+
+                if self.shouldStaySignedOutForUITests, event == .initialSession, session != nil {
+                    try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
+                    await MainActor.run {
+                        self.isAuthenticated = false
+                        self.userId = nil
+                        self.isPremium = false
+                        self.clearTabBarProfileAvatar()
+                        self.unreadNotificationsCount = 0
+                        self.unreadChatMessagesCount = 0
+                    }
+                    await self.stopChatUnreadRealtime()
+                    continue
+                }
                 
                 await MainActor.run {
                     switch event {

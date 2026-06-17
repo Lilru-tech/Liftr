@@ -39,21 +39,36 @@ struct ProfilePage {
     }
 
     func openSettingsTab() {
-        let settings = app.buttons["Settings"]
-        if settings.waitForExistence(timeout: UITestWait.standard) {
-            settings.tap()
+        let settingsCandidates: [XCUIElement] = [
+            app.buttons["Settings"],
+            app.staticTexts["Settings"],
+        ]
+        for candidate in settingsCandidates where candidate.waitForExistence(timeout: UITestWait.standard) {
+            candidate.tap()
             return
         }
-        app.staticTexts["Settings"].tap()
+        app.swipeLeft()
+        for candidate in settingsCandidates where candidate.waitForExistence(timeout: UITestWait.standard) {
+            candidate.tap()
+            return
+        }
+        XCTFail("Settings tab was not found on profile.")
     }
 
     func signOutFromSettings() {
         openSettingsTab()
-        app.swipeUp()
+        let settingsReady = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS 'Sign out' OR label CONTAINS 'Delete account'")
+        ).firstMatch
+        _ = settingsReady.waitForExistence(timeout: UITestWait.standard)
+        for _ in 0..<4 {
+            app.swipeUp()
+        }
         let candidates: [XCUIElement] = [
             logoutButton,
             app.buttons["Sign out"],
             app.staticTexts["Sign out"],
+            app.buttons.matching(NSPredicate(format: "label CONTAINS 'Sign out'")).firstMatch,
         ]
         for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.network) {
             candidate.tap()

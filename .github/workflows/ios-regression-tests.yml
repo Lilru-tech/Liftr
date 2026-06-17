@@ -125,14 +125,13 @@ jobs:
       - name: Publish UI test summary and screenshots
         if: always() && !cancelled()
         continue-on-error: true
+        env:
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           if [ -d TestResults.xcresult ]; then
-            bash scripts/ci/generate-ios-test-summary.sh TestResults.xcresult
-            rm -rf test-attachments
-            xcrun xcresulttool export attachments \
-              --path TestResults.xcresult \
-              --output-path test-attachments \
-              --only-failures || true
+            bash scripts/ci/export-ios-failure-screenshots.sh TestResults.xcresult test-attachments
+            bash scripts/ci/generate-ios-test-summary.sh TestResults.xcresult test-attachments
           else
             echo "No TestResults.xcresult bundle found; skipping summary export."
           fi

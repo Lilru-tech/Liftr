@@ -8,9 +8,22 @@ struct LoginPage {
     var submitButton: XCUIElement { app.buttons["login.submit"] }
 
     func waitForLoginScreen(timeout: TimeInterval = UITestWait.network) {
-        let ready = app.otherElements["login.screen"].waitForExistence(timeout: timeout)
-            || emailField.waitForExistence(timeout: timeout)
-        XCTAssertTrue(ready, "Login screen did not appear.")
+        let candidates: [XCUIElement] = [
+            app.otherElements["login.screen"],
+            emailField,
+            app.secureTextFields["login.password"],
+            app.staticTexts["Sign in to continue tracking your workouts."],
+            app.buttons["Sign in"],
+            app.textFields.matching(NSPredicate(format: "placeholderValue CONTAINS[c] 'email'")).firstMatch,
+        ]
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if candidates.contains(where: { $0.exists }) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertTrue(false, "Login screen did not appear.")
     }
 
     func openRegister() {
