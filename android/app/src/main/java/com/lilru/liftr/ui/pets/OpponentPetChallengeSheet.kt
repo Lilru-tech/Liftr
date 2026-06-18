@@ -20,14 +20,21 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.lilru.liftr.data.PetCombatChallengeMode
 import com.lilru.liftr.data.PetCombatHeadToHeadSummaryWire
 import com.lilru.liftr.data.PetCombatPetSummaryWire
 import com.lilru.liftr.data.PetCombatPreviewWire
+import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -39,10 +46,68 @@ fun OpponentPetChallengeSheet(
     opponentUsername: String?,
     backgroundThemeId: String,
     onDismiss: () -> Unit,
-    onChallenge: () -> Unit,
+    onChallenge: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var showUnbalancedDialog by remember { mutableStateOf(false) }
+    var dontShowAgain by remember { mutableStateOf(false) }
+    var skipWarningState by remember { mutableStateOf(LiftrPreferences.skipPetCombatUnbalancedWarning(context)) }
+    var selectedMode by remember {
+        mutableStateOf(PetCombatChallengeMode.fromRaw(LiftrPreferences.petCombatChallengeMode(context)))
+    }
+
+    fun resolvedSavedMode(): PetCombatChallengeMode =
+        if (preview.isAttackerUnderdog()) {
+            PetCombatChallengeMode.fromRaw(LiftrPreferences.petCombatChallengeMode(context))
+        } else {
+            PetCombatChallengeMode.BALANCED
+        }
+
+    fun proceedToChallenge(disableNerfChoice: Boolean) {
+        onDismiss()
+        onChallenge(disableNerfChoice)
+    }
+
+    fun handleChallengeTap() {
+        if (!preview.isStatUnbalanced()) {
+            proceedToChallenge(false)
+            return
+        }
+        if (skipWarningState) {
+            val mode = resolvedSavedMode()
+            proceedToChallenge(preview.isAttackerUnderdog() && mode.disableNerfChoice)
+            return
+        }
+        selectedMode = resolvedSavedMode()
+        dontShowAgain = false
+        showUnbalancedDialog = true
+    }
+
+    fun confirmChallenge() {
+        if (dontShowAgain) {
+            LiftrPreferences.setSkipPetCombatUnbalancedWarning(context, true)
+            skipWarningState = true
+        }
+        LiftrPreferences.setPetCombatChallengeMode(context, selectedMode.rawValue)
+        val disableNerf = preview.isAttackerUnderdog() && selectedMode.disableNerfChoice
+        showUnbalancedDialog = false
+        proceedToChallenge(disableNerf)
+    }
+
+    if (showUnbalancedDialog) {
+        PetCombatUnbalancedMatchDialog(
+            isUnderdog = preview.isAttackerUnderdog(),
+            selectedMode = selectedMode,
+            onModeChange = { selectedMode = it },
+            hardcoreBonusLabel = preview.hardcoreBonusLabel(),
+            dontShowAgain = dontShowAgain,
+            onDontShowAgainChange = { dontShowAgain = it },
+            onDismiss = { showUnbalancedDialog = false },
+            onFight = { confirmChallenge() }
+        )
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -116,10 +181,7 @@ fun OpponentPetChallengeSheet(
 
             if (preview.canChallenge) {
                 Button(
-                    onClick = {
-                        onDismiss()
-                        onChallenge()
-                    },
+                    onClick = { handleChallengeTap() },
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
                 ) {

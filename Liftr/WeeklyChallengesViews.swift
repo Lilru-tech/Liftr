@@ -30,8 +30,13 @@ struct ActiveChallengeListRow: Decodable, Identifiable {
         let c = challenge_category?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if let c, !c.isEmpty { return c }
         switch metric_kind {
-        case "cumulative_cardio_km", "cardio_session_pace_gate": return "cardio"
-        case "cumulative_sport_sessions": return "sport"
+        case "cumulative_cardio_km", "cardio_session_pace_gate",
+             "cumulative_elevation_gain_m", "cardio_session_rowerg_split_gate":
+            return "cardio"
+        case "cumulative_sport_sessions", "hyrox_official_time_gate",
+             "cumulative_climbing_routes_sent", "cumulative_ski_distance_km",
+             "cumulative_sport_scoring_stat":
+            return "sport"
         default: return "strength"
         }
     }
@@ -138,6 +143,24 @@ private func formatChallengeProgress(
         return String(format: "%.0f / %.0f reps (best set)", p, t)
     case "strength_workouts_touching_muscle":
         return String(format: "%.0f / %.0f focused workouts", p, t)
+    case "cumulative_elevation_gain_m":
+        return String(format: "%.0f / %.0f m elevation", p, t)
+    case "hyrox_official_time_gate":
+        let capMin = Int(secondary ?? 3600) / 60
+        let bestMin = Int(p) / 60
+        let bestSec = Int(p) % 60
+        return String(format: "%d:%02d best (goal ≤ %d min official)", bestMin, bestSec, capMin)
+    case "cumulative_climbing_routes_sent":
+        return String(format: "%.0f / %.0f routes sent", p, t)
+    case "cumulative_ski_distance_km":
+        return String(format: "%.1f / %.0f km ski", p, t)
+    case "cumulative_sport_scoring_stat":
+        return String(format: "%.0f / %.0f scoring stat", p, t)
+    case "cardio_session_rowerg_split_gate":
+        let capSec = Int(secondary ?? 120)
+        let capMin = capSec / 60
+        let capRem = capSec % 60
+        return String(format: "%.1f km (goal ≥ %.0f km, split ≤ %d:%02d /500m)", p, t, capMin, capRem)
     default:
         return "—"
     }

@@ -62,6 +62,35 @@ fun PetStatCombatHelpSheetContent(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f)
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.pet_stat_combat_handicap_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = stringResource(R.string.pet_stat_combat_handicap_description),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            petStatCombatRulesEntry(
+                titleRes = R.string.pet_stat_combat_handicap_battles_title,
+                descriptionRes = R.string.pet_stat_combat_handicap_battles_description
+            )
+            petStatCombatRulesEntry(
+                titleRes = R.string.pet_stat_combat_hardcore_challenge_title,
+                descriptionRes = R.string.pet_stat_combat_hardcore_challenge_description
+            )
             petStatCombatGuideEntries.forEach { entry ->
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
@@ -90,6 +119,31 @@ fun PetStatCombatHelpSheetContent(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun petStatCombatRulesEntry(titleRes: Int, descriptionRes: Int) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.35f)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = stringResource(titleRes),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = stringResource(descriptionRes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

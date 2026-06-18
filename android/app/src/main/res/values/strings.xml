@@ -761,6 +761,8 @@
     <string name="notifications_settings_pet_combat_challenged">Pet arena challenge</string>
     <string name="notifications_settings_apple_health">Apple Health</string>
     <string name="notifications_settings_apple_health_cardio">Cardio workout imported</string>
+    <string name="notifications_settings_search_hint">Search notifications</string>
+    <string name="notifications_settings_search_empty">No notification settings match your search.</string>
     <string name="notifications_loading">Loading notifications…</string>
     <string name="notifications_empty">You have no notifications yet.</string>
     <string name="notifications_unread_count">Unread: %1$d</string>
@@ -1503,6 +1505,8 @@
     <string name="pet_stat_combat_info_content_description">Arena stat guide</string>
     <string name="pet_stat_combat_title">Arena stats</string>
     <string name="pet_stat_combat_intro">Every stat affects arena battles.</string>
+    <string name="pet_stat_combat_handicap_title">Stat Balancing (Handicap)</string>
+    <string name="pet_stat_combat_handicap_description">If a pet\'s total stats are significantly higher than the opponent, they will be temporarily nerfed down to a maximum 5% stat advantage for the battle to ensure a fair fight. Winning with a nerfed pet yields minimum rewards.</string>
     <string name="pet_stat_combat_footer">Higher stats help more. Pet type weights which stats grow fastest on level-up. At the same level and rarity, production archetypes are tuned for close matchups.</string>
     <string name="pet_stat_combat_health">Health</string>
     <string name="pet_stat_combat_health_effect">Your pet\'s max HP in the arena.</string>
@@ -1526,6 +1530,19 @@
     <string name="pet_stat_combat_exploration_effect">Small bonus on your first strike of the battle.</string>
     <string name="pet_stat_combat_happiness">Happiness</string>
     <string name="pet_stat_combat_happiness_effect">More consistent damage with a higher minimum roll.</string>
+    <string name="pet_combat_unbalanced_title">Unbalanced Match Detected!</string>
+    <string name="pet_combat_unbalanced_body">There is a massive stat difference. The stronger pet will be temporarily nerfed for this battle, and their rewards will be minimized. Do you wish to proceed?</string>
+    <string name="pet_combat_unbalanced_underdog_body">Choose how you want to face this stronger opponent. Handicap battles won\'t affect your competitive record.</string>
+    <string name="pet_combat_unbalanced_bully_body">There is a massive stat difference. Your pet will be temporarily nerfed for this battle, and winning yields minimum rewards. This fight won\'t count toward your competitive record.</string>
+    <string name="pet_combat_unbalanced_dont_show">Don\'t show this warning again</string>
+    <string name="pet_combat_unbalanced_cancel">Cancel</string>
+    <string name="pet_combat_unbalanced_fight">Fight!</string>
+    <string name="pet_combat_mode_balanced_short">Balanced (Safe)</string>
+    <string name="pet_combat_mode_hardcore_short">Hardcore</string>
+    <string name="pet_stat_combat_handicap_battles_title">Handicap Battles</string>
+    <string name="pet_stat_combat_handicap_battles_description">Fights featuring a stat gap greater than 5% will not affect your permanent Win/Loss profile record.</string>
+    <string name="pet_stat_combat_hardcore_challenge_title">Hardcore Challenge</string>
+    <string name="pet_stat_combat_hardcore_challenge_description">As an underdog, you can choose to face un-nerfed opponents to unlock dynamically scaled massive reward multipliers based on the difficulty gap.</string>
     <string name="add_create_routine_toggle">Create routine</string>
     <string name="add_routine_name_create_label">Routine name</string>
     <string name="add_routine_save_without_workout">Save without logging a workout</string>

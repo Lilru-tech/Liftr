@@ -43,7 +43,7 @@ fun ProfileOpponentPetFloatingOverlay(
     opponentUsername: String?,
     bottomInsetDp: Int,
     backgroundThemeId: String,
-    onChallenge: () -> Unit,
+    onChallenge: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current

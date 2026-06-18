@@ -68,6 +68,7 @@ fun PetCombatArenaScreen(
     supabase: SupabaseClient,
     opponentUserId: String,
     preview: PetCombatPreviewWire?,
+    disableNerfChoice: Boolean = false,
     backgroundThemeId: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
@@ -119,7 +120,7 @@ fun PetCombatArenaScreen(
         isLoading = true
         errorMessage = null
         playbackEngine = null
-        runCatching { PetService.executeCombat(supabase, opponentUserId) }
+        runCatching { PetService.executeCombat(supabase, opponentUserId, disableNerfChoice) }
             .onSuccess { result ->
                 combatResult = result
                 val attackerMax = result.battleLog.attackerPet.resolvedMaxHp(

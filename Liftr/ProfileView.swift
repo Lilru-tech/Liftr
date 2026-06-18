@@ -244,6 +244,7 @@ struct ProfileView: View {
     @State private var petCombatHeadToHead: PetCombatHeadToHeadSummary?
     @State private var petCombatPreviewLoading = false
     @State private var showPetCombatArena = false
+    @State private var combatDisableNerfChoice = false
     @State private var consistencyWorkoutMeta: [Int: ConsistencyWorkoutMeta] = [:]
     @AppStorage("consistencyRootChartMetric") private var consistencyRootChartMetricRaw: String = ConsistencyChartMetric.duration.rawValue
     @State private var email: String? = nil
@@ -330,7 +331,10 @@ struct ProfileView: View {
                     headToHead: petCombatHeadToHead,
                     opponentUsername: username.isEmpty ? nil : username,
                     bannerInset: app.isPremium ? 0 : 58,
-                    onChallenge: { showPetCombatArena = true }
+                    onChallenge: { disableNerf in
+                        combatDisableNerfChoice = disableNerf
+                        showPetCombatArena = true
+                    }
                 )
             }
         }
@@ -351,7 +355,11 @@ struct ProfileView: View {
         }
         .navigationDestination(isPresented: $showPetCombatArena) {
             if let opponentId = viewingUserId, let preview = petCombatPreview {
-                PetCombatArenaView(opponentUserId: opponentId, preview: preview)
+                PetCombatArenaView(
+                    opponentUserId: opponentId,
+                    preview: preview,
+                    disableNerfChoice: combatDisableNerfChoice
+                )
                     .gradientBG()
             }
         }

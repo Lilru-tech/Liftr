@@ -25,7 +25,7 @@ struct ProfileOpponentPetFloatingOverlay: View {
     let headToHead: PetCombatHeadToHeadSummary?
     let opponentUsername: String?
     let bannerInset: CGFloat
-    let onChallenge: () -> Void
+    let onChallenge: (Bool) -> Void
 
     @State private var showChallengeSheet = false
     @State private var perimeterT: CGFloat?

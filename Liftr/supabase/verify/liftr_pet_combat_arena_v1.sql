@@ -48,7 +48,7 @@ begin
     raise exception 'missing rpc get_pet_combat_preview_v1';
   end if;
 
-  if to_regprocedure('public.execute_pet_combat_v1(uuid)') is null then
+  if to_regprocedure('public.execute_pet_combat_v1(uuid, boolean)') is null then
     raise exception 'missing rpc execute_pet_combat_v1';
   end if;
 

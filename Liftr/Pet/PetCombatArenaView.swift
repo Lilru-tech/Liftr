@@ -5,6 +5,7 @@ struct PetCombatArenaView: View {
     @EnvironmentObject private var app: AppState
     let opponentUserId: UUID
     let preview: PetCombatPreview?
+    let disableNerfChoice: Bool
 
     @State private var combatResult: PetCombatResult?
     @State private var isLoading = true
@@ -251,7 +252,10 @@ struct PetCombatArenaView: View {
         isLoading = true
         errorMessage = nil
         do {
-            let result = try await PetService.shared.executeCombat(targetOpponentUserId: opponentUserId)
+            let result = try await PetService.shared.executeCombat(
+                targetOpponentUserId: opponentUserId,
+                disableNerfChoice: disableNerfChoice
+            )
             combatResult = result
             let attackerMax = result.battleLog.attackerPet.resolvedMaxHp(
                 fallback: preview?.attacker?.stats?.health ?? 1

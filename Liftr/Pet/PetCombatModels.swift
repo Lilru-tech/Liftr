@@ -111,6 +111,70 @@ struct PetCombatStatsSummary: Codable, Equatable {
         exploration = try container.decodeIfPresent(Int.self, forKey: .exploration) ?? 0
         happiness = try container.decodeIfPresent(Int.self, forKey: .happiness) ?? 0
     }
+
+    var combatStatPoolTotal: Int {
+        health + strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
+    }
+}
+
+enum PetCombatStatBalancing {
+    static func isUnbalanced(attacker: PetCombatStatsSummary, defender: PetCombatStatsSummary) -> Bool {
+        let poolA = attacker.combatStatPoolTotal
+        let poolB = defender.combatStatPoolTotal
+        let stronger = max(poolA, poolB)
+        let weaker = min(poolA, poolB)
+        return stronger * 100 > weaker * 105
+    }
+}
+
+struct PetCombatStatBalancingSummary: Codable, Equatable {
+    let isUnbalanced: Bool
+    let attackerStatPool: Int
+    let defenderStatPool: Int
+    let attackerPoolBattle: Int?
+    let defenderPoolBattle: Int?
+    let strongerSide: String?
+    let hardcoreBuffMultiplier: Double?
+    let hardcoreBonusPercent: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case isUnbalanced = "is_unbalanced"
+        case attackerStatPool = "attacker_stat_pool"
+        case defenderStatPool = "defender_stat_pool"
+        case attackerPoolBattle = "attacker_pool_battle"
+        case defenderPoolBattle = "defender_pool_battle"
+        case strongerSide = "stronger_side"
+        case hardcoreBuffMultiplier = "hardcore_buff_multiplier"
+        case hardcoreBonusPercent = "hardcore_bonus_percent"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isUnbalanced = try container.decodeIfPresent(Bool.self, forKey: .isUnbalanced) ?? false
+        attackerStatPool = try container.decodeIfPresent(Int.self, forKey: .attackerStatPool) ?? 0
+        defenderStatPool = try container.decodeIfPresent(Int.self, forKey: .defenderStatPool) ?? 0
+        attackerPoolBattle = try container.decodeIfPresent(Int.self, forKey: .attackerPoolBattle)
+        defenderPoolBattle = try container.decodeIfPresent(Int.self, forKey: .defenderPoolBattle)
+        strongerSide = try container.decodeIfPresent(String.self, forKey: .strongerSide)
+        hardcoreBuffMultiplier = try container.decodeIfPresent(Double.self, forKey: .hardcoreBuffMultiplier)
+        hardcoreBonusPercent = try container.decodeIfPresent(Int.self, forKey: .hardcoreBonusPercent)
+    }
+}
+
+enum PetCombatChallengeMode: String, CaseIterable, Identifiable {
+    case balanced
+    case hardcore
+
+    var id: String { rawValue }
+
+    var disableNerfChoice: Bool { self == .hardcore }
+
+    var title: String {
+        switch self {
+        case .balanced: return "Balanced Mode (Safe)"
+        case .hardcore: return "Hardcore Mode (No Nerf)"
+        }
+    }
 }
 
 struct PetCombatSide: Codable, Equatable {
@@ -129,6 +193,7 @@ struct PetCombatPreview: Codable, Equatable {
     let canChallenge: Bool
     let blockReason: String?
     let cooldownExpiresAt: Date?
+    let statBalancing: PetCombatStatBalancingSummary?
     let attacker: PetCombatSide?
     let defender: PetCombatSide?
     let energy: ProfileEnergy?
@@ -137,7 +202,27 @@ struct PetCombatPreview: Codable, Equatable {
         case canChallenge = "can_challenge"
         case blockReason = "block_reason"
         case cooldownExpiresAt = "cooldown_expires_at"
+        case statBalancing = "stat_balancing"
         case attacker, defender, energy
+    }
+
+    var isStatUnbalanced: Bool {
+        if let statBalancing {
+            return statBalancing.isUnbalanced
+        }
+        guard let attackerStats = attacker?.stats, let defenderStats = defender?.stats else {
+            return false
+        }
+        return PetCombatStatBalancing.isUnbalanced(attacker: attackerStats, defender: defenderStats)
+    }
+
+    var isAttackerUnderdog: Bool {
+        statBalancing?.strongerSide == "defender"
+    }
+
+    var hardcoreBonusLabel: String? {
+        guard let percent = statBalancing?.hardcoreBonusPercent, percent > 0 else { return nil }
+        return "+\(percent)% Coins & XP"
     }
 
     var blockReasonText: String? {

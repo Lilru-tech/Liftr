@@ -69,7 +69,7 @@ Tablas:
 - `achievements` (catálogo; filas y reglas de desbloqueo principales vía `check_and_unlock_achievements_for` en la BD; opcional `coin_reward_tier` `bronze` | `silver` | `gold` para recompensas Liftr Coins)
 - `user_achievements` (desbloqueos por `user_id`)
 - `user_tracked_achievements` (logros que el usuario sigue activamente; máx. 5 por usuario)
-- `challenge_templates` (catálogo de retos; `metric_kind`, `cadence`, umbrales, ámbitos opcionales `scope_activity_code` / `scope_sport` / `scope_muscle_primary`; ver [`docs/migrations/challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql))
+- `challenge_templates` (catálogo de retos; `metric_kind`, `cadence`, umbrales, ámbitos opcionales `scope_activity_code` / `scope_sport` / `scope_muscle_primary` / `scope_stat_key`; ver [`docs/migrations/challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql) y migración `20260618194500_challenges_full_coverage_v1.sql`)
 - `challenge_instances` (ventana temporal por plantilla, p. ej. semana ISO)
 - `challenge_claims` (adjudicaciones: usuario, rango, `workout_id`, `adjudication_ts`)
 - `nutrition_ingredients` (catálogo de ingredientes; ver [`Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql))
@@ -265,8 +265,8 @@ Migración: [`Liftr/supabase/migrations/20260608120000_wearable_route_jobs_v1.sq
 - **Diferencia vs logros:** los logros son hitos personales permanentes (`achievements` / `user_achievements`). Los retos son **eventos de ventana** con **plazas limitadas** (`max_winners`) e instancias por `period_start` / `period_end`. La plantilla define **`cadence`**: `week`, `month` o `once` (ventana larga para retos tipo evergreen).
 - **Diferencia vs metas semanales:** `weekly_goals` es objetivo **solo para ti**. Los retos comparan orden de cumplimiento **en comunidad** (clasificación por `challenge_claims`).
 - **Diferencia vs duelos:** `competitions` es 1:1; los retos del MVP son **globales** en la instancia.
-- **`challenge_templates` (ámbitos opcionales):** `scope_activity_code` filtra cardio por `coalesce(cardio_sessions.activity_code, modality)`; `scope_sport` filtra por `sport_sessions.sport`; `scope_muscle_primary` restringe líneas de fuerza a `exercises.muscle_primary` (comparación `lower(btrim(...)))`).
-- **Reglas híbridas por `metric_kind`** (ver [`challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql)):
+- **`challenge_templates` (ámbitos opcionales):** `scope_activity_code` filtra cardio por `coalesce(cardio_sessions.activity_code, modality)`; `scope_sport` filtra por `sport_sessions.sport`; `scope_muscle_primary` restringe líneas de fuerza a `exercises.muscle_primary` vía `_challenge_muscle_matches` (pares ES/EN del catálogo); `scope_stat_key` (`goals`, `points`, `tries`) con `cumulative_sport_scoring_stat`.
+- **Reglas híbridas por `metric_kind`** (ver [`challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql) + `20260618194500_challenges_full_coverage_v1.sql`):
   - `cumulative_cardio_km` — suma km cardio en ventana (con filtro de actividad si hay `scope_activity_code`).
   - `single_set_max_kg` — primera publicación con serie ≥ umbral kg (filtro músculo opcional).
   - `cardio_session_pace_gate` — sesión que cumple distancia y tope de `duration_sec` (filtro actividad opcional).
@@ -275,6 +275,12 @@ Migración: [`Liftr/supabase/migrations/20260608120000_wearable_route_jobs_v1.sq
   - `cumulative_strength_reps` / `cumulative_strength_sets` / `cumulative_strength_volume_kg` — acumulado de reps, de series con carga, o de volumen kg (reps × kg) en orden cronológico; filtro músculo opcional.
   - `single_set_max_reps` — primera publicación con alguna serie con reps ≥ umbral.
   - `strength_workouts_touching_muscle` — primero en alcanzar N entrenos de fuerza distintos que incluyan al menos un ejercicio con `muscle_primary` = `scope_muscle_primary` (requiere scope).
+  - `cumulative_elevation_gain_m` — suma `elevation_gain_m` / `elev_gain_m` en cardio (filtro actividad opcional).
+  - `hyrox_official_time_gate` — sesión Hyrox con `official_time_sec` ≤ `threshold_secondary`.
+  - `cumulative_climbing_routes_sent` — suma `routes_sent` en sesiones climbing.
+  - `cumulative_ski_distance_km` — suma `total_distance_km` en sesiones ski.
+  - `cumulative_sport_scoring_stat` — suma goals/points/tries según `scope_sport` + `scope_stat_key`.
+  - `cardio_session_rowerg_split_gate` — sesión rowerg con distancia ≥ umbral y `split_sec_per_500m` ≤ secundario (JSON en `cardio_session_stats`).
 - **Notificación:** tipo **`challenge_won`** (legacy **`challenge_won_weekly`**) con `data.challenge_instance_id`, `template_code`, `workout_id` vía `create_notification`; misma cola **`send-notifications`** + FCM. Los clientes aceptan ambos tipos.
 
 ## Achievements (contrato cliente y operación en BD)
@@ -693,7 +699,9 @@ Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); s
 
 **Arena combat — balance de arquetipos (`20260625120000` + `20260626120000`):** v4: suelo `health_weight` 3 para tipos con peso ≤2; cap tank+DPS: si `health_weight ≥ 5` y `strength_weight ≥ 5`, `strength −1` y `happiness +1`; `monkey` 4/4 HP/str; `griffin` base 4/4 HP/str. v5 (paridad mismo nivel+rareza ~40–60% entre arquetipos de producción): `neon_panther` `strength_weight` 5→4, `exploration_weight` 3→4; `griffin` movilidad `speed` 5, `agility` 4, `intelligence` 2, `exploration` 3 (mantiene `resistance_weight` 5); `dragon` override explícito 4/4/6 HP/str/def, `intelligence` 4, `resistance` 4, `happiness` 4, `exploration` 4, `critical_rate` 1 (suma 40) (el cap v4 dejaba dragon en 6/6). Recompute: `recompute_pet_stats_combat_balance_v1()` — v4 en `20260625120100`, v5 en `20260626120100`; hatch con `liftr_compute_hatch_stats_v1` + re-roll de cada `level_up` en `pet_logs`. Verificación: `supabase/verify/combat_balance_v5.sql` + `combat_balance_v5_monte_carlo.py`.
 
-Cliente: botón ⓘ en Stats del pet y en comparativa pre-combate → `PetStatCombatHelpSheet` / `PetStatCombatHelpSheetContent`.
+Cliente: botón ⓘ en Stats del pet y en comparativa pre-combate → `PetStatCombatHelpSheet` / `PetStatCombatHelpSheetContent` (incluye **Stat Balancing**, **Handicap Battles**, **Hardcore Challenge**). Pre-combate underdog: picker Balanced/Hardcore; preferencias `skipPetCombatUnbalancedWarning`, `petCombatChallengeMode`.
+
+**Arena combat — stat handicap (`20260618120000` + hardcore `20260619120000`):** pool de combate = suma de 10 stats (excluye `happiness`). Desbalanceado si `max(pool) * 100 > min(pool) * 105`. Modo **balanced** (default): nerf in-memory del lado fuerte hasta `floor(weaker_pool × 1.05)`. Modo **hardcore** (`execute_pet_combat_v1(p_target, p_disable_nerf_choice=true)` solo si el atacante es underdog): sin nerf; defensor a stats reales. `pet_combat_history.is_handicapped = true` en cualquier combate desbalanceado (balanced o hardcore). `get_pet_combat_head_to_head_v1` excluye filas `is_handicapped = true` del W/L/D competitivo (stats globales `pet_combat_user_stats` siguen contando todo). Preview `stat_balancing` añade `hardcore_buff_multiplier`, `hardcore_bonus_percent`. Recompensas hardcore: underdog gana → `liftr_combat_hardcore_rewards` = premium × `(stronger_pool / weaker_pool)`; fuerte gana → mínimo (`xp:10, coins:5`). Cliente: picker Balanced/Hardcore en modal underdog; preferencias `skipPetCombatUnbalancedWarning`, `petCombatChallengeMode`. Verify: `pet_combat_stat_handicap_v1.sql`, `pet_combat_hardcore_v1.sql`.
 
 **Subida de nivel — stats (`pet_level_stat_shared_budget_v1`):** un presupuesto compartido por subida vía `compute_pet_level_stat_delta_v1(pet_type, stage, user_id)` (llamada desde `distribute_pet_stats`). (1) `total_budget = floor(random() × (max − min + 1)) + min` según `pet_stage_rewards` del stage — **una sola tirada por nivel**; (2) por stat, jitter independiente `0.5 + random()` (50%–150%); (3) `raw = total_budget × get_pet_stat_multiplier × weight/total_weight × jitter`; `health = floor(raw × 20)`; resto `round(raw)`. Varianza por stat sin 11 presupuestos independientes (evita pantallas con mayoría de +0). `pet_logs.stats_delta` conserva la misma forma jsonb. Backfill histórico: `backfill_pet_level_stat_variance_v1()` — baseline hatch = stats actuales − suma de deltas `level_up`; re-tira cada log ordenado por `new_level` con stage resuelto por `resolve_pet_stage_at_time` (último log `evolution` antes del timestamp, si no `baby`). `critical_rate` (peso 1) puede seguir en 0 en baby. Fuera de alcance: stats iniciales al hatch (`generate_initial_pet_stats`) y bono evolución (`apply_evolution_stat_bonus`).
 

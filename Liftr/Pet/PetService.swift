@@ -103,12 +103,16 @@ final class PetService {
         return try JSONDecoder.supabase().decode(PetCombatHeadToHeadSummary.self, from: res.data)
     }
 
-    func executeCombat(targetOpponentUserId: UUID) async throws -> PetCombatResult {
+    func executeCombat(targetOpponentUserId: UUID, disableNerfChoice: Bool = false) async throws -> PetCombatResult {
         struct Params: Encodable {
             let p_target_opponent_user_id: UUID
+            let p_disable_nerf_choice: Bool
         }
         let res = try await client
-            .rpc("execute_pet_combat_v1", params: Params(p_target_opponent_user_id: targetOpponentUserId))
+            .rpc("execute_pet_combat_v1", params: Params(
+                p_target_opponent_user_id: targetOpponentUserId,
+                p_disable_nerf_choice: disableNerfChoice
+            ))
             .execute()
         await CoinManager.shared.refreshBalance()
         PetRefreshCenter.notifyPetStateDidChange()

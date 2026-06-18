@@ -816,6 +816,7 @@ fun ProfileTabScreen(
     var showPetDex by rememberSaveable { mutableStateOf(false) }
     var showUserItems by rememberSaveable { mutableStateOf(false) }
     var showPetCombatArena by rememberSaveable { mutableStateOf(false) }
+    var combatDisableNerfChoice by rememberSaveable { mutableStateOf(false) }
     var petCombatPreview by remember { mutableStateOf<PetCombatPreviewWire?>(null) }
     var petCombatHeadToHead by remember { mutableStateOf<PetCombatHeadToHeadSummaryWire?>(null) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
@@ -996,6 +997,7 @@ fun ProfileTabScreen(
             supabase = supabase,
             opponentUserId = profileUserId,
             preview = petCombatPreview,
+            disableNerfChoice = combatDisableNerfChoice,
             backgroundThemeId = LiftrPreferences.backgroundTheme(context.applicationContext),
             onBack = {
                 PetRefreshBus.notifyPetStateDidChange()
@@ -1758,7 +1760,10 @@ fun ProfileTabScreen(
                     opponentUsername = preview.defender?.username,
                     bottomInsetDp = bottomInsetDp,
                     backgroundThemeId = LiftrPreferences.backgroundTheme(context.applicationContext),
-                    onChallenge = { showPetCombatArena = true },
+                    onChallenge = { disableNerf ->
+                        combatDisableNerfChoice = disableNerf
+                        showPetCombatArena = true
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
             }
