@@ -9,12 +9,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -79,6 +83,67 @@ private data class NotificationSettingsRow(
     @SerialName("push_pet_combat_challenged") val pushPetCombatChallenged: Boolean = true
 )
 
+private data class NotificationSettingItem(
+    val sectionRes: Int,
+    val titleRes: Int,
+    val column: String,
+    val value: (NotificationSettingsRow) -> Boolean
+)
+
+private data class ResolvedNotificationSettingItem(
+    val item: NotificationSettingItem,
+    val section: String,
+    val title: String
+)
+
+private val notificationSettingItems = listOf(
+    NotificationSettingItem(R.string.notifications_settings_messages, R.string.notifications_settings_dm, "push_new_message") { it.pushNewMessage },
+    NotificationSettingItem(R.string.notifications_settings_social, R.string.notifications_settings_followers, "push_new_follower") { it.pushNewFollower },
+    NotificationSettingItem(R.string.notifications_settings_workouts, R.string.notifications_settings_workout_likes, "push_workout_like") { it.pushWorkoutLike },
+    NotificationSettingItem(R.string.notifications_settings_workouts, R.string.notifications_settings_workout_comments, "push_workout_comment") { it.pushWorkoutComment },
+    NotificationSettingItem(R.string.notifications_settings_workouts, R.string.notifications_settings_comment_likes, "push_comment_like") { it.pushCommentLike },
+    NotificationSettingItem(R.string.notifications_settings_workouts, R.string.notifications_settings_comment_replies, "push_comment_reply") { it.pushCommentReply },
+    NotificationSettingItem(R.string.notifications_settings_workouts, R.string.notifications_settings_comment_mentions, "push_comment_mention") { it.pushCommentMention },
+    NotificationSettingItem(R.string.notifications_settings_workouts, R.string.notifications_settings_added_participant, "push_added_as_participant") { it.pushAddedAsParticipant },
+    NotificationSettingItem(R.string.notifications_settings_ach_goals, R.string.notifications_settings_achievements, "push_achievement_unlocked") { it.pushAchievementUnlocked },
+    NotificationSettingItem(R.string.notifications_settings_ach_goals, R.string.notifications_settings_goal_completed, "push_goal_completed") { it.pushGoalCompleted },
+    NotificationSettingItem(R.string.notifications_settings_ach_goals, R.string.notifications_settings_goal_almost, "push_goal_almost_done") { it.pushGoalAlmostDone },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_invites, "push_competition_invite") { it.pushCompetitionInvite },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_accepted, "push_competition_accepted") { it.pushCompetitionAccepted },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_declined, "push_competition_declined") { it.pushCompetitionDeclined },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_cancelled, "push_competition_cancelled") { it.pushCompetitionCancelled },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_expired, "push_competition_expired") { it.pushCompetitionExpired },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_win, "push_competition_result_win") { it.pushCompetitionResultWin },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_lose, "push_competition_result_lose") { it.pushCompetitionResultLose },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_pending_review, "push_competition_workout_pending_review") { it.pushCompetitionWorkoutPendingReview },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_workout_accepted, "push_competition_workout_accepted") { it.pushCompetitionWorkoutAccepted },
+    NotificationSettingItem(R.string.notifications_settings_competitions, R.string.notifications_settings_comp_workout_rejected, "push_competition_workout_rejected") { it.pushCompetitionWorkoutRejected },
+    NotificationSettingItem(R.string.notifications_settings_segments_challenges, R.string.notifications_settings_segment_first, "push_segment_you_are_first") { it.pushSegmentYouAreFirst },
+    NotificationSettingItem(R.string.notifications_settings_segments_challenges, R.string.notifications_settings_segment_lost, "push_segment_lost_first") { it.pushSegmentLostFirst },
+    NotificationSettingItem(R.string.notifications_settings_segments_challenges, R.string.notifications_settings_territory_capture, "push_territory_capture_from_user") { it.pushTerritoryCaptureFromUser },
+    NotificationSettingItem(R.string.notifications_settings_segments_challenges, R.string.notifications_settings_territory_lost, "push_territory_lost_to_user") { it.pushTerritoryLostToUser },
+    NotificationSettingItem(R.string.notifications_settings_segments_challenges, R.string.notifications_settings_challenge_won, "push_challenge_won") { it.pushChallengeWon },
+    NotificationSettingItem(R.string.notifications_settings_segments_challenges, R.string.notifications_settings_challenge_won_weekly, "push_challenge_won_weekly") { it.pushChallengeWonWeekly },
+    NotificationSettingItem(R.string.notifications_settings_reminders, R.string.notifications_settings_workout_reminders, "push_workout_kind_inactive") { it.pushWorkoutKindInactive },
+    NotificationSettingItem(R.string.notifications_settings_nutrition, R.string.notifications_settings_meal_plan_invites, "push_meal_plan_invite") { it.pushMealPlanInvite },
+    NotificationSettingItem(R.string.notifications_settings_pets, R.string.notifications_settings_pet_hatched, "push_pet_hatched") { it.pushPetHatched },
+    NotificationSettingItem(R.string.notifications_settings_pets, R.string.notifications_settings_pet_combat_challenged, "push_pet_combat_challenged") { it.pushPetCombatChallenged },
+    NotificationSettingItem(R.string.notifications_settings_apple_health, R.string.notifications_settings_apple_health_cardio, "push_apple_health_cardio_imported") { it.pushAppleHealthCardioImported }
+)
+
+private val notificationSectionOrder = listOf(
+    R.string.notifications_settings_messages,
+    R.string.notifications_settings_social,
+    R.string.notifications_settings_workouts,
+    R.string.notifications_settings_ach_goals,
+    R.string.notifications_settings_competitions,
+    R.string.notifications_settings_segments_challenges,
+    R.string.notifications_settings_reminders,
+    R.string.notifications_settings_nutrition,
+    R.string.notifications_settings_pets,
+    R.string.notifications_settings_apple_health
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NotificationSettingsScreen(
@@ -93,6 +158,7 @@ fun NotificationSettingsScreen(
     var saving by remember { mutableStateOf(false) }
     var err by remember { mutableStateOf<String?>(null) }
     var row by remember { mutableStateOf<NotificationSettingsRow?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
 
     suspend fun load() {
         if (meId == null) {
@@ -181,251 +247,69 @@ fun NotificationSettingsScreen(
                     onToggle = { v -> save(mapOf("push_enabled" to v)) }
                 )
 
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    placeholder = { Text(stringResource(R.string.notifications_settings_search_hint)) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, contentDescription = null)
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = null)
+                            }
+                        }
+                    }
+                )
+
                 val enabled = r.pushEnabled && !saving
+                val normalizedQuery = searchQuery.trim()
+                val resolvedItems = notificationSettingItems.map { item ->
+                    ResolvedNotificationSettingItem(
+                        item = item,
+                        section = stringResource(item.sectionRes),
+                        title = stringResource(item.titleRes)
+                    )
+                }
+                val filteredItems = if (normalizedQuery.isEmpty()) {
+                    resolvedItems
+                } else {
+                    resolvedItems.filter {
+                        it.section.contains(normalizedQuery, ignoreCase = true)
+                            || it.title.contains(normalizedQuery, ignoreCase = true)
+                    }
+                }
 
-                SectionHeader(stringResource(R.string.notifications_settings_messages))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_dm),
-                    subtitle = null,
-                    checked = r.pushNewMessage,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_new_message" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_social))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_followers),
-                    subtitle = null,
-                    checked = r.pushNewFollower,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_new_follower" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_workouts))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_workout_likes),
-                    subtitle = null,
-                    checked = r.pushWorkoutLike,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_workout_like" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_workout_comments),
-                    subtitle = null,
-                    checked = r.pushWorkoutComment,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_workout_comment" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comment_likes),
-                    subtitle = null,
-                    checked = r.pushCommentLike,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_comment_like" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comment_replies),
-                    subtitle = null,
-                    checked = r.pushCommentReply,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_comment_reply" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comment_mentions),
-                    subtitle = null,
-                    checked = r.pushCommentMention,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_comment_mention" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_added_participant),
-                    subtitle = null,
-                    checked = r.pushAddedAsParticipant,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_added_as_participant" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_ach_goals))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_achievements),
-                    subtitle = null,
-                    checked = r.pushAchievementUnlocked,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_achievement_unlocked" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_goal_completed),
-                    subtitle = null,
-                    checked = r.pushGoalCompleted,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_goal_completed" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_goal_almost),
-                    subtitle = null,
-                    checked = r.pushGoalAlmostDone,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_goal_almost_done" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_competitions))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_invites),
-                    subtitle = null,
-                    checked = r.pushCompetitionInvite,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_invite" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_accepted),
-                    subtitle = null,
-                    checked = r.pushCompetitionAccepted,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_accepted" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_declined),
-                    subtitle = null,
-                    checked = r.pushCompetitionDeclined,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_declined" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_cancelled),
-                    subtitle = null,
-                    checked = r.pushCompetitionCancelled,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_cancelled" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_expired),
-                    subtitle = null,
-                    checked = r.pushCompetitionExpired,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_expired" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_win),
-                    subtitle = null,
-                    checked = r.pushCompetitionResultWin,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_result_win" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_lose),
-                    subtitle = null,
-                    checked = r.pushCompetitionResultLose,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_result_lose" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_pending_review),
-                    subtitle = null,
-                    checked = r.pushCompetitionWorkoutPendingReview,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_workout_pending_review" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_workout_accepted),
-                    subtitle = null,
-                    checked = r.pushCompetitionWorkoutAccepted,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_workout_accepted" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_comp_workout_rejected),
-                    subtitle = null,
-                    checked = r.pushCompetitionWorkoutRejected,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_competition_workout_rejected" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_segments_challenges))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_segment_first),
-                    subtitle = null,
-                    checked = r.pushSegmentYouAreFirst,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_segment_you_are_first" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_segment_lost),
-                    subtitle = null,
-                    checked = r.pushSegmentLostFirst,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_segment_lost_first" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_territory_capture),
-                    subtitle = null,
-                    checked = r.pushTerritoryCaptureFromUser,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_territory_capture_from_user" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_territory_lost),
-                    subtitle = null,
-                    checked = r.pushTerritoryLostToUser,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_territory_lost_to_user" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_challenge_won),
-                    subtitle = null,
-                    checked = r.pushChallengeWon,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_challenge_won" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_challenge_won_weekly),
-                    subtitle = null,
-                    checked = r.pushChallengeWonWeekly,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_challenge_won_weekly" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_reminders))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_workout_reminders),
-                    subtitle = null,
-                    checked = r.pushWorkoutKindInactive,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_workout_kind_inactive" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_nutrition))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_meal_plan_invites),
-                    subtitle = null,
-                    checked = r.pushMealPlanInvite,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_meal_plan_invite" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_pets))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_pet_hatched),
-                    subtitle = null,
-                    checked = r.pushPetHatched,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_pet_hatched" to v)) }
-                )
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_pet_combat_challenged),
-                    subtitle = null,
-                    checked = r.pushPetCombatChallenged,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_pet_combat_challenged" to v)) }
-                )
-
-                SectionHeader(stringResource(R.string.notifications_settings_apple_health))
-                SettingsCard(
-                    title = stringResource(R.string.notifications_settings_apple_health_cardio),
-                    subtitle = null,
-                    checked = r.pushAppleHealthCardioImported,
-                    enabled = enabled,
-                    onToggle = { v -> save(mapOf("push_apple_health_cardio_imported" to v)) }
-                )
+                if (filteredItems.isEmpty()) {
+                    Text(
+                        stringResource(R.string.notifications_settings_search_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    )
+                } else {
+                    val grouped = filteredItems.groupBy { it.item.sectionRes }
+                    notificationSectionOrder.forEach { sectionRes ->
+                        val sectionItems = grouped[sectionRes].orEmpty()
+                        if (sectionItems.isEmpty()) return@forEach
+                        SectionHeader(stringResource(sectionRes))
+                        sectionItems.forEach { resolved ->
+                            val item = resolved.item
+                            SettingsCard(
+                                title = resolved.title,
+                                subtitle = null,
+                                checked = item.value(r),
+                                enabled = enabled,
+                                onToggle = { v -> save(mapOf(item.column to v)) }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -468,4 +352,3 @@ private fun SettingsCard(
         }
     }
 }
-

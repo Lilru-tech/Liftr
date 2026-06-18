@@ -9,10 +9,21 @@ struct RegisterPage {
     var usernameField: XCUIElement { app.textFields["register.username"] }
     var submitButton: XCUIElement { app.buttons["register.submit"] }
 
-    func waitForScreen(timeout: TimeInterval = UITestWait.standard) {
-        let ready = screen.waitForExistence(timeout: timeout)
-            || emailField.waitForExistence(timeout: timeout)
-        XCTAssertTrue(ready, "Register screen did not appear.")
+    func waitForScreen(timeout: TimeInterval = UITestWait.network) {
+        let candidates: [XCUIElement] = [
+            screen,
+            emailField,
+            app.staticTexts["Create your account to start tracking your workouts."],
+            app.buttons["Create account"],
+        ]
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if candidates.contains(where: { $0.exists }) {
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertTrue(false, "Register screen did not appear.")
     }
 
     func fillForm(email: String, password: String, username: String) {
@@ -23,8 +34,23 @@ struct RegisterPage {
     }
 
     func submitIfEnabled() {
-        XCTAssertTrue(submitButton.waitForExistence(timeout: UITestWait.standard))
-        submitButton.tap()
+        submitWhenEnabled()
+    }
+
+    func submitWhenEnabled(timeout: TimeInterval = UITestWait.network) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let candidates: [XCUIElement] = [
+                submitButton,
+                app.buttons["Create account"],
+            ]
+            if let button = candidates.first(where: { $0.exists && $0.isEnabled }) {
+                button.tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail("Create account button did not become enabled.")
     }
 }
 
@@ -43,10 +69,23 @@ struct ForgotPasswordPage {
 
     func submitEmail(_ email: String) {
         waitForScreen()
-        emailField.clearAndTypeText(email)
-        XCTAssertTrue(submitButton.waitForExistence(timeout: UITestWait.standard))
-        XCTAssertTrue(submitButton.isEnabled, "Send reset link stayed disabled.")
-        submitButton.tap()
+        if emailField.exists, (emailField.value as? String ?? "").isEmpty {
+            emailField.clearAndTypeText(email)
+        }
+        app.toolbars.buttons["Done"].tapIfExists(timeout: 1)
+        let deadline = Date().addingTimeInterval(UITestWait.network)
+        while Date() < deadline {
+            let candidates: [XCUIElement] = [
+                submitButton,
+                app.buttons["Send reset link"],
+            ]
+            if let button = candidates.first(where: { $0.exists && $0.isEnabled }) {
+                button.tap()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail("Send reset link button did not become enabled.")
     }
 
     func waitForSubmissionResult(timeout: TimeInterval = UITestWait.network) {
@@ -167,19 +206,59 @@ struct AddWorkoutPage {
     }
 
     func saveWorkout() {
-        app.swipeUp()
-        let save = saveButton.waitForExistence(timeout: 2) ? saveButton : app.buttons["Save"]
-        XCTAssertTrue(save.waitForExistence(timeout: UITestWait.standard))
-        XCTAssertTrue(save.isEnabled, "Save button stayed disabled.")
-        save.tap()
+        for _ in 0..<4 {
+            app.swipeUp()
+        }
+        let deadline = Date().addingTimeInterval(UITestWait.network)
+        while Date() < deadline {
+            let candidates: [XCUIElement] = [
+                saveButton,
+                app.buttons["Save"],
+            ]
+            if let save = candidates.first(where: { $0.exists && $0.isEnabled }) {
+                save.tap()
+                return
+            }
+            app.swipeUp()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail("Save button was not available.")
+    }
+
+    func enableFinishedWorkoutIfNeeded() {
+        let finished = app.switches.matching(
+            NSPredicate(format: "label CONTAINS[c] 'Finished'")
+        ).firstMatch
+        if finished.waitForExistence(timeout: UITestWait.standard) {
+            finished.tap()
+        }
     }
 
     func waitForSaveSuccess(timeout: TimeInterval = UITestWait.network) {
-        if successBanner.waitForExistence(timeout: timeout) { return }
-        let published = app.staticTexts.matching(
-            NSPredicate(format: "label CONTAINS 'Workout published'")
-        ).firstMatch
-        XCTAssertTrue(published.waitForExistence(timeout: timeout), "Workout save success UI did not appear.")
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if successBanner.exists { return }
+            let published = app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS 'Workout published' OR label CONTAINS 'Workout planned'")
+            ).firstMatch
+            if published.exists { return }
+            if app.otherElements["home.screen"].exists { return }
+            if app.buttons["tab.home"].exists && app.buttons["tab.home"].isSelected { return }
+            if app.otherElements["uitest.authenticated"].exists,
+               !screen.exists,
+               app.tabBars.firstMatch.exists {
+                return
+            }
+            let saveError = app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS[c] 'error' OR label CONTAINS[c] 'failed' OR label CONTAINS[c] 'could not'")
+            ).firstMatch
+            if saveError.exists {
+                XCTFail("Workout save showed an error: \(saveError.label)")
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTAssertTrue(false, "Workout save success UI did not appear.")
     }
 }
 

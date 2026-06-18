@@ -5,7 +5,6 @@ struct LoginPage {
 
     var emailField: XCUIElement { app.textFields["login.email"] }
     var passwordField: XCUIElement { app.secureTextFields["login.password"] }
-    var submitButton: XCUIElement { app.buttons["login.submit"] }
 
     func waitForLoginScreen(timeout: TimeInterval = UITestWait.network) {
         let candidates: [XCUIElement] = [
@@ -26,6 +25,14 @@ struct LoginPage {
         XCTAssertTrue(false, "Login screen did not appear.")
     }
 
+    private func tapFirstExisting(_ candidates: [XCUIElement], timeout: TimeInterval = UITestWait.standard) -> Bool {
+        for candidate in candidates where candidate.waitForExistence(timeout: timeout) {
+            candidate.tap()
+            return true
+        }
+        return false
+    }
+
     func openRegister() {
         waitForLoginScreen()
         let candidates: [XCUIElement] = [
@@ -35,11 +42,14 @@ struct LoginPage {
             app.buttons["Create an account"],
             app.staticTexts["Create an account"],
         ]
-        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.standard) {
-            candidate.tap()
+        guard tapFirstExisting(candidates) else {
+            XCTFail("Register link was not found on the login screen.")
             return
         }
-        XCTFail("Register link was not found on the login screen.")
+        let registerReady = app.textFields["register.email"].waitForExistence(timeout: UITestWait.network)
+            || app.otherElements["register.screen"].waitForExistence(timeout: UITestWait.network)
+            || app.staticTexts["Create your account to start tracking your workouts."].waitForExistence(timeout: UITestWait.network)
+        XCTAssertTrue(registerReady, "Register screen did not appear after tapping Create an account.")
     }
 
     func openForgotPassword() {
@@ -50,31 +60,70 @@ struct LoginPage {
             app.staticTexts["Forgot password?"],
             app.buttons.matching(NSPredicate(format: "label CONTAINS 'Forgot password'")).firstMatch,
         ]
-        for candidate in candidates where candidate.waitForExistence(timeout: UITestWait.standard) {
-            candidate.tap()
+        guard tapFirstExisting(candidates) else {
+            XCTFail("Forgot password link was not found on the login screen.")
             return
         }
-        XCTFail("Forgot password link was not found on the login screen.")
+        let forgotReady = app.textFields["forgotPassword.email"].waitForExistence(timeout: UITestWait.network)
+            || app.navigationBars["Forgot password"].waitForExistence(timeout: UITestWait.network)
+            || app.otherElements["forgotPassword.screen"].waitForExistence(timeout: UITestWait.network)
+        XCTAssertTrue(forgotReady, "Forgot password screen did not appear.")
     }
 
     func signIn(email: String, password: String) {
         waitForLoginScreen()
         emailField.clearAndTypeText(email)
         passwordField.clearAndTypeText(password)
-        XCTAssertTrue(submitButton.waitForExistence(timeout: UITestWait.standard))
-        XCTAssertTrue(submitButton.isEnabled, "Sign in button stayed disabled after entering credentials.")
-        submitButton.tap()
+        dismissKeyboardIfPresent()
+        let submit = waitForEnabledSignInButton(timeout: UITestWait.network)
+        submit.tap()
         waitForSignInCompletion()
     }
 
     func signInWithConfiguredCredentials() {
         waitForLoginScreen()
-        if submitButton.waitForExistence(timeout: UITestWait.standard), submitButton.isEnabled {
-            submitButton.tap()
-            waitForSignInCompletion()
-            return
+        let deadline = Date().addingTimeInterval(UITestWait.network)
+        while Date() < deadline {
+            if let submit = enabledSignInButton() {
+                submit.tap()
+                waitForSignInCompletion()
+                return
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
         }
         signIn(email: UITestCredentials.email, password: UITestCredentials.password)
+    }
+
+    private func enabledSignInButton() -> XCUIElement? {
+        let candidates: [XCUIElement] = [
+            app.buttons["login.submit"],
+            app.buttons["Sign in"],
+        ]
+        for candidate in candidates where candidate.exists && candidate.isEnabled {
+            return candidate
+        }
+        return nil
+    }
+
+    @discardableResult
+    private func waitForEnabledSignInButton(timeout: TimeInterval) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let submit = enabledSignInButton() {
+                return submit
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTFail("Sign in button did not become enabled.")
+        return app.buttons["Sign in"]
+    }
+
+    private func dismissKeyboardIfPresent() {
+        app.toolbars.buttons["Done"].tapIfExists(timeout: 1)
+        app.keyboards.buttons["Done"].tapIfExists(timeout: 1)
+        if app.keyboards.count > 0 {
+            app.tap()
+        }
     }
 
     private func waitForSignInCompletion() {
@@ -86,5 +135,6 @@ struct LoginPage {
             )
             _ = XCTWaiter().wait(for: [finished], timeout: UITestWait.network)
         }
+        _ = app.otherElements["uitest.authenticated"].waitForExistence(timeout: UITestWait.network)
     }
 }

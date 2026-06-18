@@ -208,7 +208,7 @@ private fun PrCompareRow(
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(row.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                Text(PrFormatting.activityLabel(row.kind, row.label), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                 Text(
                     ComparePrsFormat.prettyMetricName(row.metric),
                     style = MaterialTheme.typography.labelSmall,
@@ -217,14 +217,14 @@ private fun PrCompareRow(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
                 Text(
-                    ComparePrsFormat.formatValue(row.metric, row.myValue),
+                    ComparePrsFormat.formatValue(row.metric, row.myValue, row.label),
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = if (wMy) FontWeight.SemiBold else FontWeight.Normal,
                     color = myC
                 )
                 Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Text(
-                    ComparePrsFormat.formatValue(row.metric, row.otherValue),
+                    ComparePrsFormat.formatValue(row.metric, row.otherValue, row.label),
                     style = MaterialTheme.typography.bodySmall,
                     fontWeight = if (wO) FontWeight.SemiBold else FontWeight.Normal,
                     color = othC

@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlin.math.max
 import kotlin.math.min
@@ -210,15 +211,17 @@ data class DonutSegment(val label: String, val value: Double, val color: Color)
 fun KindDonutChart(
     segments: List<DonutSegment>,
     centerTitle: String,
-    modifier: Modifier = Modifier
-        .fillMaxWidth()
-        .height(200.dp)
+    modifier: Modifier = Modifier,
+    showLegend: Boolean = true,
+    chartHeight: Dp = 200.dp
 ) {
     if (segments.isEmpty()) return
     val total = segments.sumOf { it.value }
     if (total <= 0) return
     Box(
-        modifier = modifier,
+        modifier = modifier
+            .fillMaxWidth()
+            .height(chartHeight),
         contentAlignment = Alignment.Center
     ) {
         val bg = Color.Gray.copy(alpha = 0.18f)
@@ -248,24 +251,26 @@ fun KindDonutChart(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .padding(top = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        segments.forEach { s ->
-            val pct = ((s.value / total) * 100.0).toInt()
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Canvas(Modifier.size(10.dp)) {
-                    drawRect(s.color, size = size)
+    if (showLegend) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            segments.forEach { s ->
+                val pct = ((s.value / total) * 100.0).toInt()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(Modifier.size(10.dp)) {
+                        drawRect(s.color, size = size)
+                    }
+                    Text(
+                        "${s.label} $pct%",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(start = 4.dp)
+                    )
                 }
-                Text(
-                    "${s.label} $pct%",
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(start = 4.dp)
-                )
             }
         }
     }

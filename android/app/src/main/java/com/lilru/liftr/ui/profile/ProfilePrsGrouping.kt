@@ -1,13 +1,16 @@
 package com.lilru.liftr.ui.profile
 
-import java.util.Locale
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.util.Locale
 
 data class ProfilePrsListSection(
     val title: String,
+    val icon: String,
+    val kind: String,
+    val label: String,
     val items: List<ProfilePrListRow>
 )
 
@@ -29,36 +32,21 @@ enum class PrKindFilter {
     SPORT
 }
 
-/**
- * Alinea con [Liftr.ProfileView.PRsListView] (secciones, orden de claves, búsqueda local).
- */
 object ProfilePrsGrouping {
-    private fun orderTuple(title: String): Pair<Int, String> {
-        val lower = title.lowercase(Locale.US)
-        return when {
-            lower.startsWith("strength") -> 0 to lower
-            lower.startsWith("cardio") -> 1 to lower
-            lower.startsWith("sport") -> 2 to lower
-            else -> 3 to lower
-        }
-    }
+    data class ActivityKey(val kind: String, val label: String)
 
-    fun sectionTitleForRow(pr: ProfilePrListRow): String {
-        val k = pr.kind.replaceFirstChar { c ->
-            if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString()
-        }
-        val l = pr.label.replaceFirstChar { c ->
-            if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString()
-        }
-        return "$k · $l"
-    }
+    fun activityKeyForRow(pr: ProfilePrListRow): ActivityKey =
+        ActivityKey(kind = pr.kind.lowercase(Locale.US), label = pr.label.lowercase(Locale.US))
 
     fun filterBySearch(rows: List<ProfilePrListRow>, q: String): List<ProfilePrListRow> {
         val t = q.trim()
         if (t.isEmpty()) return rows
         return rows.filter { r ->
-            r.label.contains(t, ignoreCase = true) ||
-                r.metric.contains(t, ignoreCase = true)
+            val display = PrFormatting.activityLabel(r.kind, r.label)
+            display.contains(t, ignoreCase = true) ||
+                r.label.contains(t, ignoreCase = true) ||
+                r.metric.contains(t, ignoreCase = true) ||
+                PrFormatting.prettyMetricName(r.metric, r.kind, r.label).contains(t, ignoreCase = true)
         }
     }
 
@@ -70,16 +58,27 @@ object ProfilePrsGrouping {
     fun buildSections(allRows: List<ProfilePrListRow>, searchQuery: String): List<ProfilePrsListSection> {
         val rows = filterBySearch(allRows, searchQuery)
         if (rows.isEmpty()) return emptyList()
-        val byTitle = rows.groupBy { sectionTitleForRow(it) }
-        val sortedKeys = byTitle.keys.sortedWith { a, b ->
-            val oa = orderTuple(a)
-            val ob = orderTuple(b)
-            if (oa.first != ob.first) oa.first.compareTo(ob.first) else a.compareTo(b)
+        val byActivity = rows.groupBy { activityKeyForRow(it) }
+        val sortedKeys = byActivity.keys.sortedWith { a, b ->
+            val ka = PrFormatting.kindSortOrder(a.kind)
+            val kb = PrFormatting.kindSortOrder(b.kind)
+            if (ka != kb) return@sortedWith ka.compareTo(kb)
+            PrFormatting.activityLabel(a.kind, a.label)
+                .compareTo(PrFormatting.activityLabel(b.kind, b.label), ignoreCase = true)
         }
         return sortedKeys.map { key ->
-            val items = (byTitle[key] ?: emptyList())
-                .sortedByDescending { timeKey(it.achievedAt) }
-            ProfilePrsListSection(title = key, items = items)
+            val items = (byActivity[key] ?: emptyList())
+                .sortedWith(
+                    compareBy<ProfilePrListRow> { PrFormatting.metricSortOrder(it.metric) }
+                        .thenByDescending { timeKey(it.achievedAt) }
+                )
+            ProfilePrsListSection(
+                title = PrFormatting.activityLabel(key.kind, key.label),
+                icon = PrFormatting.activityIcon(key.kind, key.label),
+                kind = key.kind,
+                label = key.label,
+                items = items
+            )
         }
     }
 

@@ -54,8 +54,11 @@ data class WeeklyChallengeListRowUi(
         val c = challengeCategory?.trim()?.lowercase()
         if (!c.isNullOrEmpty()) return c
         return when (metricKind?.lowercase()) {
-            "cumulative_cardio_km", "cardio_session_pace_gate" -> "cardio"
-            "cumulative_sport_sessions" -> "sport"
+            "cumulative_cardio_km", "cardio_session_pace_gate",
+            "cumulative_elevation_gain_m", "cardio_session_rowerg_split_gate" -> "cardio"
+            "cumulative_sport_sessions", "hyrox_official_time_gate",
+            "cumulative_climbing_routes_sent", "cumulative_ski_distance_km",
+            "cumulative_sport_scoring_stat" -> "sport"
             else -> "strength"
         }
     }
@@ -290,6 +293,22 @@ class ChallengeWeeklyDetailViewModel(
             "cumulative_strength_volume_kg" -> String.format("%.0f / %.0f kg volume", pv, tv)
             "single_set_max_reps" -> String.format("%.0f / %.0f reps (best set)", pv, tv)
             "strength_workouts_touching_muscle" -> String.format("%.0f / %.0f focused workouts", pv, tv)
+            "cumulative_elevation_gain_m" -> String.format("%.0f / %.0f m elevation", pv, tv)
+            "hyrox_official_time_gate" -> {
+                val capMin = ((sec ?: 3600.0).toInt()) / 60
+                val bestMin = pv.toInt() / 60
+                val bestSec = pv.toInt() % 60
+                String.format("%d:%02d best (goal ≤ %d min official)", bestMin, bestSec, capMin)
+            }
+            "cumulative_climbing_routes_sent" -> String.format("%.0f / %.0f routes sent", pv, tv)
+            "cumulative_ski_distance_km" -> String.format("%.1f / %.0f km ski", pv, tv)
+            "cumulative_sport_scoring_stat" -> String.format("%.0f / %.0f scoring stat", pv, tv)
+            "cardio_session_rowerg_split_gate" -> {
+                val capSec = (sec ?: 120.0).toInt()
+                val capMin = capSec / 60
+                val capRem = capSec % 60
+                String.format("%.1f km (goal ≥ %.0f km, split ≤ %d:%02d /500m)", pv, tv, capMin, capRem)
+            }
             else -> null
         }
     }

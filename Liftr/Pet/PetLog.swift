@@ -69,16 +69,10 @@ struct PetLog: Identifiable, Equatable {
             if textShowsCoinAmount(titleText, amount: amount) { return nil }
             return "+\(amount) coins"
         case "combat":
-            if log.details?["is_draw"] == "true" {
-                return combatRewardText(xp: log.expGained, coins: Int(log.details?["coins_gained"] ?? "") ?? 0)
-            }
-            if log.details?["won"] == "true" {
-                return combatRewardText(
-                    xp: log.expGained,
-                    coins: Int(log.details?["coins_gained"] ?? "") ?? 0
-                )
-            }
-            return "No rewards"
+            return combatRewardText(
+                xp: log.expGained,
+                coins: Int(log.details?["coins_gained"] ?? "") ?? 0
+            )
         default:
             return nil
         }

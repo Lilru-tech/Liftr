@@ -172,8 +172,6 @@ struct RootView: View {
                 break
             case .followerProfile:
                 app.selectedTab = .search
-            case .workout:
-                app.selectedTab = .home
             case .segmentDetail:
                 app.selectedTab = .search
             case .achievements:
@@ -207,18 +205,6 @@ struct RootView: View {
             case .followerProfile(let userId):
                 ProfileView(userId: userId)
                     .gradientBG()
-                
-            case .workout(let workoutId, let ownerId):
-                if let ownerId {
-                    WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
-                        .gradientBG()
-                        .onAppear {
-                            print("🧪 [RootView.sheet] presenting WorkoutDetailView workoutId=\(workoutId) ownerId=\(ownerId)")
-                        }
-                } else {
-                    WorkoutFromNotificationLoaderView(workoutId: workoutId)
-                        .gradientBG()
-                }
                 
             case .achievements(let achievementId):
                 if let currentUserId = app.userId {

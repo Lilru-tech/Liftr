@@ -24,7 +24,8 @@
 --     Misma base que el conteo típico de desbloqueo: workouts publicados con fila en cardio_sessions.
 --
 -- community_pct_unlocked / community_sample_size (benchmark barato):
---   - % de usuarios con ≥1 workout publicado que tienen fila en user_achievements para ese logro.
+--   - % de usuarios con perfil activo y ≥1 workout publicado que tienen fila en user_achievements para ese logro.
+--   - Numerador e denominador comparten el CTE publishing_users (intersección profile + published workout).
 --   - Si el denominador < min_publishing_users (CTE achievement_community_threshold abajo), ambas NULL.
 --   - Producción con masa de usuarios: 50–100 típico. Beta con ~4 usuarios publicando: hay que bajar
 --     ese valor (p. ej. 3) o seguirás viendo NULL en la app — no es fallo del cliente.

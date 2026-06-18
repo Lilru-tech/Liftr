@@ -3,6 +3,7 @@ package com.lilru.liftr.ui.profile
 import android.net.Uri
 import com.lilru.liftr.domain.levelProgressRatio
 import com.lilru.liftr.nutrition.NutritionMetabolism
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -29,6 +31,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
@@ -65,7 +69,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.SecondaryTabRow
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
@@ -89,6 +93,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -96,9 +102,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
+import com.lilru.liftr.ui.components.LiftrBannerAd
 import com.lilru.liftr.BuildConfig
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -118,10 +122,16 @@ import com.lilru.liftr.ui.pets.ProfileOpponentPetFloatingOverlay
 import com.lilru.liftr.prefs.LiftrPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.ui.components.CoinsBalanceBadge
 import com.lilru.liftr.ui.components.HorizontalViewThatFits
 import com.lilru.liftr.ui.components.LiftrAvatar
 import com.lilru.liftr.ui.components.LiftrBackTopBar
+import com.lilru.liftr.ui.components.LiftrFilterPillRow
+import com.lilru.liftr.ui.components.LiftrGlassCircle
+import com.lilru.liftr.ui.components.LiftrGlassSurface
+import com.lilru.liftr.ui.components.LiftrPillSelectedStyle
+import com.lilru.liftr.ui.theme.LiftrRadii
 import com.lilru.liftr.ui.territory.TerritoryMapScreen
 import com.lilru.liftr.ui.territory.TerritoryProfileHubCard
 import com.lilru.liftr.util.AvatarImageUtils
@@ -153,6 +163,7 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.auth.auth
+import dev.chrisbanes.haze.HazeState
 import java.text.DateFormat
 import java.time.Instant
 import java.time.LocalDate
@@ -191,13 +202,18 @@ private enum class ProfileMainTab {
     Settings
 }
 
+private fun profileMainTabWeight(tab: ProfileMainTab): Float = when (tab) {
+    ProfileMainTab.Prs -> 0.48f
+    ProfileMainTab.Calendar -> 1.12f
+    ProfileMainTab.Progress -> 1.08f
+    ProfileMainTab.Segments -> 1.08f
+    ProfileMainTab.Settings -> 1.04f
+}
+
 @Composable
-private fun ProfileHeaderStatPillsRow(
+private fun ProfileHeaderFollowPillsRow(
     ui: ProfileUiState,
-    listMode: (FollowListMode) -> Unit,
-    onOpenCoinTransactions: (() -> Unit)?,
-    coinsCompact: Boolean,
-    coinsAbbreviated: Boolean
+    listMode: (FollowListMode) -> Unit
 ) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -206,8 +222,8 @@ private fun ProfileHeaderStatPillsRow(
         Surface(
             onClick = { listMode(FollowListMode.FOLLOWERS) },
             shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            color = Color.White.copy(alpha = 0.12f),
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.18f))
         ) {
             Row(
                 Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -225,8 +241,8 @@ private fun ProfileHeaderStatPillsRow(
         Surface(
             onClick = { listMode(FollowListMode.FOLLOWING) },
             shape = RoundedCornerShape(50),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+            color = Color.White.copy(alpha = 0.12f),
+            border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.18f))
         ) {
             Row(
                 Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
@@ -245,25 +261,59 @@ private fun ProfileHeaderStatPillsRow(
                 )
             }
         }
-        if (ui.isOwnProfile) {
-            CoinsBalanceBadge(
-                balance = ui.coinsBalance,
-                compact = coinsCompact,
-                abbreviated = coinsAbbreviated,
-                onClick = onOpenCoinTransactions
-            )
-        } else {
-            CoinsBalanceBadge(
-                balance = ui.coinsBalance,
-                compact = coinsCompact,
-                abbreviated = coinsAbbreviated
-            )
-        }
+    }
+}
+
+@Composable
+private fun ProfileHeaderCoinsPill(
+    ui: ProfileUiState,
+    onOpenCoinTransactions: (() -> Unit)?,
+    coinsCompact: Boolean,
+    coinsAbbreviated: Boolean
+) {
+    val coinBalance = maxOf(ui.coinsBalance, CoinManager.balance)
+    val abbreviated = coinsAbbreviated || coinBalance >= 1_000
+    if (ui.isOwnProfile) {
+        CoinsBalanceBadge(
+            balance = coinBalance,
+            compact = coinsCompact,
+            abbreviated = abbreviated,
+            onClick = onOpenCoinTransactions
+        )
+    } else {
+        CoinsBalanceBadge(
+            balance = coinBalance,
+            compact = coinsCompact,
+            abbreviated = abbreviated
+        )
+    }
+}
+
+@Composable
+private fun ProfileHeaderStatPillsRow(
+    ui: ProfileUiState,
+    listMode: (FollowListMode) -> Unit,
+    onOpenCoinTransactions: (() -> Unit)?,
+    coinsCompact: Boolean,
+    coinsAbbreviated: Boolean
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        ProfileHeaderFollowPillsRow(ui = ui, listMode = listMode)
+        ProfileHeaderCoinsPill(
+            ui = ui,
+            onOpenCoinTransactions = onOpenCoinTransactions,
+            coinsCompact = coinsCompact,
+            coinsAbbreviated = coinsAbbreviated
+        )
     }
 }
 
 @Composable
 private fun ProfileIosStyleHeader(
+    hazeState: HazeState,
     ui: ProfileUiState,
     profileUserId: String?,
     meId: String?,
@@ -287,13 +337,12 @@ private fun ProfileIosStyleHeader(
     showUsernameInCard: Boolean = true,
     toggleFollow: () -> Unit
 ) {
-    Card(
+    LiftrGlassSurface(
+        hazeState = hazeState,
+        shape = RoundedCornerShape(LiftrRadii.card),
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.38f)
-        ),
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(0.8.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+        elevation = 4.dp,
+        strokeAlpha = 0.18f
     ) {
         Row(
             modifier = Modifier
@@ -328,13 +377,6 @@ private fun ProfileIosStyleHeader(
                             ?: stringResource(R.string.profile_unknown_username),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
-                    )
-                }
-                if (!ui.email.isNullOrBlank() && ui.isOwnProfile) {
-                    Text(
-                        ui.email!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 HorizontalViewThatFits(modifier = Modifier.fillMaxWidth()) {
@@ -426,7 +468,17 @@ private fun ProfileIosStyleHeader(
                                 )
                             }
                             TextButton(onClick = onOpenBioSheet) {
-                                Text(stringResource(R.string.profile_edit_bio))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Edit,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Text(stringResource(R.string.profile_edit_bio))
+                                }
                             }
                         }
                     }
@@ -582,14 +634,24 @@ private fun ProfileIosStyleHeader(
             }
             Box {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onOpenRanking) {
-                        Icon(
-                            Icons.Filled.EmojiEvents,
-                            contentDescription = stringResource(R.string.profile_menu_ranking)
-                        )
+                    LiftrGlassCircle(
+                        hazeState = hazeState,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        IconButton(onClick = onOpenRanking) {
+                            Icon(
+                                Icons.Filled.EmojiEvents,
+                                contentDescription = stringResource(R.string.profile_menu_ranking)
+                            )
+                        }
                     }
-                    IconButton(onClick = { onProfileMenuExpandedChange(true) }) {
-                        Icon(Icons.Filled.MoreVert, contentDescription = null)
+                    LiftrGlassCircle(
+                        hazeState = hazeState,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        IconButton(onClick = { onProfileMenuExpandedChange(true) }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = null)
+                        }
                     }
                 }
                 if (ui.isOwnProfile && ui.unreadNotifications > 0) {
@@ -710,6 +772,7 @@ private fun ProfileIosStyleHeader(
 @Composable
 fun ProfileTabScreen(
     supabase: SupabaseClient,
+    hazeState: HazeState = remember { HazeState() },
     onSignOut: () -> Unit,
     targetUserId: String? = null,
     showSignOutButton: Boolean = true,
@@ -737,6 +800,7 @@ fun ProfileTabScreen(
     var showFeatureRequests by rememberSaveable { mutableStateOf(false) }
     var showFaqs by rememberSaveable { mutableStateOf(false) }
     var showHealthConnect by rememberSaveable { mutableStateOf(false) }
+    var showWearableConnect by rememberSaveable { mutableStateOf(false) }
     var showBodyWeightHistory by rememberSaveable { mutableStateOf(false) }
     var showHealthConnectWeight by rememberSaveable { mutableStateOf(false) }
     var showGoals by rememberSaveable { mutableStateOf(false) }
@@ -752,6 +816,7 @@ fun ProfileTabScreen(
     var showPetDex by rememberSaveable { mutableStateOf(false) }
     var showUserItems by rememberSaveable { mutableStateOf(false) }
     var showPetCombatArena by rememberSaveable { mutableStateOf(false) }
+    var combatDisableNerfChoice by rememberSaveable { mutableStateOf(false) }
     var petCombatPreview by remember { mutableStateOf<PetCombatPreviewWire?>(null) }
     var petCombatHeadToHead by remember { mutableStateOf<PetCombatHeadToHeadSummaryWire?>(null) }
     var competitionsHubContextOpponent by rememberSaveable { mutableStateOf<String?>(null) }
@@ -932,6 +997,7 @@ fun ProfileTabScreen(
             supabase = supabase,
             opponentUserId = profileUserId,
             preview = petCombatPreview,
+            disableNerfChoice = combatDisableNerfChoice,
             backgroundThemeId = LiftrPreferences.backgroundTheme(context.applicationContext),
             onBack = {
                 PetRefreshBus.notifyPetStateDidChange()
@@ -999,6 +1065,15 @@ fun ProfileTabScreen(
         HealthConnectImportScreen(
             supabase = supabase,
             onBack = { showHealthConnect = false },
+            modifier = modifier
+        )
+        return
+    }
+
+    if (showWearableConnect) {
+        com.lilru.liftr.ui.wearable.WearableConnectScreen(
+            supabase = supabase,
+            onBack = { showWearableConnect = false },
             modifier = modifier
         )
         return
@@ -1159,6 +1234,7 @@ fun ProfileTabScreen(
                 )
             }
             ProfileIosStyleHeader(
+                hazeState = hazeState,
                 ui = ui,
                 profileUserId = profileUserId,
                 meId = meId,
@@ -1193,30 +1269,27 @@ fun ProfileTabScreen(
                 showUsernameInCard = onBack == null,
                 toggleFollow = vm::toggleFollow
             )
-            SecondaryTabRow(selectedTabIndex = safeTabIndex) {
-                tabEntries.forEachIndexed { i, tab ->
-                    Tab(
-                        selected = safeTabIndex == i,
-                        onClick = { tabIndex = i },
-                        text = {
-                            Text(
-                                stringResource(
-                                    when (tab) {
-                                        ProfileMainTab.Calendar -> R.string.profile_tab_calendar
-                                        ProfileMainTab.Prs -> R.string.profile_tab_prs
-                                        ProfileMainTab.Progress -> R.string.profile_tab_progress
-                                        ProfileMainTab.Segments -> R.string.profile_tab_explore
-                                        ProfileMainTab.Settings -> R.string.profile_tab_settings
-                                    }
-                                ),
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1
-                            )
+            val tabLabels = tabEntries.map { tab ->
+                    stringResource(
+                        when (tab) {
+                            ProfileMainTab.Calendar -> R.string.profile_tab_calendar
+                            ProfileMainTab.Prs -> R.string.profile_tab_prs
+                            ProfileMainTab.Progress -> R.string.profile_tab_progress
+                            ProfileMainTab.Segments -> R.string.profile_tab_explore
+                            ProfileMainTab.Settings -> R.string.profile_tab_settings
                         }
                     )
                 }
-            }
-            HorizontalDivider(Modifier.padding(vertical = 4.dp))
+            LiftrFilterPillRow(
+                labels = tabLabels,
+                selectedIndex = safeTabIndex,
+                onSelected = { tabIndex = it },
+                hazeState = hazeState,
+                selectedStyle = LiftrPillSelectedStyle.IosWhite,
+                compact = true,
+                pillWeights = tabEntries.map(::profileMainTabWeight),
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -1234,7 +1307,8 @@ fun ProfileTabScreen(
                             if (profileUserId != null) {
                                 ProfileCalendarCard(
                                     supabase = supabase,
-                                    profileUserId = profileUserId
+                                    profileUserId = profileUserId,
+                                    hazeState = hazeState
                                 )
                             }
                         }
@@ -1245,6 +1319,7 @@ fun ProfileTabScreen(
                                 .ifEmpty { ui.username?.trim().orEmpty() }
                             ProfilePrsListScreen(
                                 supabase = supabase,
+                                hazeState = hazeState,
                                 userId = profileUserId,
                                 username = uname,
                                 showCompare = meId != null && meId != profileUserId,
@@ -1518,6 +1593,25 @@ fun ProfileTabScreen(
                             ) {
                                 Text(stringResource(R.string.profile_health_connect))
                             }
+                            if (ui.isOwnProfile) {
+                                OutlinedButton(
+                                    onClick = { showWearableConnect = true },
+                                    enabled = !ui.loading,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                        Text(
+                                            stringResource(R.string.wearable_routes_settings_title),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            stringResource(R.string.wearable_routes_settings_subtitle),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
                             OutlinedButton(
                                 onClick = { showNotificationSettings = true },
                                 enabled = !ui.loading,
@@ -1637,19 +1731,7 @@ fun ProfileTabScreen(
                 }
             }
             if (!profileNoAds) {
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp)
-                        .padding(top = 4.dp, bottom = 4.dp),
-                    factory = { ctx ->
-                        AdView(ctx).apply {
-                            setAdSize(AdSize.BANNER)
-                            adUnitId = BuildConfig.AD_BANNER_UNIT_ID
-                            loadAd(AdRequest.Builder().build())
-                        }
-                    }
-                )
+                LiftrBannerAd(horizontalPadding = 0.dp)
             }
         }
         PullRefreshIndicator(
@@ -1678,11 +1760,24 @@ fun ProfileTabScreen(
                     opponentUsername = preview.defender?.username,
                     bottomInsetDp = bottomInsetDp,
                     backgroundThemeId = LiftrPreferences.backgroundTheme(context.applicationContext),
-                    onChallenge = { showPetCombatArena = true },
+                    onChallenge = { disableNerf ->
+                        combatDisableNerfChoice = disableNerf
+                        showPetCombatArena = true
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
             }
         }
+    }
+
+    if (showDeleteAccountDialog && ui.isOwnProfile && !ui.deleteAccountBusy) {
+        BackHandler { showDeleteAccountDialog = false }
+    }
+    if (showBioSheet) {
+        BackHandler { showBioSheet = false }
+    }
+    if (profileMenuExpanded) {
+        BackHandler { profileMenuExpanded = false }
     }
 
     if (showDeleteAccountDialog && ui.isOwnProfile) {

@@ -46,6 +46,12 @@ class PetCombatPlaybackEngine(
     private val _lastStrike = MutableStateFlow<PetCombatStrikeEvent?>(null)
     val lastStrike: StateFlow<PetCombatStrikeEvent?> = _lastStrike.asStateFlow()
 
+    private val _activeActor = MutableStateFlow<PetCombatHitSide?>(null)
+    val activeActor: StateFlow<PetCombatHitSide?> = _activeActor.asStateFlow()
+
+    private val _dodgePulseSide = MutableStateFlow<PetCombatHitSide?>(null)
+    val dodgePulseSide: StateFlow<PetCombatHitSide?> = _dodgePulseSide.asStateFlow()
+
     private val _attackerCurrentHp = MutableStateFlow(this.attackerMaxHp)
     val attackerCurrentHp: StateFlow<Int> = _attackerCurrentHp.asStateFlow()
 
@@ -61,6 +67,8 @@ class PetCombatPlaybackEngine(
         _isFinished.value = false
         _currentTurnIndex.value = -1
         _currentMessage.value = ""
+        _activeActor.value = null
+        _dodgePulseSide.value = null
         _attackerCurrentHp.value = attackerMaxHp
         _defenderCurrentHp.value = defenderMaxHp
 
@@ -71,7 +79,9 @@ class PetCombatPlaybackEngine(
             _attackerCurrentHp.value = turn.attackerHpAfter
             _defenderCurrentHp.value = turn.defenderHpAfter
             val isDodged = turn.action == "dodge"
+            val actor = if (turn.actor == "attacker") PetCombatHitSide.Attacker else PetCombatHitSide.Defender
             val target = if (turn.actor == "attacker") PetCombatHitSide.Defender else PetCombatHitSide.Attacker
+            _activeActor.value = actor
             _lastStrike.value = PetCombatStrikeEvent(
                 id = index,
                 target = target,
@@ -79,11 +89,15 @@ class PetCombatPlaybackEngine(
                 isCritical = turn.isCritical,
                 isDodged = isDodged
             )
-            if (!isDodged) {
+            if (isDodged) {
+                _dodgePulseSide.value = target
+            } else {
                 _hitSide.value = target
             }
             delay(250)
             _hitSide.value = null
+            _dodgePulseSide.value = null
+            _activeActor.value = null
         }
 
         _isPlaying.value = false

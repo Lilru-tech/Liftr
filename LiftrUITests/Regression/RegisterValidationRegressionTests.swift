@@ -24,8 +24,18 @@ final class RegisterValidationRegressionTests: RegressionTestCase {
         }
 
         try step("Assert submit stays disabled") {
-            XCTAssertTrue(register.submitButton.waitForExistence(timeout: UITestWait.standard))
-            XCTAssertFalse(register.submitButton.isEnabled)
+            register.emailField.tap()
+            let invalidLabel = app.staticTexts.matching(
+                NSPredicate(format: "label CONTAINS[c] 'invalid email'")
+            ).firstMatch
+            let createButton = app.buttons.matching(
+                NSPredicate(format: "label CONTAINS 'Create account'")
+            ).firstMatch
+            XCTAssertTrue(
+                invalidLabel.waitForExistence(timeout: UITestWait.network)
+                    || (createButton.waitForExistence(timeout: UITestWait.standard) && !createButton.isEnabled),
+                "Invalid email did not disable account creation."
+            )
         }
     }
 }

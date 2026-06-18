@@ -6,6 +6,8 @@ import android.content.Context.MODE_PRIVATE
 object LiftrPreferences {
     private const val PREF = "liftr_app_prefs"
     private const val KEY_SKIP_START_COUNTDOWN = "skipStartCountdown"
+    private const val KEY_SKIP_PET_COMBAT_UNBALANCED_WARNING = "skipPetCombatUnbalancedWarning"
+    private const val KEY_PET_COMBAT_CHALLENGE_MODE = "petCombatChallengeMode"
     private const val KEY_ACTIVE_STRENGTH_NAV_HINT_SEEN = "activeStrengthNavHintSeen"
     private const val KEY_ADD_WORKOUT_PLAN_TOOLTIP_SEEN = "addWorkoutPlanTooltipSeen"
     /**
@@ -28,6 +30,33 @@ object LiftrPreferences {
             .getSharedPreferences(PREF, MODE_PRIVATE)
             .edit()
             .putBoolean(KEY_SKIP_START_COUNTDOWN, value)
+            .apply()
+    }
+
+    fun skipPetCombatUnbalancedWarning(context: Context): Boolean =
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .getBoolean(KEY_SKIP_PET_COMBAT_UNBALANCED_WARNING, false)
+
+    fun setSkipPetCombatUnbalancedWarning(context: Context, value: Boolean) {
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_SKIP_PET_COMBAT_UNBALANCED_WARNING, value)
+            .apply()
+    }
+
+    fun petCombatChallengeMode(context: Context): String =
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .getString(KEY_PET_COMBAT_CHALLENGE_MODE, "balanced")
+            ?: "balanced"
+
+    fun setPetCombatChallengeMode(context: Context, value: String) {
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PET_COMBAT_CHALLENGE_MODE, value)
             .apply()
     }
 

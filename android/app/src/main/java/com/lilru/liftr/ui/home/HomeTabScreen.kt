@@ -34,15 +34,21 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.sp
+import com.lilru.liftr.ui.components.LiftrFilterPillRow
+import com.lilru.liftr.ui.components.LiftrGlassCircle
+import com.lilru.liftr.ui.theme.LiftrRadii
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -74,9 +80,7 @@ import java.time.format.FormatStyle
 import java.util.Locale
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
+import com.lilru.liftr.ui.components.LiftrBannerAd
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
@@ -135,6 +139,7 @@ fun HomeTabScreen(
     homeFeedSyncNonce: Int = 0,
     homeFeedSyncWorkoutId: Int = 0,
     onGoToProfileTab: () -> Unit = {},
+    hazeState: HazeState = remember { HazeState() },
     modifier: Modifier = Modifier
 ) {
     val homeContext = LocalContext.current
@@ -312,6 +317,7 @@ fun HomeTabScreen(
                             listState.scrollToItem(0)
                         }
                     },
+                    hazeState = hazeState,
                     vm = vm,
                     ui = ui,
                     homeContext = homeContext,
@@ -347,6 +353,7 @@ fun HomeTabScreen(
                 HomeFloatingDockOverlay(
                     supabase = supabase,
                     quickPrefs = quickPrefs,
+                    hazeState = hazeState,
                     bottomInsetPx = homeBottomInsetPx,
                     busy = quickStartBusyKind != null,
                     showChat = me != null,
@@ -475,6 +482,7 @@ private fun HomeContentColumn(
     pull: androidx.compose.material.pullrefresh.PullRefreshState,
     showScrollTop: Boolean,
     onScrollTop: () -> Unit,
+    hazeState: HazeState,
     vm: HomeViewModel,
     ui: HomeUiState,
     homeContext: android.content.Context,
@@ -508,7 +516,7 @@ private fun HomeContentColumn(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 item {
@@ -518,30 +526,22 @@ private fun HomeContentColumn(
                         HomeKindFilter.CARDIO,
                         HomeKindFilter.SPORT
                     )
-                    val kindLabels = listOf(
-                        R.string.home_filter_all,
-                        R.string.home_filter_strength,
-                        R.string.home_filter_cardio,
-                        R.string.home_filter_sport
-                    )
-                    SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 6.dp)
-                    ) {
-                        kindSegments.forEachIndexed { i, f ->
-                            SegmentedButton(
-                                selected = ui.kindFilter == f,
-                                onClick = { vm.setKindFilter(f) },
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = i,
-                                    count = kindSegments.size
-                                )
-                            ) {
-                                Text(stringResource(kindLabels[i]))
-                            }
+                    val kindLabels = kindSegments.map { f ->
+                        when (f) {
+                            HomeKindFilter.ALL -> stringResource(R.string.home_filter_all)
+                            HomeKindFilter.STRENGTH -> stringResource(R.string.home_filter_strength)
+                            HomeKindFilter.CARDIO -> stringResource(R.string.home_filter_cardio)
+                            HomeKindFilter.SPORT -> stringResource(R.string.home_filter_sport)
                         }
                     }
+                    val selectedIndex = kindSegments.indexOf(ui.kindFilter).coerceAtLeast(0)
+                    LiftrFilterPillRow(
+                        labels = kindLabels,
+                        selectedIndex = selectedIndex,
+                        onSelected = { index -> vm.setKindFilter(kindSegments[index]) },
+                        hazeState = hazeState,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
                 }
                 if (hasDataModule || me != null) {
                     item {
@@ -701,34 +701,25 @@ private fun HomeContentColumn(
             )
         }
         if (showScrollTop) {
-            FloatingActionButton(
-                onClick = onScrollTop,
+            LiftrGlassCircle(
+                hazeState = hazeState,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(16.dp)
-                    .size(48.dp)
+                    .padding(end = 16.dp, bottom = 12.dp)
+                    .size(44.dp)
+                    .clickable(onClick = onScrollTop)
             ) {
                 Icon(
                     imageVector = Icons.Filled.KeyboardArrowUp,
-                    contentDescription = stringResource(R.string.home_scroll_to_top)
+                    contentDescription = stringResource(R.string.home_scroll_to_top),
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
     }
     if (!ui.isPremium) {
-        AndroidView(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(50.dp)
-                .padding(horizontal = 12.dp, vertical = 4.dp),
-            factory = { ctx ->
-                AdView(ctx).apply {
-                    setAdSize(AdSize.BANNER)
-                    adUnitId = BuildConfig.AD_BANNER_UNIT_ID
-                    loadAd(AdRequest.Builder().build())
-                }
-            }
-        )
+        LiftrBannerAd()
     }
     }
 }

@@ -746,7 +746,12 @@ struct AddWorkoutSheet: View {
                 }
             }
         }
-        .banner($banner, successAccessibilityIdentifier: "addWorkout.success")
+        .banner(
+            $banner,
+            autoHide: !UITestConfiguration.isEnabled,
+            duration: UITestConfiguration.isEnabled ? 8 : 2.5,
+            successAccessibilityIdentifier: "addWorkout.success"
+        )
         .alert(
             "Are you sure you want to remove the exercise?",
             isPresented: removeStrengthExerciseAlertBinding
@@ -2361,8 +2366,11 @@ struct AddWorkoutSheet: View {
     @MainActor
     private func showSuccessAndGoHome(_ message: String) async {
         banner = Banner(message: message, type: .success)
-        try? await Task.sleep(nanoseconds: 1_600_000_000)
-        resetForm()
+        let delaySeconds = UITestConfiguration.isEnabled ? 4.0 : 1.6
+        try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+        if !UITestConfiguration.isEnabled {
+            resetForm()
+        }
         app.selectedTab = .home
     }
     

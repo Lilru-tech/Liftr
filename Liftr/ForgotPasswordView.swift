@@ -90,6 +90,12 @@ struct ForgotPasswordView: View {
         .navigationTitle("Forgot password")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
+        .onAppear { prefillUITestEmailIfNeeded() }
+    }
+
+    private func prefillUITestEmailIfNeeded() {
+        guard UITestConfiguration.isEnabled, let testEmail = UITestConfiguration.testEmail else { return }
+        email = testEmail
     }
 
     private func sendResetLink() async {

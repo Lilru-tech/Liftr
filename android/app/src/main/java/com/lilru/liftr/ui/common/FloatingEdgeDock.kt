@@ -1,6 +1,12 @@
 package com.lilru.liftr.ui.common
 
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 enum class FloatingDockEdge {
@@ -106,4 +112,46 @@ fun migrateChatFabCorner(cornerRaw: String?): Pair<FloatingDockEdge, Float> = wh
     "TopLeading", "topLeading" -> FloatingDockEdge.LEFT to 0f
     "TopTrailing", "topTrailing" -> FloatingDockEdge.RIGHT to 0f
     else -> FloatingDockEdge.LEFT to 1f
+}
+
+fun Modifier.floatingDockDragAndTap(
+    widthPx: Float,
+    heightPx: Float,
+    bottomInsetPx: Float,
+    startAnchor: () -> Offset,
+    onClick: () -> Unit,
+    onDragStart: () -> Unit = {},
+    onDrag: (Offset) -> Unit,
+    onDragEnd: (Offset) -> Unit
+): Modifier = pointerInput(widthPx, heightPx, bottomInsetPx) {
+    coroutineScope {
+        var dragging = false
+        launch {
+            detectTapGestures(onTap = { if (!dragging) onClick() })
+        }
+        launch {
+            var anchor = Offset.Zero
+            var dragOffset = Offset.Zero
+            detectDragGestures(
+                onDragStart = {
+                    anchor = startAnchor()
+                    dragOffset = Offset.Zero
+                    dragging = false
+                    onDragStart()
+                },
+                onDrag = { change, dragAmount ->
+                    dragging = true
+                    change.consume()
+                    dragOffset += dragAmount
+                    onDrag(anchor + dragOffset)
+                },
+                onDragEnd = {
+                    if (dragging) {
+                        onDragEnd(anchor + dragOffset)
+                    }
+                    dragging = false
+                }
+            )
+        }
+    }
 }

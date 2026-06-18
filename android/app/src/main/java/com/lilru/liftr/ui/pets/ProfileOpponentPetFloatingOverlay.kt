@@ -43,7 +43,7 @@ fun ProfileOpponentPetFloatingOverlay(
     opponentUsername: String?,
     bottomInsetDp: Int,
     backgroundThemeId: String,
-    onChallenge: () -> Unit,
+    onChallenge: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -87,7 +87,8 @@ fun ProfileOpponentPetFloatingOverlay(
 
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .offset { IntOffset(positionX, positionY) }
+                .size(ProfilePetFabPosition.fabSize)
                 .pointerInput(perimeterT, bottomInsetDp, widthPx, heightPx, tapThresholdPx) {
                     val gestureBounds = ProfilePetFabPosition.bounds(
                         widthPx = widthPx,
@@ -97,24 +98,19 @@ fun ProfileOpponentPetFloatingOverlay(
                         bottomInsetDp = bottomInsetDp,
                         density = this@pointerInput
                     )
+                    val fabRadiusPx = ProfilePetFabPosition.fabSize.toPx() / 2f
                     val gestureResolvedT = ProfilePetFabPosition.resolvedPerimeterT(
                         saved = perimeterT.takeIf { it >= 0f },
                         legacyX = null,
                         legacyY = null,
                         bounds = gestureBounds
                     )
-                    val gestureFabRadiusPx = ProfilePetFabPosition.fabSize.toPx() / 2f
-
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        val touchAnchor = dragPreviewPoint
-                            ?: ProfilePetFabPosition.pointOnPerimeter(gestureResolvedT, gestureBounds)
-                        if (hypot(down.position.x - touchAnchor.x, down.position.y - touchAnchor.y) > gestureFabRadiusPx * 1.15f) {
-                            return@awaitEachGesture
-                        }
-
                         val pointerId = down.id
                         var isDragging = false
+                        var livePreview: Offset? = null
+                        val startAnchor = ProfilePetFabPosition.pointOnPerimeter(gestureResolvedT, gestureBounds)
 
                         while (true) {
                             val event = awaitPointerEvent()
@@ -124,10 +120,11 @@ fun ProfileOpponentPetFloatingOverlay(
                                 if (!isDragging) {
                                     showSheet = true
                                 } else {
-                                    val snapped = ProfilePetFabPosition.nearestPointOnPerimeter(
-                                        change.position,
-                                        gestureBounds
-                                    )
+                                    val snapped = livePreview
+                                        ?: ProfilePetFabPosition.nearestPointOnPerimeter(
+                                            startAnchor,
+                                            gestureBounds
+                                        )
                                     val newT = ProfilePetFabPosition.perimeterParameterFor(snapped, gestureBounds)
                                     perimeterT = newT
                                     LiftrPreferences.setProfileOpponentPetFabPerimeterT(context, newT)
@@ -135,23 +132,23 @@ fun ProfileOpponentPetFloatingOverlay(
                                 break
                             }
 
-                            val finger = change.position
-                            if (!isDragging && hypot(finger.x - down.position.x, finger.y - down.position.y) >= tapThresholdPx) {
+                            val fingerLocal = change.position
+                            if (!isDragging && hypot(fingerLocal.x - down.position.x, fingerLocal.y - down.position.y) >= tapThresholdPx) {
                                 isDragging = true
                             }
                             if (isDragging) {
-                                dragPreviewPoint = ProfilePetFabPosition.nearestPointOnPerimeter(finger, gestureBounds)
+                                val snap = livePreview ?: startAnchor
+                                val fingerGlobal = Offset(
+                                    x = snap.x - fabRadiusPx + fingerLocal.x,
+                                    y = snap.y - fabRadiusPx + fingerLocal.y
+                                )
+                                livePreview = ProfilePetFabPosition.nearestPointOnPerimeter(fingerGlobal, gestureBounds)
+                                dragPreviewPoint = livePreview
+                                change.consume()
                             }
-                            change.consume()
                         }
                     }
                 }
-        )
-
-        Box(
-            modifier = Modifier
-                .offset { IntOffset(positionX, positionY) }
-                .size(ProfilePetFabPosition.fabSize)
                 .shadow(6.dp, CircleShape, spotColor = rarityColor.copy(alpha = 0.35f))
                 .clip(CircleShape)
                 .border(2.dp, rarityColor.copy(alpha = 0.7f), CircleShape)

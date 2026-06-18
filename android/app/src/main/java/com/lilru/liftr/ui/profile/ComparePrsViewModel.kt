@@ -143,7 +143,9 @@ class ComparePrsViewModel(
         val sections = byTitle.keys.sorted().map { title ->
             ComparePrsSection(
                 title = title,
-                items = (byTitle[title] ?: emptyList()).sortedBy { it.label }
+                items = (byTitle[title] ?: emptyList()).sortedBy {
+                    PrFormatting.activityLabel(it.kind, it.label)
+                }
             )
         }
         var me = 0
