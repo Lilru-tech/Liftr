@@ -41,10 +41,10 @@ struct PetCombatUnbalancedMatchDialog: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
-                }
 
-                Toggle("Don't show this warning again", isOn: $dontShowAgain)
-                    .font(.subheadline)
+                    Toggle("Don't show this warning again", isOn: $dontShowAgain)
+                        .font(.subheadline)
+                }
 
                 HStack(spacing: 12) {
                     Button("Cancel", action: onCancel)
@@ -58,7 +58,12 @@ struct PetCombatUnbalancedMatchDialog: View {
                 }
             }
             .padding(20)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
             .padding(.horizontal, 28)
         }
     }

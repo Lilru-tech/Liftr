@@ -1,21 +1,33 @@
 package com.lilru.liftr.ui.pets
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -33,55 +45,76 @@ fun PetCombatUnbalancedMatchDialog(
     onDismiss: () -> Unit,
     onFight: () -> Unit
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.45f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 28.dp)
+                .shadow(12.dp, RoundedCornerShape(20.dp))
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {}
+                )
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
             Text(
                 text = stringResource(R.string.pet_combat_unbalanced_title),
+                style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    text = if (isUnderdog) {
-                        stringResource(R.string.pet_combat_unbalanced_underdog_body)
-                    } else {
-                        stringResource(R.string.pet_combat_unbalanced_bully_body)
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
 
-                if (isUnderdog) {
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        PetCombatChallengeMode.entries.forEachIndexed { index, mode ->
-                            SegmentedButton(
-                                selected = selectedMode == mode,
-                                onClick = { onModeChange(mode) },
-                                shape = SegmentedButtonDefaults.itemShape(
-                                    index = index,
-                                    count = PetCombatChallengeMode.entries.size
-                                )
-                            ) {
-                                Text(
-                                    text = when (mode) {
-                                        PetCombatChallengeMode.BALANCED -> stringResource(R.string.pet_combat_mode_balanced_short)
-                                        PetCombatChallengeMode.HARDCORE -> stringResource(R.string.pet_combat_mode_hardcore_short)
-                                    },
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
+            Text(
+                text = if (isUnderdog) {
+                    stringResource(R.string.pet_combat_unbalanced_underdog_body)
+                } else {
+                    stringResource(R.string.pet_combat_unbalanced_bully_body)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (isUnderdog) {
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    PetCombatChallengeMode.entries.forEachIndexed { index, mode ->
+                        SegmentedButton(
+                            selected = selectedMode == mode,
+                            onClick = { onModeChange(mode) },
+                            shape = SegmentedButtonDefaults.itemShape(
+                                index = index,
+                                count = PetCombatChallengeMode.entries.size
+                            )
+                        ) {
+                            Text(
+                                text = when (mode) {
+                                    PetCombatChallengeMode.BALANCED -> stringResource(R.string.pet_combat_mode_balanced_short)
+                                    PetCombatChallengeMode.HARDCORE -> stringResource(R.string.pet_combat_mode_hardcore_short)
+                                },
+                                style = MaterialTheme.typography.labelSmall
+                            )
                         }
                     }
-
-                    Text(
-                        text = modeDescription(selectedMode, hardcoreBonusLabel),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
 
+                Text(
+                    text = modeDescription(selectedMode, hardcoreBonusLabel),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -97,18 +130,30 @@ fun PetCombatUnbalancedMatchDialog(
                     )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onFight) {
-                Text(stringResource(R.string.pet_combat_unbalanced_fight), fontWeight = FontWeight.SemiBold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.pet_combat_unbalanced_cancel))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(stringResource(R.string.pet_combat_unbalanced_cancel))
+                }
+                Button(
+                    onClick = onFight,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+                ) {
+                    Text(
+                        stringResource(R.string.pet_combat_unbalanced_fight),
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
         }
-    )
+    }
 }
 
 private fun modeDescription(mode: PetCombatChallengeMode, hardcoreBonusLabel: String?): String =

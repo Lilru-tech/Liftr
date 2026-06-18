@@ -10,6 +10,8 @@ final class PetCombatPlaybackEngine {
     private(set) var isFinished = false
     private(set) var hitSide: PetCombatHitSide?
     private(set) var lastStrike: PetCombatStrikeEvent?
+    private(set) var activeActor: PetCombatHitSide?
+    private(set) var dodgePulseSide: PetCombatHitSide?
     private(set) var attackerCurrentHp: Int
     private(set) var defenderCurrentHp: Int
     let attackerMaxHp: Int
@@ -55,6 +57,8 @@ final class PetCombatPlaybackEngine {
         isFinished = false
         currentTurnIndex = -1
         currentMessage = ""
+        activeActor = nil
+        dodgePulseSide = nil
         attackerCurrentHp = attackerMaxHp
         defenderCurrentHp = defenderMaxHp
 
@@ -65,7 +69,9 @@ final class PetCombatPlaybackEngine {
             attackerCurrentHp = turn.attackerHpAfter
             defenderCurrentHp = turn.defenderHpAfter
             let isDodged = turn.action == "dodge"
+            let actor: PetCombatHitSide = turn.actor == "attacker" ? .attacker : .defender
             let target: PetCombatHitSide = turn.actor == "attacker" ? .defender : .attacker
+            activeActor = actor
             lastStrike = PetCombatStrikeEvent(
                 id: index,
                 target: target,
@@ -73,11 +79,15 @@ final class PetCombatPlaybackEngine {
                 isCritical: turn.isCritical,
                 isDodged: isDodged
             )
-            if !isDodged {
+            if isDodged {
+                dodgePulseSide = target
+            } else {
                 hitSide = target
             }
             try? await Task.sleep(nanoseconds: 250_000_000)
             hitSide = nil
+            dodgePulseSide = nil
+            activeActor = nil
         }
 
         isPlaying = false

@@ -119,10 +119,9 @@ struct OpponentPetChallengeSheet: View {
             return
         }
 
-        if skipPetCombatUnbalancedWarning {
-            let mode = resolvedSavedMode()
+        if skipPetCombatUnbalancedWarning && !preview.isAttackerUnderdog {
             dismiss()
-            onChallenge(mode.disableNerfChoice)
+            onChallenge(false)
             return
         }
 
@@ -132,7 +131,7 @@ struct OpponentPetChallengeSheet: View {
     }
 
     private func confirmChallenge() {
-        if dontShowAgain {
+        if dontShowAgain && !preview.isAttackerUnderdog {
             skipPetCombatUnbalancedWarning = true
         }
         savedChallengeModeRaw = selectedMode.rawValue

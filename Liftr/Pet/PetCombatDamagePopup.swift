@@ -6,6 +6,8 @@ struct PetCombatDamagePopup: View {
     @State private var offsetY: CGFloat = 4
     @State private var opacity: Double = 0
 
+    @State private var animatedStrikeId: Int?
+
     var body: some View {
         Text(label)
             .font(.system(size: event.isCritical ? 24 : 18, weight: .heavy, design: .rounded))
@@ -14,7 +16,11 @@ struct PetCombatDamagePopup: View {
             .offset(y: offsetY)
             .opacity(opacity)
             .allowsHitTesting(false)
-            .onAppear {
+            .task(id: event.id) {
+                guard animatedStrikeId != event.id else { return }
+                animatedStrikeId = event.id
+                offsetY = 4
+                opacity = 0
                 withAnimation(.easeOut(duration: 0.15)) {
                     opacity = 1
                 }

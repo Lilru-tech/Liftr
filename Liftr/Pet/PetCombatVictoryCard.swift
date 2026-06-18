@@ -80,7 +80,7 @@ struct PetCombatOutcomeBadge: View {
     private var backgroundColor: Color {
         switch style {
         case .victory: return Color(hex: "#FACC15").opacity(0.95)
-        case .defeat: return Color.white.opacity(0.22)
+        case .defeat: return Color(hex: "#475569").opacity(0.92)
         case .draw: return Color.orange.opacity(0.85)
         }
     }
@@ -88,7 +88,7 @@ struct PetCombatOutcomeBadge: View {
     private var foregroundColor: Color {
         switch style {
         case .victory: return Color(hex: "#713F12")
-        case .defeat: return .secondary
+        case .defeat: return .white
         case .draw: return .white
         }
     }

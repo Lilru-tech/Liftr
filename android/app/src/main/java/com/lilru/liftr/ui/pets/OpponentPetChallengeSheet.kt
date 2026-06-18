@@ -1,6 +1,7 @@
 package com.lilru.liftr.ui.pets
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -75,9 +76,8 @@ fun OpponentPetChallengeSheet(
             proceedToChallenge(false)
             return
         }
-        if (skipWarningState) {
-            val mode = resolvedSavedMode()
-            proceedToChallenge(preview.isAttackerUnderdog() && mode.disableNerfChoice)
+        if (skipWarningState && !preview.isAttackerUnderdog()) {
+            proceedToChallenge(false)
             return
         }
         selectedMode = resolvedSavedMode()
@@ -86,7 +86,7 @@ fun OpponentPetChallengeSheet(
     }
 
     fun confirmChallenge() {
-        if (dontShowAgain) {
+        if (dontShowAgain && !preview.isAttackerUnderdog()) {
             LiftrPreferences.setSkipPetCombatUnbalancedWarning(context, true)
             skipWarningState = true
         }
@@ -96,26 +96,13 @@ fun OpponentPetChallengeSheet(
         proceedToChallenge(disableNerf)
     }
 
-    if (showUnbalancedDialog) {
-        PetCombatUnbalancedMatchDialog(
-            isUnderdog = preview.isAttackerUnderdog(),
-            selectedMode = selectedMode,
-            onModeChange = { selectedMode = it },
-            hardcoreBonusLabel = preview.hardcoreBonusLabel(),
-            dontShowAgain = dontShowAgain,
-            onDontShowAgainChange = { dontShowAgain = it },
-            onDismiss = { showUnbalancedDialog = false },
-            onFight = { confirmChallenge() }
-        )
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        modifier = modifier,
-        containerColor = Color.Transparent,
-        dragHandle = null
-    ) {
+    Box(modifier = modifier) {
+        ModalBottomSheet(
+            onDismissRequest = onDismiss,
+            sheetState = sheetState,
+            containerColor = Color.Transparent,
+            dragHandle = null
+        ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -199,6 +186,20 @@ fun OpponentPetChallengeSheet(
             }
 
             Spacer(modifier = Modifier.padding(bottom = 24.dp))
+        }
+        }
+
+        if (showUnbalancedDialog) {
+            PetCombatUnbalancedMatchDialog(
+                isUnderdog = preview.isAttackerUnderdog(),
+                selectedMode = selectedMode,
+                onModeChange = { selectedMode = it },
+                hardcoreBonusLabel = preview.hardcoreBonusLabel(),
+                dontShowAgain = dontShowAgain,
+                onDontShowAgainChange = { dontShowAgain = it },
+                onDismiss = { showUnbalancedDialog = false },
+                onFight = { confirmChallenge() }
+            )
         }
     }
 }

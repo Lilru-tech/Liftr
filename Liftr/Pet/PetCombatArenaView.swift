@@ -13,11 +13,16 @@ struct PetCombatArenaView: View {
     @State private var playbackEngine = PetCombatPlaybackEngine(turns: [], attackerMaxHp: 1, defenderMaxHp: 1)
     @State private var attackerHitOffset: CGFloat = 0
     @State private var defenderHitOffset: CGFloat = 0
+    @State private var attackerLungeOffset: CGFloat = 0
+    @State private var defenderLungeOffset: CGFloat = 0
+    @State private var attackerDodgeScale: CGFloat = 1
+    @State private var defenderDodgeScale: CGFloat = 1
+    @State private var critFlashOpacity: Double = 0
 
     var body: some View {
         GeometryReader { geo in
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 16) {
                     arenaHeader
 
                     if isLoading {
@@ -29,8 +34,8 @@ struct PetCombatArenaView: View {
                             .multilineTextAlignment(.center)
                             .padding()
                     } else if let combatResult {
-                        battleStage(for: combatResult)
-                        battleLogTicker
+                        battleStage(for: combatResult, availableHeight: geo.size.height)
+                        battleLogTicker(availableHeight: geo.size.height)
 
                         if playbackEngine.isFinished, let userId = app.userId {
                             PetCombatVictoryCard(
@@ -59,10 +64,34 @@ struct PetCombatArenaView: View {
             guard let side else { return }
             animateHit(on: side)
         }
+        .onChange(of: playbackEngine.lastStrike?.id) { _, _ in
+            guard let strike = playbackEngine.lastStrike, !playbackEngine.isFinished else { return }
+            if strike.isCritical && !strike.isDodged {
+                animateCritFlash()
+            }
+            if !strike.isDodged {
+                animateLunge(from: strikeActorSide(for: strike))
+            }
+        }
+        .onChange(of: playbackEngine.dodgePulseSide) { _, side in
+            guard let side else { return }
+            animateDodgePulse(on: side)
+        }
+    }
+
+    private func strikeActorSide(for strike: PetCombatPlaybackEngine.PetCombatStrikeEvent) -> PetCombatPlaybackEngine.PetCombatHitSide {
+        strike.target == .attacker ? .defender : .attacker
+    }
+
+    private var totalTurns: Int {
+        if let total = combatResult?.battleLog.result.totalTurns, total > 0 {
+            return total
+        }
+        return combatResult?.battleLog.turns.count ?? 0
     }
 
     private var arenaHeader: some View {
-        HStack {
+        HStack(alignment: .top) {
             if let preview, let energy = preview.energy {
                 Label("\(energy.current)/\(energy.max)", systemImage: "bolt.fill")
                     .font(.caption.weight(.semibold))
@@ -70,9 +99,10 @@ struct PetCombatArenaView: View {
             }
             Spacer()
             if playbackEngine.isPlaying {
-                Text("Battle in progress")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                PetCombatTurnProgress(
+                    currentTurn: playbackEngine.currentTurnIndex + 1,
+                    totalTurns: totalTurns
+                )
             } else if playbackEngine.isFinished {
                 Text("Battle complete")
                     .font(.caption)
@@ -82,46 +112,111 @@ struct PetCombatArenaView: View {
     }
 
     @ViewBuilder
-    private func battleStage(for result: PetCombatResult) -> some View {
-        HStack(alignment: .bottom, spacing: 24) {
-            petSprite(
-                snapshot: result.battleLog.attackerPet,
-                alignment: .leading,
-                offset: attackerHitOffset,
-                flipped: false,
-                isAttacker: true,
-                result: result
-            )
-            Text("VS")
-                .font(.headline.weight(.black))
-                .foregroundStyle(.secondary)
-            petSprite(
-                snapshot: result.battleLog.defenderPet,
-                alignment: .trailing,
-                offset: defenderHitOffset,
-                flipped: true,
-                isAttacker: false,
-                result: result
-            )
+    private func battleStage(for result: PetCombatResult, availableHeight: CGFloat) -> some View {
+        ZStack {
+            Ellipse()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            Color.white.opacity(0.18),
+                            Color.white.opacity(0.04),
+                            Color.clear
+                        ],
+                        center: .center,
+                        startRadius: 8,
+                        endRadius: 140
+                    )
+                )
+                .frame(height: 48)
+                .offset(y: 52)
+
+            if critFlashOpacity > 0 {
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color.orange.opacity(critFlashOpacity))
+                    .allowsHitTesting(false)
+            }
+
+            HStack(alignment: .bottom, spacing: 24) {
+                petSprite(
+                    snapshot: result.battleLog.attackerPet,
+                    alignment: .leading,
+                    hitOffset: attackerHitOffset,
+                    lungeOffset: attackerLungeOffset,
+                    dodgeScale: attackerDodgeScale,
+                    flipped: false,
+                    isAttacker: true,
+                    result: result
+                )
+                Text("VS")
+                    .font(.headline.weight(.black))
+                    .foregroundStyle(.secondary)
+                petSprite(
+                    snapshot: result.battleLog.defenderPet,
+                    alignment: .trailing,
+                    hitOffset: defenderHitOffset,
+                    lungeOffset: defenderLungeOffset,
+                    dodgeScale: defenderDodgeScale,
+                    flipped: true,
+                    isAttacker: false,
+                    result: result
+                )
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 28)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
+        .frame(minHeight: min(availableHeight * 0.34, 280))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
+        )
     }
 
     @ViewBuilder
     private func petSprite(
         snapshot: PetBattlePetSnapshot,
         alignment: HorizontalAlignment,
-        offset: CGFloat,
+        hitOffset: CGFloat,
+        lungeOffset: CGFloat,
+        dodgeScale: CGFloat,
         flipped: Bool,
         isAttacker: Bool,
         result: PetCombatResult
     ) -> some View {
         let currentHp = isAttacker ? playbackEngine.attackerCurrentHp : playbackEngine.defenderCurrentHp
         let maxHp = isAttacker ? playbackEngine.attackerMaxHp : playbackEngine.defenderMaxHp
+        let side: PetCombatPlaybackEngine.PetCombatHitSide = isAttacker ? .attacker : .defender
+        let isActive = playbackEngine.activeActor == side && playbackEngine.isPlaying
 
-        VStack(spacing: 8) {
-            ZStack(alignment: .top) {
+        VStack(spacing: 6) {
+            if playbackEngine.isFinished, let badge = outcomeBadge(for: snapshot, in: result) {
+                PetCombatOutcomeBadge(style: badge)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            ZStack {
+                if isActive {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    Color.orange.opacity(0.35),
+                                    Color.orange.opacity(0.08),
+                                    Color.clear
+                                ],
+                                center: .center,
+                                startRadius: 4,
+                                endRadius: 68
+                            )
+                        )
+                        .frame(width: 136, height: 136)
+                        .offset(y: -8)
+                        .opacity(isActive ? 1 : 0)
+                        .animation(.easeOut(duration: 0.2), value: isActive)
+                }
+
                 AsyncImage(url: snapshot.imageURL) { phase in
                     switch phase {
                     case .empty:
@@ -141,22 +236,20 @@ struct PetCombatArenaView: View {
                         EmptyView()
                     }
                 }
-                .scaleEffect(x: flipped ? -1 : 1, y: 1)
-                .offset(x: offset)
+                .scaleEffect(x: (flipped ? -1 : 1) * dodgeScale, y: dodgeScale)
+                .offset(x: hitOffset + lungeOffset)
+                .animation(.easeOut(duration: 0.15), value: dodgeScale)
+                .animation(.easeOut(duration: 0.18), value: lungeOffset)
+                .animation(.default.repeatCount(3, autoreverses: true), value: hitOffset)
 
                 if let strike = playbackEngine.lastStrike,
                    !playbackEngine.isFinished,
-                   strike.target == (isAttacker ? .attacker : .defender) {
+                   strike.target == side {
                     PetCombatDamagePopup(event: strike)
                         .id(strike.id)
                 }
-
-                if playbackEngine.isFinished, let badge = outcomeBadge(for: snapshot, in: result) {
-                    PetCombatOutcomeBadge(style: badge)
-                        .offset(y: -8)
-                        .transition(.scale.combined(with: .opacity))
-                }
             }
+            .frame(width: 120, height: 120)
 
             Text(snapshot.name)
                 .font(.caption.weight(.semibold))
@@ -184,8 +277,9 @@ struct PetCombatArenaView: View {
         return .defeat
     }
 
-    private var battleLogTicker: some View {
-        ScrollViewReader { proxy in
+    private func battleLogTicker(availableHeight: CGFloat) -> some View {
+        let logHeight = logHeight(for: availableHeight)
+        return ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     let revealedTurns = (combatResult?.battleLog.turns ?? []).prefix(max(playbackEngine.currentTurnIndex + 1, 0))
@@ -206,7 +300,7 @@ struct PetCombatArenaView: View {
                 }
                 .padding(12)
             }
-            .frame(height: 125)
+            .frame(minHeight: 136, maxHeight: logHeight)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .onChange(of: playbackEngine.currentTurnIndex) { _, index in
                 withAnimation {
@@ -214,6 +308,11 @@ struct PetCombatArenaView: View {
                 }
             }
         }
+    }
+
+    private func logHeight(for availableHeight: CGFloat) -> CGFloat {
+        let ratio: CGFloat = playbackEngine.isFinished ? 0.3825 : 0.34
+        return max(136, availableHeight * ratio)
     }
 
     private func logColor(for turn: PetBattleTurn) -> Color {
@@ -232,18 +331,56 @@ struct PetCombatArenaView: View {
         let amplitude: CGFloat = 10
         switch side {
         case .attacker:
-            withAnimation(.default.repeatCount(3, autoreverses: true)) {
-                attackerHitOffset = amplitude
-            }
+            attackerHitOffset = amplitude
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 attackerHitOffset = 0
             }
         case .defender:
-            withAnimation(.default.repeatCount(3, autoreverses: true)) {
-                defenderHitOffset = -amplitude
-            }
+            defenderHitOffset = -amplitude
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
                 defenderHitOffset = 0
+            }
+        }
+    }
+
+    private func animateLunge(from side: PetCombatPlaybackEngine.PetCombatHitSide) {
+        let amplitude: CGFloat = 12
+        switch side {
+        case .attacker:
+            attackerLungeOffset = amplitude
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                attackerLungeOffset = 0
+            }
+        case .defender:
+            defenderLungeOffset = -amplitude
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                defenderLungeOffset = 0
+            }
+        }
+    }
+
+    private func animateDodgePulse(on side: PetCombatPlaybackEngine.PetCombatHitSide) {
+        switch side {
+        case .attacker:
+            attackerDodgeScale = 1.06
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                attackerDodgeScale = 1
+            }
+        case .defender:
+            defenderDodgeScale = 1.06
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                defenderDodgeScale = 1
+            }
+        }
+    }
+
+    private func animateCritFlash() {
+        withAnimation(.easeOut(duration: 0.12)) {
+            critFlashOpacity = 0.15
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+            withAnimation(.easeIn(duration: 0.28)) {
+                critFlashOpacity = 0
             }
         }
     }

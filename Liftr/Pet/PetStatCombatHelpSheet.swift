@@ -8,7 +8,7 @@ struct PetStatCombatHelpEntry: Identifiable {
 }
 
 enum PetStatCombatGuide {
-    static let intro = "Every stat affects arena battles."
+    static let intro = "Every stat affects arena battles. Winning earns the biggest rewards, but losing still grants a small consolation reward."
     static let handicapTitle = "Stat Balancing (Handicap)"
     static let handicapDescription = "If a pet's total stats are significantly higher than the opponent, they will be temporarily nerfed down to a maximum 5% stat advantage for the battle to ensure a fair fight. Winning with a nerfed pet yields minimum rewards."
     static let handicapBattlesTitle = "Handicap Battles"

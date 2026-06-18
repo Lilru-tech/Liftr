@@ -7,6 +7,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -44,8 +46,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,15 +82,23 @@ fun PetCombatArenaScreen(
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var playbackEngine by remember { mutableStateOf<PetCombatPlaybackEngine?>(null) }
-    var attackerOffset by remember { mutableFloatStateOf(0f) }
-    var defenderOffset by remember { mutableFloatStateOf(0f) }
+    var attackerHitOffset by remember { mutableFloatStateOf(0f) }
+    var defenderHitOffset by remember { mutableFloatStateOf(0f) }
+    var attackerLungeOffset by remember { mutableFloatStateOf(0f) }
+    var defenderLungeOffset by remember { mutableFloatStateOf(0f) }
+    var attackerDodgeScale by remember { mutableFloatStateOf(1f) }
+    var defenderDodgeScale by remember { mutableFloatStateOf(1f) }
+    var critFlashAlpha by remember { mutableFloatStateOf(0f) }
     val meId = supabase.auth.currentUserOrNull()?.id
     val scrollState = rememberScrollState()
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
     val stubTurnIndex = remember { MutableStateFlow(-1) }
     val stubFinished = remember { MutableStateFlow(false) }
     val stubPlaying = remember { MutableStateFlow(false) }
     val stubHitSide = remember { MutableStateFlow<PetCombatHitSide?>(null) }
     val stubStrike = remember { MutableStateFlow<PetCombatStrikeEvent?>(null) }
+    val stubActiveActor = remember { MutableStateFlow<PetCombatHitSide?>(null) }
+    val stubDodgePulse = remember { MutableStateFlow<PetCombatHitSide?>(null) }
     val stubAttackerHp = remember { MutableStateFlow(1) }
     val stubDefenderHp = remember { MutableStateFlow(1) }
 
@@ -95,6 +108,8 @@ fun PetCombatArenaScreen(
     val isPlaying by (engine?.isPlaying ?: stubPlaying).collectAsState()
     val hitSide by (engine?.hitSide ?: stubHitSide).collectAsState()
     val lastStrike by (engine?.lastStrike ?: stubStrike).collectAsState()
+    val activeActor by (engine?.activeActor ?: stubActiveActor).collectAsState()
+    val dodgePulseSide by (engine?.dodgePulseSide ?: stubDodgePulse).collectAsState()
     val attackerCurrentHp by (engine?.attackerCurrentHp ?: stubAttackerHp).collectAsState()
     val defenderCurrentHp by (engine?.defenderCurrentHp ?: stubDefenderHp).collectAsState()
     val attackerMaxHp = engine?.attackerMaxHp ?: 1
@@ -103,14 +118,59 @@ fun PetCombatArenaScreen(
     LaunchedEffect(hitSide) {
         when (hitSide) {
             PetCombatHitSide.Attacker -> {
-                attackerOffset = 10f
+                attackerHitOffset = 10f
                 delay(450)
-                attackerOffset = 0f
+                attackerHitOffset = 0f
             }
             PetCombatHitSide.Defender -> {
-                defenderOffset = -10f
+                defenderHitOffset = -10f
                 delay(450)
-                defenderOffset = 0f
+                defenderHitOffset = 0f
+            }
+            null -> Unit
+        }
+    }
+
+    LaunchedEffect(lastStrike?.id) {
+        val strike = lastStrike ?: return@LaunchedEffect
+        if (isFinished) return@LaunchedEffect
+        if (strike.isCritical && !strike.isDodged) {
+            critFlashAlpha = 0.15f
+            delay(120)
+            critFlashAlpha = 0f
+        }
+        if (!strike.isDodged) {
+            val actor = if (strike.target == PetCombatHitSide.Attacker) {
+                PetCombatHitSide.Defender
+            } else {
+                PetCombatHitSide.Attacker
+            }
+            when (actor) {
+                PetCombatHitSide.Attacker -> {
+                    attackerLungeOffset = 12f
+                    delay(180)
+                    attackerLungeOffset = 0f
+                }
+                PetCombatHitSide.Defender -> {
+                    defenderLungeOffset = -12f
+                    delay(180)
+                    defenderLungeOffset = 0f
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(dodgePulseSide) {
+        when (dodgePulseSide) {
+            PetCombatHitSide.Attacker -> {
+                attackerDodgeScale = 1.06f
+                delay(150)
+                attackerDodgeScale = 1f
+            }
+            PetCombatHitSide.Defender -> {
+                defenderDodgeScale = 1.06f
+                delay(150)
+                defenderDodgeScale = 1f
             }
             null -> Unit
         }
@@ -129,14 +189,14 @@ fun PetCombatArenaScreen(
                 val defenderMax = result.battleLog.defenderPet.resolvedMaxHp(
                     fallback = preview?.defender?.stats?.health ?: 1
                 )
-                val engine = PetCombatPlaybackEngine(
+                val newEngine = PetCombatPlaybackEngine(
                     turns = result.battleLog.turns,
                     attackerMaxHp = attackerMax,
                     defenderMaxHp = defenderMax
                 )
-                playbackEngine = engine
+                playbackEngine = newEngine
                 isLoading = false
-                engine.start()
+                newEngine.start()
             }
             .onFailure {
                 errorMessage = it.message
@@ -168,9 +228,12 @@ fun PetCombatArenaScreen(
                     .padding(padding)
                     .verticalScroll(scrollState)
                     .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Row(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.Top
+                ) {
                     preview?.energy?.let { energy ->
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.Bolt, contentDescription = null, tint = Color(0xFFFF9800))
@@ -178,15 +241,25 @@ fun PetCombatArenaScreen(
                         }
                     }
                     Spacer(modifier = Modifier.weight(1f))
-                    Text(
-                        when {
-                            isPlaying -> "Battle in progress"
-                            isFinished -> "Battle complete"
-                            else -> ""
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    when {
+                        isPlaying -> {
+                            val totalTurns = combatResult?.let { result ->
+                                result.battleLog.result.totalTurns.takeIf { it > 0 }
+                                    ?: result.battleLog.turns.size
+                            } ?: 0
+                            PetCombatTurnProgress(
+                                currentTurn = currentTurnIndex + 1,
+                                totalTurns = totalTurns
+                            )
+                        }
+                        isFinished -> {
+                            Text(
+                                "Battle complete",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 when {
@@ -205,70 +278,83 @@ fun PetCombatArenaScreen(
                     }
                     combatResult != null -> {
                         val result = combatResult!!
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.Bottom
+                        val iAmAttacker = result.battleLog.attackerPet.userId == meId
+                        val stageMinHeight = minOf(screenHeight * 0.34f, 280.dp)
+                        val logMaxHeight = if (isFinished) screenHeight * 0.3825f else screenHeight * 0.34f
+
+                        PetCombatArenaStage(
+                            critFlashAlpha = critFlashAlpha,
+                            minHeight = stageMinHeight,
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            CombatPetSprite(
-                                imageUrl = result.battleLog.attackerPet.imageUrl
-                                    ?: PetService.petImageUrl(
-                                        result.battleLog.attackerPet.petType,
-                                        result.battleLog.attackerPet.evolutionStage
-                                    ),
-                                name = result.battleLog.attackerPet.name,
-                                level = result.battleLog.attackerPet.level,
-                                currentHp = attackerCurrentHp,
-                                maxHp = attackerMaxHp,
-                                offsetX = attackerOffset,
-                                flipped = false,
-                                strike = lastStrike?.takeIf {
-                                    !isFinished && it.target == PetCombatHitSide.Attacker
-                                },
-                                outcomeBadge = if (isFinished) {
-                                    outcomeBadgeStyle(result.battleLog.attackerPet, result)
-                                } else {
-                                    null
-                                }
-                            )
-                            Text("VS", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            CombatPetSprite(
-                                imageUrl = result.battleLog.defenderPet.imageUrl
-                                    ?: PetService.petImageUrl(
-                                        result.battleLog.defenderPet.petType,
-                                        result.battleLog.defenderPet.evolutionStage
-                                    ),
-                                name = result.battleLog.defenderPet.name,
-                                level = result.battleLog.defenderPet.level,
-                                currentHp = defenderCurrentHp,
-                                maxHp = defenderMaxHp,
-                                offsetX = defenderOffset,
-                                flipped = true,
-                                strike = lastStrike?.takeIf {
-                                    !isFinished && it.target == PetCombatHitSide.Defender
-                                },
-                                outcomeBadge = if (isFinished) {
-                                    outcomeBadgeStyle(result.battleLog.defenderPet, result)
-                                } else {
-                                    null
-                                }
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 28.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.Bottom
+                            ) {
+                                CombatPetSprite(
+                                    imageUrl = result.battleLog.attackerPet.imageUrl
+                                        ?: PetService.petImageUrl(
+                                            result.battleLog.attackerPet.petType,
+                                            result.battleLog.attackerPet.evolutionStage
+                                        ),
+                                    name = result.battleLog.attackerPet.name,
+                                    level = result.battleLog.attackerPet.level,
+                                    currentHp = attackerCurrentHp,
+                                    maxHp = attackerMaxHp,
+                                    offsetX = attackerHitOffset + attackerLungeOffset,
+                                    dodgeScale = attackerDodgeScale,
+                                    flipped = false,
+                                    isActive = activeActor == PetCombatHitSide.Attacker && isPlaying,
+                                    strike = lastStrike?.takeIf {
+                                        !isFinished && it.target == PetCombatHitSide.Attacker
+                                    },
+                                    outcomeBadge = if (isFinished) {
+                                        outcomeBadgeStyle(result.battleLog.attackerPet, result)
+                                    } else {
+                                        null
+                                    }
+                                )
+                                Text("VS", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                CombatPetSprite(
+                                    imageUrl = result.battleLog.defenderPet.imageUrl
+                                        ?: PetService.petImageUrl(
+                                            result.battleLog.defenderPet.petType,
+                                            result.battleLog.defenderPet.evolutionStage
+                                        ),
+                                    name = result.battleLog.defenderPet.name,
+                                    level = result.battleLog.defenderPet.level,
+                                    currentHp = defenderCurrentHp,
+                                    maxHp = defenderMaxHp,
+                                    offsetX = defenderHitOffset + defenderLungeOffset,
+                                    dodgeScale = defenderDodgeScale,
+                                    flipped = true,
+                                    isActive = activeActor == PetCombatHitSide.Defender && isPlaying,
+                                    strike = lastStrike?.takeIf {
+                                        !isFinished && it.target == PetCombatHitSide.Defender
+                                    },
+                                    outcomeBadge = if (isFinished) {
+                                        outcomeBadgeStyle(result.battleLog.defenderPet, result)
+                                    } else {
+                                        null
+                                    }
+                                )
+                            }
                         }
 
                         val logScrollState = rememberScrollState()
                         val revealedTurns = result.battleLog.turns.take(currentTurnIndex + 1)
-                        val iAmAttacker = result.battleLog.attackerPet.userId == meId
                         LaunchedEffect(revealedTurns.size) {
                             logScrollState.animateScrollTo(logScrollState.maxValue)
                         }
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(125.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                    RoundedCornerShape(12.dp)
-                                )
+                                .heightIn(min = 136.dp, max = logMaxHeight)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                                 .padding(12.dp)
                                 .verticalScroll(logScrollState),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -304,6 +390,93 @@ fun PetCombatArenaScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PetCombatTurnProgress(
+    currentTurn: Int,
+    totalTurns: Int,
+    modifier: Modifier = Modifier
+) {
+    val progress = if (totalTurns > 0) {
+        (maxOf(currentTurn, 0).toFloat() / totalTurns.toFloat()).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "turnProgress"
+    )
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            text = "Turn ${maxOf(currentTurn, 0)} / $totalTurns",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Box(
+            modifier = Modifier
+                .width(88.dp)
+                .height(4.dp)
+                .clip(RoundedCornerShape(50))
+                .background(Color.White.copy(alpha = 0.12f))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(animatedProgress)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color(0xFFFF9800).copy(alpha = 0.85f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun PetCombatArenaStage(
+    critFlashAlpha: Float,
+    minHeight: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .heightIn(min = minHeight)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+                .align(Alignment.Center)
+                .offset(y = 52.dp)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.18f),
+                            Color.White.copy(alpha = 0.04f),
+                            Color.Transparent
+                        )
+                    )
+                )
+        )
+        if (critFlashAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color(0xFFFF9800).copy(alpha = critFlashAlpha))
+            )
+        }
+        content()
     }
 }
 
@@ -344,7 +517,9 @@ private fun CombatPetSprite(
     currentHp: Int,
     maxHp: Int,
     offsetX: Float,
+    dodgeScale: Float,
     flipped: Boolean,
+    isActive: Boolean,
     strike: PetCombatStrikeEvent?,
     outcomeBadge: PetCombatOutcomeStyle?
 ) {
@@ -352,29 +527,53 @@ private fun CombatPetSprite(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier.width(120.dp)
     ) {
-        Box(contentAlignment = Alignment.TopCenter) {
+        AnimatedVisibility(
+            visible = outcomeBadge != null,
+            enter = fadeIn() + scaleIn()
+        ) {
+            outcomeBadge?.let {
+                PetCombatOutcomeBadge(
+                    style = it,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+        }
+        Box(
+            modifier = Modifier
+                .width(120.dp)
+                .height(120.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            if (isActive) {
+                Box(
+                    modifier = Modifier
+                        .width(136.dp)
+                        .height(136.dp)
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFFF9800).copy(alpha = 0.35f),
+                                    Color(0xFFFF9800).copy(alpha = 0.08f),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                )
+            }
             AsyncImage(
                 model = imageUrl,
                 contentDescription = null,
                 modifier = Modifier
                     .height(120.dp)
                     .offset(x = offsetX.dp)
-                    .graphicsLayer(scaleX = if (flipped) -1f else 1f)
+                    .graphicsLayer {
+                        scaleX = (if (flipped) -1f else 1f) * dodgeScale
+                        scaleY = dodgeScale
+                    }
             )
             strike?.let {
                 key(it.id) {
                     CombatDamagePopup(event = it)
-                }
-            }
-            androidx.compose.animation.AnimatedVisibility(
-                visible = outcomeBadge != null,
-                enter = fadeIn() + scaleIn()
-            ) {
-                outcomeBadge?.let {
-                    PetCombatOutcomeBadge(
-                        style = it,
-                        modifier = Modifier.offset(y = (-8).dp)
-                    )
                 }
             }
         }
@@ -396,8 +595,11 @@ private fun CombatPetSprite(
 }
 
 @Composable
-private fun CombatDamagePopup(event: PetCombatStrikeEvent) {
-    var started by remember { mutableStateOf(false) }
+private fun CombatDamagePopup(
+    event: PetCombatStrikeEvent,
+    modifier: Modifier = Modifier
+) {
+    var started by remember(event.id) { mutableStateOf(false) }
     val offsetY by animateFloatAsState(
         targetValue = if (started) -34f else 4f,
         animationSpec = tween(durationMillis = 800, easing = FastOutSlowInEasing),
@@ -408,7 +610,7 @@ private fun CombatDamagePopup(event: PetCombatStrikeEvent) {
         animationSpec = tween(durationMillis = 300, delayMillis = 500),
         label = "damageAlpha"
     )
-    LaunchedEffect(Unit) { started = true }
+    LaunchedEffect(event.id) { started = true }
 
     val (label, color) = when {
         event.isDodged -> "Dodged!" to CombatLogBlue
@@ -421,7 +623,7 @@ private fun CombatDamagePopup(event: PetCombatStrikeEvent) {
         fontWeight = FontWeight.Black,
         fontSize = if (event.isCritical) 22.sp else 17.sp,
         color = color,
-        modifier = Modifier
+        modifier = modifier
             .offset(y = offsetY.dp)
             .graphicsLayer(alpha = alpha)
     )
@@ -434,7 +636,7 @@ private fun PetCombatOutcomeBadge(
 ) {
     val (label, background, foreground) = when (style) {
         PetCombatOutcomeStyle.Victory -> Triple("Victory", Color(0xFFFACC15).copy(alpha = 0.95f), Color(0xFF713F12))
-        PetCombatOutcomeStyle.Defeat -> Triple("Defeat", Color.White.copy(alpha = 0.22f), MaterialTheme.colorScheme.onSurfaceVariant)
+        PetCombatOutcomeStyle.Defeat -> Triple("Defeat", Color(0xFF475569).copy(alpha = 0.92f), Color.White)
         PetCombatOutcomeStyle.Draw -> Triple("Draw", Color(0xFFFF9800).copy(alpha = 0.85f), Color.White)
     }
     Text(

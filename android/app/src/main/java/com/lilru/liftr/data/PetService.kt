@@ -345,16 +345,12 @@ data class PetLogWire(
                 else "+$amount coins"
             }
             "combat" -> {
-                if (details?.get("is_draw") == "true" || details?.get("won") == "true") {
-                    val coins = details?.get("coins_gained")?.toIntOrNull() ?: 0
-                    val parts = buildList {
-                        if (expGained > 0) add("+$expGained XP")
-                        if (coins > 0) add("+$coins coins")
-                    }
-                    parts.takeIf { it.isNotEmpty() }?.joinToString(" · ") ?: "No rewards"
-                } else {
-                    "No rewards"
+                val coins = details?.get("coins_gained")?.toIntOrNull() ?: 0
+                val parts = buildList {
+                    if (expGained > 0) add("+$expGained XP")
+                    if (coins > 0) add("+$coins coins")
                 }
+                parts.takeIf { it.isNotEmpty() }?.joinToString(" · ") ?: "No rewards"
             }
             else -> null
         }

@@ -133,7 +133,7 @@ data class PetCombatPreviewWire(
     fun isStatUnbalanced(): Boolean {
         statBalancing?.isUnbalanced?.let { return it }
         val attackerStats = attacker?.stats ?: return false
-        val defenderStats = defender.stats ?: return false
+        val defenderStats = defender?.stats ?: return false
         return PetCombatStatBalancing.isUnbalanced(attackerStats, defenderStats)
     }
 
