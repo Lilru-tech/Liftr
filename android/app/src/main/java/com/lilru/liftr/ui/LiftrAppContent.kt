@@ -23,6 +23,7 @@ import com.lilru.liftr.push.PushIntentStore
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -33,6 +34,8 @@ import com.lilru.liftr.auth.AuthViewModel
 import com.lilru.liftr.auth.AuthViewModelFactory
 import com.lilru.liftr.auth.PasswordRecoveryGate
 import com.lilru.liftr.data.PremiumStatusStore
+import com.lilru.liftr.externalroute.ExternalRouteSyncService
+import com.lilru.liftr.externalroute.WearableCallbackStore
 import com.lilru.liftr.ui.auth.ResetPasswordScreen
 import com.lilru.liftr.ui.main.MainShellScreen
 import io.github.jan.supabase.auth.status.SessionStatus
@@ -45,6 +48,8 @@ fun LiftrAppContent(
     val viewModel: AuthViewModel = viewModel(factory = AuthViewModelFactory(supabase))
     val status by viewModel.sessionStatus.collectAsStateWithLifecycle()
     val recoveryPending by PasswordRecoveryGate.pending.collectAsStateWithLifecycle()
+
+    val context = LocalContext.current
 
     if (recoveryPending) {
         ResetPasswordScreen(viewModel = viewModel)
@@ -90,6 +95,9 @@ fun LiftrAppContent(
                 if (w != null) {
                     val oid = NotificationRouter.resolveWorkoutOwnerId(supabase, w)
                     AppNavEvents.send(MainOverlay.WorkoutDetail(w, oid))
+                }
+                WearableCallbackStore.consume()?.let { uri ->
+                    ExternalRouteSyncService(context, supabase).handleWearableCallbackUri(uri)
                 }
             }
             MainShellScreen(

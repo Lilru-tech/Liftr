@@ -1,8 +1,9 @@
 package com.lilru.liftr.ui.nutrition
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -19,11 +21,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.components.CoinsBalanceBadge
+import com.lilru.liftr.ui.components.LiftrGlassSurface
+import dev.chrisbanes.haze.HazeState
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -32,6 +37,7 @@ import kotlin.math.roundToInt
 @Composable
 fun NutritionHighlightsContent(
     ui: NutritionUiState,
+    hazeState: HazeState,
     onRankingClick: (NutritionRankingKind) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -85,6 +91,7 @@ fun NutritionHighlightsContent(
             val h = ui.highlights
             Column(modifier, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 HighlightsSectionCard(
+                    hazeState = hazeState,
                     title = stringResource(R.string.nutrition_highlights_overview),
                     titleTrailing = {
                         CoinsBalanceBadge(balance = ui.coinsBalance, compact = true)
@@ -126,6 +133,7 @@ fun NutritionHighlightsContent(
                     }
                 )
                 HighlightsSectionCard(
+                    hazeState = hazeState,
                     title = stringResource(R.string.nutrition_highlights_records),
                     content = {
                         h.peakDay?.let { peak ->
@@ -147,6 +155,7 @@ fun NutritionHighlightsContent(
                     }
                 )
                 HighlightsSectionCard(
+                    hazeState = hazeState,
                     title = stringResource(R.string.nutrition_highlights_most_logged),
                     content = {
                         h.topIngredient?.let { ing ->
@@ -170,6 +179,7 @@ fun NutritionHighlightsContent(
                     }
                 )
                 HighlightsSectionCard(
+                    hazeState = hazeState,
                     title = stringResource(R.string.nutrition_highlights_habits),
                     content = {
                         h.mostUsedMealSlot?.let { slot ->
@@ -194,6 +204,7 @@ fun NutritionHighlightsContent(
                 h.macroChampions?.let { macro ->
                     if (macro.topProteinSource != null || macro.topCarbSource != null) {
                         HighlightsSectionCard(
+                            hazeState = hazeState,
                             title = stringResource(R.string.nutrition_highlights_macro_champions),
                             content = {
                                 macro.topProteinSource?.let { protein ->
@@ -217,6 +228,7 @@ fun NutritionHighlightsContent(
                 h.calorieVolatility?.let { vol ->
                     if (vol.weekdayAvgKcal > 0 || vol.weekendAvgKcal > 0) {
                         HighlightsSectionCard(
+                            hazeState = hazeState,
                             title = stringResource(R.string.nutrition_highlights_weekly_habits),
                             content = {
                                 Row(
@@ -244,6 +256,7 @@ fun NutritionHighlightsContent(
                 }
                 h.heaviestMeal?.let { meal ->
                     HighlightsSectionCard(
+                        hazeState = hazeState,
                         title = stringResource(R.string.nutrition_highlights_heaviest_meal),
                         content = {
                             NavigableHighlightsRecordRow(
@@ -258,6 +271,7 @@ fun NutritionHighlightsContent(
                 h.consistencyStreak?.let { streak ->
                     if (streak.currentStreak > 0 || streak.bestStreak > 0) {
                         HighlightsSectionCard(
+                            hazeState = hazeState,
                             title = stringResource(R.string.nutrition_highlights_consistency_streak),
                             content = {
                                 Row(
@@ -301,15 +315,17 @@ private fun streakDaysLabel(count: Int): String {
 
 @Composable
 private fun HighlightsSectionCard(
+    hazeState: HazeState,
     title: String,
     titleTrailing: (@Composable () -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
-    Card(
+    LiftrGlassSurface(
+        hazeState = hazeState,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        )
+        elevation = 4.dp,
+        strokeAlpha = 0.18f
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(
@@ -329,6 +345,8 @@ private fun HighlightsSectionCard(
 private fun HighlightsStatPill(label: String, value: String) {
     Column(
         Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {

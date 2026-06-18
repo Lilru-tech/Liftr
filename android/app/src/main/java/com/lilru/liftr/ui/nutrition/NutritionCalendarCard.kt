@@ -16,13 +16,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +29,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.lilru.liftr.R
+import com.lilru.liftr.ui.components.LiftrGlassSurface
+import dev.chrisbanes.haze.HazeState
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -42,9 +42,11 @@ import java.util.Locale
 private val CalendarBudgetUnderColor = Color(0xFFFF9800)
 private val CalendarBudgetOverColor = Color(0xFFE53935)
 private val CalendarPlannedColor = Color(0xFFE07000)
+private val TodayBorderColor = Color(0xFF00C7BE)
 
 @Composable
 fun NutritionCalendarCard(
+    hazeState: HazeState,
     month: YearMonth,
     selectedDate: LocalDate,
     dayBalance: Map<LocalDate, NutritionMonthDayBalance>,
@@ -55,11 +57,12 @@ fun NutritionCalendarCard(
     modifier: Modifier = Modifier
 ) {
     val cells = buildMonthCells(month)
-    Card(
+    LiftrGlassSurface(
+        hazeState = hazeState,
+        shape = RoundedCornerShape(16.dp),
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-        )
+        elevation = 4.dp,
+        strokeAlpha = 0.18f
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -72,7 +75,16 @@ fun NutritionCalendarCard(
                     modifier = Modifier.weight(1f),
                     textAlign = TextAlign.Center
                 )
-                TextButton(onClick = onToday) { Text("Today") }
+                Text(
+                    text = "Today",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.White.copy(alpha = 0.55f))
+                        .clickable(onClick = onToday)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                )
                 IconButton(onClick = onNextMonth) {
                     Icon(Icons.Filled.ChevronRight, contentDescription = null)
                 }
@@ -169,7 +181,7 @@ private fun NutritionDayCell(
             .then(
                 when {
                     selected -> Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
-                    today -> Modifier.border(1.5.dp, MaterialTheme.colorScheme.tertiary, RoundedCornerShape(10.dp))
+                    today -> Modifier.border(1.5.dp, TodayBorderColor.copy(alpha = 0.8f), RoundedCornerShape(10.dp))
                     else -> Modifier
                 }
             )
@@ -183,14 +195,22 @@ private fun NutritionDayCell(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text("${day.dayOfMonth}", style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+        Text(
+            "${day.dayOfMonth}",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+        )
         if (count > 1) {
             Text(
-                "$count",
-                style = MaterialTheme.typography.labelSmall,
+                text = "$count",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(2.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.85f))
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
             )
         }
     }

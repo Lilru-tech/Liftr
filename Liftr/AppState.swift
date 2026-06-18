@@ -5,6 +5,12 @@ import Supabase
 import UIKit
 import CoreLocation
 
+struct ProfileWorkoutDeepLink: Identifiable, Hashable {
+    let workoutId: Int
+    let ownerId: UUID?
+    var id: String { "\(workoutId)-\(ownerId?.uuidString ?? "pending")" }
+}
+
 final class AppState: ObservableObject {
     @Published var selectedTab: Tab = .home
     @Published var addDraft: AddWorkoutDraft?
@@ -13,7 +19,6 @@ final class AppState: ObservableObject {
     enum NotificationDestination: Equatable {
         case none
         case followerProfile(userId: UUID)
-        case workout(workoutId: Int, ownerId: UUID?)
         case segmentDetail(segmentId: UUID)
         case achievements(achievementId: Int?)
         case goals(userId: UUID)
@@ -26,6 +31,27 @@ final class AppState: ObservableObject {
     
     @Published var notificationDestination: NotificationDestination = .none
     @Published var pendingNotification: (id: Int?, type: String, data: [String: Any])?
+    @Published var profileWorkoutDeepLink: ProfileWorkoutDeepLink?
+    @Published var pendingProfileWorkout: ProfileWorkoutDeepLink?
+    
+    @MainActor
+    func openWorkoutFromNotification(workoutId: Int, ownerId: UUID?) {
+        let link = ProfileWorkoutDeepLink(workoutId: workoutId, ownerId: ownerId)
+        selectedTab = .profile
+        guard isAuthenticated else {
+            pendingProfileWorkout = link
+            return
+        }
+        profileWorkoutDeepLink = link
+    }
+
+    @MainActor
+    func flushPendingProfileWorkoutIfNeeded() {
+        guard isAuthenticated, profileWorkoutDeepLink == nil, let pending = pendingProfileWorkout else { return }
+        pendingProfileWorkout = nil
+        selectedTab = .profile
+        profileWorkoutDeepLink = pending
+    }
     
     @MainActor
     func openAdd(with draft: AddWorkoutDraft?) {
@@ -141,6 +167,7 @@ final class AppState: ObservableObject {
             if let session = try? await SupabaseManager.shared.client.auth.session {
                 userId = session.user.id
                 isAuthenticated = true
+                flushPendingProfileWorkoutIfNeeded()
             }
             await refreshTabBarProfileAvatarFromServer()
             await refreshUnreadNotificationsCount()
@@ -156,6 +183,7 @@ final class AppState: ObservableObject {
             let session = try await SupabaseManager.shared.client.auth.session
             self.userId = session.user.id
             self.isAuthenticated = true
+            flushPendingProfileWorkoutIfNeeded()
             await refreshTabBarProfileAvatarFromServer()
             await refreshUnreadNotificationsCount()
             await startChatUnreadRealtimeIfNeeded(for: session.user.id)
@@ -412,7 +440,7 @@ final class AppState: ObservableObject {
                     ownerId = nil
                 }
 
-                notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+                openWorkoutFromNotification(workoutId: workoutId, ownerId: ownerId)
 
             } else {
                 print("⚠️ [AppState] workout_id missing/invalid in data:", data)
@@ -437,7 +465,7 @@ final class AppState: ObservableObject {
                     print("🧪 [Push] resolving owner for workoutId=\(workoutId) participantId=\(String(describing: participantId))")
                     let owner = await resolveWorkoutOwnerId(workoutId: workoutId)
                     print("🧪 [Push] resolved ownerId=\(String(describing: owner)) for workoutId=\(workoutId)")
-                    self.notificationDestination = .workout(workoutId: workoutId, ownerId: owner)
+                    self.openWorkoutFromNotification(workoutId: workoutId, ownerId: owner)
                 }
             } else {
                 print("⚠️ [AppState] workout_id missing/invalid:", data)
@@ -511,7 +539,7 @@ final class AppState: ObservableObject {
                 } else {
                     ownerId = self.userId
                 }
-                notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+                openWorkoutFromNotification(workoutId: workoutId, ownerId: ownerId)
             } else {
                 print("⚠️ [AppState] workout_id missing/invalid for territory notification:", data)
                 notificationDestination = .none

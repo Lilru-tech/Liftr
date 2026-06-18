@@ -10,7 +10,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -154,9 +153,38 @@ fun ProfilePetFloatingOverlay(
             }
         }
 
+        AnimatedVisibility(
+            visible = showGreeting,
+            enter = fadeIn() + scaleIn(),
+            exit = fadeOut() + scaleOut(),
+            modifier = Modifier.offset {
+                IntOffset(greetingOrigin.x.roundToInt(), greetingOrigin.y.roundToInt())
+            }
+        ) {
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                tonalElevation = 4.dp,
+                modifier = Modifier
+                    .widthIn(max = maxBubbleWidth)
+                    .onGloballyPositioned { coordinates ->
+                        val size = coordinates.size
+                        if (size != greetingBubbleSize) {
+                            greetingBubbleSize = size
+                        }
+                    }
+            ) {
+                Text(
+                    text = greetingMessage,
+                    modifier = Modifier.padding(8.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        }
+
         Box(
             modifier = Modifier
-                .fillMaxSize()
+                .offset { IntOffset(positionX, positionY) }
+                .size(ProfilePetFabPosition.fabSize)
                 .pointerInput(perimeterT, bottomInsetDp, widthPx, heightPx, tapThresholdPx) {
                     val gestureBounds = ProfilePetFabPosition.bounds(
                         widthPx = widthPx,
@@ -166,24 +194,19 @@ fun ProfilePetFloatingOverlay(
                         bottomInsetDp = bottomInsetDp,
                         density = this@pointerInput
                     )
+                    val fabRadiusPx = ProfilePetFabPosition.fabSize.toPx() / 2f
                     val gestureResolvedT = ProfilePetFabPosition.resolvedPerimeterT(
                         saved = perimeterT.takeIf { it >= 0f },
                         legacyX = legacy?.first,
                         legacyY = legacy?.second,
                         bounds = gestureBounds
                     )
-                    val gestureFabRadiusPx = ProfilePetFabPosition.fabSize.toPx() / 2f
-
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        val touchAnchor = dragPreviewPoint
-                            ?: ProfilePetFabPosition.pointOnPerimeter(gestureResolvedT, gestureBounds)
-                        if (hypot(down.position.x - touchAnchor.x, down.position.y - touchAnchor.y) > gestureFabRadiusPx * 1.15f) {
-                            return@awaitEachGesture
-                        }
-
                         val pointerId = down.id
                         var isDragging = false
+                        var livePreview: Offset? = null
+                        val startAnchor = ProfilePetFabPosition.pointOnPerimeter(gestureResolvedT, gestureBounds)
 
                         while (true) {
                             val event = awaitPointerEvent()
@@ -194,10 +217,11 @@ fun ProfilePetFloatingOverlay(
                                     showGreeting = false
                                     showSheet = true
                                 } else {
-                                    val snapped = ProfilePetFabPosition.nearestPointOnPerimeter(
-                                        change.position,
-                                        gestureBounds
-                                    )
+                                    val snapped = livePreview
+                                        ?: ProfilePetFabPosition.nearestPointOnPerimeter(
+                                            startAnchor,
+                                            gestureBounds
+                                        )
                                     val newT = ProfilePetFabPosition.perimeterParameterFor(snapped, gestureBounds)
                                     perimeterT = newT
                                     LiftrPreferences.setProfilePetFabPerimeterT(context, newT)
@@ -205,52 +229,23 @@ fun ProfilePetFloatingOverlay(
                                 break
                             }
 
-                            val finger = change.position
-                            if (!isDragging && hypot(finger.x - down.position.x, finger.y - down.position.y) >= tapThresholdPx) {
+                            val fingerLocal = change.position
+                            if (!isDragging && hypot(fingerLocal.x - down.position.x, fingerLocal.y - down.position.y) >= tapThresholdPx) {
                                 isDragging = true
                             }
                             if (isDragging) {
-                                dragPreviewPoint = ProfilePetFabPosition.nearestPointOnPerimeter(finger, gestureBounds)
+                                val snap = livePreview ?: startAnchor
+                                val fingerGlobal = Offset(
+                                    x = snap.x - fabRadiusPx + fingerLocal.x,
+                                    y = snap.y - fabRadiusPx + fingerLocal.y
+                                )
+                                livePreview = ProfilePetFabPosition.nearestPointOnPerimeter(fingerGlobal, gestureBounds)
+                                dragPreviewPoint = livePreview
+                                change.consume()
                             }
-                            change.consume()
                         }
                     }
                 }
-        )
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            AnimatedVisibility(
-                visible = showGreeting,
-                enter = fadeIn() + scaleIn(),
-                exit = fadeOut() + scaleOut(),
-                modifier = Modifier.offset {
-                    IntOffset(greetingOrigin.x.roundToInt(), greetingOrigin.y.roundToInt())
-                }
-            ) {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    tonalElevation = 4.dp,
-                    modifier = Modifier
-                        .widthIn(max = maxBubbleWidth)
-                        .onGloballyPositioned { coordinates ->
-                            val size = coordinates.size
-                            if (size != greetingBubbleSize) {
-                                greetingBubbleSize = size
-                            }
-                        }
-                ) {
-                    Text(
-                        text = greetingMessage,
-                        modifier = Modifier.padding(8.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .offset { IntOffset(positionX, positionY) }
-                    .size(ProfilePetFabPosition.fabSize)
                     .shadow(6.dp, CircleShape, spotColor = petRarityColor(pet.rarity).copy(alpha = 0.35f))
                     .clip(CircleShape)
                     .border(2.dp, petRarityColor(pet.rarity).copy(alpha = 0.7f), CircleShape),
@@ -269,7 +264,6 @@ fun ProfilePetFloatingOverlay(
                     )
                 }
             }
-        }
     }
 
     if (showSheet) {

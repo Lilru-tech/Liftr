@@ -106,6 +106,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import com.lilru.liftr.ui.add.recommendation.CardioRecommendationResult
 import com.lilru.liftr.ui.add.recommendation.HyroxExerciseRecommendationResult
 import com.lilru.liftr.ui.add.recommendation.SportRecommendationResult
+import dev.chrisbanes.haze.HazeState
 import io.github.jan.supabase.SupabaseClient
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
@@ -158,6 +159,7 @@ private fun AddWorkoutSignInPrompt(
 @Composable
 fun AddWorkoutTabScreen(
     supabase: SupabaseClient,
+    hazeState: HazeState = remember { HazeState() },
     duplicateApplyNonce: Int = 0,
     kindNudge: String? = null,
     kindNudgeNonce: Int = 0,
@@ -547,6 +549,7 @@ fun AddWorkoutTabScreen(
         }
         item {
             AddWorkoutGeneralCard(
+                hazeState = hazeState,
                 selectedKind = selectedKind,
                 onKindChange = { k -> selectedKind = k; vm.clearStatus() },
                 selectedState = selectedState,

@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 import com.lilru.liftr.ads.UmpHelper
 import com.lilru.liftr.bodyweight.HealthConnectBodyWeightSync
 import com.lilru.liftr.auth.handleAuthDeepLinkIfPresent
+import com.lilru.liftr.externalroute.WearableCallbackStore
 import com.lilru.liftr.data.LiftrSupabase
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.navigation.OpenWorkoutIntentStore
@@ -44,6 +45,7 @@ class MainActivity : ComponentActivity() {
         UmpHelper.requestConsentThenInitAds(this)
         enableEdgeToEdge()
         handleAuthDeepLinkIfPresent(intent, LiftrSupabase.client)
+        WearableCallbackStore.setFromIntent(intent)
         PushIntentStore.setFromIntent(intent)
         OpenWorkoutIntentStore.setFromIntent(intent)
         askNotificationPermissionIfNeeded()
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleAuthDeepLinkIfPresent(intent, LiftrSupabase.client)
+        WearableCallbackStore.setFromIntent(intent)
         PushIntentStore.setFromIntent(intent)
         OpenWorkoutIntentStore.setFromIntent(intent)
     }

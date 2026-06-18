@@ -150,7 +150,12 @@ Vistas:
 - `get_user_achievements`
 - `toggle_tracked_achievement_v1` (`p_achievement_id` bigint) → `{ tracked, tracked_count }`; toggle seguimiento personal (máx. 5; solo logros no desbloqueados)
 - `get_tracked_achievement_count_v1` (`p_user_id` uuid) → `{ count, top_progress_pct }`; resumen ligero para Home
-- `get_user_prs` (`p_user_id`, optional `p_kind`, optional `p_search`) — profile/compare PR lists; bypasses own-only RLS via `SECURITY DEFINER` + authenticated read policies on PR tables
+- `get_user_prs` (`p_user_id`, optional `p_kind`, optional `p_search`) — profile/compare PR lists; bypasses own-only RLS via `SECURITY DEFINER` + authenticated read policies on PR tables; **excludes rows with `value <= 0`** (migration `20260718150000_prs_full_coverage_v1.sql`)
+- `rebuild_strength_prs_for_user` (`p_user_id` uuid), `rebuild_endurance_prs_for_user` (`p_user_id` uuid), `rebuild_sport_prs_for_user` (`p_user_id` uuid) — delete + rescan PR tables from remaining workouts/sessions/sets
+- `rebuild_endurance_prs_all` (), `rebuild_sport_prs_all` () — iterate users with cardio/sport workouts and call per-user rebuild
+- Trigger `trg_workout_pr_rebuild_on_delete` (`AFTER DELETE ON workouts`) — rebuilds PRs for the deleted workout's owner and kind
+- PR write helpers: `apply_cardio_session_prs`, `apply_sport_session_prs`; triggers `trg_cardio_pr_from_session`, `trg_sport_pr_from_session`, `trg_strength_pr_from_set`
+- PR tables: `personal_records` (strength), `endurance_records` (cardio; key = `activity_code` when present), `sport_records` (sport); unified read view `vw_user_prs`
 - `get_user_premium_status_v1` () → `boolean`; `auth.uid()` required; `true` iff a `user_subscriptions` row exists for the caller with `status in ('active','trialing')` and `expires_at > now()` (see migration above)
 - `get_user_level`
 - `get_weekly_goal_recommendation`

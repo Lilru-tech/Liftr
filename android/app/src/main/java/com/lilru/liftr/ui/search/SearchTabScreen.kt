@@ -50,13 +50,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
+import com.lilru.liftr.ui.components.LiftrBannerAd
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
 import com.lilru.liftr.data.PremiumStatusStore
 import com.lilru.liftr.ui.components.LiftrAvatar
+import com.lilru.liftr.ui.components.LiftrFilterPillRow
+import com.lilru.liftr.ui.components.LiftrGlassSearchBar
+import com.lilru.liftr.ui.components.LiftrPillSelectedStyle
+import com.lilru.liftr.ui.components.LiftrSearchRecentChip
+import com.lilru.liftr.ui.components.LiftrSearchTrendingChip
+import dev.chrisbanes.haze.HazeState
 import com.lilru.liftr.ui.home.WorkoutDetailScreen
 import com.lilru.liftr.ui.profile.ProfileTabScreen
 import com.lilru.liftr.ui.segment.SegmentDetailScreen
@@ -69,6 +73,7 @@ import java.util.UUID
 @Composable
 fun SearchTabScreen(
     supabase: SupabaseClient,
+    hazeState: HazeState = remember { HazeState() },
     onOpenAddWithPendingDuplicate: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -109,6 +114,7 @@ fun SearchTabScreen(
     if (selectedProfileUserId != null) {
         ProfileTabScreen(
             supabase = supabase,
+            hazeState = hazeState,
             onSignOut = {},
             targetUserId = selectedProfileUserId,
             showSignOutButton = false,
@@ -130,35 +136,46 @@ fun SearchTabScreen(
         onRefresh = { vm.pullRefresh() }
     )
 
+    val scopeLabels = listOf(
+        stringResource(R.string.search_scope_users),
+        stringResource(R.string.search_scope_workouts),
+        stringResource(R.string.search_scope_segments),
+        stringResource(R.string.search_scope_map)
+    )
+    val scopeSelectedIndex = when (ui.scope) {
+        SearchScope.USERS -> 0
+        SearchScope.WORKOUTS -> 1
+        SearchScope.SEGMENTS -> 2
+        SearchScope.MAP -> 3
+    }
+    val searchPlaceholder = when (ui.scope) {
+        SearchScope.USERS -> stringResource(R.string.search_scope_users)
+        SearchScope.WORKOUTS -> stringResource(R.string.search_scope_workouts)
+        SearchScope.SEGMENTS -> stringResource(R.string.search_scope_segments)
+        SearchScope.MAP -> stringResource(R.string.search_query_label)
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Row(
+            LiftrFilterPillRow(
+                labels = scopeLabels,
+                selectedIndex = scopeSelectedIndex,
+                onSelected = { index ->
+                    vm.setScope(
+                        when (index) {
+                            0 -> SearchScope.USERS
+                            1 -> SearchScope.WORKOUTS
+                            2 -> SearchScope.SEGMENTS
+                            else -> SearchScope.MAP
+                        }
+                    )
+                },
+                hazeState = hazeState,
+                selectedStyle = LiftrPillSelectedStyle.IosWhite,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                FilterChip(
-                    selected = ui.scope == SearchScope.USERS,
-                    onClick = { vm.setScope(SearchScope.USERS) },
-                    label = { Text(stringResource(R.string.search_scope_users)) }
-                )
-                FilterChip(
-                    selected = ui.scope == SearchScope.WORKOUTS,
-                    onClick = { vm.setScope(SearchScope.WORKOUTS) },
-                    label = { Text(stringResource(R.string.search_scope_workouts)) }
-                )
-                FilterChip(
-                    selected = ui.scope == SearchScope.SEGMENTS,
-                    onClick = { vm.setScope(SearchScope.SEGMENTS) },
-                    label = { Text(stringResource(R.string.search_scope_segments)) }
-                )
-                FilterChip(
-                    selected = ui.scope == SearchScope.MAP,
-                    onClick = { vm.setScope(SearchScope.MAP) },
-                    label = { Text(stringResource(R.string.search_scope_map)) }
-                )
-            }
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+            )
             if (ui.scope == SearchScope.MAP) {
                 TerritoryMapScreen(
                     supabase = supabase,
@@ -181,34 +198,14 @@ fun SearchTabScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         item {
-                            OutlinedTextField(
-                        value = ui.query,
-                        onValueChange = vm::onQueryChanged,
-                        label = { Text(stringResource(R.string.search_query_label)) },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                        keyboardActions = KeyboardActions(
-                            onSearch = { vm.search() }
-                        ),
-                        trailingIcon = {
-                            if (ui.query.isNotEmpty()) {
-                                IconButton(
-                                    onClick = {
-                                        vm.onQueryChanged("")
-                                        vm.search("")
-                                    }
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Clear,
-                                        contentDescription = stringResource(R.string.search_query_clear)
-                                    )
-                                }
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp)
-                    )
+                            LiftrGlassSearchBar(
+                                value = ui.query,
+                                onValueChange = vm::onQueryChanged,
+                                placeholder = searchPlaceholder,
+                                hazeState = hazeState,
+                                onSearch = { vm.search() },
+                                clearContentDescription = stringResource(R.string.search_query_clear)
+                            )
                         }
 
                 if (ui.query.trim().length < 2) {
@@ -231,12 +228,12 @@ fun SearchTabScreen(
                     item {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             ui.trendingQueries.forEach { q ->
-                                AssistChip(
+                                LiftrSearchTrendingChip(
+                                    text = q,
                                     onClick = {
                                         vm.onQueryChanged(q)
                                         vm.search(q)
-                                    },
-                                    label = { Text(q) }
+                                    }
                                 )
                             }
                         }
@@ -264,13 +261,15 @@ fun SearchTabScreen(
                     }
                     item {
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            ui.recentQueries.forEach { q ->
-                                AssistChip(
+                            ui.recentQueries.forEach { recent ->
+                                LiftrSearchRecentChip(
+                                    query = recent.query,
+                                    scopeLabel = stringResource(recent.scope.displayLabelRes()),
                                     onClick = {
-                                        vm.onQueryChanged(q)
-                                        vm.search(q)
-                                    },
-                                    label = { Text(q) }
+                                        vm.setScope(recent.scope)
+                                        vm.onQueryChanged(recent.query)
+                                        vm.search(recent.query)
+                                    }
                                 )
                             }
                         }
@@ -454,18 +453,7 @@ fun SearchTabScreen(
                 }
             }
             if (!isPremium) {
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    factory = { ctx ->
-                        AdView(ctx).apply {
-                            setAdSize(AdSize.BANNER)
-                            adUnitId = BuildConfig.AD_BANNER_UNIT_ID
-                            loadAd(AdRequest.Builder().build())
-                        }
-                    }
-                )
+                LiftrBannerAd(horizontalPadding = 0.dp)
             }
         }
     }

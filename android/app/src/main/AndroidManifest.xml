@@ -50,6 +50,14 @@
                     android:scheme="com.lilru.liftr"
                     android:host="auth-callback" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="com.lilru.liftr"
+                    android:host="wearable-callback" />
+            </intent-filter>
         </activity>
 
         <service

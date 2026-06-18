@@ -22,6 +22,7 @@ class StrengthSupersetNavigationTest {
                 setNumber = i,
                 reps = 10,
                 weightKg = 50.0,
+                rpe = null,
                 restSec = if (i == sets) 90 else 0
             )
         },
@@ -73,7 +74,7 @@ class StrengthSupersetNavigationTest {
             CompletedSetLine(
                 workoutExerciseId = ex.workoutExerciseId,
                 configId = 100,
-                segmentsInRow = null,
+                segmentsInRow = 1,
                 reps = 10,
                 weightKg = 50.0,
                 rpe = null,

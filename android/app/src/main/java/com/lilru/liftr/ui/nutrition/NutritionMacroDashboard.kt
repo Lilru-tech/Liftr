@@ -16,6 +16,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -38,28 +39,28 @@ fun NutritionMacroDashboard(
             value = recommendation.consumed,
             target = recommendation.baseCaloriesTarget.coerceAtLeast(1.0),
             unit = "kcal",
-            color = MaterialTheme.colorScheme.primary
+            color = Color(0xFFFF9500)
         )
         MacroRing(
             label = stringResource(R.string.nutrition_macro_protein),
             value = recommendation.proteinG,
             target = BackendContracts.NutritionDisplayTargets.PROTEIN_G,
             unit = "g",
-            color = MaterialTheme.colorScheme.tertiary
+            color = Color(0xFF007AFF)
         )
         MacroRing(
             label = stringResource(R.string.nutrition_macro_carbs),
             value = recommendation.carbsG,
             target = BackendContracts.NutritionDisplayTargets.CARBS_G,
             unit = "g",
-            color = MaterialTheme.colorScheme.secondary
+            color = Color(0xFF34C759)
         )
         MacroRing(
             label = stringResource(R.string.nutrition_macro_fat),
             value = recommendation.fatG,
             target = BackendContracts.NutritionDisplayTargets.FAT_G,
             unit = "g",
-            color = MaterialTheme.colorScheme.error.copy(alpha = 0.85f)
+            color = Color(0xFFFFCC00)
         )
     }
 }
