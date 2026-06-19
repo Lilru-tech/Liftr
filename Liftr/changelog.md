@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.21.0] - 2026-06-19
+
+### Added
+- **Challenges** — Added more challenges (iOS + Android).
+- **Notifications — settings** — Search in the enable/disable notifications view (iOS + Android).
+- **Pets — battle** — **Nerf & buff** mode so pets with a large stat gap can fight more evenly (iOS + Android).
+
+### Changed
+- **Android — UX/UI** — Brought Android UX/UI closer to iOS (Android).
+- **Pets — battle** — Improved battle screen UX/UI (iOS + Android).
+- **Pets — battle rewards** — Losers now receive coins and exp too (iOS + Android).
+
+### Fixed
+- **Android** — Various bug fixes (Android).
+- **Push notifications — workouts** — Opening a workout from a push notification now shows the full workout (iOS + Android).
+- **Achievements** — Fixed progress percentage sometimes exceeding 100% (iOS + Android).
+
 ## [1.20.1] - 2026-06-15
 
 ### Fixed
