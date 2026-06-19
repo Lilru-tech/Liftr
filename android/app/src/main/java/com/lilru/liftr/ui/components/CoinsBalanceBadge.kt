@@ -3,8 +3,11 @@ package com.lilru.liftr.ui.components
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Paid
@@ -19,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.domain.formatCompactCount
 import java.text.NumberFormat
@@ -40,13 +44,15 @@ fun CoinsBalanceBadge(
     }
     Surface(
         modifier = modifier
+            .wrapContentWidth(unbounded = true)
+            .width(IntrinsicSize.Min)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .semantics {
                 contentDescription = "Liftr Coins balance $formatted"
             },
         shape = RoundedCornerShape(50),
-        color = Color.White.copy(alpha = 0.12f),
-        border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.12f))
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.55f),
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
     ) {
         Row(
             modifier = Modifier.padding(
@@ -70,7 +76,9 @@ fun CoinsBalanceBadge(
                     MaterialTheme.typography.labelMedium
                 },
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Clip
             )
         }
     }

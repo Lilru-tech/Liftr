@@ -47,9 +47,8 @@ struct ComparePRsView: View {
         
         func better(metric: String, a: Double?, b: Double?) -> Row.Winner {
             guard let a, let b else { return .unknown }
-            let m = metric.lowercased()
-            let lowerIsBetter = m.contains("pace") || m.contains("fastest")
             if abs(a - b) < 1e-9 { return .tie }
+            let lowerIsBetter = PrFormatting.lowerIsBetter(metric: metric)
             return lowerIsBetter ? (a < b ? .me : .other) : (a > b ? .me : .other)
         }
         
@@ -68,7 +67,11 @@ struct ComparePRsView: View {
         }
         
         let dict = Dictionary(grouping: rows, by: { sectionName(forKind: $0.kind) })
-        return dict.keys.sorted().map { ($0, dict[$0]!.sorted { $0.label < $1.label }) }
+        return dict.keys.sorted().map { ($0, dict[$0]!.sorted {
+            PrFormatting.activityLabel(kind: $0.kind, label: $0.label).localizedCaseInsensitiveCompare(
+                PrFormatting.activityLabel(kind: $1.kind, label: $1.label)
+            ) == .orderedAscending
+        }) }
     }
     
     private var tally: (me: Int, ties: Int, other: Int) {
@@ -125,20 +128,20 @@ struct ComparePRsView: View {
                             ForEach(section.items) { r in
                                 HStack(alignment: .firstTextBaseline) {
                                     VStack(alignment: .leading, spacing: 2) {
-                                        Text(r.label).font(.body.weight(.semibold))
-                                        Text(prettyMetricName(r.metric, kind: r.kind))
+                                        Text(PrFormatting.activityLabel(kind: r.kind, label: r.label)).font(.body.weight(.semibold))
+                                        Text(PrFormatting.prettyMetricName(r.metric, kind: r.kind, label: r.label))
                                             .font(.subheadline).foregroundStyle(.secondary)
                                     }
                                     Spacer()
                                     HStack(spacing: 10) {
-                                        Text(formatValue(metric: r.metric, value: r.myValue))
+                                        Text(PrFormatting.formatValue(metric: r.metric, value: r.myValue, label: r.label))
                                             .fontWeight(r.winner == .me ? .semibold : .regular)
                                             .foregroundStyle(
                                                 r.winner == .me ? .green :
                                                     (r.winner == .tie ? .orange : .primary)
                                             )
                                         Text("•").foregroundStyle(.secondary)
-                                        Text(formatValue(metric: r.metric, value: r.otherValue))
+                                        Text(PrFormatting.formatValue(metric: r.metric, value: r.otherValue, label: r.label))
                                             .fontWeight(r.winner == .other ? .semibold : .regular)
                                             .foregroundStyle(
                                                 r.winner == .other ? .red :
@@ -203,41 +206,5 @@ struct ComparePRsView: View {
         case "sport":    return "Sport"
         default:         return "Other"
         }
-    }
-    
-    private func prettyMetricName(_ metric: String, kind: String) -> String {
-        let m = metric.lowercased()
-        if m == "max_hr" { return "Max HR" }
-        if m == "longest_duration_sec" { return "Longest duration" }
-        if m == "longest_distance_km" { return "Longest distance" }
-        if m == "fastest_pace_sec_per_km" { return "Fastest pace" }
-        if m == "max_elevation_m" { return "Max elevation" }
-        if m == "est_1rm_kg" { return "Estimated 1RM" }
-        if m == "max_weight_kg" { return "Max weight" }
-        if m == "best_set_volume_kg" { return "Best set volume" }
-        if m == "max_reps" { return "Max reps" }
-        return metric.replacingOccurrences(of: "_", with: " ").capitalized
-    }
-    
-    private func formatValue(metric: String, value: Double?) -> String {
-        guard let v = value else { return "—" }
-        let m = metric.lowercased()
-        if m.hasSuffix("_kg") || m == "est_1rm_kg" || m == "max_weight_kg" || m == "best_set_volume_kg" {
-            return String(format: "%.1f kg", v)
-        }
-        if m.contains("reps") { return "\(Int(v.rounded())) reps" }
-        if m == "max_hr" { return "\(Int(v.rounded())) bpm" }
-        if m == "longest_distance_km" { return String(format: "%.1f km", v) }
-        if m == "max_elevation_m" { return "\(Int(v.rounded())) m" }
-        if m == "fastest_pace_sec_per_km" {
-            let s = max(1, Int(v.rounded()))
-            return String(format: "%d:%02d /km", s/60, s%60)
-        }
-        if m.hasSuffix("_sec") || m.contains("duration") {
-            let s = max(0, Int(v.rounded()))
-            let h = s/3600, mm = (s%3600)/60, ss = s%60
-            return h > 0 ? String(format:"%d:%02d:%02d", h, mm, ss) : String(format:"%d:%02d", mm, ss)
-        }
-        return String(format: "%.2f", v)
     }
 }

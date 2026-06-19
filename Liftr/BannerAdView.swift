@@ -32,6 +32,7 @@ struct BannerAdView: UIViewRepresentable {
     }
 
     private static func syncRootViewControllerAndLoadIfNeeded(for banner: BannerView) {
+        guard !UITestConfiguration.isEnabled else { return }
         guard let root = bestRootViewController(for: banner) else {
             bannerAdLogger.warning("No rootViewController resolved; skip load")
             return

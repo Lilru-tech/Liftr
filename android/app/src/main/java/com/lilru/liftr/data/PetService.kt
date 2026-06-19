@@ -124,10 +124,17 @@ object PetService {
         return SupabaseResponseDecoding.decodeObject(res.data)
     }
 
-    suspend fun executeCombat(supabase: SupabaseClient, targetOpponentUserId: String): PetCombatResultWire {
+    suspend fun executeCombat(
+        supabase: SupabaseClient,
+        targetOpponentUserId: String,
+        disableNerfChoice: Boolean = false
+    ): PetCombatResultWire {
         val res = supabase.postgrest.rpc(
             BackendContracts.Rpc.EXECUTE_PET_COMBAT_V1,
-            buildJsonObject { put("p_target_opponent_user_id", targetOpponentUserId) }
+            buildJsonObject {
+                put("p_target_opponent_user_id", targetOpponentUserId)
+                put("p_disable_nerf_choice", disableNerfChoice)
+            }
         ) { }
         CoinManager.refreshBalanceAfterMutation(supabase)
         PetRefreshBus.notifyPetStateDidChange()
@@ -338,16 +345,12 @@ data class PetLogWire(
                 else "+$amount coins"
             }
             "combat" -> {
-                if (details?.get("is_draw") == "true" || details?.get("won") == "true") {
-                    val coins = details?.get("coins_gained")?.toIntOrNull() ?: 0
-                    val parts = buildList {
-                        if (expGained > 0) add("+$expGained XP")
-                        if (coins > 0) add("+$coins coins")
-                    }
-                    parts.takeIf { it.isNotEmpty() }?.joinToString(" · ") ?: "No rewards"
-                } else {
-                    "No rewards"
+                val coins = details?.get("coins_gained")?.toIntOrNull() ?: 0
+                val parts = buildList {
+                    if (expGained > 0) add("+$expGained XP")
+                    if (coins > 0) add("+$coins coins")
                 }
+                parts.takeIf { it.isNotEmpty() }?.joinToString(" · ") ?: "No rewards"
             }
             else -> null
         }

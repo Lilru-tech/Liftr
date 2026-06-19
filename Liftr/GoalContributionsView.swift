@@ -41,7 +41,6 @@ struct GoalContributionsView: View {
                                 WorkoutFeedCard(item: item, dayGroupLabel: nil)
                             }
                             .buttonStyle(.plain)
-                            .navigationLinkIndicatorVisibility(.hidden)
                         }
                     }
                     .padding(.horizontal, 16)

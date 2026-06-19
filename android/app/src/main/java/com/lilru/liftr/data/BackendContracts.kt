@@ -352,5 +352,6 @@ object BackendContracts {
         const val PROCESS_BILLING_WEBHOOK = "process-billing-webhook"
         const val PROCESS_APPLE_APP_STORE_NOTIFICATION = "process-apple-app-store-notification"
         const val RESOLVE_TERRITORY_MUNICIPALITY = "resolve-territory-municipality"
+        const val WEARABLE_OAUTH_START = "wearable-oauth-start"
     }
 }

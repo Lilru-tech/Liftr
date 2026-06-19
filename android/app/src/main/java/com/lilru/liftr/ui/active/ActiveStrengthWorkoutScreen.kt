@@ -2,9 +2,11 @@ package com.lilru.liftr.ui.active
 
 import com.lilru.liftr.ui.add.StrengthRoutineOverwriteBottomSheet
 import com.lilru.liftr.workout.StrengthFinishConfirmationCopy
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -84,9 +86,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.ui.add.ExercisePickerSortMode
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
+import com.lilru.liftr.ui.components.LiftrBannerAd
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.AppSnackbar
@@ -1393,18 +1393,9 @@ fun ActiveStrengthWorkoutScreen(
                         }
                     }
                     if (!isPremium) {
-                        AndroidView(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(50.dp)
-                                .padding(top = 8.dp),
-                            factory = { adCtx ->
-                                AdView(adCtx).apply {
-                                    setAdSize(AdSize.BANNER)
-                                    adUnitId = BuildConfig.AD_BANNER_UNIT_ID
-                                    loadAd(AdRequest.Builder().build())
-                                }
-                            }
+                        LiftrBannerAd(
+                            modifier = Modifier.padding(top = 8.dp),
+                            horizontalPadding = 0.dp
                         )
                     }
                 }
@@ -1828,10 +1819,16 @@ fun ActiveStrengthWorkoutScreen(
 private fun ElborblaFinishCelebrationOverlay(
     onContinue: () -> Unit
 ) {
+    BackHandler(onBack = onContinue)
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.72f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
     ) {
         Column(
             modifier = Modifier

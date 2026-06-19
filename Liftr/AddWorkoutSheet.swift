@@ -243,7 +243,10 @@ struct AddWorkoutSheet: View {
     @State private var appliedStrengthRoutineId: Int64? = nil
     @AppStorage("addWorkoutPlanTooltipSeen") private var addWorkoutPlanTooltipSeen = false
 
-    var body: some View { addWorkoutRoot }
+    var body: some View {
+        addWorkoutRoot
+            .accessibilityIdentifier("addWorkout.screen")
+    }
 
     @ViewBuilder
     private var addWorkoutGeneralFormSection: some View {
@@ -256,6 +259,7 @@ struct AddWorkoutSheet: View {
                         Text("Sport").tag(WorkoutKind.sport)
                     }
                     .pickerStyle(.menu)
+                    .accessibilityIdentifier("addWorkout.type")
                     .onChange(of: kind) { _, new in
                         onKindChangedFromTypePicker(new)
                     }
@@ -742,7 +746,12 @@ struct AddWorkoutSheet: View {
                 }
             }
         }
-        .banner($banner)
+        .banner(
+            $banner,
+            autoHide: !UITestConfiguration.isEnabled,
+            duration: UITestConfiguration.isEnabled ? 8 : 2.5,
+            successAccessibilityIdentifier: "addWorkout.success"
+        )
         .alert(
             "Are you sure you want to remove the exercise?",
             isPresented: removeStrengthExerciseAlertBinding
@@ -808,6 +817,7 @@ struct AddWorkoutSheet: View {
             .foregroundStyle(.white)
         }
         .disabled(loading || loadingRoutineOnly || loadingHyroxRoutineOnly || !canSave)
+        .accessibilityIdentifier("addWorkout.save")
     }
 
     private var saveRoutineOnlyButton: some View {
@@ -2356,8 +2366,11 @@ struct AddWorkoutSheet: View {
     @MainActor
     private func showSuccessAndGoHome(_ message: String) async {
         banner = Banner(message: message, type: .success)
-        try? await Task.sleep(nanoseconds: 1_600_000_000)
-        resetForm()
+        let delaySeconds = UITestConfiguration.isEnabled ? 4.0 : 1.6
+        try? await Task.sleep(nanoseconds: UInt64(delaySeconds * 1_000_000_000))
+        if !UITestConfiguration.isEnabled {
+            resetForm()
+        }
         app.selectedTab = .home
     }
     

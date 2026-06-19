@@ -47,10 +47,29 @@ data class TrendingQueryRow(
 
 @Serializable
 data class RecentQueryRow(
-    @SerialName("normalized_query") val query: String
+    @SerialName("normalized_query") val query: String,
+    val scope: String? = null
+)
+
+data class RecentSearchSuggestion(
+    val query: String,
+    val scope: SearchScope
 )
 
 enum class SearchScope { USERS, WORKOUTS, SEGMENTS, MAP }
+
+fun searchScopeFromRpc(value: String?): SearchScope = when (value?.lowercase()) {
+    "workouts" -> SearchScope.WORKOUTS
+    "segments" -> SearchScope.SEGMENTS
+    else -> SearchScope.USERS
+}
+
+fun SearchScope.displayLabelRes(): Int = when (this) {
+    SearchScope.USERS -> com.lilru.liftr.R.string.search_scope_users
+    SearchScope.WORKOUTS -> com.lilru.liftr.R.string.search_scope_workouts
+    SearchScope.SEGMENTS -> com.lilru.liftr.R.string.search_scope_segments
+    SearchScope.MAP -> com.lilru.liftr.R.string.search_scope_map
+}
 
 @Serializable
 data class SearchSegmentRow(
@@ -65,7 +84,7 @@ data class SearchUiState(
     val loading: Boolean = false,
     val isRefreshing: Boolean = false,
     val error: String? = null,
-    val recentQueries: List<String> = emptyList(),
+    val recentQueries: List<RecentSearchSuggestion> = emptyList(),
     val trendingQueries: List<String> = emptyList(),
     val profiles: List<SearchProfileRow> = emptyList(),
     val workouts: List<SearchWorkoutRow> = emptyList(),
@@ -82,7 +101,7 @@ private data class SearchResult(
 
 private data class SuggestionsResult(
     val trending: List<String>,
-    val recents: List<String>
+    val recents: List<RecentSearchSuggestion>
 )
 
 class SearchViewModel(
@@ -239,8 +258,13 @@ class SearchViewModel(
                 .take(12)
             val recents = supabase.postgrest.rpc(BackendContracts.Rpc.USER_SEARCH_RECENT_LIST) { }
                 .let { decodeFlexibleList<RecentQueryRow>(it.data) }
-                .map { it.query }
-                .distinct()
+                .map { row ->
+                    RecentSearchSuggestion(
+                        query = row.query,
+                        scope = searchScopeFromRpc(row.scope)
+                    )
+                }
+                .distinctBy { "${it.query}|${it.scope}" }
                 .take(12)
             SuggestionsResult(trending = trending, recents = recents)
         }.getOrNull() ?: return

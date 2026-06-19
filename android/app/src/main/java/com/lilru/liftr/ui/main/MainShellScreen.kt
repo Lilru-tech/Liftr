@@ -1,5 +1,6 @@
 package com.lilru.liftr.ui.main
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -75,7 +76,14 @@ import com.lilru.liftr.auth.AuthViewModel
 import com.lilru.liftr.auth.PostLoginShellMessage
 import com.lilru.liftr.ui.auth.ProfileAuthNavHost
 import com.lilru.liftr.prefs.LiftrPreferences
+import androidx.compose.foundation.layout.navigationBarsPadding
+import com.lilru.liftr.ui.components.LiftrGlassSurface
+import com.lilru.liftr.ui.theme.LiftrLayout
+import com.lilru.liftr.ui.theme.LiftrRadii
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradient
+import com.lilru.liftr.ui.theme.rememberLiftrHazeBlurEnabled
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.haze
 import com.lilru.liftr.data.loadProfileAvatarUrl
 import com.lilru.liftr.ui.AppBannerEvent
 import com.lilru.liftr.data.CoinManager
@@ -156,7 +164,7 @@ private fun MainTabIcon(
             } else {
                 Box(
                     modifier = Modifier
-                        .size(24.dp)
+                        .size(26.dp)
                         .clip(CircleShape)
                 ) {
                     AsyncImage(
@@ -171,68 +179,78 @@ private fun MainTabIcon(
     }
 }
 
-/** Barra de tabs compacta: mismos insets que Material [NavigationBar], altura fija (no ~80dp). */
+/** Floating glass tab bar (iOS liquid-glass parity). */
 @Composable
 private fun LiftrMainBottomBar(
+    hazeState: HazeState,
+    blurEnabled: Boolean,
     selected: MainTab,
     onSelect: (MainTab) -> Unit,
     isAuthenticated: Boolean,
     tabUnread: Int,
     myAvatarUrl: String?
 ) {
-    val container = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f)
     val pill = MaterialTheme.colorScheme.secondaryContainer
     val onSelected = MaterialTheme.colorScheme.onSecondaryContainer
     val onIdle = MaterialTheme.colorScheme.onSurfaceVariant
-    Surface(
-        color = container,
-        contentColor = onIdle,
-        tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
-        modifier = Modifier.fillMaxWidth()
+    val barShape = RoundedCornerShape(LiftrRadii.bottomBar)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Row(
+        LiftrGlassSurface(
+            hazeState = hazeState,
+            shape = barShape,
+            blurEnabled = blurEnabled,
             modifier = Modifier
                 .fillMaxWidth()
-                .windowInsetsPadding(NavigationBarDefaults.windowInsets)
-                .height(58.dp)
-                .selectableGroup(),
-            verticalAlignment = Alignment.CenterVertically
+                .height(56.dp)
         ) {
-            for (tab in MainTab.entries) {
-                val desc = stringResource(tab.titleRes)
-                val isSelected = selected == tab
-                val iconTint = if (isSelected) onSelected else onIdle
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clickable(
-                            role = Role.Tab,
-                            onClick = { onSelect(tab) }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .selectableGroup(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                for (tab in MainTab.entries) {
+                    val desc = stringResource(tab.titleRes)
+                    val isSelected = selected == tab
+                    val iconTint = if (isSelected) onSelected else onIdle
                     Box(
                         modifier = Modifier
-                            .defaultMinSize(minWidth = 40.dp, minHeight = 32.dp)
-                            .widthIn(max = 58.dp)
-                            .clip(RoundedCornerShape(20.dp))
-                            .then(
-                                if (isSelected) Modifier.background(pill.copy(alpha = 0.55f))
-                                else Modifier
-                            )
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clickable(
+                                role = Role.Tab,
+                                onClick = { onSelect(tab) }
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (isAuthenticated && tab == MainTab.Profile && tabUnread > 0) {
-                            BadgedBox(
-                                badge = { Badge { Text(tabUnread.toString()) } }
-                            ) {
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 40.dp, minHeight = 32.dp)
+                                .widthIn(max = if (tab == MainTab.Profile && isAuthenticated && tabUnread > 0) 68.dp else 58.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .then(
+                                    if (isSelected) Modifier.background(pill.copy(alpha = 0.55f))
+                                    else Modifier
+                                )
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isAuthenticated && tab == MainTab.Profile && tabUnread > 0) {
+                                BadgedBox(
+                                    modifier = Modifier.padding(top = 4.dp, end = 6.dp),
+                                    badge = { Badge { Text(tabUnread.toString()) } }
+                                ) {
+                                    MainTabIcon(tab, myAvatarUrl, desc, iconTint = iconTint)
+                                }
+                            } else {
                                 MainTabIcon(tab, myAvatarUrl, desc, iconTint = iconTint)
                             }
-                        } else {
-                            MainTabIcon(tab, myAvatarUrl, desc, iconTint = iconTint)
                         }
                     }
                 }
@@ -370,6 +388,9 @@ fun MainShellScreen(
         overlay = null
     }
 
+    val hazeState = remember { HazeState() }
+    val hazeBlurEnabled = rememberLiftrHazeBlurEnabled()
+
     Box(
         Modifier
             .fillMaxSize()
@@ -377,23 +398,28 @@ fun MainShellScreen(
     ) {
         val mainOverlay = overlay
         val showTabShell = mainOverlay == null
+        Box(
+            Modifier
+                .fillMaxSize()
+                .then(if (hazeBlurEnabled) Modifier.haze(state = hazeState) else Modifier)
+        ) {
         Scaffold(
             containerColor = Color.Transparent,
             contentColor = MaterialTheme.colorScheme.onBackground,
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {},
-            bottomBar = {
-                if (showTabShell) {
-                LiftrMainBottomBar(
-                    selected = selected,
-                    onSelect = { selected = it },
-                    isAuthenticated = isAuthenticated,
-                    tabUnread = tabUnread,
-                    myAvatarUrl = myAvatarUrl
-                )
-                }
-            }
+            bottomBar = {}
         ) { paddingValues ->
+            val tabContentModifier = if (showTabShell) {
+                Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .padding(bottom = LiftrLayout.floatingNavClearance)
+            } else {
+                Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            }
             if (showTabShell) {
                 when (selected) {
                 MainTab.Home -> {
@@ -407,28 +433,27 @@ fun MainShellScreen(
                         homeFeedSyncNonce = homeFeedSyncNonce,
                         homeFeedSyncWorkoutId = homeFeedSyncWorkoutId,
                         onGoToProfileTab = { selected = MainTab.Profile },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
+                        hazeState = hazeState,
+                        modifier = tabContentModifier
                     )
                 }
 
                 MainTab.Search -> {
                     SearchTabScreen(
                         supabase = supabase,
+                        hazeState = hazeState,
                         onOpenAddWithPendingDuplicate = {
                             duplicateApplyNonce++
                             selected = MainTab.Add
                         },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
+                        modifier = tabContentModifier
                     )
                 }
 
                 MainTab.Add -> {
                     AddWorkoutTabScreen(
                         supabase = supabase,
+                        hazeState = hazeState,
                         duplicateApplyNonce = duplicateApplyNonce,
                         kindNudge = kindNudge,
                         kindNudgeNonce = kindNudgeNonce,
@@ -438,18 +463,15 @@ fun MainShellScreen(
                         },
                         isSignedIn = isAuthenticated,
                         onGoToSignIn = { selected = MainTab.Profile },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
+                        modifier = tabContentModifier
                     )
                 }
 
                 MainTab.Nutrition -> {
                     NutritionTabScreen(
                         supabase = supabase,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(paddingValues)
+                        hazeState = hazeState,
+                        modifier = tabContentModifier
                     )
                 }
 
@@ -457,22 +479,19 @@ fun MainShellScreen(
                     if (isAuthenticated) {
                         ProfileTabScreen(
                             supabase = supabase,
+                            hazeState = hazeState,
                             onSignOut = onSignOut,
                             backgroundThemeId = backgroundTheme,
                             onBackgroundThemeChange = { id ->
                                 LiftrPreferences.setBackgroundTheme(context, id)
                                 backgroundTheme = id
                             },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(paddingValues)
+                            modifier = tabContentModifier
                         )
                     } else {
                         ProfileAuthNavHost(
                             viewModel = authViewModel,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(paddingValues)
+                            modifier = tabContentModifier
                         )
                     }
                 }
@@ -482,7 +501,27 @@ fun MainShellScreen(
             }
         }
 
+        if (showTabShell) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+            ) {
+                LiftrMainBottomBar(
+                    hazeState = hazeState,
+                    blurEnabled = hazeBlurEnabled,
+                    selected = selected,
+                    onSelect = { selected = it },
+                    isAuthenticated = isAuthenticated,
+                    tabUnread = tabUnread,
+                    myAvatarUrl = myAvatarUrl
+                )
+            }
+        }
+        }
+
         if (mainOverlay != null) {
+            BackHandler { clearOverlay() }
             val overlayNonNull = mainOverlay
             Box(
                 Modifier
@@ -511,6 +550,7 @@ fun MainShellScreen(
             is MainOverlay.FollowerProfile -> {
                 ProfileTabScreen(
                     supabase = supabase,
+                    hazeState = hazeState,
                     onSignOut = {},
                     targetUserId = overlayNonNull.userId,
                     showSignOutButton = false,

@@ -1,7 +1,6 @@
 package com.lilru.liftr.ui.profile
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,12 +9,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -33,22 +30,27 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.components.LiftrBackTopBar
+import com.lilru.liftr.ui.components.LiftrFilterPillRow
+import com.lilru.liftr.ui.components.LiftrGlassSurface
+import com.lilru.liftr.ui.components.LiftrPillSelectedStyle
+import dev.chrisbanes.haze.HazeState
 import io.github.jan.supabase.SupabaseClient
 
 @Composable
 fun ProfilePrsListScreen(
     supabase: SupabaseClient,
+    hazeState: HazeState,
     userId: String,
     username: String,
     showCompare: Boolean,
     onCompare: (() -> Unit)?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    /** Dentro de la pestaña PRs del perfil (sin botón Atrás ni padding de pantalla completa). */
     embedded: Boolean = false
 ) {
     val vm: ProfilePrsListViewModel = viewModel(
@@ -90,22 +92,20 @@ fun ProfilePrsListScreen(
                 }
             }
         }
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                PrKindFilterChip(PrKindFilter.ALL, st.filter) { vm.setFilter(it) }
-            }
-            item {
-                PrKindFilterChip(PrKindFilter.STRENGTH, st.filter) { vm.setFilter(it) }
-            }
-            item {
-                PrKindFilterChip(PrKindFilter.CARDIO, st.filter) { vm.setFilter(it) }
-            }
-            item {
-                PrKindFilterChip(PrKindFilter.SPORT, st.filter) { vm.setFilter(it) }
-            }
-        }
+        val filterLabels = listOf(
+            stringResource(R.string.home_filter_all),
+            stringResource(R.string.home_filter_strength),
+            stringResource(R.string.home_filter_cardio),
+            stringResource(R.string.home_filter_sport)
+        )
+        val filterSelectedIndex = PrKindFilter.entries.indexOf(st.filter).coerceAtLeast(0)
+        LiftrFilterPillRow(
+            labels = filterLabels,
+            selectedIndex = filterSelectedIndex,
+            onSelected = { index -> vm.setFilter(PrKindFilter.entries[index]) },
+            hazeState = hazeState,
+            selectedStyle = LiftrPillSelectedStyle.IosWhite
+        )
         if (st.rows.isNotEmpty()) {
             TextButton(
                 onClick = {
@@ -183,29 +183,16 @@ fun ProfilePrsListScreen(
             }
             sections.isNotEmpty() -> {
                 LazyColumn(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth()
                 ) {
-                    sections.forEach { sec ->
-                        item(key = "hdr-${sec.title}") {
-                            Text(
-                                sec.title,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .background(MaterialTheme.colorScheme.background)
-                                    .padding(vertical = 6.dp, horizontal = 4.dp)
-                            )
-                        }
-                        items(
-                            items = sec.items,
-                            key = { it.listId }
-                        ) { pr ->
-                            PrListRowCard(pr = pr)
-                        }
+                    items(
+                        items = sections,
+                        key = { "${it.kind}|${it.label}" }
+                    ) { sec ->
+                        PrActivityCard(hazeState = hazeState, section = sec)
                     }
                 }
             }
@@ -214,56 +201,60 @@ fun ProfilePrsListScreen(
 }
 
 @Composable
-private fun PrKindFilterChip(
-    option: PrKindFilter,
-    selected: PrKindFilter,
-    onSelect: (PrKindFilter) -> Unit
-) {
-    val label = when (option) {
-        PrKindFilter.ALL -> stringResource(R.string.home_filter_all)
-        PrKindFilter.STRENGTH -> stringResource(R.string.home_filter_strength)
-        PrKindFilter.CARDIO -> stringResource(R.string.home_filter_cardio)
-        PrKindFilter.SPORT -> stringResource(R.string.home_filter_sport)
+private fun PrActivityCard(hazeState: HazeState, section: ProfilePrsListSection) {
+    LiftrGlassSurface(
+        hazeState = hazeState,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth(),
+        elevation = 2.dp,
+        strokeAlpha = 0.18f
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (section.icon.isNotEmpty()) {
+                    Text(section.icon, fontSize = 20.sp)
+                }
+                Text(
+                    section.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            section.items.forEach { pr ->
+                PrMetricRow(pr = pr)
+            }
+        }
     }
-    FilterChip(
-        selected = option == selected,
-        onClick = { onSelect(option) },
-        label = { Text(label) }
-    )
 }
 
 @Composable
-private fun PrListRowCard(pr: ProfilePrListRow) {
+private fun PrMetricRow(pr: ProfilePrListRow) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(12.dp)
-            )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(Modifier.weight(1f, fill = true), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(
-                pr.label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                ComparePrsFormat.prettyMetricName(pr.metric),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Text(
+            PrFormatting.prettyMetricName(pr.metric, pr.kind, pr.label),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f, fill = true)
+        )
         Column(
             horizontalAlignment = Alignment.End,
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             Text(
-                ComparePrsFormat.formatValue(pr.metric, pr.value),
-                style = MaterialTheme.typography.titleMedium,
+                PrFormatting.formatValue(pr.metric, pr.value, pr.label),
+                style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )

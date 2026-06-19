@@ -1,6 +1,5 @@
 package com.lilru.liftr.ui.chat
 
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -8,16 +7,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
+import com.lilru.liftr.ui.components.LiftrChatFab
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -31,7 +26,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
@@ -44,6 +38,7 @@ import com.lilru.liftr.prefs.ChatPreferences
 import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.common.FloatingDockEdge
 import com.lilru.liftr.ui.common.floatingBubbleOffset
+import com.lilru.liftr.ui.common.floatingDockDragAndTap
 import com.lilru.liftr.ui.common.floatingEdgeAnchor
 import com.lilru.liftr.ui.common.floatingEdgeDock
 import com.lilru.liftr.ui.common.marginPx
@@ -82,9 +77,8 @@ fun MessagesFloatingButton(
 
     var showInbox by remember { mutableStateOf(false) }
     var openThread by remember { mutableStateOf<Pair<Long, ProfileLite?>?>(null) }
-    var dragHintClearRequested by remember { mutableStateOf(false) }
-    var fabDidDrag by remember { mutableStateOf(false) }
     var dragHintSize by remember { mutableStateOf(IntSize.Zero) }
+    var fabDragLocation by remember { mutableStateOf<Offset?>(null) }
 
     LaunchedEffect(showInbox, dragHintSeen) {
         if (showInbox && !dragHintSeen) ChatPreferences.setFabDragHintSeen(context)
@@ -103,6 +97,7 @@ fun MessagesFloatingButton(
             tabSizePx = tabSizePx,
             bottomInsetPx = bottomInsetPx
         )
+        val displayAnchor = fabDragLocation ?: anchor
 
         if (!dragHintSeen) {
             val cardWidthPx = with(density) { 280.dp.toPx() }
@@ -123,7 +118,7 @@ fun MessagesFloatingButton(
                     }
                     .offset {
                         floatingBubbleOffset(
-                            anchor = anchor,
+                            anchor = displayAnchor,
                             edge = fabEdge,
                             bubbleWidthPx = cardWidthPx,
                             bubbleHeightPx = cardHeightPx,
@@ -157,56 +152,43 @@ fun MessagesFloatingButton(
             }
         }
 
-        FloatingActionButton(
-            onClick = {
-                if (fabDidDrag) {
-                    fabDidDrag = false
-                } else {
-                    showInbox = true
-                }
-            },
+        LiftrChatFab(
             modifier = Modifier
                 .offset {
                     IntOffset(
-                        (anchor.x - tabSizePx / 2f).roundToInt(),
-                        (anchor.y - tabSizePx / 2f).roundToInt()
+                        (displayAnchor.x - tabSizePx / 2f).roundToInt(),
+                        (displayAnchor.y - tabSizePx / 2f).roundToInt()
                     )
                 }
-                .size(56.dp)
-                .pointerInput(widthPx, heightPx, bottomInsetPx, dragHintSeen) {
-                    var dragAnchor = anchor
-                    detectDragGestures(
-                        onDragStart = { fabDidDrag = false },
-                        onDragEnd = {
-                            scope.launch {
-                                ChatPreferences.setFabDock(context, fabEdge, fabPosition)
-                            }
-                        },
-                        onDrag = { change, drag ->
-                            change.consume()
-                            fabDidDrag = true
-                            if (!dragHintSeen && !dragHintClearRequested) {
-                                dragHintClearRequested = true
-                                scope.launch { ChatPreferences.setFabDragHintSeen(context) }
-                            }
-                            dragAnchor += Offset(drag.x, drag.y)
-                            val dock = floatingEdgeDock(
-                                point = dragAnchor,
-                                widthPx = widthPx,
-                                heightPx = heightPx,
-                                tabSizePx = tabSizePx,
-                                bottomInsetPx = bottomInsetPx
-                            )
-                            fabEdge = dock.first
-                            fabPosition = dock.second
+                .floatingDockDragAndTap(
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                    bottomInsetPx = bottomInsetPx,
+                    startAnchor = { anchor },
+                    onClick = { showInbox = true },
+                    onDrag = { point ->
+                        if (!dragHintSeen) {
+                            scope.launch { ChatPreferences.setFabDragHintSeen(context) }
                         }
-                    )
-                },
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary
-        ) {
-            Icon(Icons.Filled.Send, contentDescription = "Open messages")
-        }
+                        fabDragLocation = point
+                    },
+                    onDragEnd = { point ->
+                        fabDragLocation = null
+                        val dock = floatingEdgeDock(
+                            point = point,
+                            widthPx = widthPx,
+                            heightPx = heightPx,
+                            tabSizePx = tabSizePx,
+                            bottomInsetPx = bottomInsetPx
+                        )
+                        fabEdge = dock.first
+                        fabPosition = dock.second
+                        scope.launch {
+                            ChatPreferences.setFabDock(context, fabEdge, fabPosition)
+                        }
+                    }
+                )
+        )
 
         if (showInbox && openThread == null) {
             val theme = remember { LiftrPreferences.backgroundTheme(context) }

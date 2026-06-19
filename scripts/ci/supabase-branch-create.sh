@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+WORK_DIR="${ROOT_DIR}/Liftr"
+ENV_FILE="${ROOT_DIR}/scripts/ci/.branch.env"
+BRANCH_NAME="${BRANCH_NAME:-ui-regression-${GITHUB_RUN_ID:-local}}"
+TIMEOUT_SECONDS="${BRANCH_READY_TIMEOUT_SECONDS:-900}"
+POLL_INTERVAL_SECONDS="${BRANCH_POLL_INTERVAL_SECONDS:-30}"
+
+require_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    echo "Missing required environment variable: ${name}"
+    exit 1
+  fi
+}
+
+load_branch_env() {
+  if [ ! -s "$ENV_FILE" ]; then
+    echo "Branch env file is missing or empty: ${ENV_FILE}"
+    return 1
+  fi
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+}
+
+fetch_branch_env() {
+  if supabase branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"; then
+    :
+  else
+    supabase --experimental branches get "$BRANCH_NAME" -o env --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" >"$ENV_FILE"
+  fi
+
+  if ! grep -q '^POSTGRES_URL=' "$ENV_FILE"; then
+    postgres_url="$(
+      supabase branches get "$BRANCH_NAME" -o json --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" 2>/dev/null \
+        | jq -r '.POSTGRES_URL // empty' \
+        | head -n 1
+    )"
+    if [ -n "$postgres_url" ] && [ "$postgres_url" != "null" ]; then
+      echo "POSTGRES_URL=${postgres_url}" >>"$ENV_FILE"
+    fi
+  fi
+}
+
+export_branch_env_to_github() {
+  if [ -z "${GITHUB_ENV:-}" ]; then
+    return 0
+  fi
+
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    echo "$line" >>"$GITHUB_ENV"
+  done <"$ENV_FILE"
+
+  if grep -q '^ANON_KEY=' "$ENV_FILE" && ! grep -q '^SUPABASE_ANON_KEY=' "$ENV_FILE"; then
+    anon_key="$(grep '^ANON_KEY=' "$ENV_FILE" | cut -d= -f2-)"
+    echo "SUPABASE_ANON_KEY=${anon_key}" >>"$GITHUB_ENV"
+    echo "SUPABASE_ANON_KEY=${anon_key}" >>"$ENV_FILE"
+  fi
+
+  echo "BRANCH_NAME=${BRANCH_NAME}" >>"$GITHUB_ENV"
+}
+
+recover_migrations_failed_branch() {
+  echo "Branch ${BRANCH_NAME} hit MIGRATIONS_FAILED."
+  echo "This project relies on a production baseline schema that is not fully represented in migration history."
+  echo "Bootstrapping branch schema from the parent project..."
+
+  if [ -z "${SUPABASE_DB_PASSWORD:-}" ]; then
+    echo "SUPABASE_DB_PASSWORD is required for schema bootstrap recovery."
+    echo "Add it in GitHub Actions secrets (Supabase Dashboard → Project Settings → Database)."
+    exit 1
+  fi
+
+  fetch_branch_env
+  load_branch_env
+
+  if [ -z "${POSTGRES_URL:-}" ] && [ -z "${POSTGRES_URL_NON_POOLING:-}" ]; then
+    echo "POSTGRES_URL was not returned by supabase branches get."
+    echo "Branch env file contents (redacted):"
+    sed 's/=.*/=***REDACTED***/' "$ENV_FILE" || true
+    exit 1
+  fi
+
+  if [ -z "${POSTGRES_URL:-}" ]; then
+    echo "Warning: POSTGRES_URL missing; branch restore requires the pooler URL from branches get."
+  fi
+
+  if command -v pg_dump >/dev/null 2>&1; then
+    pg_dump --version
+  else
+    echo "pg_dump not found in PATH"
+  fi
+
+  if command -v psql >/dev/null 2>&1; then
+    psql --version
+  else
+    echo "psql not found in PATH"
+  fi
+
+  if ! bash "${ROOT_DIR}/scripts/ci/supabase-branch-bootstrap-schema.sh"; then
+    echo "Schema bootstrap failed for branch ${BRANCH_NAME}."
+    if [ -f "${ROOT_DIR}/scripts/ci/.parent-schema.sql" ]; then
+      dump_lines="$(wc -l < "${ROOT_DIR}/scripts/ci/.parent-schema.sql" | tr -d ' ')"
+      echo "Parent schema dump line count: ${dump_lines}"
+    fi
+    exit 1
+  fi
+}
+
+require_env SUPABASE_ACCESS_TOKEN
+require_env SUPABASE_PROJECT_ID
+
+export SUPABASE_ACCESS_TOKEN
+mkdir -p "$(dirname "$ENV_FILE")"
+: >"$ENV_FILE"
+
+echo "Linking Supabase project ${SUPABASE_PROJECT_ID} (workdir: ${WORK_DIR})"
+supabase link --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR"
+
+echo "Creating preview branch: ${BRANCH_NAME}"
+create_branch() {
+  supabase branches create "$BRANCH_NAME" --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR"
+}
+
+if ! create_branch; then
+  if ! supabase --experimental branches create "$BRANCH_NAME" --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR"; then
+    if supabase branches list --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" -o json \
+      | jq -e --arg name "$BRANCH_NAME" '.[] | select(.name == $name)' >/dev/null 2>&1; then
+      echo "Branch ${BRANCH_NAME} already exists; continuing."
+    else
+      echo "Failed to create branch ${BRANCH_NAME}"
+      exit 1
+    fi
+  fi
+fi
+
+echo "Waiting for branch ${BRANCH_NAME} to become ready (timeout ${TIMEOUT_SECONDS}s)"
+elapsed=0
+branch_status=""
+while [ "$elapsed" -lt "$TIMEOUT_SECONDS" ]; do
+  branch_status="$(
+    supabase branches list --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" -o json \
+      | jq -r --arg name "$BRANCH_NAME" '.[] | select(.name == $name) | .status // empty' \
+      | head -n 1
+  )"
+
+  if [ -z "$branch_status" ]; then
+    echo "Branch ${BRANCH_NAME} not found in list yet (elapsed ${elapsed}s)"
+  else
+    echo "Branch status: ${branch_status} (elapsed ${elapsed}s)"
+    case "$branch_status" in
+      ACTIVE_HEALTHY|FUNCTIONS_DEPLOYED|RUNNING)
+        break
+        ;;
+      MIGRATIONS_FAILED)
+        recover_migrations_failed_branch
+        branch_status="ACTIVE_HEALTHY"
+        break
+        ;;
+      FAILED|UNHEALTHY)
+        echo "Branch ${BRANCH_NAME} failed with status ${branch_status}"
+        supabase branches list --project-ref "$SUPABASE_PROJECT_ID" --workdir "$WORK_DIR" -o json \
+          | jq --arg name "$BRANCH_NAME" '.[] | select(.name == $name)'
+        exit 1
+        ;;
+    esac
+  fi
+
+  sleep "$POLL_INTERVAL_SECONDS"
+  elapsed=$((elapsed + POLL_INTERVAL_SECONDS))
+done
+
+if [ "$elapsed" -ge "$TIMEOUT_SECONDS" ]; then
+  echo "Timed out waiting for branch ${BRANCH_NAME} to become ready"
+  exit 1
+fi
+
+if [ "$branch_status" != "ACTIVE_HEALTHY" ]; then
+  echo "Fetching branch credentials"
+  fetch_branch_env
+  load_branch_env
+else
+  if [ ! -s "$ENV_FILE" ]; then
+    echo "Fetching branch credentials"
+    fetch_branch_env
+    load_branch_env
+  else
+    load_branch_env
+  fi
+fi
+
+echo "BRANCH_NAME=${BRANCH_NAME}" >>"$ENV_FILE"
+export_branch_env_to_github
+
+echo "Branch ${BRANCH_NAME} is ready."

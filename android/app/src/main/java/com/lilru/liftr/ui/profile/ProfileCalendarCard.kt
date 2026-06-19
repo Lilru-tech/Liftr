@@ -16,6 +16,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import com.lilru.liftr.ui.components.LiftrGlassSurface
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -51,6 +53,7 @@ import java.time.format.DateTimeFormatter
 fun ProfileCalendarCard(
     supabase: SupabaseClient,
     profileUserId: String,
+    hazeState: HazeState,
     modifier: Modifier = Modifier
 ) {
     val calVm: ProfileMonthCalendarViewModel = viewModel(
@@ -62,11 +65,12 @@ fun ProfileCalendarCard(
     val cells = buildMonthGridCells(cal.yearMonth)
     val weekLabels = weekDayLabels()
 
-    Card(
+    LiftrGlassSurface(
+        hazeState = hazeState,
+        shape = RoundedCornerShape(16.dp),
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.background
-        )
+        elevation = 4.dp,
+        strokeAlpha = 0.18f
     ) {
         Column(
             modifier = Modifier.padding(14.dp),

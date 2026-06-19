@@ -127,6 +127,53 @@ private func fetchParticipantWorkoutIds(for userId: UUID) async throws -> [Int] 
         .map(\.workout_id)
 }
 
+private struct ProfileLayoutMetrics: Equatable {
+    let usesCompactLayout: Bool
+    let usesScrollableTabs: Bool
+
+    static func from(contentWidth: CGFloat, isOwnProfile: Bool) -> ProfileLayoutMetrics {
+        ProfileLayoutMetrics(
+            usesCompactLayout: contentWidth < 390,
+            usesScrollableTabs: isOwnProfile && contentWidth < 410
+        )
+    }
+
+    var headerAvatarSize: CGFloat { usesCompactLayout ? 80 : 96 }
+    var headerStackSpacing: CGFloat { usesCompactLayout ? 10 : 14 }
+    var calendarDayCellHeight: CGFloat { usesCompactLayout ? 32 : 36 }
+    var verticalPadding: CGFloat { usesCompactLayout ? 8 : 12 }
+    var rootVStackSpacing: CGFloat { usesCompactLayout ? 10 : 12 }
+    var actionPadding: CGFloat { usesCompactLayout ? 6 : 8 }
+    var actionSpacing: CGFloat { usesCompactLayout ? 6 : 8 }
+}
+
+private struct ProfileRootContent<Header: View, TabPicker: View, TabContent: View>: View {
+    let layout: ProfileLayoutMetrics
+    @ViewBuilder let header: () -> Header
+    @ViewBuilder let tabPicker: () -> TabPicker
+    @ViewBuilder let tabContent: () -> TabContent
+    @EnvironmentObject var app: AppState
+
+    var body: some View {
+        VStack(spacing: layout.rootVStackSpacing) {
+            header()
+            tabPicker()
+            Group {
+                tabContent()
+            }
+            .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+
+            if !app.isPremium {
+                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
+                    .frame(height: 50)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .background(.ultraThinMaterial)
+            }
+        }
+    }
+}
+
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
     @AppStorage("backgroundTheme") private var backgroundTheme: String = "mintBlue"
@@ -136,8 +183,6 @@ struct ProfileView: View {
     init(userId: UUID? = nil) {
         self.userId = userId
     }
-    @State private var profileContentWidth: CGFloat = UIScreen.main.bounds.width
-    @State private var profileHeaderMiddleWidth: CGFloat = max(120, UIScreen.main.bounds.width * 0.38)
     @State private var counts: ProfileCounts?
     @State private var coinsBalance: Int = 0
     @State private var username: String = ""
@@ -199,6 +244,7 @@ struct ProfileView: View {
     @State private var petCombatHeadToHead: PetCombatHeadToHeadSummary?
     @State private var petCombatPreviewLoading = false
     @State private var showPetCombatArena = false
+    @State private var combatDisableNerfChoice = false
     @State private var consistencyWorkoutMeta: [Int: ConsistencyWorkoutMeta] = [:]
     @AppStorage("consistencyRootChartMetric") private var consistencyRootChartMetricRaw: String = ConsistencyChartMetric.duration.rawValue
     @State private var email: String? = nil
@@ -220,11 +266,6 @@ struct ProfileView: View {
     @State private var isPurchasingPremium = false
     @State private var premiumError: String?
     private let premiumProductID = "com.liftr.premium.monthly"
-    private var usesCompactProfileLayout: Bool { profileContentWidth < 390 }
-    private var profileUsesScrollableTabs: Bool { isOwnProfile && profileContentWidth < 410 }
-    private var profileHeaderAvatarSize: CGFloat { usesCompactProfileLayout ? 80 : 96 }
-    private var profileHeaderStackSpacing: CGFloat { usesCompactProfileLayout ? 10 : 14 }
-    private var profileCalendarDayCellHeight: CGFloat { usesCompactProfileLayout ? 32 : 36 }
     private let privacyPolicyURL = URL(string: "https://lilru-tech.github.io/liftr-legal/privacy.html")!
     private let termsOfUseURL = URL(string: "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     private var hasAnyUnread: Bool {
@@ -254,8 +295,30 @@ struct ProfileView: View {
     @State private var mySegmentsError: String?
     
     var body: some View {
+        GeometryReader { geo in
+            let layout = ProfileLayoutMetrics.from(contentWidth: geo.size.width, isOwnProfile: isOwnProfile)
+            profileScreen(layout: layout)
+                .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
+        }
+    }
+
+    @ViewBuilder
+    private func profileScreen(layout: ProfileLayoutMetrics) -> some View {
         ZStack {
-            profileRootView
+            ProfileRootContent(
+                layout: layout,
+                header: { headerCard(layout: layout) },
+                tabPicker: { profileMainTabPicker(layout: layout) },
+                tabContent: {
+                    switch tab {
+                    case .calendar: calendarTabContent(layout: layout)
+                    case .prs: prsTabContent
+                    case .progress: progressTabContent
+                    case .segments: mySegmentsTabContent
+                    case .settings: settingsView
+                    }
+                }
+            )
 
             if !isOwnProfile,
                let preview = petCombatPreview,
@@ -268,12 +331,15 @@ struct ProfileView: View {
                     headToHead: petCombatHeadToHead,
                     opponentUsername: username.isEmpty ? nil : username,
                     bannerInset: app.isPremium ? 0 : 58,
-                    onChallenge: { showPetCombatArena = true }
+                    onChallenge: { disableNerf in
+                        combatDisableNerfChoice = disableNerf
+                        showPetCombatArena = true
+                    }
                 )
             }
         }
         .foregroundStyle(.primary)
-        .padding(.vertical, usesCompactProfileLayout ? 8 : 12)
+        .padding(.vertical, layout.verticalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .banner($banner)
         .onAppear {
@@ -289,7 +355,11 @@ struct ProfileView: View {
         }
         .navigationDestination(isPresented: $showPetCombatArena) {
             if let opponentId = viewingUserId, let preview = petCombatPreview {
-                PetCombatArenaView(opponentUserId: opponentId, preview: preview)
+                PetCombatArenaView(
+                    opponentUserId: opponentId,
+                    preview: preview,
+                    disableNerfChoice: combatDisableNerfChoice
+                )
                     .gradientBG()
             }
         }
@@ -357,43 +427,9 @@ struct ProfileView: View {
         }
     }
 
-    private var profileRootView: some View {
-        VStack(spacing: usesCompactProfileLayout ? 10 : 12) {
-            headerCard
-
-            profileMainTabPicker
-
-            Group {
-                switch tab {
-                case .calendar: calendarTabContent
-                case .prs: prsTabContent
-                case .progress: progressTabContent
-                case .segments: mySegmentsTabContent
-                case .settings: settingsView
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-
-            if !app.isPremium {
-                BannerAdView(adUnitID: "ca-app-pub-7676731162362384/7781347704")
-                    .frame(height: 50)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-                    .background(.ultraThinMaterial)
-            }
-        }
-        .background {
-            GeometryReader { geo in
-                Color.clear.preference(key: ProfileContentWidthKey.self, value: geo.size.width)
-            }
-        }
-        .onPreferenceChange(ProfileContentWidthKey.self) { profileContentWidth = $0 }
-        .onPreferenceChange(ProfileHeaderMiddleWidthKey.self) { profileHeaderMiddleWidth = $0 }
-    }
-
     @ViewBuilder
-    private var profileMainTabPicker: some View {
-        if profileUsesScrollableTabs {
+    private func profileMainTabPicker(layout: ProfileLayoutMetrics) -> some View {
+        if layout.usesScrollableTabs {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     profileTabChip(title: "Calendar", targetTab: .calendar)
@@ -440,9 +476,9 @@ struct ProfileView: View {
         .buttonStyle(.plain)
     }
 
-    private var calendarTabContent: some View {
+    private func calendarTabContent(layout: ProfileLayoutMetrics) -> some View {
         ScrollView {
-            calendarView
+            calendarView(layout: layout)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
@@ -1364,19 +1400,18 @@ struct ProfileView: View {
         }
     }
 
-    private func profileHeaderStatPills(maxWidth: CGFloat) -> some View {
+    private func profileHeaderStatPills() -> some View {
         ViewThatFits(in: .horizontal) {
             profileHeaderStatPillsRow(compact: false, abbreviated: false)
             profileHeaderStatPillsRow(compact: true, abbreviated: false)
             profileHeaderStatPillsRow(compact: true, abbreviated: true)
         }
-        .frame(maxWidth: maxWidth > 0 ? maxWidth : nil, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .clipped()
     }
 
-    private var profileHeaderTrailingActions: some View {
-        let actionPadding: CGFloat = usesCompactProfileLayout ? 6 : 8
-        return HStack(spacing: usesCompactProfileLayout ? 6 : 8) {
+    private func profileHeaderTrailingActions(layout: ProfileLayoutMetrics) -> some View {
+        HStack(spacing: layout.actionSpacing) {
             NavigationLink {
                 RankingView(presetMetric: .level)
                     .gradientBG()
@@ -1384,7 +1419,7 @@ struct ProfileView: View {
             } label: {
                 Image(systemName: "trophy.fill")
                     .font(.subheadline.weight(.bold))
-                    .padding(actionPadding)
+                    .padding(layout.actionPadding)
                     .background(.thinMaterial, in: Circle())
             }
             .buttonStyle(.plain)
@@ -1405,6 +1440,7 @@ struct ProfileView: View {
                     } label: {
                         Label("Market", systemImage: "cart.fill")
                     }
+                    .accessibilityIdentifier("profile.menu.market")
 
                     NavigationLink {
                         PetDexView()
@@ -1422,6 +1458,7 @@ struct ProfileView: View {
                 } label: {
                     Label("Achievements", systemImage: "rosette")
                 }
+                .accessibilityIdentifier("profile.menu.achievements")
 
                 NavigationLink {
                     GoalsView(userId: viewingUserId, viewedUsername: username)
@@ -1429,6 +1466,7 @@ struct ProfileView: View {
                 } label: {
                     Label("Goals", systemImage: "target")
                 }
+                .accessibilityIdentifier("profile.menu.goals")
 
                 if isOwnProfile {
                     NavigationLink {
@@ -1454,7 +1492,7 @@ struct ProfileView: View {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "ellipsis")
                         .font(.subheadline.weight(.bold))
-                        .padding(actionPadding)
+                        .padding(layout.actionPadding)
                         .background(.thinMaterial, in: Circle())
 
                     if hasAnyUnread {
@@ -1465,19 +1503,20 @@ struct ProfileView: View {
                     }
                 }
             }
+            .accessibilityIdentifier("profile.menu")
             .buttonStyle(.plain)
         }
         .fixedSize(horizontal: true, vertical: false)
         .padding(.top, 2)
     }
 
-    private var headerCard: some View {
-        HStack(alignment: .top, spacing: profileHeaderStackSpacing) {
+    private func headerCard(layout: ProfileLayoutMetrics) -> some View {
+        HStack(alignment: .top, spacing: layout.headerStackSpacing) {
                 if isOwnProfile {
                     PhotosPicker(selection: $pickedItem, matching: .images) {
                         ZStack {
                             AvatarView(urlString: avatarURL)
-                                .frame(width: profileHeaderAvatarSize, height: profileHeaderAvatarSize)
+                                .frame(width: layout.headerAvatarSize, height: layout.headerAvatarSize)
                                 .overlay(
                                     Group { if uploadingAvatar { ProgressView().scaleEffect(0.8) } },
                                     alignment: .bottomTrailing
@@ -1489,18 +1528,18 @@ struct ProfileView: View {
                     }
                 } else {
                     AvatarView(urlString: avatarURL)
-                        .frame(width: profileHeaderAvatarSize, height: profileHeaderAvatarSize)
+                        .frame(width: layout.headerAvatarSize, height: layout.headerAvatarSize)
                         .contentShape(Rectangle())
                         .onTapGesture { if avatarURL != nil { showAvatarPreview = true } }
                         .accessibilityHint("Tap to preview")
                 }
 
-                VStack(alignment: .leading, spacing: usesCompactProfileLayout ? 4 : 6) {
+                VStack(alignment: .leading, spacing: layout.usesCompactLayout ? 4 : 6) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("@\(username.isEmpty ? "user" : username)")
-                        .font(usesCompactProfileLayout ? .headline : .title3)
+                        .font(layout.usesCompactLayout ? .headline : .title3)
                         .fontWeight(.semibold)
-                    profileHeaderStatPills(maxWidth: profileHeaderMiddleWidth)
+                    profileHeaderStatPills()
                         .foregroundStyle(.secondary)
 
                     if let uid = viewingUserId {
@@ -1596,18 +1635,13 @@ struct ProfileView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
-                .background {
-                    GeometryReader { geo in
-                        Color.clear.preference(key: ProfileHeaderMiddleWidthKey.self, value: geo.size.width)
-                    }
-                }
 
-            profileHeaderTrailingActions
+            profileHeaderTrailingActions(layout: layout)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, usesCompactProfileLayout ? 12 : 16)
-        .padding(.top, usesCompactProfileLayout ? 14 : 20)
-        .padding(.bottom, usesCompactProfileLayout ? 12 : 16)
+        .padding(.horizontal, layout.usesCompactLayout ? 12 : 16)
+        .padding(.top, layout.usesCompactLayout ? 14 : 20)
+        .padding(.bottom, layout.usesCompactLayout ? 12 : 16)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)
@@ -1621,7 +1655,7 @@ struct ProfileView: View {
         .padding(.horizontal)
     }
     
-    private var calendarView: some View {
+    private func calendarView(layout: ProfileLayoutMetrics) -> some View {
         VStack(spacing: 14) {
             ProfileCalendarView(
                 monthDate: $monthDate,
@@ -1633,7 +1667,7 @@ struct ProfileView: View {
                 draftActivity: draftActivity,
                 monthTitle: monthTitle(for: monthDate),
                 weekdays: weekdays(),
-                dayCellHeight: profileCalendarDayCellHeight,
+                dayCellHeight: layout.calendarDayCellHeight,
                 onToday: selectTodayInCalendar
             )
 
@@ -1661,6 +1695,15 @@ struct ProfileView: View {
         var id: String { "\(kind)|\(label)|\(metric)|\(achieved_at.timeIntervalSince1970)" }
     }
     
+    private struct PRActivitySection: Identifiable {
+        let id: String
+        let title: String
+        let icon: String
+        let kind: String
+        let label: String
+        let items: [PRRow]
+    }
+
     private struct PRsListView: View {
         @EnvironmentObject var app: AppState
         let userId: UUID?
@@ -1675,8 +1718,8 @@ struct ProfileView: View {
         @State private var loading = false
         @State private var error: String?
         
-        private var sections: [(title: String, items: [PRRow])] {
-            grouped(by: Self.sectionTitle)
+        private var sections: [PRActivitySection] {
+            buildSections(from: filtered(prs))
         }
         
         var body: some View {
@@ -1706,67 +1749,52 @@ struct ProfileView: View {
                     .padding(.horizontal)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
+
+                if !prs.isEmpty {
+                    HStack {
+                        Button {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
+                                showSearch.toggle()
+                                if !showSearch { search = "" }
+                            }
+                        } label: {
+                            Label(showSearch ? "Hide search" : "Search", systemImage: showSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
+                                .font(.subheadline)
+                        }
+                        .buttonStyle(.plain)
+                        Spacer()
+                    }
+                    .padding(.horizontal)
+                }
                 
-                List {
-                    if loading { ProgressView().frame(maxWidth: .infinity) }
-                    
-                    ForEach(Array(sections.enumerated()), id: \.element.title) { index, section in
-                        HStack {
-                            Text(section.title)
-                                .font(.headline)
-                                .textCase(nil)
-                            Spacer()
-                            if index == 0 {
-                                Button {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.88)) {
-                                        showSearch.toggle()
-                                    }
-                                } label: {
-                                    Image(systemName: showSearch ? "magnifyingglass.circle.fill" : "magnifyingglass")
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Toggle search")
+                if loading && prs.isEmpty {
+                    ProgressView().padding(.top, 24)
+                } else if let error, prs.isEmpty {
+                    Text(error).foregroundStyle(.red).padding(.horizontal)
+                } else if !loading && error == nil && prs.isEmpty {
+                    Text("No personal records yet.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(24)
+                } else if !prs.isEmpty && sections.isEmpty && !search.isEmpty {
+                    Text("No PRs match your search.")
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(24)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 10) {
+                            if loading {
+                                ProgressView().frame(maxWidth: .infinity)
+                            }
+                            ForEach(sections) { section in
+                                prActivityCard(section)
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .listRowInsets(EdgeInsets(top: 18, leading: 16, bottom: 8, trailing: 16))
-                        .listRowBackground(Color.clear)
-                        
-                        ForEach(section.items, id: \.id) { pr in
-                            HStack(alignment: .firstTextBaseline) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(pr.label).font(.body.weight(.semibold))
-                                    Text(prettyMetricName(pr.metric, kind: pr.kind))
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(formatValue(pr))
-                                        .font(.title3.weight(.bold))
-                                        .monospacedDigit()
-                                    Text(dateOnly(pr.achieved_at))
-                                        .font(.caption2).foregroundStyle(.secondary)
-                                }
-                            }
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 12)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(.white.opacity(0.18))
-                            )
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
-                            .listRowBackground(Color.clear)
-                        }
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 16)
                     }
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-                .listSectionSeparator(.hidden)
-                .background(Color.clear)
             }
             .toolbar {
                 if enableCompareWithMe, let myId = app.userId, let otherId = userId {
@@ -1781,8 +1809,42 @@ struct ProfileView: View {
             }
             .task { await load() }
             .onChange(of: filter) { _, _ in Task { await load() } }
-            .onAppear { UITableView.appearance().backgroundColor = .clear }
-            .onDisappear { UITableView.appearance().backgroundColor = nil }
+        }
+
+        @ViewBuilder
+        private func prActivityCard(_ section: PRActivitySection) -> some View {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    if !section.icon.isEmpty {
+                        Text(section.icon).font(.title3)
+                    }
+                    Text(section.title)
+                        .font(.headline)
+                }
+                ForEach(section.items, id: \.id) { pr in
+                    HStack(alignment: .top) {
+                        Text(PrFormatting.prettyMetricName(pr.metric, kind: pr.kind, label: pr.label))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 12)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(PrFormatting.formatValue(metric: pr.metric, value: pr.value, label: pr.label))
+                                .font(.body.weight(.bold))
+                                .monospacedDigit()
+                            Text(dateOnly(pr.achieved_at))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(.white.opacity(0.18))
+            )
         }
         
         private func load() async {
@@ -1804,99 +1866,50 @@ struct ProfileView: View {
                 await MainActor.run { self.error = error.localizedDescription }
             }
         }
-        
-        private static func sectionTitle(_ pr: PRRow) -> String {
-            let kind = pr.kind.capitalized
-            let label = pr.label.capitalized
-            return "\(kind) · \(label)"
-        }
-        
-        private func grouped(by key: (PRRow) -> String) -> [(title: String, items: [PRRow])] {
-            let dict = Dictionary(grouping: filtered(prs), by: key)
-            func orderTuple(_ title: String) -> (Int, String) {
-                let lower = title.lowercased()
-                if lower.hasPrefix("strength") { return (0, lower) }
-                if lower.hasPrefix("cardio")   { return (1, lower) }
-                if lower.hasPrefix("sport")    { return (2, lower) }
-                return (3, lower)
-            }
 
-            let sortedKeys = dict.keys.sorted { a, b in
-                let oa = orderTuple(a), ob = orderTuple(b)
-                return oa.0 == ob.0 ? oa.1 < ob.1 : oa.0 < ob.0
+        private struct ActivityKey: Hashable {
+            let kind: String
+            let label: String
+        }
+
+        private func buildSections(from rows: [PRRow]) -> [PRActivitySection] {
+            let grouped = Dictionary(grouping: rows) { pr in
+                ActivityKey(kind: pr.kind.lowercased(), label: pr.label.lowercased())
+            }
+            let sortedKeys = grouped.keys.sorted { a, b in
+                let ka = PrFormatting.kindSortOrder(a.kind)
+                let kb = PrFormatting.kindSortOrder(b.kind)
+                if ka != kb { return ka < kb }
+                return PrFormatting.activityLabel(kind: a.kind, label: a.label)
+                    .localizedCaseInsensitiveCompare(PrFormatting.activityLabel(kind: b.kind, label: b.label)) == .orderedAscending
             }
             return sortedKeys.map { key in
-                let items = (dict[key] ?? []).sorted { $0.achieved_at > $1.achieved_at }
-                return (title: key, items: items)
+                let items = (grouped[key] ?? []).sorted {
+                    let oa = PrFormatting.metricSortOrder($0.metric)
+                    let ob = PrFormatting.metricSortOrder($1.metric)
+                    if oa != ob { return oa < ob }
+                    return $0.achieved_at > $1.achieved_at
+                }
+                return PRActivitySection(
+                    id: "\(key.kind)|\(key.label)",
+                    title: PrFormatting.activityLabel(kind: key.kind, label: key.label),
+                    icon: PrFormatting.activityIcon(kind: key.kind, label: key.label),
+                    kind: key.kind,
+                    label: key.label,
+                    items: items
+                )
             }
         }
         
         private func filtered(_ items: [PRRow]) -> [PRRow] {
             guard !search.isEmpty else { return items }
-            return items.filter { $0.label.localizedCaseInsensitiveContains(search) || $0.metric.localizedCaseInsensitiveContains(search) }
-        }
-        
-        private func prettyMetricName(_ metric: String, kind: String) -> String {
-            let m = metric.lowercased()
-            if m == "max_hr" { return "Max HR" }
-            if m == "longest_duration_sec" { return "Longest duration" }
-            if m == "longest_distance_km" { return "Longest distance" }
-            if m == "fastest_pace_sec_per_km" { return "Fastest pace" }
-            if m == "max_elevation_m" { return "Max elevation" }
-            if m == "est_1rm_kg" { return "Estimated 1RM" }
-            if m == "max_weight_kg" { return "Max weight" }
-            if m == "best_set_volume_kg" { return "Best set volume" }
-            if m == "max_reps" { return "Max reps" }
-            return snakeToTitle(m)
-        }
-        
-        private func formatValue(_ pr: PRRow) -> String {
-            let m = pr.metric.lowercased()
-            let v = pr.value
-            
-            if m.hasSuffix("_kg") || m == "est_1rm_kg" || m == "max_weight_kg" || m == "best_set_volume_kg" {
-                return String(format: "%.1f kg", v)
+            return items.filter { pr in
+                let display = PrFormatting.activityLabel(kind: pr.kind, label: pr.label)
+                return display.localizedCaseInsensitiveContains(search)
+                    || pr.label.localizedCaseInsensitiveContains(search)
+                    || pr.metric.localizedCaseInsensitiveContains(search)
+                    || PrFormatting.prettyMetricName(pr.metric, kind: pr.kind, label: pr.label).localizedCaseInsensitiveContains(search)
             }
-            if m.contains("reps") {
-                return "\(Int(v.rounded())) reps"
-            }
-            if m == "max_hr" {
-                return "\(Int(v.rounded())) bpm"
-            }
-            if m == "longest_distance_km" {
-                return String(format: "%.1f km", v)
-            }
-            if m == "max_elevation_m" {
-                return "\(Int(v.rounded())) m"
-            }
-            if m == "fastest_pace_sec_per_km" {
-                return paceString(fromSeconds: v)
-            }
-            if m.hasSuffix("_sec") || m.contains("duration") {
-                return durationString(fromSeconds: v)
-            }
-            return String(format: "%.2f", v)
-        }
-        
-        private func durationString(fromSeconds secondsDouble: Double) -> String {
-            let s = max(0, Int(secondsDouble.rounded()))
-            let h = s / 3600
-            let m = (s % 3600) / 60
-            let sec = s % 60
-            if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
-            return String(format: "%d:%02d", m, sec)
-        }
-        
-        private func paceString(fromSeconds secondsDouble: Double) -> String {
-            let s = max(1, Int(secondsDouble.rounded()))
-            let m = s / 60
-            let sec = s % 60
-            return String(format: "%d:%02d /km", m, sec)
-        }
-        
-        private func snakeToTitle(_ s: String) -> String {
-            s.replacingOccurrences(of: "_", with: " ")
-                .capitalized
         }
         
         private func dateOnly(_ d: Date) -> String {
@@ -2468,6 +2481,7 @@ struct ProfileView: View {
                         .padding(12)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityIdentifier("profile.menu.logout")
                 }
                 .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
                 .listRowBackground(Color.clear)
@@ -3721,20 +3735,6 @@ struct AvatarZoomPreview: View {
 
     private func clamp(_ v: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
         Swift.min(Swift.max(v, min), max)
-    }
-}
-
-private struct ProfileContentWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-private struct ProfileHeaderMiddleWidthKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
 

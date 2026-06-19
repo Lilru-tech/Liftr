@@ -26,9 +26,13 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircle
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Eco
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Star
@@ -48,7 +52,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -105,7 +110,12 @@ import com.lilru.liftr.ui.chat.SharedIngredientSnapshot
 import com.lilru.liftr.ui.chat.SharedRecipeIngredientSnapshot
 import com.lilru.liftr.ui.chat.SharedRecipeProfilePer100gSnapshot
 import com.lilru.liftr.ui.chat.SharedRecipeSnapshot
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.lilru.liftr.data.PremiumStatusStore
+import com.lilru.liftr.ui.components.LiftrBannerAd
+import com.lilru.liftr.ui.components.LiftrGlassSurface
 import com.lilru.liftr.ui.theme.liftrAppBackgroundGradientOpaque
+import dev.chrisbanes.haze.HazeState
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import java.time.format.DateTimeFormatter
@@ -116,11 +126,13 @@ import kotlin.math.roundToInt
 @Composable
 fun NutritionTabScreen(
     supabase: SupabaseClient,
+    hazeState: HazeState = remember { HazeState() },
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val vm: NutritionViewModel = viewModel(factory = NutritionViewModelFactory(supabase))
     val ui by vm.uiState.collectAsState()
+    val isPremium by PremiumStatusStore.isPremium.collectAsStateWithLifecycle()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true, confirmValueChange = { newValue ->
         if (newValue == SheetValue.Hidden && ui.logCart.isNotEmpty()) false else true
     })
@@ -129,45 +141,78 @@ fun NutritionTabScreen(
     if (showInsightsHub) {
         NutritionInsightsHubScreen(
             vm = vm,
+            hazeState = hazeState,
             onBack = { showInsightsHub = false },
             modifier = modifier
         )
         return
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        floatingActionButton = {
-            var fabMenuExpanded by remember { mutableStateOf(false) }
-            Box {
-                IconButton(onClick = { fabMenuExpanded = true }) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.nutrition_add_food))
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            var addMenuExpanded by remember { mutableStateOf(false) }
+            TopAppBar(
+                title = { },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                    scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent
+                ),
+                actions = {
+                    IconButton(onClick = { addMenuExpanded = true }) {
+                        Icon(
+                            Icons.Filled.AddCircle,
+                            contentDescription = stringResource(R.string.nutrition_add_food)
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = addMenuExpanded,
+                        onDismissRequest = { addMenuExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.nutrition_log_food)) },
+                            leadingIcon = { Icon(Icons.Filled.AddCircle, contentDescription = null) },
+                            onClick = {
+                                addMenuExpanded = false
+                                vm.openAddFood(plan = false)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.nutrition_plan_food)) },
+                            leadingIcon = { Icon(Icons.Filled.CalendarMonth, contentDescription = null) },
+                            onClick = {
+                                addMenuExpanded = false
+                                vm.openAddFood(plan = true)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.nutrition_new_ingredient)) },
+                            leadingIcon = { Icon(Icons.Filled.Eco, contentDescription = null) },
+                            onClick = {
+                                addMenuExpanded = false
+                                vm.setOverlay(NutritionOverlay.CreateIngredient)
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.nutrition_new_recipe)) },
+                            leadingIcon = { Icon(Icons.Filled.MenuBook, contentDescription = null) },
+                            onClick = {
+                                addMenuExpanded = false
+                                vm.setOverlay(NutritionOverlay.CreateRecipe)
+                            }
+                        )
+                    }
                 }
-                DropdownMenu(expanded = fabMenuExpanded, onDismissRequest = { fabMenuExpanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.nutrition_add_food)) },
-                        onClick = {
-                            fabMenuExpanded = false
-                            vm.openAddFood(plan = false)
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.nutrition_plan_food)) },
-                        onClick = {
-                            fabMenuExpanded = false
-                            vm.openAddFood(plan = true)
-                        }
-                    )
-                }
-            }
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+            )
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             item {
                 NutritionCalendarCard(
+                    hazeState = hazeState,
                     month = ui.month,
                     selectedDate = ui.selectedDate,
                     dayBalance = ui.monthDayBalance,
@@ -177,7 +222,7 @@ fun NutritionTabScreen(
                     onSelectDay = { vm.setSelectedDate(it) }
                 )
             }
-            item { NutritionSummaryCard(ui = ui, vm = vm) }
+            item { NutritionSummaryCard(hazeState = hazeState, ui = ui, vm = vm) }
             if (ui.error != null) {
                 item {
                     Text(ui.error!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -259,7 +304,11 @@ fun NutritionTabScreen(
                 }
             }
             item {
-                NutritionInsightsEntryCard(onClick = { showInsightsHub = true })
+                NutritionInsightsEntryCard(hazeState = hazeState, onClick = { showInsightsHub = true })
+            }
+            }
+            if (!isPremium) {
+                LiftrBannerAd(horizontalPadding = 4.dp)
             }
         }
     }
@@ -350,10 +399,17 @@ private fun NutritionGramsPicker(grams: Double, onChange: (Double) -> Unit, kcal
 }
 
 @Composable
-private fun NutritionSummaryCard(ui: NutritionUiState, vm: NutritionViewModel) {
-    Card(
+private fun NutritionSummaryCard(
+    hazeState: HazeState,
+    ui: NutritionUiState,
+    vm: NutritionViewModel
+) {
+    LiftrGlassSurface(
+        hazeState = hazeState,
+        shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+        elevation = 4.dp,
+        strokeAlpha = 0.18f
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(stringResource(R.string.nutrition_daily_balance), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
@@ -363,18 +419,24 @@ private fun NutritionSummaryCard(ui: NutritionUiState, vm: NutritionViewModel) {
                 val rec = ui.recommendation!!
                 NutritionMacroDashboard(recommendation = rec)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.nutrition_target_base), style = MaterialTheme.typography.labelSmall)
-                        Text(stringResource(R.string.nutrition_kcal_format, rec.baseCaloriesTarget.roundToInt()), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.nutrition_activity_burned), style = MaterialTheme.typography.labelSmall)
-                        Text(stringResource(R.string.nutrition_kcal_format, rec.burned.roundToInt()), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(R.string.nutrition_consumed), style = MaterialTheme.typography.labelSmall)
-                        Text(stringResource(R.string.nutrition_kcal_format, rec.consumed.roundToInt()), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
+                    NutritionBalanceColumnCard(
+                        title = stringResource(R.string.nutrition_target_base),
+                        value = rec.baseCaloriesTarget.toInt(),
+                        tint = NutritionBalanceColors.Bmr,
+                        modifier = Modifier.weight(1f)
+                    )
+                    NutritionBalanceColumnCard(
+                        title = stringResource(R.string.nutrition_activity_burned),
+                        value = rec.burned.toInt(),
+                        tint = NutritionBalanceColors.Activity,
+                        modifier = Modifier.weight(1f)
+                    )
+                    NutritionBalanceColumnCard(
+                        title = stringResource(R.string.nutrition_consumed),
+                        value = rec.consumed.toInt(),
+                        tint = NutritionBalanceColors.Consumed,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
                 NutritionCalorieBudgetStatusRow(remainingKcal = rec.remaining)
                 NutritionMicroNutrientsSection(

@@ -115,6 +115,14 @@ struct NotificationSettingsRow: Codable {
     }
 }
 
+private struct NotificationSettingItem: Identifiable {
+    let section: String
+    let title: String
+    let keyPath: WritableKeyPath<NotificationSettingsRow, Bool>
+
+    var id: String { "\(section)|\(title)" }
+}
+
 struct NotificationSettingsView: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -122,9 +130,81 @@ struct NotificationSettingsView: View {
     @State private var loading = false
     @State private var saving = false
     @State private var error: String?
+    @State private var searchText = ""
+
+    private static let sectionOrder = [
+        "Messages",
+        "Social",
+        "Workouts",
+        "Achievements & Goals",
+        "Competitions",
+        "Segments & Challenges",
+        "Reminders",
+        "Nutrition",
+        "Pets",
+        "Apple Health"
+    ]
+
+    private static let notificationSettingItems: [NotificationSettingItem] = [
+        NotificationSettingItem(section: "Messages", title: "Direct messages", keyPath: \.pushNewMessage),
+        NotificationSettingItem(section: "Social", title: "New followers", keyPath: \.pushNewFollower),
+        NotificationSettingItem(section: "Workouts", title: "Workout likes", keyPath: \.pushWorkoutLike),
+        NotificationSettingItem(section: "Workouts", title: "Workout comments", keyPath: \.pushWorkoutComment),
+        NotificationSettingItem(section: "Workouts", title: "Comment likes", keyPath: \.pushCommentLike),
+        NotificationSettingItem(section: "Workouts", title: "Comment replies", keyPath: \.pushCommentReply),
+        NotificationSettingItem(section: "Workouts", title: "Comment mentions", keyPath: \.pushCommentMention),
+        NotificationSettingItem(section: "Workouts", title: "Added as participant", keyPath: \.pushAddedAsParticipant),
+        NotificationSettingItem(section: "Achievements & Goals", title: "Achievements", keyPath: \.pushAchievementUnlocked),
+        NotificationSettingItem(section: "Achievements & Goals", title: "Goal completed", keyPath: \.pushGoalCompleted),
+        NotificationSettingItem(section: "Achievements & Goals", title: "Goal almost done", keyPath: \.pushGoalAlmostDone),
+        NotificationSettingItem(section: "Competitions", title: "Invites", keyPath: \.pushCompetitionInvite),
+        NotificationSettingItem(section: "Competitions", title: "Accepted", keyPath: \.pushCompetitionAccepted),
+        NotificationSettingItem(section: "Competitions", title: "Declined", keyPath: \.pushCompetitionDeclined),
+        NotificationSettingItem(section: "Competitions", title: "Cancelled", keyPath: \.pushCompetitionCancelled),
+        NotificationSettingItem(section: "Competitions", title: "Expired", keyPath: \.pushCompetitionExpired),
+        NotificationSettingItem(section: "Competitions", title: "Result: win", keyPath: \.pushCompetitionResultWin),
+        NotificationSettingItem(section: "Competitions", title: "Result: lose", keyPath: \.pushCompetitionResultLose),
+        NotificationSettingItem(section: "Competitions", title: "Workout pending review", keyPath: \.pushCompetitionWorkoutPendingReview),
+        NotificationSettingItem(section: "Competitions", title: "Workout accepted", keyPath: \.pushCompetitionWorkoutAccepted),
+        NotificationSettingItem(section: "Competitions", title: "Workout rejected", keyPath: \.pushCompetitionWorkoutRejected),
+        NotificationSettingItem(section: "Segments & Challenges", title: "Segment: you are first", keyPath: \.pushSegmentYouAreFirst),
+        NotificationSettingItem(section: "Segments & Challenges", title: "Segment: lost first", keyPath: \.pushSegmentLostFirst),
+        NotificationSettingItem(section: "Segments & Challenges", title: "Territory captured from others", keyPath: \.pushTerritoryCaptureFromUser),
+        NotificationSettingItem(section: "Segments & Challenges", title: "Territory lost to others", keyPath: \.pushTerritoryLostToUser),
+        NotificationSettingItem(section: "Segments & Challenges", title: "Challenge won", keyPath: \.pushChallengeWon),
+        NotificationSettingItem(section: "Segments & Challenges", title: "Challenge won (weekly)", keyPath: \.pushChallengeWonWeekly),
+        NotificationSettingItem(section: "Reminders", title: "Workout reminders", keyPath: \.pushWorkoutKindInactive),
+        NotificationSettingItem(section: "Nutrition", title: "Meal plan invites", keyPath: \.pushMealPlanInvite),
+        NotificationSettingItem(section: "Pets", title: "Pet hatched", keyPath: \.pushPetHatched),
+        NotificationSettingItem(section: "Pets", title: "Pet arena challenge", keyPath: \.pushPetCombatChallenged),
+        NotificationSettingItem(section: "Apple Health", title: "Cardio workout imported", keyPath: \.pushAppleHealthCardioImported)
+    ]
 
     private var pushMaster: Bool {
         row?.pushEnabled ?? true
+    }
+
+    private var filteredNotificationSections: [(section: String, items: [NotificationSettingItem])] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let items: [NotificationSettingItem]
+        if query.isEmpty {
+            items = Self.notificationSettingItems
+        } else {
+            items = Self.notificationSettingItems.filter {
+                $0.title.localizedCaseInsensitiveContains(query)
+                    || $0.section.localizedCaseInsensitiveContains(query)
+            }
+        }
+
+        var grouped: [String: [NotificationSettingItem]] = [:]
+        for item in items {
+            grouped[item.section, default: []].append(item)
+        }
+
+        return Self.sectionOrder.compactMap { section in
+            guard let sectionItems = grouped[section], !sectionItems.isEmpty else { return nil }
+            return (section, sectionItems)
+        }
     }
 
     var body: some View {
@@ -154,94 +234,31 @@ struct NotificationSettingsView: View {
                     Text("These toggles control whether Liftr sends push notifications to your phone. Notifications can still appear inside the app.")
                 }
 
-                Section("Messages") {
-                    toggleCard(
-                        title: "Direct messages",
-                        isOn: binding(\.pushNewMessage),
-                        enabled: pushMaster && !saving
-                    )
-                }
-
-                Section("Social") {
-                    toggleCard(
-                        title: "New followers",
-                        isOn: binding(\.pushNewFollower),
-                        enabled: pushMaster && !saving
-                    )
-                }
-
-                Section("Workouts") {
-                    toggleCard(title: "Workout likes", isOn: binding(\.pushWorkoutLike), enabled: pushMaster && !saving)
-                    toggleCard(title: "Workout comments", isOn: binding(\.pushWorkoutComment), enabled: pushMaster && !saving)
-                    toggleCard(title: "Comment likes", isOn: binding(\.pushCommentLike), enabled: pushMaster && !saving)
-                    toggleCard(title: "Comment replies", isOn: binding(\.pushCommentReply), enabled: pushMaster && !saving)
-                    toggleCard(title: "Comment mentions", isOn: binding(\.pushCommentMention), enabled: pushMaster && !saving)
-                    toggleCard(title: "Added as participant", isOn: binding(\.pushAddedAsParticipant), enabled: pushMaster && !saving)
-                }
-
-                Section("Achievements & Goals") {
-                    toggleCard(title: "Achievements", isOn: binding(\.pushAchievementUnlocked), enabled: pushMaster && !saving)
-                    toggleCard(title: "Goal completed", isOn: binding(\.pushGoalCompleted), enabled: pushMaster && !saving)
-                    toggleCard(title: "Goal almost done", isOn: binding(\.pushGoalAlmostDone), enabled: pushMaster && !saving)
-                }
-
-                Section("Competitions") {
-                    toggleCard(title: "Invites", isOn: binding(\.pushCompetitionInvite), enabled: pushMaster && !saving)
-                    toggleCard(title: "Accepted", isOn: binding(\.pushCompetitionAccepted), enabled: pushMaster && !saving)
-                    toggleCard(title: "Declined", isOn: binding(\.pushCompetitionDeclined), enabled: pushMaster && !saving)
-                    toggleCard(title: "Cancelled", isOn: binding(\.pushCompetitionCancelled), enabled: pushMaster && !saving)
-                    toggleCard(title: "Expired", isOn: binding(\.pushCompetitionExpired), enabled: pushMaster && !saving)
-                    toggleCard(title: "Result: win", isOn: binding(\.pushCompetitionResultWin), enabled: pushMaster && !saving)
-                    toggleCard(title: "Result: lose", isOn: binding(\.pushCompetitionResultLose), enabled: pushMaster && !saving)
-                    toggleCard(title: "Workout pending review", isOn: binding(\.pushCompetitionWorkoutPendingReview), enabled: pushMaster && !saving)
-                    toggleCard(title: "Workout accepted", isOn: binding(\.pushCompetitionWorkoutAccepted), enabled: pushMaster && !saving)
-                    toggleCard(title: "Workout rejected", isOn: binding(\.pushCompetitionWorkoutRejected), enabled: pushMaster && !saving)
-                }
-
-                Section("Segments & Challenges") {
-                    toggleCard(title: "Segment: you are first", isOn: binding(\.pushSegmentYouAreFirst), enabled: pushMaster && !saving)
-                    toggleCard(title: "Segment: lost first", isOn: binding(\.pushSegmentLostFirst), enabled: pushMaster && !saving)
-                    toggleCard(title: "Territory captured from others", isOn: binding(\.pushTerritoryCaptureFromUser), enabled: pushMaster && !saving)
-                    toggleCard(title: "Territory lost to others", isOn: binding(\.pushTerritoryLostToUser), enabled: pushMaster && !saving)
-                    toggleCard(title: "Challenge won", isOn: binding(\.pushChallengeWon), enabled: pushMaster && !saving)
-                    toggleCard(title: "Challenge won (weekly)", isOn: binding(\.pushChallengeWonWeekly), enabled: pushMaster && !saving)
-                }
-
-                Section("Reminders") {
-                    toggleCard(title: "Workout reminders", isOn: binding(\.pushWorkoutKindInactive), enabled: pushMaster && !saving)
-                }
-
-                Section("Nutrition") {
-                    toggleCard(
-                        title: "Meal plan invites",
-                        isOn: binding(\.pushMealPlanInvite),
-                        enabled: pushMaster && !saving
-                    )
-                }
-
-                Section("Pets") {
-                    toggleCard(
-                        title: "Pet hatched",
-                        isOn: binding(\.pushPetHatched),
-                        enabled: pushMaster && !saving
-                    )
-                    toggleCard(
-                        title: "Pet arena challenge",
-                        isOn: binding(\.pushPetCombatChallenged),
-                        enabled: pushMaster && !saving
-                    )
-                }
-
-                Section("Apple Health") {
-                    toggleCard(
-                        title: "Cardio workout imported",
-                        isOn: binding(\.pushAppleHealthCardioImported),
-                        enabled: pushMaster && !saving
-                    )
+                if filteredNotificationSections.isEmpty {
+                    Section {
+                        Text("No notification settings match your search.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .listRowBackground(Color.clear)
+                    }
+                } else {
+                    ForEach(filteredNotificationSections, id: \.section) { section in
+                        Section(section.section) {
+                            ForEach(section.items) { item in
+                                toggleCard(
+                                    title: item.title,
+                                    isOn: binding(item.keyPath),
+                                    enabled: pushMaster && !saving
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
         .navigationTitle("Notifications")
+        .searchable(text: $searchText, prompt: "Search notifications")
         .scrollContentBackground(.hidden)
         .listStyle(.insetGrouped)
         .gradientBG()

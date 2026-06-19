@@ -55,9 +55,11 @@ struct LoginView: View {
                             .keyboardType(.emailAddress)
                             .textContentType(.username)
                             .autocorrectionDisabled(true)
+                            .accessibilityIdentifier("login.email")
                         
                         SecureField("Password", text: $password)
                             .textContentType(.password)
+                            .accessibilityIdentifier("login.password")
 
                         NavigationLink {
                             ForgotPasswordView()
@@ -66,6 +68,7 @@ struct LoginView: View {
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                         }
+                        .accessibilityIdentifier("forgotPassword.link")
                         .frame(maxWidth: .infinity, alignment: .trailing)
 
                         Toggle("Remember me", isOn: $rememberMe)
@@ -86,6 +89,7 @@ struct LoginView: View {
                             .foregroundStyle(.white)
                         }
                         .disabled(!isButtonEnabled)
+                        .accessibilityIdentifier("login.submit")
                         
                         HStack {
                             Rectangle().frame(height: 1).foregroundStyle(.quaternary)
@@ -99,6 +103,7 @@ struct LoginView: View {
                             Text("Create an account")
                                 .fontWeight(.semibold)
                         }
+                        .accessibilityIdentifier("login.register")
                         .padding(.top, 4)
                     }
                     .padding(20)
@@ -114,8 +119,22 @@ struct LoginView: View {
                 .padding(.horizontal, 24)
             }
         }
+        .accessibilityIdentifier("login.screen")
         .toolbarBackground(.hidden, for: .navigationBar)
-        .onAppear { loadRemembered() }
+        .onAppear {
+            loadRemembered()
+            prefillUITestCredentialsIfNeeded()
+        }
+    }
+    
+    private func prefillUITestCredentialsIfNeeded() {
+        guard UITestConfiguration.isEnabled, !UITestConfiguration.autoSignInEnabled else { return }
+        if let email = UITestConfiguration.testEmail {
+            self.email = email
+        }
+        if let password = UITestConfiguration.testPassword {
+            self.password = password
+        }
     }
     
     private func loadRemembered() {

@@ -1,11 +1,12 @@
 package com.lilru.liftr.ui.components
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.unit.Constraints
+import kotlin.math.min
 
 class HorizontalViewThatFitsScope internal constructor(
     internal val variants: MutableList<@Composable () -> Unit>
@@ -20,27 +21,26 @@ fun HorizontalViewThatFits(
     modifier: Modifier = Modifier,
     content: @Composable HorizontalViewThatFitsScope.() -> Unit
 ) {
-    val variants = remember { mutableStateListOf<@Composable () -> Unit>() }
-    variants.clear()
-    HorizontalViewThatFitsScope(variants).content()
+    val variantBuilders = remember { ArrayList<@Composable () -> Unit>(4) }
+    variantBuilders.clear()
+    HorizontalViewThatFitsScope(variantBuilders).content()
 
-    if (variants.isEmpty()) return
+    if (variantBuilders.isEmpty()) return
+
+    val variants = variantBuilders.toList()
 
     SubcomposeLayout(modifier = modifier) { constraints ->
         val maxWidth = constraints.maxWidth
+        val intrinsicMeasure = constraints.copy(minWidth = 0, maxWidth = Constraints.Infinity)
         var selectedPlaceables: List<Placeable>? = null
         var selectedHeight = 0
+        val slotPrefix = "v${variants.size}"
 
         for (index in variants.indices) {
-            val placeables = subcompose("variant_$index") {
+            val placeables = subcompose("$slotPrefix-$index") {
                 variants[index]()
             }.map { measurable ->
-                measurable.measure(
-                    constraints.copy(
-                        minWidth = 0,
-                        maxWidth = maxWidth
-                    )
-                )
+                measurable.measure(intrinsicMeasure)
             }
 
             val totalWidth = placeables.sumOf { it.width }
@@ -53,24 +53,22 @@ fun HorizontalViewThatFits(
 
         if (selectedPlaceables == null) {
             val fallbackIndex = variants.lastIndex
-            selectedPlaceables = subcompose("variant_fallback_$fallbackIndex") {
+            selectedPlaceables = subcompose("$slotPrefix-fallback-$fallbackIndex") {
                 variants[fallbackIndex]()
             }.map { measurable ->
-                measurable.measure(
-                    constraints.copy(
-                        minWidth = 0,
-                        maxWidth = maxWidth
-                    )
-                )
+                measurable.measure(intrinsicMeasure)
             }
             selectedHeight = selectedPlaceables.maxOfOrNull { it.height } ?: 0
         }
 
         val placeables = selectedPlaceables ?: emptyList()
         val contentWidth = placeables.sumOf { it.width }
-        layout(contentWidth, selectedHeight) {
+        val layoutWidth = min(contentWidth, maxWidth)
+        layout(layoutWidth, selectedHeight) {
+            var x = 0
             placeables.forEach { placeable ->
-                placeable.placeRelative(0, 0)
+                placeable.placeRelative(x, 0)
+                x += placeable.width
             }
         }
     }

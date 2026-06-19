@@ -3,11 +3,11 @@ import Foundation
 
 class SupabaseManager {
     static let shared = SupabaseManager()
-    private let supabaseURL = URL(string: "https://rjzhaafvkxmvlnpsikbi.supabase.co")!
+    private let supabaseURL = SupabaseRuntimeConfig.url
     var supabasePublicStorageBase: String {
         "\(supabaseURL.absoluteString)/storage/v1/object/public"
     }
-    private let supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJqemhhYWZ2a3htdmxucHNpa2JpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjA0NDY4OTQsImV4cCI6MjA3NjAyMjg5NH0.eQt6M6riyj9-wCwQp2JE_KfgKoE7Wv3Xj64NLjCa6Jg"
+    private let supabaseKey = SupabaseRuntimeConfig.anonKey
     lazy var client: SupabaseClient = {
         SupabaseClient(
             supabaseURL: supabaseURL,

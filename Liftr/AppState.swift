@@ -5,6 +5,12 @@ import Supabase
 import UIKit
 import CoreLocation
 
+struct ProfileWorkoutDeepLink: Identifiable, Hashable {
+    let workoutId: Int
+    let ownerId: UUID?
+    var id: String { "\(workoutId)-\(ownerId?.uuidString ?? "pending")" }
+}
+
 final class AppState: ObservableObject {
     @Published var selectedTab: Tab = .home
     @Published var addDraft: AddWorkoutDraft?
@@ -13,7 +19,6 @@ final class AppState: ObservableObject {
     enum NotificationDestination: Equatable {
         case none
         case followerProfile(userId: UUID)
-        case workout(workoutId: Int, ownerId: UUID?)
         case segmentDetail(segmentId: UUID)
         case achievements(achievementId: Int?)
         case goals(userId: UUID)
@@ -26,6 +31,27 @@ final class AppState: ObservableObject {
     
     @Published var notificationDestination: NotificationDestination = .none
     @Published var pendingNotification: (id: Int?, type: String, data: [String: Any])?
+    @Published var profileWorkoutDeepLink: ProfileWorkoutDeepLink?
+    @Published var pendingProfileWorkout: ProfileWorkoutDeepLink?
+    
+    @MainActor
+    func openWorkoutFromNotification(workoutId: Int, ownerId: UUID?) {
+        let link = ProfileWorkoutDeepLink(workoutId: workoutId, ownerId: ownerId)
+        selectedTab = .profile
+        guard isAuthenticated else {
+            pendingProfileWorkout = link
+            return
+        }
+        profileWorkoutDeepLink = link
+    }
+
+    @MainActor
+    func flushPendingProfileWorkoutIfNeeded() {
+        guard isAuthenticated, profileWorkoutDeepLink == nil, let pending = pendingProfileWorkout else { return }
+        pendingProfileWorkout = nil
+        selectedTab = .profile
+        profileWorkoutDeepLink = pending
+    }
     
     @MainActor
     func openAdd(with draft: AddWorkoutDraft?) {
@@ -141,6 +167,7 @@ final class AppState: ObservableObject {
             if let session = try? await SupabaseManager.shared.client.auth.session {
                 userId = session.user.id
                 isAuthenticated = true
+                flushPendingProfileWorkoutIfNeeded()
             }
             await refreshTabBarProfileAvatarFromServer()
             await refreshUnreadNotificationsCount()
@@ -156,6 +183,7 @@ final class AppState: ObservableObject {
             let session = try await SupabaseManager.shared.client.auth.session
             self.userId = session.user.id
             self.isAuthenticated = true
+            flushPendingProfileWorkoutIfNeeded()
             await refreshTabBarProfileAvatarFromServer()
             await refreshUnreadNotificationsCount()
             await startChatUnreadRealtimeIfNeeded(for: session.user.id)
@@ -331,8 +359,19 @@ final class AppState: ObservableObject {
     @MainActor
     func signOut() {
         CoinManager.shared.resetSession()
+        if UITestConfiguration.isEnabled {
+            isAuthenticated = false
+            userId = nil
+            isPremium = false
+            passwordRecoveryPending = false
+            authCallbackError = nil
+            clearTabBarProfileAvatar()
+            unreadNotificationsCount = 0
+            unreadChatMessagesCount = 0
+            Task { await stopChatUnreadRealtime() }
+        }
         Task {
-            try? await SupabaseManager.shared.client.auth.signOut()
+            try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
         }
     }
     
@@ -401,7 +440,7 @@ final class AppState: ObservableObject {
                     ownerId = nil
                 }
 
-                notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+                openWorkoutFromNotification(workoutId: workoutId, ownerId: ownerId)
 
             } else {
                 print("⚠️ [AppState] workout_id missing/invalid in data:", data)
@@ -426,7 +465,7 @@ final class AppState: ObservableObject {
                     print("🧪 [Push] resolving owner for workoutId=\(workoutId) participantId=\(String(describing: participantId))")
                     let owner = await resolveWorkoutOwnerId(workoutId: workoutId)
                     print("🧪 [Push] resolved ownerId=\(String(describing: owner)) for workoutId=\(workoutId)")
-                    self.notificationDestination = .workout(workoutId: workoutId, ownerId: owner)
+                    self.openWorkoutFromNotification(workoutId: workoutId, ownerId: owner)
                 }
             } else {
                 print("⚠️ [AppState] workout_id missing/invalid:", data)
@@ -500,7 +539,7 @@ final class AppState: ObservableObject {
                 } else {
                     ownerId = self.userId
                 }
-                notificationDestination = .workout(workoutId: workoutId, ownerId: ownerId)
+                openWorkoutFromNotification(workoutId: workoutId, ownerId: ownerId)
             } else {
                 print("⚠️ [AppState] workout_id missing/invalid for territory notification:", data)
                 notificationDestination = .none
@@ -624,13 +663,68 @@ final class AppState: ObservableObject {
         }
         isPremium = await PremiumStatusClient.fetchIsPremium()
     }
+
+    @MainActor
+    func signOutForUITestsIfNeeded() async {
+        guard UITestConfiguration.isEnabled, !UITestConfiguration.autoSignInEnabled else { return }
+        try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
+        LoginView.KeychainHelper.delete(key: "settleit.email")
+        LoginView.KeychainHelper.delete(key: "settleit.password")
+        isAuthenticated = false
+        userId = nil
+        isPremium = false
+        passwordRecoveryPending = false
+        authCallbackError = nil
+        clearTabBarProfileAvatar()
+        unreadNotificationsCount = 0
+        unreadChatMessagesCount = 0
+        await stopChatUnreadRealtime()
+        for _ in 0..<30 {
+            if (try? await SupabaseManager.shared.client.auth.session) == nil { break }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    @MainActor
+    func signInForUITestsIfNeeded() async {
+        guard UITestConfiguration.isEnabled, UITestConfiguration.autoSignInEnabled else { return }
+        guard let email = UITestConfiguration.testEmail,
+              let password = UITestConfiguration.testPassword else { return }
+        if isAuthenticated { return }
+        if (try? await SupabaseManager.shared.client.auth.session) != nil {
+            await refreshSession()
+            return
+        }
+        do {
+            try await SupabaseManager.shared.client.auth.signIn(email: email, password: password)
+            await refreshSession()
+        } catch {
+        }
+    }
     
+    private var shouldStaySignedOutForUITests: Bool {
+        UITestConfiguration.isEnabled && !UITestConfiguration.autoSignInEnabled
+    }
+
     private func listenAuth() {
         authTask?.cancel()
         authTask = Task { [weak self] in
             guard let self else { return }
-            
-            if let session = try? await SupabaseManager.shared.client.auth.session {
+
+            if shouldStaySignedOutForUITests {
+                try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
+                await MainActor.run {
+                    self.isAuthenticated = false
+                    self.userId = nil
+                    self.isPremium = false
+                    self.passwordRecoveryPending = false
+                    self.authCallbackError = nil
+                    self.clearTabBarProfileAvatar()
+                    self.unreadNotificationsCount = 0
+                    self.unreadChatMessagesCount = 0
+                }
+                await self.stopChatUnreadRealtime()
+            } else if let session = try? await SupabaseManager.shared.client.auth.session {
                 await MainActor.run {
                     self.userId = session.user.id
                     if !self.passwordRecoveryPending {
@@ -662,6 +756,20 @@ final class AppState: ObservableObject {
             for await state in SupabaseManager.shared.client.auth.authStateChanges {
                 let event = state.event
                 let session = state.session
+
+                if self.shouldStaySignedOutForUITests, event == .initialSession, session != nil {
+                    try? await SupabaseManager.shared.client.auth.signOut(scope: .global)
+                    await MainActor.run {
+                        self.isAuthenticated = false
+                        self.userId = nil
+                        self.isPremium = false
+                        self.clearTabBarProfileAvatar()
+                        self.unreadNotificationsCount = 0
+                        self.unreadChatMessagesCount = 0
+                    }
+                    await self.stopChatUnreadRealtime()
+                    continue
+                }
                 
                 await MainActor.run {
                     switch event {

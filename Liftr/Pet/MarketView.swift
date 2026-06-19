@@ -12,26 +12,24 @@ struct MarketView: View {
 
     var body: some View {
         ZStack {
-            if isLoading && items.isEmpty {
-                PetMarketSkeletonView()
-                    .transition(.opacity)
-            } else if let errorMessage, items.isEmpty {
-                ScrollView {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .padding()
-                }
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        coinBanner
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    coinBanner
 
+                    if isLoading && items.isEmpty {
+                        PetMarketSkeletonView()
+                            .transition(.opacity)
+                    } else if let errorMessage, items.isEmpty {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal)
+                    } else {
                         ForEach(groupedCategories, id: \.0) { category, categoryItems in
                             categorySection(category: category, items: categoryItems)
                         }
                     }
-                    .padding(.bottom, 20)
                 }
+                .padding(.bottom, 20)
             }
 
             if let selectedItem {
@@ -82,6 +80,7 @@ struct MarketView: View {
                         )
                     }
                 }
+                .accessibilityIdentifier("market.overlay")
                 .transition(.scale)
                 .zIndex(2)
             }
@@ -106,6 +105,7 @@ struct MarketView: View {
         .animation(.easeInOut(duration: 0.3), value: isLoading)
         .animation(.easeInOut(duration: 0.25), value: purchaseFeedback.toastMessage)
         .navigationTitle("Market")
+        .accessibilityIdentifier("market.screen")
         .gradientBG()
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -169,6 +169,8 @@ struct MarketView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal)
         .padding(.top, 8)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("market.coinBanner")
     }
 
     @ViewBuilder

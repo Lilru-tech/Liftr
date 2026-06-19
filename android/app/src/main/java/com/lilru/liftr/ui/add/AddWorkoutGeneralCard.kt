@@ -2,25 +2,17 @@ package com.lilru.liftr.ui.add
 
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -35,6 +27,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
+import com.lilru.liftr.ui.components.LiftrFormDateTimeChips
+import com.lilru.liftr.ui.components.LiftrFormDivider
+import com.lilru.liftr.ui.components.LiftrFormInlineSegmented
+import com.lilru.liftr.ui.components.LiftrFormNotesField
+import com.lilru.liftr.ui.components.LiftrFormPickerValue
+import com.lilru.liftr.ui.components.LiftrFormRow
+import com.lilru.liftr.ui.components.LiftrFormTextValue
+import com.lilru.liftr.ui.components.LiftrSectionCard
+import dev.chrisbanes.haze.HazeState
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -50,84 +51,9 @@ private fun zonedFromIso(iso: String): ZonedDateTime {
     return i.atZone(ZoneId.systemDefault())
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ScheduleDateTimeRow(
-    label: String,
-    valueIso: String,
-    onValueIso: (String) -> Unit
-) {
-    val ctx = LocalContext.current
-    val z = remember(valueIso) { zonedFromIso(valueIso) }
-    Column(Modifier.fillMaxWidth()) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(bottom = 4.dp)
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            OutlinedButton(
-                onClick = {
-                    DatePickerDialog(
-                        ctx,
-                        { _, y, m, d ->
-                            val base = zonedFromIso(valueIso)
-                            val next = ZonedDateTime.of(
-                                y,
-                                m + 1,
-                                d,
-                                base.hour,
-                                base.minute,
-                                base.second,
-                                base.nano,
-                                ZoneId.systemDefault()
-                            )
-                            onValueIso(next.toInstant().toString())
-                        },
-                        z.year,
-                        z.monthValue - 1,
-                        z.dayOfMonth
-                    ).show()
-                },
-                modifier = Modifier.weight(1f)
-            ) { Text(z.format(dateDisplayFmt)) }
-            OutlinedButton(
-                onClick = {
-                    TimePickerDialog(
-                        ctx,
-                        { _, h, min ->
-                            val base = zonedFromIso(valueIso)
-                            val next = ZonedDateTime.of(
-                                base.year,
-                                base.monthValue,
-                                base.dayOfMonth,
-                                h,
-                                min,
-                                base.second,
-                                base.nano,
-                                ZoneId.systemDefault()
-                            )
-                            onValueIso(next.toInstant().toString())
-                        },
-                        z.hour,
-                        z.minute,
-                        true
-                    ).show()
-                },
-                modifier = Modifier.weight(1f)
-            ) { Text(z.format(timeDisplayFmt)) }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun AddWorkoutGeneralCard(
+    hazeState: HazeState,
     selectedKind: AddWorkoutKind,
     onKindChange: (AddWorkoutKind) -> Unit,
     selectedState: AddWorkoutState,
@@ -148,6 +74,7 @@ internal fun AddWorkoutGeneralCard(
     showPlanTooltip: Boolean = false,
     onDismissPlanTooltip: () -> Unit = {}
 ) {
+    val ctx = LocalContext.current
     var typeMenuExpanded by remember { mutableStateOf(false) }
     var intensityMenuExpanded by remember { mutableStateOf(false) }
     val kindText = when (selectedKind) {
@@ -161,30 +88,22 @@ internal fun AddWorkoutGeneralCard(
         AddWorkoutIntensity.HARD -> stringResource(R.string.add_intensity_hard)
         AddWorkoutIntensity.MAX -> stringResource(R.string.add_intensity_max)
     }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp)
-        ) {
-            ExposedDropdownMenuBox(
-                expanded = typeMenuExpanded,
-                onExpandedChange = { typeMenuExpanded = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = kindText,
-                    onValueChange = {},
-                    readOnly = true,
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.add_kind_label)) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = typeMenuExpanded) },
-                    modifier = Modifier
-                        .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true)
-                        .fillMaxWidth()
-                )
-                ExposedDropdownMenu(
+    val startedZ = remember(startedAtIsoText) { zonedFromIso(startedAtIsoText) }
+    val endedZ = remember(endedAtIsoText) { zonedFromIso(endedAtIsoText) }
+    val modeLabels = listOf(
+        stringResource(R.string.add_mode_add),
+        stringResource(R.string.add_mode_plan)
+    )
+    val modeSelectedIndex = if (selectedState == AddWorkoutState.PUBLISHED) 0 else 1
+
+    LiftrSectionCard(hazeState = hazeState) {
+        Column {
+            LiftrFormRow(label = stringResource(R.string.add_kind_label)) {
+                BoxWithMenus(
                     expanded = typeMenuExpanded,
-                    onDismissRequest = { typeMenuExpanded = false }
+                    onExpandedChange = { typeMenuExpanded = it },
+                    value = kindText,
+                    onDismiss = { typeMenuExpanded = false }
                 ) {
                     AddWorkoutKind.entries.forEach { k ->
                         val label = when (k) {
@@ -202,140 +121,172 @@ internal fun AddWorkoutGeneralCard(
                     }
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            Text(
-                text = stringResource(R.string.add_mode_label),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 4.dp)
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    SegmentedButton(
-                        selected = selectedState == AddWorkoutState.PUBLISHED,
-                        onClick = { onStateChange(AddWorkoutState.PUBLISHED) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)
-                    ) {
-                        Text(stringResource(R.string.add_mode_add))
+            LiftrFormDivider()
+            LiftrFormRow(label = stringResource(R.string.add_mode_label)) {
+                LiftrFormInlineSegmented(
+                    labels = modeLabels,
+                    selectedIndex = modeSelectedIndex,
+                    onSelected = { index ->
+                        onStateChange(
+                            if (index == 0) AddWorkoutState.PUBLISHED else AddWorkoutState.PLANNED
+                        )
                     }
-                    SegmentedButton(
-                        selected = selectedState == AddWorkoutState.PLANNED,
-                        onClick = { onStateChange(AddWorkoutState.PLANNED) },
-                        shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)
-                    ) {
-                        Text(stringResource(R.string.add_mode_plan))
-                    }
-                }
-                if (showPlanTooltip) {
-                    PlanModeFirstHintBubble(onDismiss = onDismissPlanTooltip)
-                }
-                Text(
-                    text = if (selectedState == AddWorkoutState.PUBLISHED) {
-                        stringResource(R.string.add_mode_add_sub)
-                    } else {
-                        stringResource(R.string.add_mode_plan_sub)
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
                 )
             }
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            OutlinedTextField(
-                value = title,
-                onValueChange = onTitleChange,
-                label = { Text(stringResource(R.string.add_workout_title_label)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth()
-            )
-            ScheduleDateTimeRow(
-                label = stringResource(R.string.add_field_started_at),
-                valueIso = startedAtIsoText,
-                onValueIso = { newStart ->
-                    onStartedAtChange(newStart)
-                    if (scheduleEndedEnabled) {
-                        val st = runCatching { Instant.parse(newStart) }.getOrNull()
-                        val en = runCatching { Instant.parse(endedAtIsoText.trim()) }.getOrNull()
-                        if (st != null && en != null && en.isBefore(st)) {
-                            onEndedAtChange(newStart)
-                        }
-                    }
-                }
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    stringResource(R.string.add_field_finished),
-                    style = MaterialTheme.typography.bodyLarge
+            if (showPlanTooltip) {
+                PlanModeFirstHintBubble(onDismiss = onDismissPlanTooltip)
+            }
+            LiftrFormDivider()
+            LiftrFormRow(label = stringResource(R.string.add_workout_title_label)) {
+                LiftrFormTextValue(
+                    value = title,
+                    onValueChange = onTitleChange,
+                    placeholder = stringResource(R.string.add_workout_title_label)
                 )
+            }
+            LiftrFormDivider()
+            LiftrFormRow(label = stringResource(R.string.add_field_started_at)) {
+                LiftrFormDateTimeChips(
+                    dateLabel = startedZ.format(dateDisplayFmt),
+                    timeLabel = startedZ.format(timeDisplayFmt),
+                    onDateClick = {
+                        DatePickerDialog(
+                            ctx,
+                            { _, y, m, d ->
+                                val base = zonedFromIso(startedAtIsoText)
+                                val next = ZonedDateTime.of(
+                                    y, m + 1, d,
+                                    base.hour, base.minute, base.second, base.nano,
+                                    ZoneId.systemDefault()
+                                )
+                                val newStart = next.toInstant().toString()
+                                onStartedAtChange(newStart)
+                                if (scheduleEndedEnabled) {
+                                    val st = next.toInstant()
+                                    val en = runCatching { Instant.parse(endedAtIsoText.trim()) }.getOrNull()
+                                    if (en != null && en.isBefore(st)) {
+                                        onEndedAtChange(newStart)
+                                    }
+                                }
+                            },
+                            startedZ.year,
+                            startedZ.monthValue - 1,
+                            startedZ.dayOfMonth
+                        ).show()
+                    },
+                    onTimeClick = {
+                        TimePickerDialog(
+                            ctx,
+                            { _, h, min ->
+                                val base = zonedFromIso(startedAtIsoText)
+                                val next = ZonedDateTime.of(
+                                    base.year, base.monthValue, base.dayOfMonth,
+                                    h, min, base.second, base.nano,
+                                    ZoneId.systemDefault()
+                                )
+                                val newStart = next.toInstant().toString()
+                                onStartedAtChange(newStart)
+                                if (scheduleEndedEnabled) {
+                                    val st = next.toInstant()
+                                    val en = runCatching { Instant.parse(endedAtIsoText.trim()) }.getOrNull()
+                                    if (en != null && en.isBefore(st)) {
+                                        onEndedAtChange(newStart)
+                                    }
+                                }
+                            },
+                            startedZ.hour,
+                            startedZ.minute,
+                            true
+                        ).show()
+                    }
+                )
+            }
+            LiftrFormDivider()
+            LiftrFormRow(label = stringResource(R.string.add_field_finished)) {
                 Switch(
                     checked = scheduleEndedEnabled,
                     onCheckedChange = onScheduleEndedChange
                 )
             }
             if (scheduleEndedEnabled) {
-                val startI = remember(startedAtIsoText) {
-                    runCatching { Instant.parse(startedAtIsoText.trim()) }.getOrNull()
-                }
-                ScheduleDateTimeRow(
-                    label = stringResource(R.string.add_field_ended_at),
-                    valueIso = endedAtIsoText,
-                    onValueIso = { newEnd ->
-                        val e = runCatching { Instant.parse(newEnd) }.getOrNull()
-                        if (startI != null && e != null && e.isBefore(startI)) {
-                            onEndedAtChange(startI.toString())
-                        } else {
-                            onEndedAtChange(newEnd)
+                LiftrFormDivider()
+                LiftrFormRow(label = stringResource(R.string.add_field_ended_at)) {
+                    LiftrFormDateTimeChips(
+                        dateLabel = endedZ.format(dateDisplayFmt),
+                        timeLabel = endedZ.format(timeDisplayFmt),
+                        onDateClick = {
+                            DatePickerDialog(
+                                ctx,
+                                { _, y, m, d ->
+                                    val base = zonedFromIso(endedAtIsoText)
+                                    val next = ZonedDateTime.of(
+                                        y, m + 1, d,
+                                        base.hour, base.minute, base.second, base.nano,
+                                        ZoneId.systemDefault()
+                                    )
+                                    val newEnd = next.toInstant().toString()
+                                    val startI = runCatching { Instant.parse(startedAtIsoText.trim()) }.getOrNull()
+                                    val e = next.toInstant()
+                                    if (startI != null && e.isBefore(startI)) {
+                                        onEndedAtChange(startI.toString())
+                                    } else {
+                                        onEndedAtChange(newEnd)
+                                    }
+                                },
+                                endedZ.year,
+                                endedZ.monthValue - 1,
+                                endedZ.dayOfMonth
+                            ).show()
+                        },
+                        onTimeClick = {
+                            TimePickerDialog(
+                                ctx,
+                                { _, h, min ->
+                                    val base = zonedFromIso(endedAtIsoText)
+                                    val next = ZonedDateTime.of(
+                                        base.year, base.monthValue, base.dayOfMonth,
+                                        h, min, base.second, base.nano,
+                                        ZoneId.systemDefault()
+                                    )
+                                    val newEnd = next.toInstant().toString()
+                                    val startI = runCatching { Instant.parse(startedAtIsoText.trim()) }.getOrNull()
+                                    val e = next.toInstant()
+                                    if (startI != null && e.isBefore(startI)) {
+                                        onEndedAtChange(startI.toString())
+                                    } else {
+                                        onEndedAtChange(newEnd)
+                                    }
+                                },
+                                endedZ.hour,
+                                endedZ.minute,
+                                true
+                            ).show()
                         }
-                    }
-                )
+                    )
+                }
                 scheduleDurationMin?.let { dm ->
                     Text(
                         text = stringResource(R.string.add_duration_from_schedule, dm),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 4.dp)
+                        modifier = Modifier.padding(bottom = 8.dp)
                     )
                 }
             }
-            HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            OutlinedTextField(
+            LiftrFormDivider()
+            LiftrFormNotesField(
+                label = stringResource(R.string.add_notes_label),
                 value = notes,
                 onValueChange = onNotesChange,
-                label = { Text(stringResource(R.string.add_notes_label)) },
-                minLines = 2,
-                maxLines = 4,
-                modifier = Modifier.fillMaxWidth()
+                placeholder = stringResource(R.string.add_notes_label)
             )
-            ExposedDropdownMenuBox(
-                expanded = intensityMenuExpanded,
-                onExpandedChange = { intensityMenuExpanded = it },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                OutlinedTextField(
-                    value = intensityText,
-                    onValueChange = {},
-                    readOnly = true,
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.add_intensity_label)) },
-                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = intensityMenuExpanded) },
-                    modifier = Modifier
-                        .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = true)
-                        .fillMaxWidth()
-                )
-                ExposedDropdownMenu(
+            LiftrFormDivider()
+            LiftrFormRow(label = stringResource(R.string.add_intensity_label)) {
+                BoxWithMenus(
                     expanded = intensityMenuExpanded,
-                    onDismissRequest = { intensityMenuExpanded = false }
+                    onExpandedChange = { intensityMenuExpanded = it },
+                    value = intensityText,
+                    onDismiss = { intensityMenuExpanded = false }
                 ) {
                     AddWorkoutIntensity.entries.forEach { v ->
                         val label = when (v) {
@@ -359,11 +310,33 @@ internal fun AddWorkoutGeneralCard(
 }
 
 @Composable
+private fun BoxWithMenus(
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    value: String,
+    onDismiss: () -> Unit,
+    menuContent: @Composable () -> Unit
+) {
+    Box {
+        LiftrFormPickerValue(
+            value = value,
+            onClick = { onExpandedChange(true) }
+        )
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = onDismiss
+        ) {
+            menuContent()
+        }
+    }
+}
+
+@Composable
 private fun PlanModeFirstHintBubble(onDismiss: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 4.dp),
+            .padding(vertical = 4.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
         )

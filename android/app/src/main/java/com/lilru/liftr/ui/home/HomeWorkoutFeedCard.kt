@@ -21,28 +21,25 @@ import androidx.compose.material.icons.filled.ModeEdit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.lilru.liftr.R
 import com.lilru.liftr.ui.components.LiftrAvatar
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
+import com.lilru.liftr.ui.components.LiftrLabel
+import com.lilru.liftr.ui.theme.LiftrRadii
 import kotlin.math.roundToInt
 
-/**
- * Paridad con [Liftr/WorkoutCard.swift] `WorkoutFeedCard`: gradiente, jerarquía, píldoras, *Draft*.
- * El **tap** abre el detalle; no hay *like* en línea (como en iOS).
- */
 @Composable
 fun HomeWorkoutFeedCard(
     workout: WorkoutSummary,
@@ -52,7 +49,7 @@ fun HomeWorkoutFeedCard(
 ) {
     val planned = workout.state?.lowercase() == "planned"
     val tint = workoutKindTintForFeed(workout.kind)
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(LiftrRadii.card)
     val displayName = when {
         meUserId != null && workout.userId == meUserId -> stringResource(R.string.home_feed_you)
         !workout.ownerUsername.isNullOrBlank() -> workout.ownerUsername!!
@@ -64,6 +61,12 @@ fun HomeWorkoutFeedCard(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (planned) Modifier.alpha(0.72f) else Modifier)
+            .shadow(
+                elevation = 10.dp,
+                shape = shape,
+                ambientColor = tint.copy(alpha = 0.25f),
+                spotColor = tint.copy(alpha = 0.25f)
+            )
             .clip(shape)
             .background(
                 brush = Brush.linearGradient(
@@ -75,16 +78,15 @@ fun HomeWorkoutFeedCard(
             )
             .border(0.8.dp, Color.White.copy(alpha = 0.18f), shape)
             .clickable(onClick = onClick)
-            .padding(14.dp)
+            .padding(18.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(if (dayGroupLabel == null) 8.dp else 4.dp)) {
             if (dayGroupLabel != null) {
-                Text(
+                LiftrLabel(
                     text = dayGroupLabel,
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.sp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Row(
@@ -120,7 +122,7 @@ fun HomeWorkoutFeedCard(
                                     color = MaterialTheme.colorScheme.surface,
                                     shadowElevation = 0.dp
                                 ) {
-                                    Text(
+                                    LiftrLabel(
                                         text = "+${workout.coAvatarUrls.size - 3}",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
@@ -135,7 +137,7 @@ fun HomeWorkoutFeedCard(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Text(
+                    LiftrLabel(
                         text = displayName,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -143,7 +145,7 @@ fun HomeWorkoutFeedCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     if (!workout.title.isNullOrBlank()) {
-                        Text(
+                        LiftrLabel(
                             text = workout.title,
                             style = MaterialTheme.typography.bodyLarge,
                             fontStyle = if (planned) FontStyle.Italic else FontStyle.Normal,
@@ -151,7 +153,7 @@ fun HomeWorkoutFeedCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     } else {
-                        Text(
+                        LiftrLabel(
                             text = workoutKindLabel(workout.kind),
                             style = MaterialTheme.typography.bodyLarge,
                             fontStyle = if (planned) FontStyle.Italic else FontStyle.Normal,
@@ -159,11 +161,10 @@ fun HomeWorkoutFeedCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
-                    Text(
+                    LiftrLabel(
                         text = homeFeedRelativeStartedAt(workout.startedAt),
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
                 Column(
@@ -195,12 +196,12 @@ fun HomeWorkoutFeedCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
+                        .clip(RoundedCornerShape(LiftrRadii.pill))
                         .background(tint.copy(alpha = 0.18f))
-                        .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
+                        .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(LiftrRadii.pill))
                         .padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
-                    Text(
+                    LiftrLabel(
                         text = workoutKindLabel(workout.kind).replaceFirstChar { it.titlecase() },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.SemiBold
@@ -208,13 +209,17 @@ fun HomeWorkoutFeedCard(
                     when (kindKey) {
                         "sport" -> {
                             val icon = sportIconEmoji(workout.sportName)
-                            if (icon.isNotEmpty()) Text(text = icon, style = MaterialTheme.typography.labelSmall)
+                            if (icon.isNotEmpty()) {
+                                LiftrLabel(text = icon, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                         "cardio" -> {
                             val icon = cardioIconEmoji(workout.cardioActivityCode)
-                            if (icon.isNotEmpty()) Text(text = icon, style = MaterialTheme.typography.labelSmall)
+                            if (icon.isNotEmpty()) {
+                                LiftrLabel(text = icon, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
-                        "strength" -> Text("🏋️‍♂️", style = MaterialTheme.typography.labelSmall)
+                        "strength" -> LiftrLabel("🏋️‍♂️", style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 Spacer(Modifier.weight(1f))
@@ -228,9 +233,9 @@ fun HomeWorkoutFeedCard(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .padding(start = 8.dp)
-                            .clip(RoundedCornerShape(50))
+                            .clip(RoundedCornerShape(LiftrRadii.pill))
                             .background(Color(0xFFFFC107).copy(alpha = 0.22f))
-                            .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
+                            .border(0.6.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(LiftrRadii.pill))
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
                         Icon(
@@ -238,7 +243,7 @@ fun HomeWorkoutFeedCard(
                             contentDescription = null,
                             modifier = Modifier.size(14.dp)
                         )
-                        Text(
+                        LiftrLabel(
                             text = stringResource(R.string.home_workout_draft_badge),
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold
@@ -252,9 +257,16 @@ fun HomeWorkoutFeedCard(
 
 @Composable
 private fun HomeFeedPill(text: String, tint: Color) {
+    val pillShape = RoundedCornerShape(LiftrRadii.pill)
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
+            .shadow(
+                elevation = 2.dp,
+                shape = pillShape,
+                ambientColor = Color.Black.copy(alpha = 0.14f),
+                spotColor = Color.Black.copy(alpha = 0.14f)
+            )
+            .clip(pillShape)
             .background(
                 brush = Brush.horizontalGradient(
                     listOf(
@@ -263,10 +275,10 @@ private fun HomeFeedPill(text: String, tint: Color) {
                     )
                 )
             )
-            .border(0.6.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
+            .border(0.6.dp, Color.White.copy(alpha = 0.18f), pillShape)
             .padding(vertical = 6.dp, horizontal = 10.dp)
     ) {
-        Text(
+        LiftrLabel(
             text = text,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold
@@ -276,13 +288,14 @@ private fun HomeFeedPill(text: String, tint: Color) {
 
 @Composable
 private fun HomeLikesPill(likeCount: Int, isLiked: Boolean) {
+    val pillShape = RoundedCornerShape(LiftrRadii.pill)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(pillShape)
             .background(Color.White.copy(alpha = 0.12f))
-            .border(0.6.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(50))
+            .border(0.6.dp, Color.White.copy(alpha = 0.18f), pillShape)
             .padding(vertical = 6.dp, horizontal = 10.dp)
     ) {
         Icon(
@@ -291,7 +304,7 @@ private fun HomeLikesPill(likeCount: Int, isLiked: Boolean) {
             modifier = Modifier.size(18.dp),
             tint = if (isLiked) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant
         )
-        Text(
+        LiftrLabel(
             text = "$likeCount",
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.SemiBold

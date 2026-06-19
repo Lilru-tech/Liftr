@@ -1,16 +1,8 @@
-//
-//  LiftrUITestsLaunchTests.swift
-//  LiftrUITests
-//
-//  Created by David Gomez sanchez on 15/10/25.
-//
-
 import XCTest
 
 final class LiftrUITestsLaunchTests: XCTestCase {
-
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
-        true
+        false
     }
 
     override func setUpWithError() throws {
@@ -19,11 +11,16 @@ final class LiftrUITestsLaunchTests: XCTestCase {
 
     @MainActor
     func testLaunch() throws {
-        let app = XCUIApplication()
-        app.launch()
+        if ProcessInfo.processInfo.environment["CI"] != nil {
+            throw XCTSkip("Launch screenshot test is not run in CI regression.")
+        }
 
-        // Insert steps here to perform after app launch but before taking a screenshot,
-        // such as logging into a test account or navigating somewhere in the app
+        guard UITestCredentials.isConfigured else {
+            throw XCTSkip("UI test credentials are not configured for launch screenshot test.")
+        }
+
+        let app = LiftrUIApplication()
+        app.launchForRegression()
 
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = "Launch Screen"

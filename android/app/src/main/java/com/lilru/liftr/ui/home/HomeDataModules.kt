@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.lilru.liftr.ui.theme.LiftrRadii
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Share
@@ -49,6 +50,19 @@ import com.lilru.liftr.R
 import com.lilru.liftr.ui.components.LiftrAvatar
 import androidx.compose.ui.platform.LocalContext
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+
+@Composable
+private fun Modifier.homeModuleGlassCard(): Modifier {
+    val shape = RoundedCornerShape(LiftrRadii.card)
+    return this
+        .shadow(6.dp, shape, ambientColor = Color.Black.copy(0.1f), spotColor = Color.Black.copy(0.14f))
+        .clip(shape)
+        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+        .border(0.8.dp, Color.White.copy(alpha = 0.18f), shape)
+}
+
 @Composable
 fun HomeTodayCard(
     count: Int,
@@ -56,8 +70,13 @@ fun HomeTodayCard(
     points: Int,
     kcal: Int
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .homeModuleGlassCard()
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
             Text(
                 stringResource(R.string.home_today_headline),
                 style = MaterialTheme.typography.titleMedium,
@@ -69,10 +88,9 @@ fun HomeTodayCard(
                 } else {
                     stringResource(R.string.home_today_body_no_kcal, count, minutes, points)
                 },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
@@ -83,14 +101,14 @@ fun HomeStreakCard(
     weekPoints: Int,
     weekKcal: Int
 ) {
-    Card(Modifier.fillMaxWidth()) {
-        Row(
-            Modifier
-                .padding(12.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .homeModuleGlassCard()
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
             Text(
                 text = if (streak > 0) {
                     "🔥 " + stringResource(R.string.home_streak_badge, streak)
@@ -108,8 +126,7 @@ fun HomeStreakCard(
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold
-            )
-        }
+        )
     }
 }
 
@@ -122,14 +139,14 @@ fun HomeInsightsRow(
     bestSportScore: Int
 ) {
     val sport = bestSportLabel.ifBlank { "—" }
-    Card(Modifier.fillMaxWidth()) {
-        FlowRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
+    FlowRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .homeModuleGlassCard()
+            .padding(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
             if (bestWeekPts > 0) {
                 InsightPill(
                     text = if (bestWeekKcal > 0) {
@@ -152,7 +169,6 @@ fun HomeInsightsRow(
                     )
                 )
             }
-        }
     }
 }
 
@@ -281,14 +297,17 @@ private fun HomeCompactNavPill(
     trailing: String,
     onClick: () -> Unit
 ) {
-    Card(
-        modifier = Modifier.clickable(onClick = onClick)
+    val shape = RoundedCornerShape(LiftrRadii.pill)
+    Row(
+        Modifier
+            .clip(shape)
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.55f))
+            .border(0.8.dp, Color.White.copy(alpha = 0.18f), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
             icon()
             Text(
                 text = title,
@@ -301,8 +320,7 @@ private fun HomeCompactNavPill(
                 trailing,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        )
     }
 }
 
@@ -411,8 +429,9 @@ fun HomeHighlightsCard(
                 )
                 prs.take(5).forEach { pr ->
                     val owner = pr.username ?: "user"
-                    val metricPretty = HomePrFormatting.prettyMetric(pr.metric)
-                    val valuePretty = HomePrFormatting.formatValue(pr.metric, pr.value)
+                    val activity = HomePrFormatting.activityLabel(pr.kind, pr.label)
+                    val metricPretty = HomePrFormatting.prettyMetric(pr.metric, pr.kind, pr.label)
+                    val valuePretty = HomePrFormatting.formatValue(pr.metric, pr.value, pr.label)
                     val rel = HomePrFormatting.relativeShort(pr.achievedAt)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -438,7 +457,7 @@ fun HomeHighlightsCard(
                                 )
                             }
                             Text(
-                                "${pr.label}: $valuePretty",
+                                "$activity: $valuePretty",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1

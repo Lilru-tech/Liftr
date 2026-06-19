@@ -15,10 +15,12 @@ struct RootView: View {
         TabView(selection: $app.selectedTab) {
             NavigationStack { HomeView().gradientBG() }
                 .tag(Tab.home)
+                .accessibilityIdentifier("tab.home")
                 .tabItem { Label("", systemImage: "house.fill") }
             
             NavigationStack { SearchView().gradientBG() }
                 .tag(Tab.search)
+                .accessibilityIdentifier("tab.explore")
                 .tabItem { Label("", systemImage: "magnifyingglass") }
             
             NavigationStack {
@@ -27,15 +29,18 @@ struct RootView: View {
                     .id(app.addDraftKey)
             }
             .tag(Tab.add)
+            .accessibilityIdentifier("tab.add")
             .tabItem { Label("", systemImage: "plus.circle.fill") }
             
             NutritionView()
                 .gradientBG()
                 .tag(Tab.nutrition)
+                .accessibilityIdentifier("tab.food")
                 .tabItem { Label("", systemImage: "fork.knife") }
             
             NavigationStack { ProfileGate().gradientBG() }
                 .tag(Tab.profile)
+                .accessibilityIdentifier("tab.profile")
                 .tabItem {
                     if let tabImg = app.tabBarProfileAvatar {
                         Image(uiImage: tabImg)
@@ -134,6 +139,20 @@ struct RootView: View {
                 await CoinManager.shared.refreshBalance(notifyIfEarned: true)
             }
         }
+        .task {
+            guard UITestConfiguration.isEnabled else { return }
+            await app.signOutForUITestsIfNeeded()
+            await app.signInForUITestsIfNeeded()
+        }
+        .overlay(alignment: .topLeading) {
+            if UITestConfiguration.isEnabled {
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityIdentifier(app.isAuthenticated ? "uitest.authenticated" : "uitest.guest")
+                    .accessibilityElement(children: .ignore)
+                    .allowsHitTesting(false)
+            }
+        }
         .onReceive(app.$pendingNotification) { pending in
             guard let pending else { return }
             print("🧭 [RootView] onReceive pendingNotification:", pending)
@@ -153,8 +172,6 @@ struct RootView: View {
                 break
             case .followerProfile:
                 app.selectedTab = .search
-            case .workout:
-                app.selectedTab = .home
             case .segmentDetail:
                 app.selectedTab = .search
             case .achievements:
@@ -188,18 +205,6 @@ struct RootView: View {
             case .followerProfile(let userId):
                 ProfileView(userId: userId)
                     .gradientBG()
-                
-            case .workout(let workoutId, let ownerId):
-                if let ownerId {
-                    WorkoutDetailView(workoutId: workoutId, ownerId: ownerId)
-                        .gradientBG()
-                        .onAppear {
-                            print("🧪 [RootView.sheet] presenting WorkoutDetailView workoutId=\(workoutId) ownerId=\(ownerId)")
-                        }
-                } else {
-                    WorkoutFromNotificationLoaderView(workoutId: workoutId)
-                        .gradientBG()
-                }
                 
             case .achievements(let achievementId):
                 if let currentUserId = app.userId {

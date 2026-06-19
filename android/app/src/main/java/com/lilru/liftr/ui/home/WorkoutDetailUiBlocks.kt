@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import com.lilru.liftr.ui.theme.LiftrRadii
+import androidx.compose.ui.draw.shadow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -102,7 +104,7 @@ fun WorkoutDetailHeaderCard(
     modifier: Modifier = Modifier
 ) {
     val tint = workoutKindTintForDetail(workout.kind)
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(LiftrRadii.cardLarge)
     val titleText = workout.title?.trim()?.takeIf { it.isNotEmpty() }
         ?: workout.kind?.replaceFirstChar { c ->
             if (c.isLowerCase()) c.titlecase(Locale.getDefault()) else c.toString()
@@ -111,6 +113,12 @@ fun WorkoutDetailHeaderCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .shadow(
+                elevation = 10.dp,
+                shape = shape,
+                ambientColor = tint.copy(alpha = 0.25f),
+                spotColor = tint.copy(alpha = 0.25f)
+            )
             .clip(shape)
             .background(
                 brush = Brush.linearGradient(
@@ -118,7 +126,7 @@ fun WorkoutDetailHeaderCard(
                 )
             )
             .border(0.8.dp, Color.White.copy(alpha = 0.18f), shape)
-            .padding(16.dp)
+            .padding(18.dp)
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(

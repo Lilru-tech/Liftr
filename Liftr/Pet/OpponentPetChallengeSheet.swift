@@ -2,12 +2,18 @@ import SwiftUI
 
 struct OpponentPetChallengeSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("skipPetCombatUnbalancedWarning") private var skipPetCombatUnbalancedWarning = false
+    @AppStorage("petCombatChallengeMode") private var savedChallengeModeRaw = PetCombatChallengeMode.balanced.rawValue
 
     let preview: PetCombatPreview
     let defenderPet: PetCombatPetSummary
     let headToHead: PetCombatHeadToHeadSummary?
     let opponentUsername: String?
-    let onChallenge: () -> Void
+    let onChallenge: (Bool) -> Void
+
+    @State private var showUnbalancedDialog = false
+    @State private var dontShowAgain = false
+    @State private var selectedMode: PetCombatChallengeMode = .balanced
 
     private var rarity: PetRarity {
         PetRarity(databaseValue: defenderPet.rarity) ?? .common
@@ -62,10 +68,7 @@ struct OpponentPetChallengeSheet: View {
                     }
 
                     if preview.canChallenge {
-                        Button {
-                            dismiss()
-                            onChallenge()
-                        } label: {
+                        Button(action: handleChallengeTap) {
                             Label("Challenge Pet", systemImage: "bolt.horizontal.circle.fill")
                                 .font(.subheadline.weight(.semibold))
                                 .frame(maxWidth: .infinity)
@@ -91,5 +94,57 @@ struct OpponentPetChallengeSheet: View {
             }
         }
         .gradientBG()
+        .overlay {
+            if showUnbalancedDialog {
+                PetCombatUnbalancedMatchDialog(
+                    isPresented: $showUnbalancedDialog,
+                    dontShowAgain: $dontShowAgain,
+                    isUnderdog: preview.isAttackerUnderdog,
+                    selectedMode: $selectedMode,
+                    hardcoreBonusLabel: preview.hardcoreBonusLabel,
+                    onCancel: { showUnbalancedDialog = false },
+                    onFight: confirmChallenge
+                )
+            }
+        }
+        .onAppear {
+            selectedMode = PetCombatChallengeMode(rawValue: savedChallengeModeRaw) ?? .balanced
+        }
+    }
+
+    private func handleChallengeTap() {
+        if !preview.isStatUnbalanced {
+            dismiss()
+            onChallenge(false)
+            return
+        }
+
+        if skipPetCombatUnbalancedWarning && !preview.isAttackerUnderdog {
+            dismiss()
+            onChallenge(false)
+            return
+        }
+
+        selectedMode = resolvedSavedMode()
+        dontShowAgain = false
+        showUnbalancedDialog = true
+    }
+
+    private func confirmChallenge() {
+        if dontShowAgain && !preview.isAttackerUnderdog {
+            skipPetCombatUnbalancedWarning = true
+        }
+        savedChallengeModeRaw = selectedMode.rawValue
+        let disableNerf = preview.isAttackerUnderdog && selectedMode.disableNerfChoice
+        showUnbalancedDialog = false
+        dismiss()
+        onChallenge(disableNerf)
+    }
+
+    private func resolvedSavedMode() -> PetCombatChallengeMode {
+        if preview.isAttackerUnderdog {
+            return PetCombatChallengeMode(rawValue: savedChallengeModeRaw) ?? .balanced
+        }
+        return .balanced
     }
 }

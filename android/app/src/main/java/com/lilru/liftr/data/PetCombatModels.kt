@@ -67,7 +67,50 @@ data class PetCombatStatsSummaryWire(
     val resistance: Int = 0,
     val exploration: Int = 0,
     val happiness: Int = 0
+) {
+    val combatStatPoolTotal: Int
+        get() = health + strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
+}
+
+object PetCombatStatBalancing {
+    fun isUnbalanced(attacker: PetCombatStatsSummaryWire, defender: PetCombatStatsSummaryWire): Boolean {
+        val poolA = attacker.combatStatPoolTotal
+        val poolB = defender.combatStatPoolTotal
+        val stronger = maxOf(poolA, poolB)
+        val weaker = minOf(poolA, poolB)
+        return stronger * 100 > weaker * 105
+    }
+}
+
+@Serializable
+data class PetCombatStatBalancingWire(
+    @SerialName("is_unbalanced") val isUnbalanced: Boolean = false,
+    @SerialName("attacker_stat_pool") val attackerStatPool: Int = 0,
+    @SerialName("defender_stat_pool") val defenderStatPool: Int = 0,
+    @SerialName("attacker_pool_battle") val attackerPoolBattle: Int? = null,
+    @SerialName("defender_pool_battle") val defenderPoolBattle: Int? = null,
+    @SerialName("stronger_side") val strongerSide: String? = null,
+    @SerialName("hardcore_buff_multiplier") val hardcoreBuffMultiplier: Double? = null,
+    @SerialName("hardcore_bonus_percent") val hardcoreBonusPercent: Int? = null
 )
+
+enum class PetCombatChallengeMode(val rawValue: String) {
+    BALANCED("balanced"),
+    HARDCORE("hardcore");
+
+    val disableNerfChoice: Boolean get() = this == HARDCORE
+
+    val title: String
+        get() = when (this) {
+            BALANCED -> "Balanced Mode (Safe)"
+            HARDCORE -> "Hardcore Mode (No Nerf)"
+        }
+
+    companion object {
+        fun fromRaw(value: String?): PetCombatChallengeMode =
+            entries.firstOrNull { it.rawValue == value } ?: BALANCED
+    }
+}
 
 @Serializable
 data class PetCombatSideWire(
@@ -82,10 +125,26 @@ data class PetCombatPreviewWire(
     @SerialName("can_challenge") val canChallenge: Boolean = false,
     @SerialName("block_reason") val blockReason: String? = null,
     @SerialName("cooldown_expires_at") val cooldownExpiresAt: String? = null,
+    @SerialName("stat_balancing") val statBalancing: PetCombatStatBalancingWire? = null,
     val attacker: PetCombatSideWire? = null,
     val defender: PetCombatSideWire? = null,
     val energy: ProfileEnergyWire? = null
 ) {
+    fun isStatUnbalanced(): Boolean {
+        statBalancing?.isUnbalanced?.let { return it }
+        val attackerStats = attacker?.stats ?: return false
+        val defenderStats = defender?.stats ?: return false
+        return PetCombatStatBalancing.isUnbalanced(attackerStats, defenderStats)
+    }
+
+    fun isAttackerUnderdog(): Boolean = statBalancing?.strongerSide == "defender"
+
+    fun hardcoreBonusLabel(): String? {
+        val percent = statBalancing?.hardcoreBonusPercent ?: return null
+        if (percent <= 0) return null
+        return "+$percent% Coins & XP"
+    }
+
     fun blockReasonText(): String? = when (blockReason) {
         "self_challenge" -> "You cannot challenge yourself."
         "attacker_no_pet" -> "You need a hatched pet to challenge."

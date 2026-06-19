@@ -935,6 +935,7 @@ struct HomeView: View {
         .onChange(of: showTrackedAchievements) { _, show in
             if !show { Task { await loadTrackedAchievementSummary() } }
         }
+        .accessibilityIdentifier("home.screen")
     }
 
     private var quickStartLoadingOverlay: some View {
@@ -1766,6 +1767,7 @@ struct HomeView: View {
                 .from("vw_user_prs")
                 .select("*")
                 .in("user_id", values: allIds.map { $0.uuidString })
+                .gt("value", value: 0)
                 .gte("achieved_at", value: iso.string(from: since))
                 .order("achieved_at", ascending: false)
                 .limit(10)
@@ -2294,12 +2296,12 @@ private struct HighlightsCard: View {
                             HStack(spacing: 6) {
                                 Text(owner.map { "@\($0.username)" } ?? "@user")
                                     .font(.subheadline.weight(.semibold))
-                                Text("• \(prettyMetric(pr.metric))")
+                                Text("• \(prettyMetric(pr.metric, kind: pr.kind, label: pr.label))")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             
-                            Text("\(pr.label): \(formatValue(pr))")
+                            Text("\(PrFormatting.activityLabel(kind: pr.kind, label: pr.label)): \(formatValue(pr))")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
@@ -2334,43 +2336,11 @@ private struct HighlightsCard: View {
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.18)))
     }
     
-    private func prettyMetric(_ m: String) -> String {
-        switch m.lowercased() {
-        case "max_hr": return "Max HR"
-        case "longest_duration_sec": return "Longest duration"
-        case "longest_distance_km": return "Longest distance"
-        case "fastest_pace_sec_per_km": return "Fastest pace"
-        case "max_elevation_m": return "Max elevation"
-        case "est_1rm_kg": return "Estimated 1RM"
-        case "max_weight_kg": return "Max weight"
-        case "best_set_volume_kg": return "Best set volume"
-        case "max_reps": return "Max reps"
-        default: return m.replacingOccurrences(of: "_", with: " ").capitalized
-        }
+    private func prettyMetric(_ m: String, kind: String, label: String) -> String {
+        PrFormatting.prettyMetricName(m, kind: kind, label: label)
     }
     private func formatValue(_ pr: HomeView.PRRow) -> String {
-        let m = pr.metric.lowercased(), v = pr.value
-        if m.hasSuffix("_kg") || m == "est_1rm_kg" || m == "max_weight_kg" || m == "best_set_volume_kg" {
-            return String(format: "%.1f kg", v)
-        }
-        if m.contains("reps") { return "\(Int(v.rounded())) reps" }
-        if m == "max_hr" { return "\(Int(v.rounded())) bpm" }
-        if m == "longest_distance_km" { return String(format: "%.1f km", v) }
-        if m == "max_elevation_m" { return "\(Int(v.rounded())) m" }
-        if m == "fastest_pace_sec_per_km" { return paceString(v) }
-        if m.hasSuffix("_sec") || m.contains("duration") { return durationString(v) }
-        return String(format: "%.2f", v)
-    }
-    private func durationString(_ secondsDouble: Double) -> String {
-        let s = max(0, Int(secondsDouble.rounded()))
-        let h = s / 3600, m = (s % 3600) / 60, sec = s % 60
-        if h > 0 { return String(format: "%d:%02d:%02d", h, m, sec) }
-        return String(format: "%d:%02d", m, sec)
-    }
-    private func paceString(_ secondsDouble: Double) -> String {
-        let s = max(1, Int(secondsDouble.rounded()))
-        let m = s / 60, sec = s % 60
-        return String(format: "%d:%02d /km", m, sec)
+        PrFormatting.formatValue(metric: pr.metric, value: pr.value, label: pr.label)
     }
     private func relative(_ d: Date) -> String {
         let f = RelativeDateTimeFormatter(); f.unitsStyle = .short

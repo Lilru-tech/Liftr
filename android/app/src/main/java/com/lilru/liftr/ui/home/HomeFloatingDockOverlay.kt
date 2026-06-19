@@ -4,7 +4,6 @@ import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -25,7 +24,13 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.draw.shadow
+import com.lilru.liftr.ui.components.LiftrChatFab
+import com.lilru.liftr.ui.components.LiftrGlassSurface
+import com.lilru.liftr.ui.components.LiftrQuickActionFab
+import com.lilru.liftr.ui.theme.LiftrRadii
+import com.lilru.liftr.ui.theme.rememberLiftrHazeBlurEnabled
+import dev.chrisbanes.haze.HazeState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -42,7 +47,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -59,6 +63,7 @@ import com.lilru.liftr.ui.chat.MessagesInboxScreen
 import com.lilru.liftr.ui.chat.ProfileLite
 import com.lilru.liftr.ui.common.FLOATING_DOCK_MERGE_THRESHOLD_PX
 import com.lilru.liftr.ui.common.FloatingDockEdge
+import com.lilru.liftr.ui.common.floatingDockDragAndTap
 import com.lilru.liftr.ui.common.floatingEdgeAnchor
 import com.lilru.liftr.ui.common.floatingEdgeDock
 import com.lilru.liftr.ui.common.floatingDockShouldMerge
@@ -76,6 +81,7 @@ import kotlin.math.roundToInt
 fun HomeFloatingDockOverlay(
     supabase: SupabaseClient,
     quickPrefs: android.content.SharedPreferences,
+    hazeState: HazeState,
     bottomInsetPx: Float,
     busy: Boolean,
     showChat: Boolean,
@@ -129,6 +135,9 @@ fun HomeFloatingDockOverlay(
     var openThread by remember { mutableStateOf<Pair<Long, ProfileLite?>?>(null) }
     var quickTooltipSize by remember { mutableStateOf(IntSize.Zero) }
     var chatHintSize by remember { mutableStateOf(IntSize.Zero) }
+    var chatDragLocation by remember { mutableStateOf<Offset?>(null) }
+    var quickDragLocation by remember { mutableStateOf<Offset?>(null) }
+    var mergedDragLocation by remember { mutableStateOf<Offset?>(null) }
 
     var chatFabEdge by remember { mutableStateOf(chatDock.edge) }
     var chatFabPosition by remember { mutableStateOf(chatDock.position) }
@@ -216,6 +225,7 @@ fun HomeFloatingDockOverlay(
                 mergedTabPx,
                 bottomInsetPx
             )
+            val mergedDisplayAnchor = mergedDragLocation ?: anchor
 
             if (showMergedMenu) {
                 Box(
@@ -225,6 +235,7 @@ fun HomeFloatingDockOverlay(
                 )
                 HomeFloatingDockMergedMenu(
                     busy = busy,
+                    hazeState = hazeState,
                     onMessages = {
                         showMergedMenu = false
                         showInbox = true
@@ -243,60 +254,43 @@ fun HomeFloatingDockOverlay(
                     },
                     onSeparate = { unmerge() },
                     modifier = Modifier.offset {
-                        homeFloatingDockMenuOffset(anchor, mergedEdge, widthPx, heightPx, density, menuHeightDp = 300f)
+                        homeFloatingDockMenuOffset(mergedDisplayAnchor, mergedEdge, widthPx, heightPx, density, menuHeightDp = 300f)
                     }
                 )
             }
 
-            var mergedDidDrag by remember { mutableStateOf(false) }
             HomeFloatingDockMergedButton(
                 busy = busy,
-                onClick = {
-                    if (mergedDidDrag) {
-                        mergedDidDrag = false
-                    } else {
-                        showMergedMenu = !showMergedMenu
-                    }
-                },
+                hazeState = hazeState,
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            (anchor.x - mergedTabPx / 2f).roundToInt(),
-                            (anchor.y - mergedTabPx / 2f).roundToInt()
+                            (mergedDisplayAnchor.x - mergedTabPx / 2f).roundToInt(),
+                            (mergedDisplayAnchor.y - mergedTabPx / 2f).roundToInt()
                         )
                     }
-                    .pointerInput(mergedEdge, mergedPosition, widthPx, heightPx) {
-                        var dragAnchor = anchor
-                        detectDragGestures(
-                            onDragStart = {
-                                mergedDidDrag = false
-                                dragAnchor = anchor
-                                showMergedMenu = false
-                            },
-                            onDragEnd = {
-                                mergedEdge = dragAnchor.let {
-                                    floatingEdgeDock(it, widthPx, heightPx, mergedTabPx, bottomInsetPx).first
-                                }
-                                mergedPosition = dragAnchor.let {
-                                    floatingEdgeDock(it, widthPx, heightPx, mergedTabPx, bottomInsetPx).second
-                                }
-                                persistMergedDock()
-                            },
-                            onDrag = { _, drag ->
-                                mergedDidDrag = true
-                                dragAnchor += drag
-                                val dock = floatingEdgeDock(
-                                    dragAnchor,
-                                    widthPx,
-                                    heightPx,
-                                    mergedTabPx,
-                                    bottomInsetPx
-                                )
-                                mergedEdge = dock.first
-                                mergedPosition = dock.second
-                            }
-                        )
-                    }
+                    .floatingDockDragAndTap(
+                        widthPx = widthPx,
+                        heightPx = heightPx,
+                        bottomInsetPx = bottomInsetPx,
+                        startAnchor = { anchor },
+                        onClick = { showMergedMenu = !showMergedMenu },
+                        onDragStart = { showMergedMenu = false },
+                        onDrag = { point -> mergedDragLocation = point },
+                        onDragEnd = { point ->
+                            mergedDragLocation = null
+                            val dock = floatingEdgeDock(
+                                point,
+                                widthPx,
+                                heightPx,
+                                mergedTabPx,
+                                bottomInsetPx
+                            )
+                            mergedEdge = dock.first
+                            mergedPosition = dock.second
+                            persistMergedDock()
+                        }
+                    )
             )
         } else {
             val chatAnchor = floatingEdgeAnchor(
@@ -315,6 +309,8 @@ fun HomeFloatingDockOverlay(
                 quickTabPx,
                 bottomInsetPx
             )
+            val chatDisplayAnchor = chatDragLocation ?: chatAnchor
+            val quickDisplayAnchor = quickDragLocation ?: quickAnchor
 
             if (showQuickMenu) {
                 Box(
@@ -336,7 +332,7 @@ fun HomeFloatingDockOverlay(
                         onSport()
                     },
                     modifier = Modifier.offset {
-                        homeFloatingDockMenuOffset(quickAnchor, quickEdge, widthPx, heightPx, density)
+                        homeFloatingDockMenuOffset(quickDisplayAnchor, quickEdge, widthPx, heightPx, density)
                     }
                 )
             }
@@ -366,7 +362,7 @@ fun HomeFloatingDockOverlay(
                         }
                         .offset {
                             homeQuickTooltipOffset(
-                                quickAnchor,
+                                quickDisplayAnchor,
                                 quickEdge,
                                 widthPx,
                                 heightPx,
@@ -399,7 +395,7 @@ fun HomeFloatingDockOverlay(
                         }
                         .offset {
                             floatingBubbleOffset(
-                                anchor = chatAnchor,
+                                anchor = chatDisplayAnchor,
                                 edge = chatFabEdge,
                                 bubbleWidthPx = chatCardWidthPx,
                                 bubbleHeightPx = chatCardHeightPx,
@@ -431,163 +427,114 @@ fun HomeFloatingDockOverlay(
             }
 
             if (showChat) {
-            var chatDidDrag by remember { mutableStateOf(false) }
-            FloatingActionButton(
-                onClick = {
-                    if (chatDidDrag) {
-                        chatDidDrag = false
-                    } else {
-                        showInbox = true
-                    }
-                },
+            LiftrChatFab(
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            (chatAnchor.x - chatTabPx / 2f).roundToInt(),
-                            (chatAnchor.y - chatTabPx / 2f).roundToInt()
+                            (chatDisplayAnchor.x - chatTabPx / 2f).roundToInt(),
+                            (chatDisplayAnchor.y - chatTabPx / 2f).roundToInt()
                         )
                     }
-                    .size(56.dp)
-                    .pointerInput(chatFabEdge, chatFabPosition, quickAnchor) {
-                        var dragAnchor = chatAnchor
-                        detectDragGestures(
-                            onDragStart = {
-                                chatDidDrag = false
-                                dragAnchor = chatAnchor
-                                showQuickMenu = false
-                            },
-                            onDragEnd = {
-                                val dock = floatingEdgeDock(
-                                    dragAnchor,
-                                    widthPx,
-                                    heightPx,
-                                    chatTabPx,
-                                    bottomInsetPx
-                                )
-                                val snapped = floatingEdgeAnchor(
-                                    dock.first,
-                                    dock.second,
-                                    widthPx,
-                                    heightPx,
-                                    chatTabPx,
-                                    bottomInsetPx
-                                )
-                                if (showChat && floatingDockShouldMerge(snapped, quickAnchor, FLOATING_DOCK_MERGE_THRESHOLD_PX)) {
-                                    applyMerge(dock.first, dock.second)
-                                } else {
-                                    chatFabEdge = dock.first
-                                    chatFabPosition = dock.second
-                                    scope.launch {
-                                        ChatPreferences.setFabDock(context, chatFabEdge, chatFabPosition)
-                                    }
-                                }
-                            },
-                            onDrag = { change, drag ->
-                                change.consume()
-                                chatDidDrag = true
-                                if (!chatDragHintSeen) {
-                                    scope.launch { ChatPreferences.setFabDragHintSeen(context) }
-                                }
-                                dragAnchor += Offset(drag.x, drag.y)
-                                val dock = floatingEdgeDock(
-                                    dragAnchor,
-                                    widthPx,
-                                    heightPx,
-                                    chatTabPx,
-                                    bottomInsetPx
-                                )
+                    .floatingDockDragAndTap(
+                        widthPx = widthPx,
+                        heightPx = heightPx,
+                        bottomInsetPx = bottomInsetPx,
+                        startAnchor = { chatAnchor },
+                        onClick = { showInbox = true },
+                        onDragStart = { showQuickMenu = false },
+                        onDrag = { point ->
+                            if (!chatDragHintSeen) {
+                                scope.launch { ChatPreferences.setFabDragHintSeen(context) }
+                            }
+                            chatDragLocation = point
+                        },
+                        onDragEnd = { point ->
+                            chatDragLocation = null
+                            val dock = floatingEdgeDock(
+                                point,
+                                widthPx,
+                                heightPx,
+                                chatTabPx,
+                                bottomInsetPx
+                            )
+                            val snapped = floatingEdgeAnchor(
+                                dock.first,
+                                dock.second,
+                                widthPx,
+                                heightPx,
+                                chatTabPx,
+                                bottomInsetPx
+                            )
+                            if (showChat && floatingDockShouldMerge(snapped, quickAnchor, FLOATING_DOCK_MERGE_THRESHOLD_PX)) {
+                                applyMerge(dock.first, dock.second)
+                            } else {
                                 chatFabEdge = dock.first
                                 chatFabPosition = dock.second
+                                scope.launch {
+                                    ChatPreferences.setFabDock(context, chatFabEdge, chatFabPosition)
+                                }
                             }
-                        )
-                    },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ) {
-                Icon(Icons.Filled.Send, contentDescription = "Open messages")
-            }
+                        }
+                    )
+            )
             }
 
-            var quickDidDrag by remember { mutableStateOf(false) }
-            FloatingActionButton(
-                onClick = {
-                    if (quickDidDrag) {
-                        quickDidDrag = false
-                    } else if (!isSignedIn) {
-                        onQuickSignInRequired()
-                    } else {
-                        quickHintDismissed = true
-                        quickPrefs.edit().putBoolean("hintDismissed", true).apply()
-                        showQuickMenu = !showQuickMenu
-                    }
-                },
+            LiftrQuickActionFab(
+                hazeState = hazeState,
+                busy = busy,
                 modifier = Modifier
                     .offset {
                         IntOffset(
-                            (quickAnchor.x - quickTabPx / 2f).roundToInt(),
-                            (quickAnchor.y - quickTabPx / 2f).roundToInt()
+                            (quickDisplayAnchor.x - quickTabPx / 2f).roundToInt(),
+                            (quickDisplayAnchor.y - quickTabPx / 2f).roundToInt()
                         )
                     }
                     .size(52.dp)
-                    .pointerInput(quickEdge, quickPosition, chatAnchor) {
-                        var dragAnchor = quickAnchor
-                        detectDragGestures(
-                            onDragStart = {
-                                quickDidDrag = false
-                                dragAnchor = quickAnchor
-                                showQuickMenu = false
-                            },
-                            onDragEnd = {
-                                val dock = floatingEdgeDock(
-                                    dragAnchor,
-                                    widthPx,
-                                    heightPx,
-                                    quickTabPx,
-                                    bottomInsetPx
-                                )
-                                val snapped = floatingEdgeAnchor(
-                                    dock.first,
-                                    dock.second,
-                                    widthPx,
-                                    heightPx,
-                                    quickTabPx,
-                                    bottomInsetPx
-                                )
-                                if (showChat && floatingDockShouldMerge(snapped, chatAnchor, FLOATING_DOCK_MERGE_THRESHOLD_PX)) {
-                                    applyMerge(dock.first, dock.second)
-                                } else {
-                                    quickEdge = dock.first
-                                    quickPosition = dock.second
-                                    quickHintDismissed = true
-                                    persistQuickDock()
-                                    quickPrefs.edit().putBoolean("hintDismissed", true).apply()
-                                }
-                            },
-                            onDrag = { _, drag ->
-                                quickDidDrag = true
-                                dragAnchor += drag
-                                val dock = floatingEdgeDock(
-                                    dragAnchor,
-                                    widthPx,
-                                    heightPx,
-                                    quickTabPx,
-                                    bottomInsetPx
-                                )
+                    .floatingDockDragAndTap(
+                        widthPx = widthPx,
+                        heightPx = heightPx,
+                        bottomInsetPx = bottomInsetPx,
+                        startAnchor = { quickAnchor },
+                        onClick = {
+                            if (!isSignedIn) {
+                                onQuickSignInRequired()
+                            } else {
+                                quickHintDismissed = true
+                                quickPrefs.edit().putBoolean("hintDismissed", true).apply()
+                                showQuickMenu = !showQuickMenu
+                            }
+                        },
+                        onDragStart = { showQuickMenu = false },
+                        onDrag = { point -> quickDragLocation = point },
+                        onDragEnd = { point ->
+                            quickDragLocation = null
+                            val dock = floatingEdgeDock(
+                                point,
+                                widthPx,
+                                heightPx,
+                                quickTabPx,
+                                bottomInsetPx
+                            )
+                            val snapped = floatingEdgeAnchor(
+                                dock.first,
+                                dock.second,
+                                widthPx,
+                                heightPx,
+                                quickTabPx,
+                                bottomInsetPx
+                            )
+                            if (showChat && floatingDockShouldMerge(snapped, chatAnchor, FLOATING_DOCK_MERGE_THRESHOLD_PX)) {
+                                applyMerge(dock.first, dock.second)
+                            } else {
                                 quickEdge = dock.first
                                 quickPosition = dock.second
+                                quickHintDismissed = true
+                                persistQuickDock()
+                                quickPrefs.edit().putBoolean("hintDismissed", true).apply()
                             }
-                        )
-                    }
-            ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp
+                        }
                     )
-                } else {
-                    Text("⚡", style = MaterialTheme.typography.titleLarge)
-                }
-            }
+            )
         }
 
         if (showInbox && openThread == null) {
@@ -625,15 +572,21 @@ fun HomeFloatingDockOverlay(
 @Composable
 private fun HomeFloatingDockMergedButton(
     busy: Boolean,
-    onClick: () -> Unit,
+    hazeState: HazeState,
     modifier: Modifier = Modifier
 ) {
+    val shape = RoundedCornerShape(LiftrRadii.dockButton)
     Box(
         modifier = modifier
             .size(width = 72.dp, height = 52.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .border(0.8.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .shadow(
+                elevation = 6.dp,
+                shape = shape,
+                ambientColor = Color.Black.copy(alpha = 0.18f),
+                spotColor = Color.Black.copy(alpha = 0.18f)
+            )
+            .clip(shape)
+            .border(0.8.dp, Color.White.copy(alpha = 0.22f), shape)
     ) {
         Row(modifier = Modifier.fillMaxSize()) {
             Box(
@@ -650,20 +603,28 @@ private fun HomeFloatingDockMergedButton(
                     modifier = Modifier.size(20.dp)
                 )
             }
-            Box(
+            LiftrGlassSurface(
+                hazeState = hazeState,
+                shape = RoundedCornerShape(topEnd = LiftrRadii.dockButton, bottomEnd = LiftrRadii.dockButton),
                 modifier = Modifier
                     .width(36.dp)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f)),
-                contentAlignment = Alignment.Center
+                    .fillMaxHeight(),
+                elevation = 0.dp,
+                strokeAlpha = 0f,
+                blurEnabled = rememberLiftrHazeBlurEnabled()
             ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp
-                    )
-                } else {
-                    Text("⚡", style = MaterialTheme.typography.titleLarge)
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Text("⚡", style = MaterialTheme.typography.titleLarge, color = Color(0xFFFFD600))
+                    }
                 }
             }
         }
@@ -673,6 +634,7 @@ private fun HomeFloatingDockMergedButton(
 @Composable
 private fun HomeFloatingDockMergedMenu(
     busy: Boolean,
+    hazeState: HazeState,
     onMessages: () -> Unit,
     onStrength: () -> Unit,
     onCardio: () -> Unit,
@@ -680,12 +642,16 @@ private fun HomeFloatingDockMergedMenu(
     onSeparate: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    LiftrGlassSurface(
+        hazeState = hazeState,
+        shape = RoundedCornerShape(24.dp),
+        modifier = modifier.width(158.dp),
+        elevation = 16.dp,
+        strokeAlpha = 0.22f
+    ) {
     Column(
-        modifier = modifier
+        modifier = Modifier
             .width(158.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
-            .border(0.8.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(24.dp))
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -740,6 +706,7 @@ private fun HomeFloatingDockMergedMenu(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
     }
 }
 

@@ -1,0 +1,161 @@
+name: iOS regression tests
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui-regression:
+    runs-on: macos-15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_DB_HOST: aws-1-eu-west-1.pooler.supabase.com
+      SUPABASE_DB_PORT: "5432"
+      UI_TEST_EMAIL: ${{ secrets.UI_TEST_EMAIL }}
+      UI_TEST_PASSWORD: ${{ secrets.UI_TEST_PASSWORD }}
+      BRANCH_NAME: ui-regression-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v2
+        with:
+          version: 2.106.0
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install PostgreSQL client
+        run: |
+          brew install libpq
+          echo "$(brew --prefix libpq)/bin" >> "$GITHUB_PATH"
+
+      - name: Verify PostgreSQL client
+        run: |
+          export PATH="$(brew --prefix libpq)/bin:$PATH"
+          pg_dump --version
+          psql --version
+
+      - name: Create ephemeral Supabase branch
+        run: |
+          export PATH="$(brew --prefix libpq)/bin:$PATH"
+          bash scripts/ci/supabase-branch-create.sh
+
+      - name: Seed UI regression user
+        run: |
+          export PATH="$(brew --prefix libpq)/bin:$PATH"
+          bash scripts/ci/supabase-branch-seed-ui-user.sh
+
+      - name: Select iOS simulator
+        id: simulator
+        run: |
+          eval "$(bash scripts/ci/select-ios-simulator.sh)"
+          echo "device_name=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Boot iOS simulator
+        run: |
+          DEVICE_NAME="${{ steps.simulator.outputs.device_name }}"
+          xcrun simctl boot "$DEVICE_NAME" || true
+          open -a Simulator
+
+      - name: Run LiftrUITests regression suite
+        run: |
+          set -a
+          source scripts/ci/.branch.env
+          set +a
+          export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-${ANON_KEY:-}}"
+          SIGNUP_DOMAIN="${UI_TEST_EMAIL#*@}"
+          export UI_TEST_SIGNUP_EMAIL="ui-signup-${GITHUB_RUN_ID}@${SIGNUP_DOMAIN}"
+          export UI_TEST_SIGNUP_USERNAME="uireg${GITHUB_RUN_ID}"
+          export UI_TEST_SIGNUP_PASSWORD="12345678"
+          cp scripts/ci/.branch.env scripts/ci/.ui-test.env
+          {
+            echo "SUPABASE_URL=${SUPABASE_URL}"
+            echo "UI_TEST_EMAIL=${UI_TEST_EMAIL}"
+            echo "UI_TEST_PASSWORD=${UI_TEST_PASSWORD}"
+            echo "SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}"
+            echo "UI_TEST_SIGNUP_EMAIL=${UI_TEST_SIGNUP_EMAIL}"
+            echo "UI_TEST_SIGNUP_USERNAME=${UI_TEST_SIGNUP_USERNAME}"
+            echo "UI_TEST_SIGNUP_PASSWORD=${UI_TEST_SIGNUP_PASSWORD}"
+          } >> scripts/ci/.ui-test.env
+          export TEST_RUNNER_SUPABASE_URL="${SUPABASE_URL}"
+          export TEST_RUNNER_SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY}"
+          export TEST_RUNNER_UI_TEST_EMAIL="${UI_TEST_EMAIL}"
+          export TEST_RUNNER_UI_TEST_PASSWORD="${UI_TEST_PASSWORD}"
+          export TEST_RUNNER_UI_TEST_SIGNUP_EMAIL="${UI_TEST_SIGNUP_EMAIL}"
+          export TEST_RUNNER_UI_TEST_SIGNUP_USERNAME="${UI_TEST_SIGNUP_USERNAME}"
+          export TEST_RUNNER_UI_TEST_SIGNUP_PASSWORD="${UI_TEST_SIGNUP_PASSWORD}"
+          rm -rf TestResults.xcresult
+          set +e
+          xcodebuild test \
+            -project Liftr.xcodeproj \
+            -scheme Liftr \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.device_name }}" \
+            -maximum-concurrent-test-simulator-destinations 1 \
+            -parallel-testing-enabled NO \
+            -only-testing:LiftrUITests/ExploreTabRegressionTests \
+            -only-testing:LiftrUITests/NutritionTabRegressionTests \
+            -only-testing:LiftrUITests/HomeFeedRegressionTests \
+            -only-testing:LiftrUITests/NavigationRobustnessRegressionTests \
+            -only-testing:LiftrUITests/AuthSessionRegressionTests \
+            -only-testing:LiftrUITests/RegisterValidationRegressionTests \
+            -only-testing:LiftrUITests/ForgotPasswordRegressionTests \
+            -only-testing:LiftrUITests/ProfileMenuRegressionTests \
+            -only-testing:LiftrUITests/RegisterFullRegressionTests \
+            -only-testing:LiftrUITests/AddWorkoutCardioRegressionTests \
+            -only-testing:LiftrUITests/CreateGoalRegressionTests \
+            -only-testing:LiftrUITests/AddWorkoutStrengthRegressionTests \
+            -only-testing:LiftrUITests/MarketTransactionRegressionTests \
+            -only-testing:LiftrUITests/LogoutReloginRegressionTests \
+            -resultBundlePath TestResults.xcresult
+          TEST_EXIT=$?
+          set -e
+          exit "$TEST_EXIT"
+
+      - name: Publish UI test summary and screenshots
+        if: always() && !cancelled()
+        continue-on-error: true
+        env:
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          if [ -d TestResults.xcresult ]; then
+            bash scripts/ci/export-ios-failure-screenshots.sh TestResults.xcresult test-attachments
+            bash scripts/ci/generate-ios-visual-report.sh TestResults.xcresult test-attachments
+            bash scripts/ci/generate-ios-test-summary.sh TestResults.xcresult test-attachments
+          else
+            echo "No TestResults.xcresult bundle found; skipping summary export."
+          fi
+
+      - name: Upload failure screenshots
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-screenshots-${{ github.run_id }}
+          path: test-attachments/
+          if-no-files-found: ignore
+
+      - name: Upload visual HTML report
+        if: always() && !cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-visual-report-${{ github.run_id }}
+          path: test-attachments/report.html
+          if-no-files-found: ignore
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-ui-test-results-${{ github.run_id }}
+          path: TestResults.xcresult
+          if-no-files-found: ignore
+
+      - name: Tear down Supabase preview branch
+        if: always()
+        run: bash scripts/ci/supabase-branch-teardown.sh

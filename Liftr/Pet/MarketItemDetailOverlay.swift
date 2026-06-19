@@ -61,6 +61,8 @@ struct MarketItemDetailOverlay: View {
                             Button("\(qty)") {
                                 Task { await purchase(quantity: qty) }
                             }
+                            .accessibilityIdentifier("market.overlay.qty.\(qty)")
+                            .accessibilityLabel("Buy quantity \(qty)")
                             .disabled(item.price * qty > userCoins || isBuying)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 8)
@@ -79,12 +81,14 @@ struct MarketItemDetailOverlay: View {
                     }
                     .frame(maxWidth: .infinity)
                 }
+                .accessibilityIdentifier("market.overlay.buy")
                 .buttonStyle(.borderedProminent)
                 .disabled(item.price > userCoins || isBuying)
             }
 
             Button("Close", action: onClose)
                 .font(.subheadline)
+                .accessibilityIdentifier("market.overlay.close")
         }
         .padding(24)
         .frame(maxWidth: 340)

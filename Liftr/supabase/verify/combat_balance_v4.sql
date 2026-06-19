@@ -12,7 +12,7 @@ begin
     raise exception 'missing function recompute_pet_stats_combat_balance_v1';
   end if;
 
-  if to_regprocedure('public.execute_pet_combat_v1(uuid)') is null then
+  if to_regprocedure('public.execute_pet_combat_v1(uuid, boolean)') is null then
     raise exception 'missing function execute_pet_combat_v1';
   end if;
 

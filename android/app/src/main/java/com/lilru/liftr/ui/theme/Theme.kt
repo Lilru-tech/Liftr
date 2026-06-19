@@ -5,8 +5,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import android.content.res.Configuration
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.graphics.Color
+import com.lilru.liftr.ui.theme.LiftrShapes
+import com.lilru.liftr.ui.theme.LiftrTypography
 
 private val DarkColors = darkColorScheme(
     primary = Color(0xFF6EE7A8),
@@ -27,7 +29,8 @@ fun LiftrTheme(content: @Composable () -> Unit) {
     val scheme = if (dark) DarkColors else LightColors
     MaterialTheme(
         colorScheme = scheme,
-        typography = MaterialTheme.typography,
+        typography = LiftrTypography,
+        shapes = LiftrShapes,
         content = content
     )
 }

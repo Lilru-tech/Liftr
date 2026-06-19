@@ -60,9 +60,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.android.gms.ads.AdRequest
-import com.google.android.gms.ads.AdSize
-import com.google.android.gms.ads.AdView
+import com.lilru.liftr.ui.components.LiftrBannerAd
 import com.lilru.liftr.BuildConfig
 import com.lilru.liftr.R
 import com.lilru.liftr.data.PremiumStatusStore
@@ -563,18 +561,7 @@ fun RankingTabScreen(
         }
             }
             if (!isPremium) {
-                AndroidView(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    factory = { ctx ->
-                        AdView(ctx).apply {
-                            setAdSize(AdSize.BANNER)
-                            adUnitId = BuildConfig.AD_BANNER_UNIT_ID
-                            loadAd(AdRequest.Builder().build())
-                        }
-                    }
-                )
+                LiftrBannerAd(horizontalPadding = 0.dp)
             }
         }
         FloatingActionButton(

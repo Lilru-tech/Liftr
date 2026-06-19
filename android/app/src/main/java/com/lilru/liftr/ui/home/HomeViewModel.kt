@@ -1353,6 +1353,7 @@ class HomeViewModel(
             .from(BackendContracts.Views.VW_USER_PRS)
             .select(columns = Columns.raw("*")) {
                 filter { isIn("user_id", allIds) }
+                filter { gt("value", 0) }
                 filter { gte("achieved_at", since) }
                 order("achieved_at", Order.DESCENDING)
                 limit(10)
@@ -1386,6 +1387,7 @@ class HomeViewModel(
                 val metric = o.optString("metric", "")
                 val ach = o.optString("achieved_at", "")
                 val value = if (o.has("value") && !o.isNull("value")) o.optDouble("value") else 0.0
+                if (value <= 0) continue
                 out.add(
                     HomePrRow(
                         userId = uid,

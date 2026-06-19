@@ -1,5 +1,6 @@
 package com.lilru.liftr.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -31,6 +32,7 @@ fun LiftrBackTopBar(
     title: String? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
+    BackHandler(onBack = onBack)
     Row(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
