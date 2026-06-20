@@ -279,6 +279,7 @@ Full list with parameters: [backend-contracts.md § Inventario de RPC](../backen
 | `delete-auth-user` | User JWT + service role | `auth.admin.deleteUser` for GDPR delete |
 | `resolve-territory-municipality` | Service / scheduled | Nominatim/OSM queue → `ingest_territory_municipality_v1` |
 | `notify-new-user` | Webhook | Resend email to admins on signup |
+| `notify-first-workout` | Webhook | Resend email to admins on first published workout |
 
 Clients invoke (with session JWT): `delete-auth-user`, `resolve-territory-municipality` (operator paths).
 

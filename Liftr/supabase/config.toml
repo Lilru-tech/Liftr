@@ -28,3 +28,6 @@ verify_jwt = false
 
 [functions.garmin-activity-webhook]
 verify_jwt = false
+
+[functions.notify-first-workout]
+verify_jwt = false
