@@ -43,13 +43,36 @@ final class PetDetailViewModel: ObservableObject {
     }
 
     func reloadLogs() async {
+        let raw = UserDefaults.standard.string(forKey: LogFilterPreferences.petDisabledStorageKey) ?? ""
+        let keys = LogFilterPreferences.decodeDisabledCategories(raw)
+        await reloadLogsMatchingFilters(disabledKeys: keys)
+    }
+
+    func reloadLogsMatchingFilters(disabledKeys: Set<String>) async {
         logsOffset = 0
         hasMoreLogs = true
+        logs = []
+        let maxPages = 10
+        var pagesLoaded = 0
+        let allCategoriesDisabled = disabledKeys.count >= PetLogFilterCategory.allCases.count
+
         do {
-            let page = try await PetService.shared.fetchPetLogs(offset: 0, limit: logsPageSize)
-            logs = page
-            logsOffset = page.count
-            hasMoreLogs = page.count >= logsPageSize
+            while pagesLoaded < maxPages {
+                let page = try await PetService.shared.fetchPetLogs(offset: logsOffset, limit: logsPageSize)
+                logs.append(contentsOf: page)
+                logsOffset += page.count
+                hasMoreLogs = page.count >= logsPageSize
+                pagesLoaded += 1
+
+                if allCategoriesDisabled {
+                    break
+                }
+
+                let visibleCount = PetLogFilterCategory.filter(logs, disabledKeys: disabledKeys).count
+                if visibleCount >= logsPageSize || !hasMoreLogs {
+                    break
+                }
+            }
         } catch {
             errorMessage = error.localizedDescription
         }

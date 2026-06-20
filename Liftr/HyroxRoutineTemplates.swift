@@ -62,6 +62,7 @@ struct HyroxRoutineExerciseWire: Decodable {
     let duration_sec: Int?
     let height_cm: Int?
     let implement_count: Int?
+    let calories_kcal: Double?
     let notes: String?
     let exercise_display_name: String?
 }
@@ -83,7 +84,7 @@ struct HyroxRoutineDetailWire: Decodable {
 }
 
 func hyroxRoutineDetailSelect() -> String {
-    "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr,hyrox_routine_exercises(exercise_code,exercise_order,zone_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+    "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr,hyrox_routine_exercises(exercise_code,exercise_order,zone_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,calories_kcal,notes,exercise_display_name)"
 }
 
 func hyroxApplyPayloadFromDetail(_ detail: HyroxRoutineDetailWire) -> HyroxRoutineApplyPayload {
@@ -110,6 +111,7 @@ func hyroxApplyPayloadFromDetail(_ detail: HyroxRoutineDetailWire) -> HyroxRouti
             durationSec: s(w.duration_sec),
             heightCm: s(w.height_cm),
             implementCount: s(w.implement_count),
+            caloriesKcal: w.calories_kcal.map { String(Int($0.rounded())) } ?? "",
             notes: w.notes ?? ""
         )
     }
@@ -401,6 +403,7 @@ func insertHyroxRoutineTemplate(
         let duration_sec: Int?
         let height_cm: Int?
         let implement_count: Int?
+        let calories_kcal: Double?
         let notes: String?
         let exercise_display_name: String?
     }
@@ -424,6 +427,7 @@ func insertHyroxRoutineTemplate(
             duration_sec: hyroxIntOrNil(ex.durationSec),
             height_cm: hyroxIntOrNil(ex.heightCm),
             implement_count: hyroxIntOrNil(ex.implementCount),
+            calories_kcal: hyroxParseDouble(ex.caloriesKcal),
             notes: noteTrim.isEmpty ? nil : noteTrim,
             exercise_display_name: persisted.displayName
         )
@@ -521,6 +525,7 @@ func updateHyroxRoutineTemplateInPlace(
         let duration_sec: Int?
         let height_cm: Int?
         let implement_count: Int?
+        let calories_kcal: Double?
         let notes: String?
         let exercise_display_name: String?
     }
@@ -544,6 +549,7 @@ func updateHyroxRoutineTemplateInPlace(
             duration_sec: hyroxIntOrNil(ex.durationSec),
             height_cm: hyroxIntOrNil(ex.heightCm),
             implement_count: hyroxIntOrNil(ex.implementCount),
+            calories_kcal: hyroxParseDouble(ex.caloriesKcal),
             notes: noteTrim.isEmpty ? nil : noteTrim,
             exercise_display_name: persisted.displayName
         )

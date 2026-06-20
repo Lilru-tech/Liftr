@@ -141,7 +141,7 @@ Vistas:
 - `get_level_leaderboard_v1`
 - `get_coins_leaderboard_v1` (`p_scope`, `p_limit`, `p_sex`, `p_age_band`) — ranking por `profiles.coins_balance`; sin periodo
 - `get_pet_leaderboard_v1` (`p_metric`, `p_scope`, `p_limit`, `p_sex`, `p_age_band`) — rankings de mascotas, sin periodo (all-time). `p_metric`: `level`, `total_stats`, `health`, `strength`, `defense` (requieren mascota activa eclosionada), `battles`, `wins`, `losses`, `win_rate` (mín. 5 combates), `max_damage_dealt`, `max_damage_taken`, `total_damage_dealt`, `total_damage_taken` (de `pet_combat_user_stats`, requieren `total_battles > 0`). Devuelve `rank`, `user_id`, `username`, `avatar_url`, `value` (numeric; `win_rate` en %), `battles`, `pet_name` (custom o display name del tipo), `pet_level`
-- `list_my_coin_transactions_v1` (`p_limit` default 20, max 50) — historial propio; `SECURITY DEFINER`
+- `list_my_coin_transactions_v1` (`p_limit` default 20, max 50; `p_offset` default 0) — historial propio paginado (`order by created_at desc, id desc`); `SECURITY DEFINER`
 - `get_my_coin_sources_v1` (`p_start`, `p_end` timestamptz opcionales; ambos null = all-time) — agregación de monedas **ganadas** (`amount > 0`) por categoría (`source_key`); excluye backfills de economía; `SECURITY DEFINER`
 - `clear_my_coin_history_v1` () — borra filas de `coin_transactions` del caller; **no** modifica `coins_balance`
 - `get_workout_likes_received_leaderboard_v1`, `get_workout_comments_received_leaderboard_v1`, `get_group_workout_sessions_leaderboard_v1` (social / feed quality; published workouts in period)

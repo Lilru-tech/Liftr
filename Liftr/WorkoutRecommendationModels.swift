@@ -145,6 +145,7 @@ struct HyroxExerciseRecommendation: Equatable, Identifiable {
     let durationSec: Int?
     let heightCm: Int?
     let implementCount: Int?
+    let caloriesKcal: Int?
     let notes: String?
     
     var id: String { "\(exerciseOrder)-\(exerciseCode)" }

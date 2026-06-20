@@ -31,7 +31,10 @@ struct PetDetailView: View {
                                 logs: viewModel.logs,
                                 hasMore: viewModel.hasMoreLogs,
                                 onLoadMore: { Task { await viewModel.loadMoreLogs() } },
-                                onDeleteAll: { Task { await viewModel.deleteAllLogs() } }
+                                onDeleteAll: { Task { await viewModel.deleteAllLogs() } },
+                                onFilterChange: { disabled in
+                                    Task { await viewModel.reloadLogsMatchingFilters(disabledKeys: disabled) }
+                                }
                             )
                         } else {
                             hatchedSection(pet)
@@ -49,7 +52,10 @@ struct PetDetailView: View {
                                     logs: viewModel.logs,
                                     hasMore: viewModel.hasMoreLogs,
                                     onLoadMore: { Task { await viewModel.loadMoreLogs() } },
-                                    onDeleteAll: { Task { await viewModel.deleteAllLogs() } }
+                                    onDeleteAll: { Task { await viewModel.deleteAllLogs() } },
+                                    onFilterChange: { disabled in
+                                        Task { await viewModel.reloadLogsMatchingFilters(disabledKeys: disabled) }
+                                    }
                                 )
                             }
                         }

@@ -117,6 +117,7 @@ data class HyroxExerciseRecommendationResult(
     @SerialName("duration_sec") val durationSec: Int? = null,
     @SerialName("height_cm") val heightCm: Int? = null,
     @SerialName("implement_count") val implementCount: Int? = null,
+    @SerialName("calories_kcal") val caloriesKcal: Int? = null,
     val notes: String? = null
 )
 

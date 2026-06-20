@@ -25,6 +25,7 @@ private struct HyroxExRow: Decodable {
     let duration_sec: Int?
     let height_cm: Int?
     let implement_count: Int?
+    let calories_kcal: Decimal?
     let exercise_display_name: String?
 }
 
@@ -1227,7 +1228,7 @@ enum WorkoutRecommendationService {
             do {
                 let exRes = try await client
                     .from("hyrox_session_exercises")
-                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name")
+                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name")
                     .in("session_id", values: hyroxSessionIds)
                     .execute()
                 exRows = try decoder.decode([HyroxExRow].self, from: exRes.data)
@@ -1258,6 +1259,7 @@ enum WorkoutRecommendationService {
             let duration_sec: Int?
             let height_cm: Int?
             let implement_count: Int?
+            let calories_kcal: Double?
             let exercise_display_name: String?
             let notes: String?
         }
@@ -1278,7 +1280,7 @@ enum WorkoutRecommendationService {
         }
         let detailRes = try await client
             .from("hyrox_routines")
-            .select("name, hyrox_routine_exercises(exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name, notes)")
+            .select("name, hyrox_routine_exercises(exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name, notes)")
             .eq("id", value: Int(picked.id))
             .single()
             .execute()
@@ -1295,6 +1297,7 @@ enum WorkoutRecommendationService {
                 durationSec: ex.duration_sec,
                 heightCm: ex.height_cm,
                 implementCount: ex.implement_count,
+                caloriesKcal: ex.calories_kcal.map { Int($0.rounded()) },
                 notes: ex.notes
             )
         }.map { HyroxExerciseFormatting.sanitizeHyroxExerciseRecommendation($0) }
@@ -1322,7 +1325,7 @@ enum WorkoutRecommendationService {
             do {
                 let exRes = try await client
                     .from("hyrox_session_exercises")
-                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name")
+                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name")
                     .in("session_id", values: hyroxSessionIds)
                     .execute()
                 exRows = try decoder.decode([HyroxExRow].self, from: exRes.data)
@@ -1360,7 +1363,7 @@ enum WorkoutRecommendationService {
             do {
                 let exRes = try await client
                     .from("hyrox_session_exercises")
-                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name")
+                    .select("exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name")
                     .in("session_id", values: hyroxSessionIds)
                     .execute()
                 exRows = try decoder.decode([HyroxExRow].self, from: exRes.data)
@@ -1501,6 +1504,7 @@ enum WorkoutRecommendationService {
                 durationSec: medianIntOpt(group.compactMap(\.duration_sec)),
                 heightCm: medianIntOpt(group.compactMap(\.height_cm)),
                 implementCount: medianIntOpt(group.compactMap(\.implement_count)),
+                caloriesKcal: medianIntOpt(group.compactMap { $0.calories_kcal.map { Int(NSDecimalNumber(decimal: $0).doubleValue.rounded()) } }),
                 notes: nil
             )
         }

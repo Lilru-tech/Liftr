@@ -224,6 +224,7 @@ private data class HyroxRoutineExerciseDb(
     @SerialName("duration_sec") val durationSec: Int? = null,
     @SerialName("height_cm") val heightCm: Int? = null,
     @SerialName("implement_count") val implementCount: Int? = null,
+    @SerialName("calories_kcal") val caloriesKcal: Double? = null,
     val notes: String? = null,
     @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
 )
@@ -251,7 +252,7 @@ private const val STRENGTH_DETAIL_SHARE_SELECT = STRENGTH_ROUTINE_DETAIL_SELECT
 
 private const val HYROX_DETAIL_SHARE_SELECT =
     "id,name,updated_at,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
-        "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+        "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,calories_kcal,notes,exercise_display_name)"
 
 @Serializable
 private data class ShareStrengthSet(
@@ -2189,7 +2190,7 @@ class AddWorkoutViewModel(
         val res = supabase.from(BackendContracts.Tables.HYROX_ROUTINES).select(
             columns = Columns.raw(
                 "id,name,division,category,age_group,official_time_sec,penalty_time_sec,no_reps,rank_overall,rank_category,avg_hr,max_hr," +
-                    "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,notes,exercise_display_name)"
+                    "hyrox_routine_exercises(exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,height_cm,implement_count,calories_kcal,notes,exercise_display_name)"
             )
         ) {
             filter { eq("id", routineId) }
@@ -2223,6 +2224,7 @@ class AddWorkoutViewModel(
                         r.durationSec?.let { put("duration_sec", it) }
                         r.heightCm?.let { put("height_cm", it) }
                         r.implementCount?.let { put("implement_count", it) }
+                        r.caloriesKcal?.let { put("calories_kcal", it) }
                         r.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
                     }
                 )
@@ -2311,6 +2313,7 @@ class AddWorkoutViewModel(
                 o["duration_sec"]?.let { put("duration_sec", it) }
                 o["height_cm"]?.let { put("height_cm", it) }
                 o["implement_count"]?.let { put("implement_count", it) }
+                o["calories_kcal"]?.let { put("calories_kcal", it) }
                 o["notes"]?.let { put("notes", it) }
                 o["exercise_display_name"]?.let { put("exercise_display_name", it) }
             }
@@ -2364,6 +2367,7 @@ class AddWorkoutViewModel(
                 o["duration_sec"]?.let { put("duration_sec", it) }
                 o["height_cm"]?.let { put("height_cm", it) }
                 o["implement_count"]?.let { put("implement_count", it) }
+                o["calories_kcal"]?.let { put("calories_kcal", it) }
                 o["notes"]?.let { put("notes", it) }
                 o["exercise_display_name"]?.let { put("exercise_display_name", it) }
             }
@@ -2707,6 +2711,7 @@ class AddWorkoutViewModel(
                         r.durationSec?.let { put("duration_sec", it) }
                         r.heightCm?.let { put("height_cm", it) }
                         r.implementCount?.let { put("implement_count", it) }
+                        r.caloriesKcal?.let { put("calories_kcal", it) }
                         r.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) }
                     }
                 )

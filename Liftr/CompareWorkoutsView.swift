@@ -512,6 +512,7 @@ struct CompareWorkoutsView: View {
             case "reps": fieldLabel = "Reps"
             case "duration_sec": fieldLabel = "Duration"
             case "weight_kg": fieldLabel = "Weight"
+            case "calories_kcal": fieldLabel = "Calories"
             case "implement_count": fieldLabel = "Implements"
             default: fieldLabel = field.replacingOccurrences(of: "_", with: " ").capitalized
             }
@@ -1242,6 +1243,7 @@ struct CompareWorkoutsView: View {
             let weight_kg: Decimal?
             let duration_sec: Int?
             let implement_count: Int?
+            let calories_kcal: Decimal?
             let exercise_display_name: String?
         }
 
@@ -1274,13 +1276,13 @@ struct CompareWorkoutsView: View {
 
         async let leftQ = client
             .from("hyrox_session_exercises")
-            .select("exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,exercise_display_name")
+            .select("exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,calories_kcal,exercise_display_name")
             .eq("session_id", value: leftSessionId)
             .order("exercise_order", ascending: true)
             .execute()
         async let rightQ = client
             .from("hyrox_session_exercises")
-            .select("exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,exercise_display_name")
+            .select("exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,calories_kcal,exercise_display_name")
             .eq("session_id", value: rightSessionId)
             .order("exercise_order", ascending: true)
             .execute()
@@ -1304,6 +1306,7 @@ struct CompareWorkoutsView: View {
             append(m("reps"), "count", a.reps.map(Double.init), b.reps.map(Double.init))
             append(m("duration_sec"), "sec", a.duration_sec.map(Double.init), b.duration_sec.map(Double.init))
             append(m("weight_kg"), "kg", decToD(a.weight_kg), decToD(b.weight_kg))
+            append(m("calories_kcal"), "kcal", a.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue }, b.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue })
             append(m("implement_count"), "count", a.implement_count.map(Double.init), b.implement_count.map(Double.init))
         }
     }

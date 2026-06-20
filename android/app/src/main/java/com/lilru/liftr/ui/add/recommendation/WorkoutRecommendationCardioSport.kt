@@ -7,6 +7,7 @@ import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -37,6 +38,7 @@ private data class HyroxExRow(
     @SerialName("duration_sec") val durationSec: Int? = null,
     @SerialName("height_cm") val heightCm: Int? = null,
     @SerialName("implement_count") val implementCount: Int? = null,
+    @SerialName("calories_kcal") val caloriesKcal: Double? = null,
     @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
 )
 
@@ -377,7 +379,7 @@ object WorkoutRecommendationCardioSport {
                 val exRes = supabase.from(BackendContracts.Tables.HYROX_SESSION_EXERCISES)
                     .select(
                         Columns.raw(
-                            "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name"
+                            "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name"
                         )
                     ) {
                         filter { isIn("session_id", hyroxSessIds.map { it.toString() }) }
@@ -439,7 +441,7 @@ object WorkoutRecommendationCardioSport {
                 val exRes = supabase.from(BackendContracts.Tables.HYROX_SESSION_EXERCISES)
                     .select(
                         Columns.raw(
-                            "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name"
+                            "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name"
                         )
                     ) {
                         filter { isIn("session_id", hIds.map { it.toString() }) }
@@ -475,7 +477,7 @@ object WorkoutRecommendationCardioSport {
                 val exRes = supabase.from(BackendContracts.Tables.HYROX_SESSION_EXERCISES)
                     .select(
                         Columns.raw(
-                            "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name"
+                            "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name"
                         )
                     ) {
                         filter { isIn("session_id", hIds.map { it.toString() }) }
@@ -571,6 +573,7 @@ object WorkoutRecommendationCardioSport {
                     durationSec = medianIntOpt(group.mapNotNull { it.durationSec }),
                     heightCm = medianIntOpt(group.mapNotNull { it.heightCm }),
                     implementCount = medianIntOpt(group.mapNotNull { it.implementCount }),
+                    caloriesKcal = medianIntOpt(group.mapNotNull { it.caloriesKcal?.roundToInt() }),
                     notes = null
                 )
             )
@@ -613,6 +616,7 @@ object WorkoutRecommendationCardioSport {
             @SerialName("duration_sec") val durationSec: Int? = null,
             @SerialName("height_cm") val heightCm: Int? = null,
             @SerialName("implement_count") val implementCount: Int? = null,
+            @SerialName("calories_kcal") val caloriesKcal: Double? = null,
             @SerialName("exercise_display_name") val exerciseDisplayName: String? = null,
             val notes: String? = null
         )
@@ -632,7 +636,7 @@ object WorkoutRecommendationCardioSport {
         val dRes = supabase.from(BackendContracts.Tables.HYROX_ROUTINES)
             .select(
                 Columns.raw(
-                    "name, hyrox_routine_exercises(exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, exercise_display_name, notes)"
+                    "name, hyrox_routine_exercises(exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, exercise_display_name, notes)"
                 )
             ) {
                 filter { eq("id", picked.id) }
@@ -651,6 +655,7 @@ object WorkoutRecommendationCardioSport {
                     durationSec = ex.durationSec,
                     heightCm = ex.heightCm,
                     implementCount = ex.implementCount,
+                    caloriesKcal = ex.caloriesKcal?.roundToInt(),
                     notes = ex.notes
                 )
             )

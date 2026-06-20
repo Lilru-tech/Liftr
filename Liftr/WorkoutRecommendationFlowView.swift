@@ -623,6 +623,9 @@ struct WorkoutRecommendationFlowView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("\(ex.exerciseOrder). \(name)")
                 .font(.headline)
+            if let c = ex.caloriesKcal {
+                LabeledContent("Calories", value: "\(c) kcal")
+            }
             if let d = ex.distanceM {
                 LabeledContent("Distance", value: "\(d) m")
             }

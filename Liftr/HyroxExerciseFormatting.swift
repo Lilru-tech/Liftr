@@ -83,6 +83,11 @@ enum HyroxWeightTier: String, CaseIterable, Identifiable {
 
 enum HyroxExerciseFormatting {
     static let customExerciseCode = "custom"
+
+    static func supportsCaloriesLogging(code: String) -> Bool {
+        let c = code.lowercased()
+        return c == HyroxExerciseCode.row.rawValue || c == HyroxExerciseCode.skierg.rawValue
+    }
     static func label(code: String, displayName: String?, notes: String? = nil) -> String {
         if let d = displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !d.isEmpty {
             return d
@@ -205,6 +210,7 @@ enum HyroxExerciseFormatting {
                 durationSec: nil,
                 heightCm: heightCm,
                 implementCount: implementCount,
+                caloriesKcal: nil,
                 notes: nil
             )
         }
@@ -245,6 +251,7 @@ enum HyroxExerciseFormatting {
                     durationSec: nil,
                     heightCm: nil,
                     implementCount: nil,
+                    caloriesKcal: nil,
                     notes: nil
                 )
             )
@@ -260,6 +267,7 @@ enum HyroxExerciseFormatting {
                     durationSec: station.durationSec,
                     heightCm: station.heightCm,
                     implementCount: station.implementCount,
+                    caloriesKcal: station.caloriesKcal,
                     notes: nil
                 )
             )
@@ -283,6 +291,7 @@ enum HyroxExerciseFormatting {
         var dur = ex.durationSec
         var h = ex.heightCm
         var imp = ex.implementCount
+        var cal: Int? = nil
 
         switch t {
         case .run:
@@ -293,13 +302,19 @@ enum HyroxExerciseFormatting {
             h = nil
             imp = nil
         case .skierg, .row:
-            if d == nil || d! < 200 || d! > 6_000 { d = 1_000 }
-            if let dv = d { d = min(max(dv, 200), 5_000) }
+            if let cv = ex.caloriesKcal, cv > 0 {
+                cal = min(max(cv, 50), 2_500)
+                d = nil
+                dur = nil
+            } else {
+                if d == nil || d! < 200 || d! > 6_000 { d = 1_000 }
+                if let dv = d { d = min(max(dv, 200), 5_000) }
+                if let du = dur, du > 3_600 { dur = 3_600 }
+            }
             r = nil
             w = nil
             h = nil
             imp = nil
-            if let du = dur, du > 3_600 { dur = 3_600 }
         case .sledPush, .sledPull:
             if d == nil || d! > 500 { d = 50 }
             if let dv = d { d = min(max(dv, 25), 200) }
@@ -381,6 +396,7 @@ enum HyroxExerciseFormatting {
             durationSec: dur,
             heightCm: h,
             implementCount: imp,
+            caloriesKcal: cal,
             notes: nil
         )
     }
@@ -399,6 +415,7 @@ enum HyroxExerciseFormatting {
             durationSec: ex.durationSec.map { min($0, 36_000) },
             heightCm: h,
             implementCount: ex.implementCount.map { min($0, 50) },
+            caloriesKcal: nil,
             notes: nil
         )
     }

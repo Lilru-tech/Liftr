@@ -1957,6 +1957,7 @@ struct WorkoutDetailView: View {
                             let duration_sec: Int?
                             let height_cm: Int?
                             let implement_count: Int?
+                            let calories_kcal: Decimal?
                             let notes: String?
                             let exercise_display_name: String?
                         }
@@ -1979,6 +1980,7 @@ struct WorkoutDetailView: View {
                                 durationSec: row.duration_sec.map(String.init) ?? "",
                                 heightCm: row.height_cm.map(String.init) ?? "",
                                 implementCount: row.implement_count.map(String.init) ?? "",
+                                caloriesKcal: row.calories_kcal.map { String(Int(NSDecimalNumber(decimal: $0).doubleValue.rounded())) } ?? "",
                                 notes: row.notes ?? ""
                             )
                         }
@@ -3641,6 +3643,7 @@ private struct SportDetailBlock: View {
         let duration_sec: Int?
         let height_cm: Int?
         let implement_count: Int?
+        let calories_kcal: Decimal?
         let notes: String?
         let exercise_display_name: String?
     }
@@ -4164,6 +4167,9 @@ private struct SportDetailBlock: View {
 
     private func hyroxExerciseMetrics(_ ex: HyroxExerciseStats) -> [DetailMetric] {
         var metrics: [DetailMetric] = []
+        if let v = detailPositiveDecimalDouble(ex.calories_kcal) {
+            metrics.append(DetailMetric("Calories", "\(Int(v.rounded())) kcal"))
+        }
         if let v = detailPositiveInt(ex.distance_m) {
             metrics.append(DetailMetric("Distance", "\(v) m"))
         }

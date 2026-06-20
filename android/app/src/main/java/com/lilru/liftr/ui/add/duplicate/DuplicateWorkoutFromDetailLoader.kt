@@ -20,6 +20,7 @@ import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import java.util.UUID
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -105,6 +106,7 @@ private data class HyroxExRow(
     @SerialName("duration_sec") val durationSec: Int? = null,
     @SerialName("height_cm") val heightCm: Int? = null,
     @SerialName("implement_count") val implementCount: Int? = null,
+    @SerialName("calories_kcal") val caloriesKcal: Double? = null,
     val notes: String? = null,
     @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
 )
@@ -661,7 +663,7 @@ private suspend fun loadHyroxExercisesJson(supabase: SupabaseClient, sessionId: 
         .select(
             columns = Columns.raw(
                 "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, " +
-                    "height_cm, implement_count, exercise_display_name, notes"
+                    "height_cm, implement_count, calories_kcal, exercise_display_name, notes"
             )
         ) {
             filter { eq("session_id", sessionId) }
@@ -680,6 +682,7 @@ private suspend fun loadHyroxExercisesJson(supabase: SupabaseClient, sessionId: 
             durationSec = r.durationSec,
             heightCm = r.heightCm,
             implementCount = r.implementCount,
+            caloriesKcal = r.caloriesKcal?.roundToInt(),
             notes = r.notes
         )
     }

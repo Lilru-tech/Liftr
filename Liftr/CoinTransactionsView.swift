@@ -16,66 +16,68 @@ private struct CoinSourceRow: Decodable {
 
 struct CoinTransactionsView: View {
     @ObservedObject private var coinManager = CoinManager.shared
+    @AppStorage(LogFilterPreferences.coinDisabledStorageKey) private var disabledCategoriesRaw = ""
     @State private var items: [CoinTransactionRow] = []
     @State private var isLoading = true
+    @State private var isLoadingMore = false
+    @State private var hasMore = true
+    @State private var listOffset = 0
     @State private var errorMessage: String?
     @State private var showClearConfirmation = false
+    @State private var showFilterSheet = false
     @State private var sourcesPeriod: CoinSourcesPeriod = .allTime
     @State private var sourceSlices: [CoinSourceSlice] = []
     @State private var sourcesLoading = true
     @State private var sourcesError: String?
+
+    private let pageSize = 20
+
+    private var disabledCategories: Set<String> {
+        LogFilterPreferences.decodeDisabledCategories(disabledCategoriesRaw)
+    }
+
+    private var filteredItems: [CoinTransactionRow] {
+        items.filter { CoinLogFilterCategory.isVisible(actionType: $0.action_type, disabledKeys: disabledCategories) }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 balanceHeader
                 sourcesCard
-
-                if isLoading && items.isEmpty {
-                    ProgressView("Loading transactions...")
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 24)
-                } else if let errorMessage {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .padding()
-                } else if items.isEmpty {
-                    Text("No transactions yet.")
-                        .foregroundStyle(.secondary)
-                        .padding()
-                } else {
-                    LazyVStack(spacing: 8) {
-                        ForEach(items) { item in
-                            transactionCard(item)
-                        }
-                    }
-
-                    HStack {
-                        Spacer()
-                        Button("Clear history") {
-                            showClearConfirmation = true
-                        }
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                    }
-                    .padding(.top, 4)
-                }
+                transactionsSection
             }
             .padding()
         }
         .navigationTitle("Liftr Coins")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            await loadTransactions()
+            await reloadTransactions()
             await loadSources()
         }
         .task {
-            await loadTransactions()
+            await reloadTransactions()
             await loadSources()
         }
         .task { await coinManager.refreshBalance(notifyIfEarned: false) }
         .onChange(of: sourcesPeriod) { _, _ in
             Task { await loadSources() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .coinTransactionsShouldRefresh)) { _ in
+            Task { await reloadTransactions() }
+        }
+        .onChange(of: disabledCategoriesRaw) { _, newValue in
+            let keys = LogFilterPreferences.decodeDisabledCategories(newValue)
+            Task { await reloadTransactions(matchingDisabledCategories: keys) }
+        }
+        .sheet(isPresented: $showFilterSheet) {
+            CoinLogFilterSheet(
+                disabledCategories: Binding(
+                    get: { disabledCategories },
+                    set: { disabledCategoriesRaw = LogFilterPreferences.encodeDisabledCategories($0) }
+                )
+            )
+            .presentationDetents([.medium, .large])
         }
         .confirmationDialog(
             "Clear transaction history?",
@@ -87,7 +89,81 @@ struct CoinTransactionsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes your transaction list. Your coin balance will not change.")
+            Text("This removes your transaction list. Your coin balance will not change. Pet activity logs are not affected.")
+        }
+    }
+
+    @ViewBuilder
+    private var transactionsSection: some View {
+        HStack {
+            Text("Transactions")
+                .font(.headline)
+            Spacer()
+            Button {
+                showFilterSheet = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Transaction filters")
+        }
+
+        if isLoading && items.isEmpty {
+            ProgressView("Loading transactions...")
+                .frame(maxWidth: .infinity)
+                .padding(.top, 24)
+        } else if let errorMessage {
+            Text(errorMessage)
+                .foregroundStyle(.red)
+                .padding()
+        } else if items.isEmpty {
+            Text("No transactions yet.")
+                .foregroundStyle(.secondary)
+                .padding()
+        } else if filteredItems.isEmpty {
+            Text("No transactions match your filters.")
+                .foregroundStyle(.secondary)
+                .padding()
+        } else {
+            LazyVStack(spacing: 8) {
+                ForEach(filteredItems) { item in
+                    transactionCard(item)
+                }
+            }
+
+            if hasMore {
+                HStack {
+                    Spacer()
+                    Button {
+                        Task { await loadMoreTransactions() }
+                    } label: {
+                        if isLoadingMore {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text("Load more transactions…")
+                        }
+                    }
+                    .font(.caption)
+                    .disabled(isLoadingMore)
+                }
+                .padding(.top, 4)
+            }
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Button("Clear history") {
+                    showClearConfirmation = true
+                }
+                .font(.caption)
+                .foregroundStyle(.red)
+
+                Text("Clearing coin history does not remove pet activity logs.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.top, 4)
         }
     }
 
@@ -200,27 +276,79 @@ struct CoinTransactionsView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
     }
 
-    private func loadTransactions() async {
+    private func reloadTransactions(matchingDisabledCategories disabledKeys: Set<String>? = nil) async {
+        let activeDisabledKeys = disabledKeys ?? disabledCategories
+        let allCategoriesDisabled = activeDisabledKeys.count >= CoinLogFilterCategory.allCases.count
+        let maxPages = 5
+
         await MainActor.run {
             isLoading = true
             errorMessage = nil
+            listOffset = 0
+            hasMore = true
+            items = []
         }
-        defer { Task { await MainActor.run { isLoading = false } } }
 
         do {
-            var params: [String: AnyJSON] = [:]
-            params["p_limit"] = AnyJSON(20)
-            let res = try await SupabaseManager.shared.client
-                .rpc("list_my_coin_transactions_v1", params: params)
-                .execute()
-            let rows = try JSONDecoder.supabase().decode([CoinTransactionRow].self, from: res.data)
-            await MainActor.run { items = rows }
+            var pagesLoaded = 0
+            var offset = 0
+            while pagesLoaded < maxPages {
+                let rows = try await fetchTransactions(offset: offset)
+                await MainActor.run {
+                    items.append(contentsOf: rows)
+                    listOffset = offset + rows.count
+                    hasMore = rows.count >= pageSize
+                }
+                offset += rows.count
+                pagesLoaded += 1
+
+                if allCategoriesDisabled {
+                    break
+                }
+
+                let visibleCount = items.filter {
+                    CoinLogFilterCategory.isVisible(actionType: $0.action_type, disabledKeys: activeDisabledKeys)
+                }.count
+                if visibleCount >= pageSize || rows.count < pageSize {
+                    break
+                }
+            }
+            await MainActor.run { isLoading = false }
         } catch {
             await MainActor.run {
                 errorMessage = error.localizedDescription
                 items = []
+                hasMore = false
+                isLoading = false
             }
         }
+    }
+
+    private func loadMoreTransactions() async {
+        guard hasMore, !isLoadingMore else { return }
+        await MainActor.run { isLoadingMore = true }
+        defer { Task { await MainActor.run { isLoadingMore = false } } }
+
+        do {
+            let rows = try await fetchTransactions(offset: listOffset)
+            await MainActor.run {
+                items.append(contentsOf: rows)
+                listOffset += rows.count
+                hasMore = rows.count >= pageSize
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func fetchTransactions(offset: Int) async throws -> [CoinTransactionRow] {
+        var params: [String: AnyJSON] = [:]
+        params["p_limit"] = try AnyJSON(pageSize)
+        params["p_offset"] = try AnyJSON(offset)
+        let res = try await SupabaseManager.shared.client
+            .rpc("list_my_coin_transactions_v1", params: params)
+            .execute()
+        return try JSONDecoder.supabase().decode([CoinTransactionRow].self, from: res.data)
     }
 
     private func loadSources() async {
@@ -263,6 +391,8 @@ struct CoinTransactionsView: View {
                 .execute()
             await MainActor.run {
                 items = []
+                listOffset = 0
+                hasMore = false
                 sourceSlices = []
             }
         } catch {
@@ -274,36 +404,51 @@ struct CoinTransactionsView: View {
 private struct CoinSourcesDonutChart: View {
     let slices: [CoinSourceSlice]
 
+    private var total: Int {
+        slices.reduce(0) { $0 + $1.totalAmount }
+    }
+
     var body: some View {
-        if #available(iOS 17.0, *) {
-            Chart(slices) { slice in
-                SectorMark(
-                    angle: .value("Coins", slice.totalAmount),
-                    innerRadius: .ratio(0.55),
-                    angularInset: 1.5
-                )
-                .foregroundStyle(slice.color)
+        ZStack {
+            if #available(iOS 17.0, *) {
+                Chart(slices) { slice in
+                    SectorMark(
+                        angle: .value("Coins", slice.totalAmount),
+                        innerRadius: .ratio(0.55),
+                        angularInset: 1.5
+                    )
+                    .foregroundStyle(slice.color)
+                }
+                .frame(height: 220)
+                .chartLegend(.hidden)
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(Color.gray.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            } else {
+                Chart(slices) { slice in
+                    BarMark(
+                        x: .value("Source", slice.label),
+                        y: .value("Coins", slice.totalAmount)
+                    )
+                    .foregroundStyle(slice.color)
+                }
+                .frame(height: 220)
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(Color.gray.opacity(0.18))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
             }
-            .frame(height: 220)
-            .chartLegend(.hidden)
-            .chartPlotStyle { plotArea in
-                plotArea
-                    .background(Color.gray.opacity(0.18))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        } else {
-            Chart(slices) { slice in
-                BarMark(
-                    x: .value("Source", slice.label),
-                    y: .value("Coins", slice.totalAmount)
-                )
-                .foregroundStyle(slice.color)
-            }
-            .frame(height: 220)
-            .chartPlotStyle { plotArea in
-                plotArea
-                    .background(Color.gray.opacity(0.18))
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(spacing: 2) {
+                Text("\(total)")
+                    .font(.title2.weight(.bold))
+                    .monospacedDigit()
+                Text("Earned")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

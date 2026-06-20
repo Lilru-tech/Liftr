@@ -15,12 +15,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Paid
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -40,15 +43,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.data.CoinLogFilterCategory
 import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.data.CoinSourceSlice
 import com.lilru.liftr.data.CoinSourcesPeriod
 import com.lilru.liftr.data.CoinSourcesTimeWindows
 import com.lilru.liftr.data.SupabaseResponseDecoding
+import com.lilru.liftr.prefs.LiftrPreferences
 import com.lilru.liftr.ui.components.LiftrBackTopBar
+import com.lilru.liftr.ui.pets.LogFilterBottomSheet
 import com.lilru.liftr.ui.profile.progress.DonutSegment
 import com.lilru.liftr.ui.profile.progress.KindDonutChart
 import com.lilru.liftr.ui.ranking.RankingInitial
@@ -81,15 +90,24 @@ private data class CoinSourceRow(
     @SerialName("total_amount") val totalAmount: Int
 )
 
-@OptIn(ExperimentalMaterialApi::class)
+@OptIn(ExperimentalMaterialApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun CoinTransactionsScreen(
     supabase: SupabaseClient,
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    var disabledCoinLogCategories by remember {
+        mutableStateOf(LiftrPreferences.coinLogDisabledCategories(context))
+    }
+    var showFilterSheet by remember { mutableStateOf(false) }
+    val filterSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var items by remember { mutableStateOf<List<CoinTransactionRow>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var hasMore by remember { mutableStateOf(true) }
+    var listOffset by remember { mutableStateOf(0) }
     var error by remember { mutableStateOf<String?>(null) }
     var showClearDialog by remember { mutableStateOf(false) }
     var showRanking by remember { mutableStateOf(false) }
@@ -99,6 +117,10 @@ fun CoinTransactionsScreen(
     var sourcesError by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val balance = CoinManager.balance
+    val pageSize = 20
+    val filteredItems = remember(items, disabledCoinLogCategories) {
+        items.filter { CoinLogFilterCategory.isVisible(it.actionType, disabledCoinLogCategories) }
+    }
 
     suspend fun loadSources() {
         sourcesLoading = true
@@ -126,28 +148,62 @@ fun CoinTransactionsScreen(
         }
     }
 
-    suspend fun load() {
+    suspend fun reloadTransactions(disabledCategories: Set<String> = disabledCoinLogCategories) {
         loading = true
         error = null
+        listOffset = 0
+        hasMore = true
+        items = emptyList()
+        val maxPages = 5
+        val allCategoriesDisabled = disabledCategories.size >= CoinLogFilterCategory.all.size
         runCatching {
-            val res = supabase.postgrest.rpc(
-                BackendContracts.Rpc.LIST_MY_COIN_TRANSACTIONS_V1,
-                buildJsonObject { put("p_limit", 20) }
-            ) { }
-            SupabaseResponseDecoding.decodeListOrObject<CoinTransactionRow>(res.data)
-        }.onSuccess {
-            items = it
+            val accumulated = mutableListOf<CoinTransactionRow>()
+            var moreAvailable = true
+            var pagesLoaded = 0
+            while (pagesLoaded < maxPages && moreAvailable) {
+                val page = fetchTransactions(supabase, offset = accumulated.size, limit = pageSize)
+                accumulated.addAll(page)
+                moreAvailable = page.size >= pageSize
+                pagesLoaded += 1
+                if (allCategoriesDisabled) break
+                val visibleCount = accumulated.count {
+                    CoinLogFilterCategory.isVisible(it.actionType, disabledCategories)
+                }
+                if (visibleCount >= pageSize || !moreAvailable) break
+            }
+            accumulated to moreAvailable
+        }.onSuccess { (page, moreAvailable) ->
+            items = page
+            listOffset = page.size
+            hasMore = moreAvailable
             loading = false
         }.onFailure {
             error = it.message
             items = emptyList()
+            hasMore = false
             loading = false
+        }
+    }
+
+    suspend fun loadMoreTransactions() {
+        if (!hasMore || loadingMore) return
+        loadingMore = true
+        runCatching {
+            fetchTransactions(supabase, offset = listOffset, limit = pageSize)
+        }.onSuccess { page ->
+            items = items + page
+            listOffset += page.size
+            hasMore = page.size >= pageSize
+            loadingMore = false
+        }.onFailure {
+            error = it.message
+            loadingMore = false
         }
     }
 
     LaunchedEffect(supabase) {
         CoinManager.refreshBalance(supabase, notifyIfEarned = false)
-        load()
+        reloadTransactions()
         loadSources()
     }
 
@@ -155,10 +211,16 @@ fun CoinTransactionsScreen(
         loadSources()
     }
 
+    LaunchedEffect(Unit) {
+        CoinManager.transactionHistoryRefresh.collect {
+            reloadTransactions()
+        }
+    }
+
     val refreshing = (loading && items.isNotEmpty()) || (sourcesLoading && sourceSlices.isNotEmpty())
     val pullState = rememberPullRefreshState(refreshing, onRefresh = {
         scope.launch {
-            load()
+            reloadTransactions()
             loadSources()
         }
     })
@@ -179,7 +241,7 @@ fun CoinTransactionsScreen(
             onDismissRequest = { showClearDialog = false },
             title = { Text("Clear transaction history?") },
             text = {
-                Text("This removes your transaction list. Your coin balance will not change.")
+                Text("This removes your transaction list. Your coin balance will not change. Pet activity logs are not affected.")
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -192,6 +254,8 @@ fun CoinTransactionsScreen(
                             ) { }
                         }.onSuccess {
                             items = emptyList()
+                            listOffset = 0
+                            hasMore = false
                             sourceSlices = emptyList()
                         }.onFailure { e ->
                             error = e.message
@@ -265,6 +329,22 @@ fun CoinTransactionsScreen(
                     )
                 }
 
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Transactions", style = MaterialTheme.typography.titleMedium)
+                        IconButton(onClick = { showFilterSheet = true }) {
+                            Icon(
+                                Icons.Filled.Settings,
+                                contentDescription = stringResource(R.string.coin_log_filters_title)
+                            )
+                        }
+                    }
+                }
+
                 when {
                     loading && items.isEmpty() -> item {
                         CircularProgressIndicator(modifier = Modifier.padding(24.dp))
@@ -275,8 +355,14 @@ fun CoinTransactionsScreen(
                     items.isEmpty() -> item {
                         Text("No transactions yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
+                    filteredItems.isEmpty() -> item {
+                        Text(
+                            stringResource(R.string.coin_log_filters_no_matches),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     else -> {
-                        items(items, key = { it.id }) { row ->
+                        items(filteredItems, key = { it.id }) { row ->
                             Card(modifier = Modifier.fillMaxWidth()) {
                                 Column(modifier = Modifier.padding(12.dp)) {
                                     Row(
@@ -298,17 +384,60 @@ fun CoinTransactionsScreen(
                                 }
                             }
                         }
+                        if (hasMore) {
+                            item {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(
+                                        onClick = { scope.launch { loadMoreTransactions() } },
+                                        enabled = !loadingMore
+                                    ) {
+                                        if (loadingMore) {
+                                            CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                                        } else {
+                                            Text(stringResource(R.string.coin_history_load_more))
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         item {
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalAlignment = Alignment.End
+                            ) {
                                 TextButton(onClick = { showClearDialog = true }) {
                                     Text("Clear history", color = MaterialTheme.colorScheme.error)
                                 }
+                                Text(
+                                    stringResource(R.string.coin_history_clear_pet_note),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
                     }
                 }
             }
         }
+    }
+
+    if (showFilterSheet) {
+        LogFilterBottomSheet(
+            title = stringResource(R.string.coin_log_filters_title),
+            categories = CoinLogFilterCategory.all.map { it.key to it.label },
+            disabledCategories = disabledCoinLogCategories,
+            onDisabledCategoriesChange = { next ->
+                disabledCoinLogCategories = next
+                LiftrPreferences.setCoinLogDisabledCategories(context, next)
+                scope.launch { reloadTransactions(next) }
+            },
+            footer = stringResource(R.string.coin_log_filters_footer),
+            onDismiss = { showFilterSheet = false },
+            sheetState = filterSheetState
+        )
     }
 }
 
@@ -373,6 +502,7 @@ private fun CoinSourcesCard(
                     KindDonutChart(
                         segments = segments,
                         centerTitle = "Earned",
+                        centerValue = total.toInt().toString(),
                         showLegend = false,
                         chartHeight = 180.dp
                     )
@@ -443,4 +573,19 @@ private fun formatCreatedAt(raw: String): String {
     val instant = runCatching { java.time.Instant.parse(raw) }.getOrNull() ?: return raw
     return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
         .format(Date.from(instant))
+}
+
+private suspend fun fetchTransactions(
+    supabase: SupabaseClient,
+    offset: Int,
+    limit: Int
+): List<CoinTransactionRow> {
+    val res = supabase.postgrest.rpc(
+        BackendContracts.Rpc.LIST_MY_COIN_TRANSACTIONS_V1,
+        buildJsonObject {
+            put("p_limit", limit)
+            put("p_offset", offset)
+        }
+    ) { }
+    return SupabaseResponseDecoding.decodeListOrObject<CoinTransactionRow>(res.data)
 }

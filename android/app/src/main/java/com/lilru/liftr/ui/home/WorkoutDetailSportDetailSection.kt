@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import com.lilru.liftr.R
 import com.lilru.liftr.hyrox.HyroxExerciseFormatting
 import com.lilru.liftr.climbing.ClimbingGradeSystem
@@ -316,6 +317,12 @@ fun WorkoutDetailSportDetailSection(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text("${ex.exerciseOrder}. $exerciseTitle", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        ex.caloriesKcal?.let {
+                            DetailStatRow(
+                                stringResource(R.string.workout_detail_stat_calories),
+                                stringResource(R.string.workout_detail_kcal_fmt, it.roundToInt())
+                            )
+                        }
                         ex.distanceM?.let { DetailStatRow(stringResource(R.string.workout_detail_stat_distance_m), stringResource(R.string.workout_detail_m_fmt, it)) }
                         ex.reps?.let { DetailStatRow(stringResource(R.string.workout_detail_stat_reps), "$it") }
                         ex.weightKg?.let {

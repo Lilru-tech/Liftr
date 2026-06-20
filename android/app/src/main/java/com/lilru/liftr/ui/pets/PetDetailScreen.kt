@@ -66,6 +66,7 @@ import com.lilru.liftr.data.PetInstanceWire
 import com.lilru.liftr.data.PetService
 import com.lilru.liftr.data.PetStatsWire
 import com.lilru.liftr.data.ProfileEnergyWire
+import com.lilru.liftr.prefs.LiftrPreferences
 import io.github.jan.supabase.SupabaseClient
 import java.time.Instant
 import java.time.ZoneId
@@ -85,13 +86,16 @@ fun PetDetailScreen(
 ) {
     val context = LocalContext.current
     val ui by vm.uiState.collectAsStateWithLifecycle()
+    var disabledPetLogCategories by remember {
+        mutableStateOf(LiftrPreferences.petLogDisabledCategories(context))
+    }
     var selectedTab by remember { mutableIntStateOf(0) }
     var showStatCombatHelp by rememberSaveable { mutableStateOf(false) }
     val statCombatHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     LaunchedEffect(Unit) {
         vm.load()
-        vm.reloadLogs()
+        vm.reloadLogsMatchingFilters(LiftrPreferences.petLogDisabledCategories(context))
         CoinManager.refreshBalanceAfterMutation(supabase)
         vm.startPollingIfNeeded()
     }
@@ -142,7 +146,13 @@ fun PetDetailScreen(
                 logs = ui.logs,
                 hasMore = ui.hasMoreLogs,
                 onLoadMore = { vm.loadMoreLogs() },
-                onDeleteAll = { vm.deleteAllLogs() }
+                onDeleteAll = { vm.deleteAllLogs() },
+                disabledCategories = disabledPetLogCategories,
+                onDisabledCategoriesChange = { next ->
+                    disabledPetLogCategories = next
+                    LiftrPreferences.setPetLogDisabledCategories(context, next)
+                    vm.reloadLogsMatchingFilters(next)
+                }
             )
         } else {
             HatchedSection(
@@ -186,7 +196,13 @@ fun PetDetailScreen(
                     logs = ui.logs,
                     hasMore = ui.hasMoreLogs,
                     onLoadMore = { vm.loadMoreLogs() },
-                    onDeleteAll = { vm.deleteAllLogs() }
+                    onDeleteAll = { vm.deleteAllLogs() },
+                    disabledCategories = disabledPetLogCategories,
+                    onDisabledCategoriesChange = { next ->
+                        disabledPetLogCategories = next
+                        LiftrPreferences.setPetLogDisabledCategories(context, next)
+                        vm.reloadLogsMatchingFilters(next)
+                    }
                 )
             }
         }

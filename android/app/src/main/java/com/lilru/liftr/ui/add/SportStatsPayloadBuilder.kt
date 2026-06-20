@@ -197,6 +197,7 @@ object SportStatsPayloadBuilder {
             jsonIntFromObject(o, "duration_sec", "durationSec")?.let { put("duration_sec", it) }
             jsonIntFromObject(o, "height_cm", "heightCm")?.let { put("height_cm", it) }
             jsonIntFromObject(o, "implement_count", "implementCount")?.let { put("implement_count", it) }
+            jsonDoubleFromObject(o, "calories_kcal", "caloriesKcal")?.let { put("calories_kcal", it) }
             if (notesRaw.isNotBlank()) {
                 put("notes", notesRaw.trim())
             }

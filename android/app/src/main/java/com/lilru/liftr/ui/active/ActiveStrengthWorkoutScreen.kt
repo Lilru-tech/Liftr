@@ -1508,7 +1508,7 @@ fun ActiveStrengthWorkoutScreen(
                         ) { Text("Add step") }
                         OutlinedButton(
                             onClick = {
-                                if (dropSegs.size > 2) dropSegs = dropSegs.toMutableList().apply { removeLast() }
+                                if (dropSegs.size > 2) dropSegs = dropSegs.toMutableList().apply { removeAt(lastIndex) }
                             },
                             enabled = dropSegs.size > 2,
                             modifier = Modifier.weight(1f)

@@ -763,6 +763,20 @@
     <string name="notifications_settings_apple_health_cardio">Cardio workout imported</string>
     <string name="notifications_settings_search_hint">Search notifications</string>
     <string name="notifications_settings_search_empty">No notification settings match your search.</string>
+    <string name="coin_history_load_more">Load more transactions…</string>
+    <string name="coin_history_clear_pet_note">Clearing coin history does not remove pet activity logs.</string>
+    <string name="pet_log_filters_title">Log filters</string>
+    <string name="coin_log_filters_title">Transaction filters</string>
+    <string name="log_filters_no_matches">No logs match your filters.</string>
+    <string name="coin_log_filters_no_matches">No transactions match your filters.</string>
+    <string name="log_filters_footer">Filters apply to loaded logs only.</string>
+    <string name="coin_log_filters_footer">Filters apply to loaded transactions only.</string>
+    <string name="log_filters_show_all">Show all</string>
+    <string name="log_filters_hide_all">Hide all</string>
+    <string name="log_filters_done">Done</string>
+    <string name="pet_logs_empty">No logs yet</string>
+    <string name="pet_logs_load_more">See more logs…</string>
+    <string name="pet_logs_delete">Delete logs</string>
     <string name="notifications_loading">Loading notifications…</string>
     <string name="notifications_empty">You have no notifications yet.</string>
     <string name="notifications_unread_count">Unread: %1$d</string>
@@ -878,6 +892,7 @@
     <string name="home_scroll_to_top">Back to top</string>
     <string name="home_loading_more">Loading more…</string>
     <string name="active_sport_hyrox_progress">Station %1$d of %2$d</string>
+    <string name="active_sport_hyrox_calories">Calories (kcal)</string>
     <string name="active_sport_hyrox_distance_m">Distance (m)</string>
     <string name="active_sport_hyrox_reps">Reps</string>
     <string name="active_sport_hyrox_weight">Weight (kg)</string>
@@ -1026,6 +1041,7 @@
     <string name="workout_detail_menu_edit">Edit</string>
     <string name="workout_detail_menu_delete_workout">Delete workout</string>
     <string name="workout_detail_stat_distance_m">Distance</string>
+    <string name="workout_detail_stat_calories">Calories</string>
     <string name="workout_detail_stat_reps">Reps</string>
     <string name="workout_detail_stat_weight">Weight</string>
     <string name="workout_detail_stat_duration">Duration</string>
@@ -1115,6 +1131,7 @@
     <string name="workout_detail_label_snow">Snow</string>
     <string name="workout_detail_label_weather">Weather</string>
     <string name="workout_detail_rank_hash">#%1$d</string>
+    <string name="workout_detail_kcal_fmt">%1$d kcal</string>
     <string name="workout_detail_kg_fmt">%1$.1f kg</string>
     <string name="workout_detail_km_fmt">%1$.2f km</string>
     <string name="workout_detail_kmh_fmt">%1$.1f km/h</string>
