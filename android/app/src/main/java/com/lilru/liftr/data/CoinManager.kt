@@ -9,6 +9,8 @@ import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
@@ -25,6 +27,13 @@ object CoinManager {
     private val mutex = Mutex()
     private const val EARN_TOAST_DEBOUNCE_MS = 2_000L
     private const val EARN_TOAST_MAX_AGE_MS = 120_000L
+
+    private val _transactionHistoryRefresh = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val transactionHistoryRefresh = _transactionHistoryRefresh.asSharedFlow()
+
+    fun notifyTransactionHistoryShouldRefresh() {
+        _transactionHistoryRefresh.tryEmit(Unit)
+    }
 
     fun syncBalance(value: Int) {
         balance = maxOf(0, value)
@@ -58,6 +67,7 @@ object CoinManager {
                 return@runCatching
             }
             if (notifyIfEarned && next > previousBalance) {
+                notifyTransactionHistoryShouldRefresh()
                 showEarnToast(supabase, next - previousBalance)
             }
         }
@@ -116,6 +126,27 @@ object CoinManager {
 
     fun formattedAmount(amount: Int): String =
         if (amount >= 0) "+$amount" else "$amount"
+
+    fun sourceKey(actionType: String): String = when (actionType) {
+        "workout_logged",
+        "workout_coin_doubling_v1",
+        "workout_economy_rebalance_v1",
+        "workout_economy_reduction_30pct_v1" -> "workouts"
+        "workout_pet_training_bonus" -> "pet_workout_bonus"
+        "pet_coins_generated",
+        "pet_passive_economy_rebalance_v1",
+        "pet_passive_economy_reduction_30pct_v1" -> "pet_coins"
+        "like_given", "comment_added", "user_followed", "earned_follower" -> "social"
+        "nutrition_ingredient_logged", "nutrition_recipe_logged",
+        "nutrition_ingredient_created", "nutrition_recipe_created" -> "nutrition"
+        "achievement_unlocked", "achievement_unlocked_bronze",
+        "achievement_unlocked_silver", "achievement_unlocked_gold" -> "achievements"
+        "weekly_goal_perfect_week", "workout_consistency_streak" -> "goals_streaks"
+        "competition_bet_win", "competition_bet_refund_draw",
+        "competition_bet_refund_cancelled", "competition_bet_escrow" -> "competition"
+        "pet_combat_reward" -> "pet_combat"
+        else -> "other"
+    }
 
     fun displayLabel(actionType: String): String = when (actionType) {
         "like_given" -> "Like given"

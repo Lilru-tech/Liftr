@@ -82,7 +82,7 @@ fun ProfilePetFloatingOverlay(
         vm.startPollingIfNeeded()
         PetRefreshBus.events.collect {
             vm.load()
-            vm.reloadLogs()
+            vm.reloadLogsMatchingFilters(LiftrPreferences.petLogDisabledCategories(context))
             vm.startPollingIfNeeded()
         }
     }

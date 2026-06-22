@@ -1,5 +1,8 @@
 package com.lilru.liftr.ui.add.duplicate
 
+import com.lilru.liftr.climbing.ClimbingRouteFormatting
+import com.lilru.liftr.climbing.ClimbingRouteFormatting.sanitizeClimbingSportStats
+import com.lilru.liftr.climbing.ClimbingRouteFormatting.sanitizeRoutes
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddFootballPosition
@@ -20,6 +23,7 @@ import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.Order
 import java.util.UUID
 import kotlin.math.floor
+import kotlin.math.roundToInt
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
@@ -105,6 +109,7 @@ private data class HyroxExRow(
     @SerialName("duration_sec") val durationSec: Int? = null,
     @SerialName("height_cm") val heightCm: Int? = null,
     @SerialName("implement_count") val implementCount: Int? = null,
+    @SerialName("calories_kcal") val caloriesKcal: Double? = null,
     val notes: String? = null,
     @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
 )
@@ -608,6 +613,7 @@ private suspend fun climbingStatsFromTables(
         "highest_grade_system" to o.optString("highest_grade_system", ""),
         "highest_grade_value" to o.optString("highest_grade_value", "")
     )
+    sanitizeClimbingSportStats(stats)
     val routesJson = loadClimbingRoutesJson(supabase, sessionId)
     return stats to routesJson
 }
@@ -628,7 +634,7 @@ private suspend fun loadClimbingRoutesJson(
     val rows = runCatching { loaderJson.decodeFromString<List<ClimbingRouteDbRow>>(exRes.data) }
         .getOrDefault(emptyList())
     if (rows.isEmpty()) return "[]"
-    val forms = rows.map { r ->
+    val forms = sanitizeRoutes(rows.map { r ->
         com.lilru.liftr.climbing.ClimbingRouteForm(
             routeName = r.routeName.orEmpty(),
             style = com.lilru.liftr.climbing.ClimbingStyle.fromWire(r.style),
@@ -639,7 +645,7 @@ private suspend fun loadClimbingRoutesJson(
             flash = r.flash == true,
             notes = r.notes.orEmpty()
         )
-    }
+    })
     return com.lilru.liftr.climbing.ClimbingRouteFormatting.encodeRoutesJson(forms)
 }
 
@@ -661,7 +667,7 @@ private suspend fun loadHyroxExercisesJson(supabase: SupabaseClient, sessionId: 
         .select(
             columns = Columns.raw(
                 "exercise_code, exercise_order, distance_m, reps, weight_kg, duration_sec, " +
-                    "height_cm, implement_count, exercise_display_name, notes"
+                    "height_cm, implement_count, calories_kcal, exercise_display_name, notes"
             )
         ) {
             filter { eq("session_id", sessionId) }
@@ -680,6 +686,7 @@ private suspend fun loadHyroxExercisesJson(supabase: SupabaseClient, sessionId: 
             durationSec = r.durationSec,
             heightCm = r.heightCm,
             implementCount = r.implementCount,
+            caloriesKcal = r.caloriesKcal?.roundToInt(),
             notes = r.notes
         )
     }

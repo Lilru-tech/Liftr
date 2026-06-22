@@ -82,6 +82,22 @@ data class ClimbingRouteForm(
 )
 
 object ClimbingRouteFormatting {
+    fun sanitizeGradeValue(system: ClimbingGradeSystem, value: String): String {
+        val v = value.trim()
+        if (v.isEmpty()) return ""
+        return if (v in ClimbingGradeSystem.grades(system)) v else ""
+    }
+
+    fun sanitizeClimbingSportStats(stats: MutableMap<String, String>) {
+        val system = ClimbingGradeSystem.fromWire(stats["highest_grade_system"])
+        stats["highest_grade_value"] = sanitizeGradeValue(system, stats["highest_grade_value"].orEmpty())
+    }
+
+    fun sanitizeRoutes(routes: List<ClimbingRouteForm>): List<ClimbingRouteForm> =
+        routes.map { route ->
+            route.copy(gradeValue = sanitizeGradeValue(route.gradeSystem, route.gradeValue))
+        }
+
     fun displayGrade(system: ClimbingGradeSystem, value: String): String {
         val v = value.trim()
         if (v.isEmpty()) return "—"
@@ -105,7 +121,7 @@ object ClimbingRouteFormatting {
         val best = sentRoutes.maxByOrNull { gradeRank(it) }
         if (best != null && best.gradeValue.trim().isNotEmpty()) {
             stats["highest_grade_system"] = best.gradeSystem.wire
-            stats["highest_grade_value"] = best.gradeValue.trim()
+            stats["highest_grade_value"] = sanitizeGradeValue(best.gradeSystem, best.gradeValue)
         }
     }
 
@@ -137,11 +153,13 @@ object ClimbingRouteFormatting {
             .getOrNull() ?: return emptyList()
         return arr.mapNotNull { el ->
             val o = el as? JsonObject ?: return@mapNotNull null
+            val gradeSystem = ClimbingGradeSystem.fromWire(o["grade_system"]?.jsonPrimitive?.contentOrNull)
+            val gradeValue = o["grade_value"]?.jsonPrimitive?.contentOrNull.orEmpty()
             ClimbingRouteForm(
                 routeName = o["route_name"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 style = ClimbingStyle.fromWire(o["style"]?.jsonPrimitive?.contentOrNull),
-                gradeSystem = ClimbingGradeSystem.fromWire(o["grade_system"]?.jsonPrimitive?.contentOrNull),
-                gradeValue = o["grade_value"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                gradeSystem = gradeSystem,
+                gradeValue = sanitizeGradeValue(gradeSystem, gradeValue),
                 attempts = o["attempts"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 sent = o["sent"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true,
                 flash = o["flash"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() == true,

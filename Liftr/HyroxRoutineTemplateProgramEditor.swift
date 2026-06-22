@@ -134,6 +134,19 @@ struct HyroxRoutineTemplateProgramEditor: View {
                         hyroxExerciseNameFieldWithSuggestions(index: i)
                     }
 
+                    if HyroxExerciseFormatting.supportsCaloriesLogging(code: sport.hyExercises[i].exerciseCode) {
+                        StrengthStyleMetricField(title: "Calories (kcal)") {
+                            TextField("—", text: $sport.hyExercises[i].caloriesKcal)
+                                .keyboardType(.numberPad)
+                                .onChange(of: sport.hyExercises[i].caloriesKcal) { _, newValue in
+                                    if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        sport.hyExercises[i].distanceM = ""
+                                        sport.hyExercises[i].durationSec = ""
+                                    }
+                                }
+                        }
+                    }
+
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(alignment: .top, spacing: 6) {
                             StrengthStyleMetricField(title: "Distance (m)") {

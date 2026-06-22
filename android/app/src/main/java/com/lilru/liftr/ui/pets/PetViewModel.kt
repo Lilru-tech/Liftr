@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.data.PetFullDataWire
+import com.lilru.liftr.data.PetLogFilterCategory
 import com.lilru.liftr.data.PetLogWire
 import com.lilru.liftr.data.PetRefreshBus
 import com.lilru.liftr.data.PetService
@@ -38,6 +39,7 @@ class PetViewModel(
     private var logsOffset = 0
     private val logsPageSize = 5
     private var lastKnownStage: String? = null
+    private var lastDisabledLogCategories: Set<String> = emptySet()
 
     fun load() {
         viewModelScope.launch {
@@ -64,19 +66,38 @@ class PetViewModel(
     }
 
     fun reloadLogs() {
+        reloadLogsMatchingFilters(lastDisabledLogCategories)
+    }
+
+    fun reloadLogsMatchingFilters(disabledCategories: Set<String>) {
+        lastDisabledLogCategories = disabledCategories
         viewModelScope.launch {
             logsOffset = 0
-            runCatching { PetService.fetchPetLogs(supabase, 0, logsPageSize) }
-                .onSuccess { page ->
-                    logsOffset = page.size
-                    _ui.update {
-                        it.copy(
-                            logs = page,
-                            hasMoreLogs = page.size >= logsPageSize
-                        )
-                    }
+            val maxPages = 10
+            val allCategoriesDisabled = disabledCategories.size >= PetLogFilterCategory.all.size
+            runCatching {
+                val accumulated = mutableListOf<PetLogWire>()
+                var hasMore = true
+                var pagesLoaded = 0
+                while (pagesLoaded < maxPages && hasMore) {
+                    val page = PetService.fetchPetLogs(supabase, accumulated.size, logsPageSize)
+                    accumulated.addAll(page)
+                    hasMore = page.size >= logsPageSize
+                    pagesLoaded += 1
+                    if (allCategoriesDisabled) break
+                    val visibleCount = PetLogFilterCategory.filter(accumulated, disabledCategories).size
+                    if (visibleCount >= logsPageSize || !hasMore) break
                 }
-                .onFailure { e -> _ui.update { it.copy(error = e.message) } }
+                accumulated to hasMore
+            }.onSuccess { (logs, hasMore) ->
+                logsOffset = logs.size
+                _ui.update {
+                    it.copy(
+                        logs = logs,
+                        hasMoreLogs = hasMore
+                    )
+                }
+            }.onFailure { e -> _ui.update { it.copy(error = e.message) } }
         }
     }
 

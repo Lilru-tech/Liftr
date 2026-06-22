@@ -366,6 +366,7 @@ object CompareSportMetrics {
         @SerialName("weight_kg") val weightKg: Double? = null,
         @SerialName("duration_sec") val durationSec: Int? = null,
         @SerialName("implement_count") val implementCount: Int? = null,
+        @SerialName("calories_kcal") val caloriesKcal: Double? = null,
         @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
     )
 
@@ -408,7 +409,7 @@ object CompareSportMetrics {
         val lQ = supabase.from(BackendContracts.Tables.HYROX_SESSION_EXERCISES)
             .select(
                 columns = Columns.raw(
-                    "exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,exercise_display_name"
+                    "exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,calories_kcal,exercise_display_name"
                 )
             ) {
                 filter { eq("session_id", leftSessionId) }
@@ -417,7 +418,7 @@ object CompareSportMetrics {
         val rQ = supabase.from(BackendContracts.Tables.HYROX_SESSION_EXERCISES)
             .select(
                 columns = Columns.raw(
-                    "exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,exercise_display_name"
+                    "exercise_code,exercise_order,distance_m,reps,weight_kg,duration_sec,implement_count,calories_kcal,exercise_display_name"
                 )
             ) {
                 filter { eq("session_id", rightSessionId) }
@@ -435,6 +436,7 @@ object CompareSportMetrics {
             out.addM(m("reps"), "count", a.reps?.toDouble(), b.reps?.toDouble())
             out.addM(m("duration_sec"), "sec", a.durationSec?.toDouble(), b.durationSec?.toDouble())
             out.addM(m("weight_kg"), "kg", a.weightKg, b.weightKg)
+            out.addM(m("calories_kcal"), "kcal", a.caloriesKcal, b.caloriesKcal)
             out.addM(m("implement_count"), "count", a.implementCount?.toDouble(), b.implementCount?.toDouble())
         }
     }

@@ -74,6 +74,7 @@ enum ActiveWorkoutSessionCheckpoint {
         let duration_sec: Int?
         let height_cm: Int?
         let implement_count: Int?
+        let calories_kcal: Double?
         let notes: String?
         let custom_display_name: String?
     }

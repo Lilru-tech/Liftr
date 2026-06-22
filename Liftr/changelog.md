@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.22.0] - 2026-06-22
+
+### Added
+- **Logs — pet & coins** — Enable/disable toggle for pet and coin activity logs (iOS + Android).
+- **Liftr Coins — logs** — Option to load more coin transaction history (iOS + Android).
+- **Liftr Coins — income graphs** — Total coin amounts now displayed on income charts (iOS + Android).
+- **Hyrox — logging** — Row and SkiErg exercises can be logged by calories (iOS + Android).
+
+### Changed
+- **Pets — battle** — Rebalanced the stat handicap (nerf) system: symmetric arena HP, tuned pool scaling, and near-even odds in Balanced mode when fighting lower-level pets (iOS + Android).
+
+### Fixed
+- **Profile — avatar** — Fixed an issue that prevented uploading a profile picture (iOS + Android).
+- **Liftr Coins — logs** — Fixed workout coin rewards not appearing in the activity log (iOS + Android).
+- **Climbing** — Fixed a crash when logging climbing workouts (iOS + Android).
+
 ## [1.21.0] - 2026-06-19
 
 ### Added

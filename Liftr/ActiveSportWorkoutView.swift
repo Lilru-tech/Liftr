@@ -43,6 +43,7 @@ struct ActiveSportWorkoutView: View {
     @State private var editHyroxDurationSec = ""
     @State private var editHyroxHeightCm = ""
     @State private var editHyroxImplementCount = ""
+    @State private var editHyroxCaloriesKcal = ""
     @State private var editHyroxNotes = ""
     @State private var didLoadEditHyroxCustomDisplayNameSuggestions = false
     @State private var editHyroxCustomDisplayNameSuggestionsFromDB: [String] = []
@@ -82,6 +83,7 @@ struct ActiveSportWorkoutView: View {
         var duration_sec: Int?
         var height_cm: Int?
         var implement_count: Int?
+        var calories_kcal: Decimal?
         var notes: String?
         var exercise_display_name: String?
 
@@ -778,6 +780,7 @@ struct ActiveSportWorkoutView: View {
 
     private func hyroxMetricCount(for ex: ActiveHyroxExercise) -> Int {
         var count = 0
+        if ex.calories_kcal != nil { count += 1 }
         if ex.distance_m != nil { count += 1 }
         if ex.reps != nil { count += 1 }
         if ex.weight_kg != nil { count += 1 }
@@ -790,6 +793,12 @@ struct ActiveSportWorkoutView: View {
 
     @ViewBuilder
     private func hyroxMetricGridValues(_ ex: ActiveHyroxExercise) -> some View {
+        if let calories = ex.calories_kcal {
+            hyroxExerciseMainValue(
+                title: "Calories",
+                value: "\(Int(NSDecimalNumber(decimal: calories).doubleValue.rounded())) kcal"
+            )
+        }
         if let distance = ex.distance_m {
             hyroxExerciseMainValue(title: "Distance", value: "\(distance) m")
         }
@@ -1230,6 +1239,10 @@ struct ActiveSportWorkoutView: View {
                         }
                     }
 
+                    if HyroxExerciseFormatting.supportsCaloriesLogging(code: editHyroxExerciseCode) {
+                        sportCardField("Calories (kcal)", text: $editHyroxCaloriesKcal, keyboard: .numberPad)
+                    }
+
                     HStack {
                         sportCardField("Distance (m)", text: $editHyroxDistanceM, keyboard: .numberPad)
                         sportCardField("Reps", text: $editHyroxReps, keyboard: .numberPad)
@@ -1394,6 +1407,7 @@ struct ActiveSportWorkoutView: View {
         editHyroxDurationSec = ex.duration_sec.map(String.init) ?? ""
         editHyroxHeightCm = ex.height_cm.map(String.init) ?? ""
         editHyroxImplementCount = ex.implement_count.map(String.init) ?? ""
+        editHyroxCaloriesKcal = ex.calories_kcal.map { String(Int(NSDecimalNumber(decimal: $0).doubleValue.rounded())) } ?? ""
         editHyroxNotes = ex.notes ?? ""
         showEditHyroxExerciseSheet = true
     }
@@ -1409,8 +1423,18 @@ struct ActiveSportWorkoutView: View {
         editHyroxDurationSec = ""
         editHyroxHeightCm = ""
         editHyroxImplementCount = ""
+        editHyroxCaloriesKcal = ""
         editHyroxNotes = ""
         showEditHyroxExerciseSheet = true
+    }
+
+    private func resolveHyroxEditedMetrics(code: String) -> (distance_m: Int?, duration_sec: Int?, calories_kcal: Decimal?) {
+        let calText = editHyroxCaloriesKcal.trimmingCharacters(in: .whitespacesAndNewlines)
+        if HyroxExerciseFormatting.supportsCaloriesLogging(code: code),
+           let cal = parseIntField(calText), cal > 0 {
+            return (nil, nil, Decimal(cal))
+        }
+        return (parseIntField(editHyroxDistanceM), parseIntField(editHyroxDurationSec), nil)
     }
 
     private func applyHyroxExerciseEdits() {
@@ -1419,6 +1443,7 @@ struct ActiveSportWorkoutView: View {
             customDisplayName: editHyroxCustomDisplayName,
             notes: editHyroxNotes
         )
+        let metrics = resolveHyroxEditedMetrics(code: persisted.code)
         if isAddingHyroxExercise {
             let newId = nextTempHyroxExerciseId
             nextTempHyroxExerciseId -= 1
@@ -1434,12 +1459,13 @@ struct ActiveSportWorkoutView: View {
                     exercise_code: persisted.code,
                     exercise_order: insertionOrder,
                     zone_order: nil,
-                    distance_m: parseIntField(editHyroxDistanceM),
+                    distance_m: metrics.distance_m,
                     reps: parseIntField(editHyroxReps),
                     weight_kg: parseDecimalField(editHyroxWeightKg),
-                    duration_sec: parseIntField(editHyroxDurationSec),
+                    duration_sec: metrics.duration_sec,
                     height_cm: parseIntField(editHyroxHeightCm),
                     implement_count: parseIntField(editHyroxImplementCount),
+                    calories_kcal: metrics.calories_kcal,
                     notes: editHyroxNotes.trimmedOrNil,
                     exercise_display_name: persisted.displayName
                 )
@@ -1460,12 +1486,13 @@ struct ActiveSportWorkoutView: View {
 
         hyroxExercises[index].exercise_code = persisted.code
         hyroxExercises[index].exercise_display_name = persisted.displayName
-        hyroxExercises[index].distance_m = parseIntField(editHyroxDistanceM)
+        hyroxExercises[index].distance_m = metrics.distance_m
         hyroxExercises[index].reps = parseIntField(editHyroxReps)
         hyroxExercises[index].weight_kg = parseDecimalField(editHyroxWeightKg)
-        hyroxExercises[index].duration_sec = parseIntField(editHyroxDurationSec)
+        hyroxExercises[index].duration_sec = metrics.duration_sec
         hyroxExercises[index].height_cm = parseIntField(editHyroxHeightCm)
         hyroxExercises[index].implement_count = parseIntField(editHyroxImplementCount)
+        hyroxExercises[index].calories_kcal = metrics.calories_kcal
         hyroxExercises[index].notes = editHyroxNotes.trimmedOrNil
     }
 
@@ -1659,6 +1686,7 @@ struct ActiveSportWorkoutView: View {
                 duration_sec: $0.duration_sec,
                 height_cm: $0.height_cm,
                 implement_count: $0.implement_count,
+                calories_kcal: $0.calories_kcal.map { NSDecimalNumber(decimal: $0).doubleValue },
                 notes: $0.notes,
                 custom_display_name: $0.exercise_display_name
             )
@@ -1725,6 +1753,7 @@ struct ActiveSportWorkoutView: View {
                     duration_sec: $0.duration_sec,
                     height_cm: $0.height_cm,
                     implement_count: $0.implement_count,
+                    calories_kcal: $0.calories_kcal.map { Decimal($0) },
                     notes: $0.notes,
                     exercise_display_name: $0.custom_display_name
                 )
@@ -2090,7 +2119,7 @@ struct ActiveSportWorkoutView: View {
                 }
                 let exRes = try await client
                     .from("hyrox_session_exercises")
-                    .select("id, exercise_code, exercise_order, zone_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, notes, exercise_display_name")
+                    .select("id, exercise_code, exercise_order, zone_order, distance_m, reps, weight_kg, duration_sec, height_cm, implement_count, calories_kcal, notes, exercise_display_name")
                     .eq("session_id", value: sessionId)
                     .order("exercise_order", ascending: true)
                     .execute()
@@ -2226,6 +2255,7 @@ struct ActiveSportWorkoutView: View {
                         form.notes = route.notes ?? ""
                         return form
                     }
+                    ClimbingRouteFormatting.sanitizeClimbingForm(&self.sportForm)
                 }
             } catch {
                 print("Error loading climbing stats: \(error)")
@@ -2537,6 +2567,7 @@ struct ActiveSportWorkoutView: View {
                 let duration_sec: Int?
                 let height_cm: Int?
                 let implement_count: Int?
+                let calories_kcal: Decimal?
                 let notes: String?
                 let exercise_display_name: String?
             }
@@ -2553,6 +2584,7 @@ struct ActiveSportWorkoutView: View {
                     duration_sec: ex.duration_sec,
                     height_cm: ex.height_cm,
                     implement_count: ex.implement_count,
+                    calories_kcal: ex.calories_kcal,
                     notes: ex.notes,
                     exercise_display_name: ex.exercise_display_name
                 )

@@ -37,6 +37,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlin.math.roundToInt
 import com.lilru.liftr.R
 import com.lilru.liftr.ongoing.OngoingWorkoutService
 import com.lilru.liftr.ongoing.OngoingWorkoutWidgetPrefs
@@ -274,6 +275,12 @@ fun ActiveSportWorkoutScreen(
                                         ),
                                         style = MaterialTheme.typography.titleMedium
                                     )
+                                    current.caloriesKcal?.let {
+                                        Text(
+                                            stringResource(R.string.active_sport_hyrox_calories) + ": ${it.roundToInt()}",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
                                     current.distanceM?.let {
                                         Text(
                                             stringResource(R.string.active_sport_hyrox_distance_m) + ": $it",

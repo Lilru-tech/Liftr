@@ -2631,6 +2631,7 @@ struct AddWorkoutSheet: View {
                 if let v = parseInt(ex.durationSec)    { item["duration_sec"] = try .init(v) }
                 if let v = parseInt(ex.heightCm)       { item["height_cm"] = try .init(v) }
                 if let v = parseInt(ex.implementCount) { item["implement_count"] = try .init(v) }
+                if let v = parseInt(ex.caloriesKcal)    { item["calories_kcal"] = try .init(v) }
                 if let s = strOrNil(ex.notes)          { item["notes"] = try .init(s) }
 
                 return try AnyJSON(item)
@@ -2825,6 +2826,7 @@ struct AddWorkoutSheet: View {
                     durationSec: ex.durationSec.map(String.init) ?? "",
                     heightCm: ex.heightCm.map(String.init) ?? "",
                     implementCount: ex.implementCount.map(String.init) ?? "",
+                    caloriesKcal: ex.caloriesKcal.map(String.init) ?? "",
                     notes: ex.notes ?? ""
                 )
             }
@@ -3286,6 +3288,7 @@ struct HyroxExerciseForm: Identifiable, Hashable {
     var durationSec: String = ""
     var heightCm: String = ""
     var implementCount: String = ""
+    var caloriesKcal: String = ""
     var notes: String = ""
 }
 

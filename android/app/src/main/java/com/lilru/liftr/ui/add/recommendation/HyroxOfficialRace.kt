@@ -170,6 +170,7 @@ private fun sanitizeStandard(
     var dur = ex.durationSec
     var h = ex.heightCm
     var imp = ex.implementCount
+    var cal: Int? = null
 
     when (t) {
         HyroxExerciseCode.RUN -> {
@@ -181,13 +182,20 @@ private fun sanitizeStandard(
             imp = null
         }
         HyroxExerciseCode.SKIERG, HyroxExerciseCode.ROW -> {
-            if (d == null || d < 200 || d > 6000) d = 1000
-            d = d?.let { min(max(it, 200), 5000) }
+            val incomingCal = ex.caloriesKcal
+            if (incomingCal != null && incomingCal > 0) {
+                cal = min(max(incomingCal, 50), 2500)
+                d = null
+                dur = null
+            } else {
+                if (d == null || d < 200 || d > 6000) d = 1000
+                d = d?.let { min(max(it, 200), 5000) }
+                if (dur != null && dur > 3600) dur = 3600
+            }
             r = null
             w = null
             h = null
             imp = null
-            if (dur != null && dur > 3600) dur = 3600
         }
         HyroxExerciseCode.SLED_PUSH, HyroxExerciseCode.SLED_PULL -> {
             if (d == null || d > 500) d = 50
@@ -271,6 +279,7 @@ private fun sanitizeStandard(
         durationSec = dur,
         heightCm = h,
         implementCount = imp,
+        caloriesKcal = cal,
         notes = null
     )
 }
@@ -291,6 +300,7 @@ private fun sanitizeCustomStation(
         durationSec = ex.durationSec?.let { min(it, 36_000) },
         heightCm = h,
         implementCount = ex.implementCount?.let { min(it, 50) },
+        caloriesKcal = null,
         notes = null
     )
 }

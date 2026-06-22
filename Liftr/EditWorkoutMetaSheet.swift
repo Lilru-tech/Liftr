@@ -67,6 +67,7 @@ private struct EditHyroxExercise: Identifiable {
     var durationSec: String = ""
     var heightCm: String = ""
     var implementCount: String = ""
+    var caloriesKcal: String = ""
     var notes: String = ""
 }
 
@@ -1198,6 +1199,7 @@ struct EditWorkoutMetaSheet: View {
                             let duration_sec: Int?
                             let height_cm: Int?
                             let implement_count: Int?
+                            let calories_kcal: Decimal?
                             let notes: String?
                             let exercise_display_name: String?
                         }
@@ -1228,6 +1230,7 @@ struct EditWorkoutMetaSheet: View {
                                 durationSec: row.duration_sec.map(String.init) ?? "",
                                 heightCm: row.height_cm.map(String.init) ?? "",
                                 implementCount: row.implement_count.map(String.init) ?? "",
+                                caloriesKcal: row.calories_kcal.map { String(Int(NSDecimalNumber(decimal: $0).doubleValue.rounded())) } ?? "",
                                 notes: row.notes ?? ""
                             )
                         }
@@ -1365,8 +1368,8 @@ struct EditWorkoutMetaSheet: View {
                             route.notes = row.notes ?? ""
                             return route
                         }
+                        ClimbingRouteFormatting.sanitizeClimbingForm(&climbingForm)
                     } catch {
-                        climbingForm = SportForm()
                         climbingForm.sport = .climbing
                     }
                     
@@ -2612,6 +2615,11 @@ struct EditWorkoutMetaSheet: View {
                             .textFieldStyle(.roundedBorder)
                     }
 
+                    if HyroxExerciseFormatting.supportsCaloriesLogging(code: hyExercises[i].exerciseCode) {
+                        TextField("Calories (kcal)", text: $hyExercises[i].caloriesKcal)
+                            .keyboardType(.numberPad)
+                    }
+
                     HStack {
                         TextField("Order", text: $hyExercises[i].exerciseOrder.asStringBinding)
                             .keyboardType(.numberPad)
@@ -3030,6 +3038,7 @@ struct EditWorkoutMetaSheet: View {
                 if let v = parseInt(ex.durationSec) { values["duration_sec"] = .i(v) }
                 if let v = parseInt(ex.heightCm) { values["height_cm"] = .i(v) }
                 if let v = parseInt(ex.implementCount) { values["implement_count"] = .i(v) }
+                if let v = parseInt(ex.caloriesKcal) { values["calories_kcal"] = .i(v) }
                 if let v = ex.notes.trimmedOrNil { values["notes"] = .s(v) }
 
                 return JStats(values: values)

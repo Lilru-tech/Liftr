@@ -2,6 +2,10 @@ import Foundation
 import SwiftUI
 import Supabase
 
+extension Notification.Name {
+    static let coinTransactionsShouldRefresh = Notification.Name("coinTransactionsShouldRefresh")
+}
+
 enum CoinSourcesPeriod: String, CaseIterable, Identifiable {
     case week
     case month
@@ -87,6 +91,7 @@ final class CoinManager: ObservableObject {
             }
 
             if notifyIfEarned, balance > previousBalance {
+                NotificationCenter.default.post(name: .coinTransactionsShouldRefresh, object: nil)
                 await showEarnToast(userId: userId, fallbackDelta: balance - previousBalance)
             }
         } catch {
@@ -131,6 +136,39 @@ final class CoinManager: ObservableObject {
 
     nonisolated static func formattedAmount(_ amount: Int) -> String {
         amount >= 0 ? "+\(amount)" : "\(amount)"
+    }
+
+    nonisolated static func sourceKey(for actionType: String) -> String {
+        switch actionType {
+        case "workout_logged",
+             "workout_coin_doubling_v1",
+             "workout_economy_rebalance_v1",
+             "workout_economy_reduction_30pct_v1":
+            return "workouts"
+        case "workout_pet_training_bonus":
+            return "pet_workout_bonus"
+        case "pet_coins_generated",
+             "pet_passive_economy_rebalance_v1",
+             "pet_passive_economy_reduction_30pct_v1":
+            return "pet_coins"
+        case "like_given", "comment_added", "user_followed", "earned_follower":
+            return "social"
+        case "nutrition_ingredient_logged", "nutrition_recipe_logged",
+             "nutrition_ingredient_created", "nutrition_recipe_created":
+            return "nutrition"
+        case "achievement_unlocked", "achievement_unlocked_bronze",
+             "achievement_unlocked_silver", "achievement_unlocked_gold":
+            return "achievements"
+        case "weekly_goal_perfect_week", "workout_consistency_streak":
+            return "goals_streaks"
+        case "competition_bet_win", "competition_bet_refund_draw",
+             "competition_bet_refund_cancelled", "competition_bet_escrow":
+            return "competition"
+        case "pet_combat_reward":
+            return "pet_combat"
+        default:
+            return "other"
+        }
     }
 
     nonisolated static func displayLabel(for actionType: String) -> String {

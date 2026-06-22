@@ -66,6 +66,22 @@ struct ClimbingRouteForm: Identifiable, Hashable {
 }
 
 enum ClimbingRouteFormatting {
+    static func sanitizeGradeValue(_ value: String, for system: ClimbingGradeSystem) -> String {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty else { return "" }
+        return ClimbingGradeSystem.grades(for: system).contains(v) ? v : ""
+    }
+
+    static func sanitizeClimbingForm(_ sport: inout SportForm) {
+        sport.clHighestGradeValue = sanitizeGradeValue(sport.clHighestGradeValue, for: sport.clHighestGradeSystem)
+        for index in sport.clRoutes.indices {
+            sport.clRoutes[index].gradeValue = sanitizeGradeValue(
+                sport.clRoutes[index].gradeValue,
+                for: sport.clRoutes[index].gradeSystem
+            )
+        }
+    }
+
     static func displayGrade(system: ClimbingGradeSystem, value: String) -> String {
         let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !v.isEmpty else { return "—" }
@@ -90,7 +106,7 @@ enum ClimbingRouteFormatting {
 
         if let best = sentRoutes.max(by: { gradeRank($0) < gradeRank($1) }) {
             sport.clHighestGradeSystem = best.gradeSystem
-            sport.clHighestGradeValue = best.gradeValue
+            sport.clHighestGradeValue = sanitizeGradeValue(best.gradeValue, for: best.gradeSystem)
         }
     }
 

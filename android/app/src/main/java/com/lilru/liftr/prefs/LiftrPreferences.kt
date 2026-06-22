@@ -15,6 +15,8 @@ object LiftrPreferences {
      * valores: mintBlue, sunset, forest, midnight, lavender, ocean, rose, desert, berry, mono.
      */
     private const val KEY_BACKGROUND_THEME = "backgroundTheme"
+    private const val KEY_PET_LOG_DISABLED_CATEGORIES = "petLogDisabledCategories"
+    private const val KEY_COIN_LOG_DISABLED_CATEGORIES = "coinLogDisabledCategories"
 
     /**
      * Si es true, se abre el entreno activo sin [com.lilru.liftr.ui.home.StartWorkoutCountdownScreen]
@@ -102,6 +104,20 @@ object LiftrPreferences {
             .edit()
             .putString(KEY_BACKGROUND_THEME, v)
             .apply()
+    }
+
+    fun petLogDisabledCategories(context: Context): Set<String> =
+        getStringList(context, KEY_PET_LOG_DISABLED_CATEGORIES).toSet()
+
+    fun setPetLogDisabledCategories(context: Context, keys: Set<String>) {
+        setStringList(context, KEY_PET_LOG_DISABLED_CATEGORIES, keys.sorted())
+    }
+
+    fun coinLogDisabledCategories(context: Context): Set<String> =
+        getStringList(context, KEY_COIN_LOG_DISABLED_CATEGORIES).toSet()
+
+    fun setCoinLogDisabledCategories(context: Context, keys: Set<String>) {
+        setStringList(context, KEY_COIN_LOG_DISABLED_CATEGORIES, keys.sorted())
     }
 
     private const val KEY_TERRITORY_REFERENCE_LAT = "territoryReferenceLat"

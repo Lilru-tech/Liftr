@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -212,6 +213,7 @@ fun KindDonutChart(
     segments: List<DonutSegment>,
     centerTitle: String,
     modifier: Modifier = Modifier,
+    centerValue: String? = null,
     showLegend: Boolean = true,
     chartHeight: Dp = 200.dp
 ) {
@@ -245,11 +247,26 @@ fun KindDonutChart(
                 start += sweep
             }
         }
-        Text(
-            centerTitle,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        if (centerValue != null) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    centerValue,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    centerTitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else {
+            Text(
+                centerTitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
     if (showLegend) {
         Row(

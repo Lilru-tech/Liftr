@@ -5,17 +5,48 @@ struct PetLogsView: View {
     let hasMore: Bool
     let onLoadMore: () -> Void
     let onDeleteAll: () -> Void
+    var onFilterChange: ((Set<String>) -> Void)? = nil
+
+    @AppStorage(LogFilterPreferences.petDisabledStorageKey) private var disabledCategoriesRaw = ""
+    @State private var showFilterSheet = false
+
+    private var disabledCategories: Set<String> {
+        LogFilterPreferences.decodeDisabledCategories(disabledCategoriesRaw)
+    }
+
+    private var filteredLogs: [PetLog] {
+        PetLogFilterCategory.filter(logs, disabledKeys: disabledCategories)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Logs")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button {
+                    showFilterSheet = true
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Log filters")
+            }
+
             if logs.isEmpty {
                 Text("No logs yet")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
+            } else if filteredLogs.isEmpty {
+                Text("No logs match your filters.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
             } else {
-                ForEach(logs) { log in
+                ForEach(filteredLogs) { log in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
                             Text(PetLog.title(for: log))
@@ -60,6 +91,19 @@ struct PetLogsView: View {
                         .font(.caption)
                 }
             }
+        }
+        .sheet(isPresented: $showFilterSheet) {
+            PetLogFilterSheet(
+                disabledCategories: Binding(
+                    get: { disabledCategories },
+                    set: { disabledCategoriesRaw = LogFilterPreferences.encodeDisabledCategories($0) }
+                )
+            )
+            .presentationDetents([.medium, .large])
+        }
+        .onChange(of: disabledCategoriesRaw) { _, newValue in
+            let keys = LogFilterPreferences.decodeDisabledCategories(newValue)
+            onFilterChange?(keys)
         }
     }
 }

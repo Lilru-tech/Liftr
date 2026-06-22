@@ -71,7 +71,7 @@ struct PetCombatUnbalancedMatchDialog: View {
     private var modeDescription: String {
         switch selectedMode {
         case .balanced:
-            return "Balanced Mode caps the opponent at a +5% stat advantage. Normal handicap reward rules apply."
+            return "Balanced Mode rebalances stats for a near-even fight. Normal handicap reward rules apply."
         case .hardcore:
             if let hardcoreBonusLabel {
                 return "Hardcore Mode keeps the opponent at full stats. Winning grants a dynamically scaled bonus (\(hardcoreBonusLabel))."

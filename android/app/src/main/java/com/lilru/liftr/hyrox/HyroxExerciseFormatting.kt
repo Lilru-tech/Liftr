@@ -48,6 +48,11 @@ object HyroxExerciseFormatting {
         "farmer_carry", "sandbag_lunges", "wall_ball", "atlas_carry", "box_jump_over", "dead_ball_over_trunk"
     )
 
+    fun supportsCaloriesLogging(code: String): Boolean {
+        val c = code.trim().lowercase()
+        return c == "row" || c == "skierg"
+    }
+
     data class HyroxPersistedPayload(val code: String, val displayName: String?)
 
     /**

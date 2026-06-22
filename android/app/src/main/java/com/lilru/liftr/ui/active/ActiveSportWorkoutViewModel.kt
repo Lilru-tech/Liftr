@@ -52,6 +52,7 @@ data class ActiveHyroxExerciseUi(
     val durationSec: Int? = null,
     val heightCm: Int? = null,
     val implementCount: Int? = null,
+    val caloriesKcal: Double? = null,
     val notes: String? = null,
     val exerciseDisplayName: String? = null
 )
@@ -213,7 +214,7 @@ class ActiveSportWorkoutViewModel(
                         .select(
                             columns = Columns.raw(
                                 "id, exercise_code, exercise_order, distance_m, reps, weight_kg, " +
-                                    "duration_sec, height_cm, implement_count, notes, exercise_display_name"
+                                    "duration_sec, height_cm, implement_count, calories_kcal, notes, exercise_display_name"
                             )
                         ) {
                             filter { eq("session_id", row.id) }
@@ -230,6 +231,7 @@ class ActiveSportWorkoutViewModel(
                             durationSec = w.durationSec,
                             heightCm = w.heightCm,
                             implementCount = w.implementCount,
+                            caloriesKcal = w.caloriesKcal,
                             notes = w.notes,
                             exerciseDisplayName = w.exerciseDisplayName
                         )
@@ -347,6 +349,7 @@ class ActiveSportWorkoutViewModel(
                 durationSec = ex.durationSec,
                 heightCm = ex.heightCm,
                 implementCount = ex.implementCount,
+                caloriesKcal = ex.caloriesKcal,
                 notes = ex.notes,
                 customDisplayName = ex.exerciseDisplayName
             )
@@ -404,6 +407,7 @@ class ActiveSportWorkoutViewModel(
                     durationSec = ex.durationSec,
                     heightCm = ex.heightCm,
                     implementCount = ex.implementCount,
+                    caloriesKcal = ex.caloriesKcal,
                     notes = ex.notes,
                     exerciseDisplayName = ex.customDisplayName
                 )
@@ -451,13 +455,14 @@ class ActiveSportWorkoutViewModel(
         row?.flashes?.let { stats["flashes"] = it.toString() }
         row?.highestGradeSystem?.takeIf { it.isNotBlank() }?.let { stats["highest_grade_system"] = it }
         row?.highestGradeValue?.takeIf { it.isNotBlank() }?.let { stats["highest_grade_value"] = it }
+        ClimbingRouteFormatting.sanitizeClimbingSportStats(stats)
 
         val rRes = supabase.from(BackendContracts.Tables.CLIMBING_SESSION_ROUTES)
             .select(columns = Columns.raw("route_order, route_name, style, grade_system, grade_value, attempts, sent, flash, notes")) {
                 filter { eq("session_id", sessionId) }
                 order("route_order", Order.ASCENDING)
             }
-        val routes = decodeFlexibleList<ClimbingRouteWire>(rRes.data).map { r ->
+        val routes = ClimbingRouteFormatting.sanitizeRoutes(decodeFlexibleList<ClimbingRouteWire>(rRes.data).map { r ->
             com.lilru.liftr.climbing.ClimbingRouteForm(
                 routeName = r.routeName.orEmpty(),
                 style = com.lilru.liftr.climbing.ClimbingStyle.fromWire(r.style),
@@ -468,7 +473,7 @@ class ActiveSportWorkoutViewModel(
                 flash = r.flash == true,
                 notes = r.notes.orEmpty()
             )
-        }
+        })
         return stats to ClimbingRouteFormatting.encodeRoutesJson(routes)
     }
 
@@ -530,6 +535,7 @@ private data class HyroxExerciseWire(
     @SerialName("duration_sec") val durationSec: Int? = null,
     @SerialName("height_cm") val heightCm: Int? = null,
     @SerialName("implement_count") val implementCount: Int? = null,
+    @SerialName("calories_kcal") val caloriesKcal: Double? = null,
     val notes: String? = null,
     @SerialName("exercise_display_name") val exerciseDisplayName: String? = null
 )
@@ -544,6 +550,7 @@ private fun hyroxInsertJson(sessionId: Int, ex: ActiveHyroxExerciseUi) = buildJs
     ex.durationSec?.let { put("duration_sec", it) } ?: put("duration_sec", JsonNull)
     ex.heightCm?.let { put("height_cm", it) } ?: put("height_cm", JsonNull)
     ex.implementCount?.let { put("implement_count", it) } ?: put("implement_count", JsonNull)
+    ex.caloriesKcal?.let { put("calories_kcal", JsonPrimitive(it)) } ?: put("calories_kcal", JsonNull)
     ex.notes?.takeIf { it.isNotBlank() }?.let { put("notes", it) } ?: put("notes", JsonNull)
     ex.exerciseDisplayName?.takeIf { it.isNotBlank() }?.let { put("exercise_display_name", it) }
         ?: put("exercise_display_name", JsonNull)
