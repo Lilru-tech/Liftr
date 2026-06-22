@@ -159,7 +159,7 @@ fun PetCombatUnbalancedMatchDialog(
 private fun modeDescription(mode: PetCombatChallengeMode, hardcoreBonusLabel: String?): String =
     when (mode) {
         PetCombatChallengeMode.BALANCED ->
-            "Balanced Mode caps the opponent at a +5% stat advantage. Normal handicap reward rules apply."
+            "Balanced Mode rebalances stats for a near-even fight. Normal handicap reward rules apply."
         PetCombatChallengeMode.HARDCORE ->
             hardcoreBonusLabel?.let {
                 "Hardcore Mode keeps the opponent at full stats. Winning grants a dynamically scaled bonus ($it)."

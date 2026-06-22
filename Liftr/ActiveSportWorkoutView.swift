@@ -2255,6 +2255,7 @@ struct ActiveSportWorkoutView: View {
                         form.notes = route.notes ?? ""
                         return form
                     }
+                    ClimbingRouteFormatting.sanitizeClimbingForm(&self.sportForm)
                 }
             } catch {
                 print("Error loading climbing stats: \(error)")

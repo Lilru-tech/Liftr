@@ -1,5 +1,8 @@
 package com.lilru.liftr.ui.add.duplicate
 
+import com.lilru.liftr.climbing.ClimbingRouteFormatting
+import com.lilru.liftr.climbing.ClimbingRouteFormatting.sanitizeClimbingSportStats
+import com.lilru.liftr.climbing.ClimbingRouteFormatting.sanitizeRoutes
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddFootballPosition
@@ -610,6 +613,7 @@ private suspend fun climbingStatsFromTables(
         "highest_grade_system" to o.optString("highest_grade_system", ""),
         "highest_grade_value" to o.optString("highest_grade_value", "")
     )
+    sanitizeClimbingSportStats(stats)
     val routesJson = loadClimbingRoutesJson(supabase, sessionId)
     return stats to routesJson
 }
@@ -630,7 +634,7 @@ private suspend fun loadClimbingRoutesJson(
     val rows = runCatching { loaderJson.decodeFromString<List<ClimbingRouteDbRow>>(exRes.data) }
         .getOrDefault(emptyList())
     if (rows.isEmpty()) return "[]"
-    val forms = rows.map { r ->
+    val forms = sanitizeRoutes(rows.map { r ->
         com.lilru.liftr.climbing.ClimbingRouteForm(
             routeName = r.routeName.orEmpty(),
             style = com.lilru.liftr.climbing.ClimbingStyle.fromWire(r.style),
@@ -641,7 +645,7 @@ private suspend fun loadClimbingRoutesJson(
             flash = r.flash == true,
             notes = r.notes.orEmpty()
         )
-    }
+    })
     return com.lilru.liftr.climbing.ClimbingRouteFormatting.encodeRoutesJson(forms)
 }
 

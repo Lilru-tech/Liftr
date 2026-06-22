@@ -69,6 +69,12 @@ struct ClimbingSessionEditor: View {
                 }
             }
             .pickerStyle(.menu)
+            .onChange(of: sport.clHighestGradeSystem) { _, newSystem in
+                sport.clHighestGradeValue = ClimbingRouteFormatting.sanitizeGradeValue(
+                    sport.clHighestGradeValue,
+                    for: newSystem
+                )
+            }
         }
         Divider().padding(.vertical, 6)
         FieldRowPlain {
@@ -125,6 +131,12 @@ struct ClimbingSessionEditor: View {
                 }
             }
             .pickerStyle(.menu)
+            .onChange(of: route.wrappedValue.gradeSystem) { _, newSystem in
+                route.wrappedValue.gradeValue = ClimbingRouteFormatting.sanitizeGradeValue(
+                    route.wrappedValue.gradeValue,
+                    for: newSystem
+                )
+            }
             Picker("Grade", selection: route.gradeValue) {
                 Text("—").tag("")
                 ForEach(ClimbingGradeSystem.grades(for: route.wrappedValue.gradeSystem), id: \.self) { grade in

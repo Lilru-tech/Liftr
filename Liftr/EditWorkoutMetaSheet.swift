@@ -1368,8 +1368,8 @@ struct EditWorkoutMetaSheet: View {
                             route.notes = row.notes ?? ""
                             return route
                         }
+                        ClimbingRouteFormatting.sanitizeClimbingForm(&climbingForm)
                     } catch {
-                        climbingForm = SportForm()
                         climbingForm.sport = .climbing
                     }
                     

@@ -57,8 +57,8 @@ begin
     v_nerf.critical_rate, v_nerf.intelligence, v_nerf.exploration
   );
 
-  if v_nerfed_pool <> floor(900 * 1.05)::integer then
-    raise exception 'nerfed pool expected % got %', floor(900 * 1.05)::integer, v_nerfed_pool;
+  if v_nerfed_pool <> floor(900 * 1.07)::integer then
+    raise exception 'nerfed pool expected % got %', floor(900 * 1.07)::integer, v_nerfed_pool;
   end if;
 
   v_balancing := public.liftr_combat_stat_balancing_json(

@@ -455,13 +455,14 @@ class ActiveSportWorkoutViewModel(
         row?.flashes?.let { stats["flashes"] = it.toString() }
         row?.highestGradeSystem?.takeIf { it.isNotBlank() }?.let { stats["highest_grade_system"] = it }
         row?.highestGradeValue?.takeIf { it.isNotBlank() }?.let { stats["highest_grade_value"] = it }
+        ClimbingRouteFormatting.sanitizeClimbingSportStats(stats)
 
         val rRes = supabase.from(BackendContracts.Tables.CLIMBING_SESSION_ROUTES)
             .select(columns = Columns.raw("route_order, route_name, style, grade_system, grade_value, attempts, sent, flash, notes")) {
                 filter { eq("session_id", sessionId) }
                 order("route_order", Order.ASCENDING)
             }
-        val routes = decodeFlexibleList<ClimbingRouteWire>(rRes.data).map { r ->
+        val routes = ClimbingRouteFormatting.sanitizeRoutes(decodeFlexibleList<ClimbingRouteWire>(rRes.data).map { r ->
             com.lilru.liftr.climbing.ClimbingRouteForm(
                 routeName = r.routeName.orEmpty(),
                 style = com.lilru.liftr.climbing.ClimbingStyle.fromWire(r.style),
@@ -472,7 +473,7 @@ class ActiveSportWorkoutViewModel(
                 flash = r.flash == true,
                 notes = r.notes.orEmpty()
             )
-        }
+        })
         return stats to ClimbingRouteFormatting.encodeRoutesJson(routes)
     }
 

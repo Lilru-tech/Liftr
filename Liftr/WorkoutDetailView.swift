@@ -2096,6 +2096,7 @@ struct WorkoutDetailView: View {
                             route.notes = row.notes ?? ""
                             return route
                         }
+                        ClimbingRouteFormatting.sanitizeClimbingForm(&sf2)
                     } catch {
                         print("[DUP][SPORT] Climbing stats load failed: \(error)")
                     }
