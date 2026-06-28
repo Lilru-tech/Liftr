@@ -2,6 +2,7 @@ do $$
 declare
   v_pool_a integer;
   v_pool_b integer;
+  v_comparison_pool integer;
   v_nerf record;
   v_nerfed_pool integer;
   v_balancing jsonb;
@@ -10,6 +11,10 @@ declare
 begin
   if to_regprocedure('public.liftr_combat_stat_pool_v1(integer, integer, integer, integer, integer, integer, integer, integer, integer, integer)') is null then
     raise exception 'missing function liftr_combat_stat_pool_v1';
+  end if;
+
+  if to_regprocedure('public.liftr_combat_comparison_pool_v1(integer, integer, integer, integer, integer, integer, integer, integer, integer, integer)') is null then
+    raise exception 'missing function liftr_combat_comparison_pool_v1';
   end if;
 
   if to_regprocedure('public.liftr_combat_is_stat_unbalanced_v1(integer, integer)') is null then
@@ -28,11 +33,26 @@ begin
     raise exception 'missing function liftr_combat_premium_rewards';
   end if;
 
+  if public.liftr_combat_handicap_health_weight_v1() <> 0.25 then
+    raise exception 'handicap health weight expected 0.25 got %', public.liftr_combat_handicap_health_weight_v1();
+  end if;
+
+  if public.liftr_combat_handicap_threshold_pct_v1() <> 125 then
+    raise exception 'handicap threshold pct expected 125 got %', public.liftr_combat_handicap_threshold_pct_v1();
+  end if;
+
   v_pool_a := public.liftr_combat_stat_pool_v1(100, 50, 40, 30, 20, 10, 15, 5, 25, 10);
   v_pool_b := public.liftr_combat_stat_pool_v1(100, 50, 40, 30, 20, 10, 15, 5, 25, 10);
 
   if v_pool_a <> 305 then
     raise exception 'liftr_combat_stat_pool_v1 sum expected 305 got %', v_pool_a;
+  end if;
+
+  v_comparison_pool := public.liftr_combat_comparison_pool_v1(
+    1000, 100, 100, 100, 100, 100, 100, 100, 100, 100
+  );
+  if v_comparison_pool <> 1150 then
+    raise exception 'comparison pool expected 1150 got %', v_comparison_pool;
   end if;
 
   if public.liftr_combat_is_stat_unbalanced_v1(v_pool_a, v_pool_b) then
@@ -43,8 +63,23 @@ begin
     raise exception '1200 vs 900 should be unbalanced';
   end if;
 
+  if public.liftr_combat_is_stat_unbalanced_v1(1250, 1000) then
+    raise exception '1250 vs 1000 should be balanced (exactly 25%%)';
+  end if;
+
+  if not public.liftr_combat_is_stat_unbalanced_v1(1251, 1000) then
+    raise exception '1251 vs 1000 should be unbalanced';
+  end if;
+
   if public.liftr_combat_is_stat_unbalanced_v1(1050, 1000) then
-    raise exception '1050 vs 1000 should be balanced (exactly 5%%)';
+    raise exception '1050 vs 1000 should be balanced under 25%% threshold';
+  end if;
+
+  if public.liftr_combat_is_stat_unbalanced_v1(
+    public.liftr_combat_comparison_pool_v1(1000, 100, 100, 100, 100, 100, 100, 100, 100, 100),
+    public.liftr_combat_comparison_pool_v1(800, 100, 100, 100, 100, 100, 100, 100, 100, 100)
+  ) then
+    raise exception 'HP-only gap should be balanced when other stats are equal';
   end if;
 
   select * into v_nerf from public.liftr_combat_nerf_stats_to_target_v1(
@@ -63,11 +98,11 @@ begin
 
   v_balancing := public.liftr_combat_stat_balancing_json(
     120, 120, 120, 120, 120, 120, 120, 120, 120, 120,
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100
+    90, 90, 90, 90, 90, 90, 90, 90, 90, 90
   );
 
   if coalesce((v_balancing->>'is_unbalanced')::boolean, false) is not true then
-    raise exception 'stat_balancing_json should report unbalanced for 1200 vs 1000';
+    raise exception 'stat_balancing_json should report unbalanced for comparison gap';
   end if;
 
   if v_balancing->>'stronger_side' <> 'attacker' then

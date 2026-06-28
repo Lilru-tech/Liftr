@@ -115,15 +115,22 @@ struct PetCombatStatsSummary: Codable, Equatable {
     var combatStatPoolTotal: Int {
         health + strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
     }
+
+    var comparisonStatPoolTotal: Int {
+        Int(floor(Double(health) * 0.25))
+            + strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
+    }
 }
 
 enum PetCombatStatBalancing {
+    private static let handicapThresholdPct = 125
+
     static func isUnbalanced(attacker: PetCombatStatsSummary, defender: PetCombatStatsSummary) -> Bool {
-        let poolA = attacker.combatStatPoolTotal
-        let poolB = defender.combatStatPoolTotal
+        let poolA = attacker.comparisonStatPoolTotal
+        let poolB = defender.comparisonStatPoolTotal
         let stronger = max(poolA, poolB)
         let weaker = min(poolA, poolB)
-        return stronger * 100 > weaker * 105
+        return stronger * 100 > weaker * handicapThresholdPct
     }
 }
 
@@ -225,6 +232,16 @@ struct PetCombatPreview: Codable, Equatable {
         return "+\(percent)% Coins & XP"
     }
 
+    var effectiveCanChallenge: Bool {
+        if canChallenge { return true }
+        if blockReason == "cooldown_active",
+           let cooldownExpiresAt,
+           cooldownExpiresAt <= Date() {
+            return true
+        }
+        return false
+    }
+
     var blockReasonText: String? {
         guard let blockReason else { return nil }
         switch blockReason {
@@ -235,11 +252,14 @@ struct PetCombatPreview: Codable, Equatable {
         case "defender_egg": return "This user's pet has not hatched yet."
         case "no_energy": return "No arena energy left. You regain 1 energy every 4 hours."
         case "cooldown_active":
-            if let cooldownExpiresAt {
+            if let cooldownExpiresAt, cooldownExpiresAt > Date() {
                 let formatter = RelativeDateTimeFormatter()
                 return "You can challenge again \(formatter.localizedString(for: cooldownExpiresAt, relativeTo: Date()))."
             }
-            return "You recently battled this user. Try again later."
+            if cooldownExpiresAt == nil {
+                return "You recently battled this user. Try again later."
+            }
+            return nil
         default: return blockReason.replacingOccurrences(of: "_", with: " ").capitalized
         }
     }

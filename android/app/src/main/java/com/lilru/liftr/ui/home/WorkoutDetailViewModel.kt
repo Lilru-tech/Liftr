@@ -764,6 +764,8 @@ class WorkoutDetailViewModel(
                 } else {
                     null
                 }
+                val firstTimeFinalize = endedEl != null && w.endedAt.isNullOrBlank()
+
                 supabase.from(BackendContracts.Tables.WORKOUTS).update(
                     buildJsonObject {
                         if (title.isNotBlank()) {
@@ -777,11 +779,6 @@ class WorkoutDetailViewModel(
                             put("notes", JsonNull)
                         }
                         put("started_at", JsonPrimitive(startedStr))
-                        if (endedEl != null) {
-                            put("ended_at", JsonPrimitive(endedEl.toString()))
-                        } else {
-                            put("ended_at", JsonNull)
-                        }
                         put("perceived_intensity", JsonPrimitive(intensity.wire))
                     }
                 ) {
@@ -840,6 +837,7 @@ class WorkoutDetailViewModel(
                         val row = buildJsonObject {
                             put("workout_exercise_id", weId)
                             put("set_number", p.setNumber.coerceIn(1, 99))
+                            put("is_completed", true)
                             if (p.reps != null) put("reps", p.reps)
                             if (p.weightKg != null) put("weight_kg", p.weightKg)
                             if (p.rpe != null) put("rpe", p.rpe)
@@ -849,6 +847,30 @@ class WorkoutDetailViewModel(
                             }
                         }
                         supabase.from(BackendContracts.Tables.EXERCISE_SETS).insert(row) { }
+                    }
+                }
+
+                val endedAtChanged = when {
+                    endedEl != null -> endedEl.toString() != w.endedAt?.trim().orEmpty()
+                    else -> !w.endedAt.isNullOrBlank()
+                }
+                if (endedAtChanged) {
+                    supabase.from(BackendContracts.Tables.WORKOUTS).update(
+                        buildJsonObject {
+                            if (endedEl != null) {
+                                put("ended_at", JsonPrimitive(endedEl.toString()))
+                            } else {
+                                put("ended_at", JsonNull)
+                            }
+                            if (firstTimeFinalize && w.state?.lowercase() == "planned") {
+                                put("state", JsonPrimitive("published"))
+                            }
+                        }
+                    ) {
+                        filter {
+                            eq("id", workoutId)
+                            eq("user_id", me)
+                        }
                     }
                 }
             }

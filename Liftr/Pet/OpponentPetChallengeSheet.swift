@@ -5,15 +5,38 @@ struct OpponentPetChallengeSheet: View {
     @AppStorage("skipPetCombatUnbalancedWarning") private var skipPetCombatUnbalancedWarning = false
     @AppStorage("petCombatChallengeMode") private var savedChallengeModeRaw = PetCombatChallengeMode.balanced.rawValue
 
+    let opponentUserId: UUID
     let preview: PetCombatPreview
     let defenderPet: PetCombatPetSummary
     let headToHead: PetCombatHeadToHeadSummary?
     let opponentUsername: String?
     let onChallenge: (Bool) -> Void
+    let onPreviewRefreshed: (PetCombatPreview) -> Void
 
+    @State private var displayPreview: PetCombatPreview
+    @State private var isRefreshingPreview = false
     @State private var showUnbalancedDialog = false
     @State private var dontShowAgain = false
     @State private var selectedMode: PetCombatChallengeMode = .balanced
+
+    init(
+        opponentUserId: UUID,
+        preview: PetCombatPreview,
+        defenderPet: PetCombatPetSummary,
+        headToHead: PetCombatHeadToHeadSummary?,
+        opponentUsername: String?,
+        onChallenge: @escaping (Bool) -> Void,
+        onPreviewRefreshed: @escaping (PetCombatPreview) -> Void
+    ) {
+        self.opponentUserId = opponentUserId
+        self.preview = preview
+        self.defenderPet = defenderPet
+        self.headToHead = headToHead
+        self.opponentUsername = opponentUsername
+        self.onChallenge = onChallenge
+        self.onPreviewRefreshed = onPreviewRefreshed
+        _displayPreview = State(initialValue: preview)
+    }
 
     private var rarity: PetRarity {
         PetRarity(databaseValue: defenderPet.rarity) ?? .common
@@ -39,8 +62,8 @@ struct OpponentPetChallengeSheet: View {
                         )
                     }
 
-                    if let attacker = preview.attacker,
-                       let defender = preview.defender,
+                    if let attacker = displayPreview.attacker,
+                       let defender = displayPreview.defender,
                        let attackerPet = attacker.pet,
                        let defenderPet = defender.pet,
                        let attackerStats = attacker.stats,
@@ -55,7 +78,7 @@ struct OpponentPetChallengeSheet: View {
                         )
                     }
 
-                    if let energy = preview.energy {
+                    if let energy = displayPreview.energy {
                         HStack {
                             PetEnergyBadge(energy: energy, label: "Your energy")
                             Spacer()
@@ -67,7 +90,10 @@ struct OpponentPetChallengeSheet: View {
                         .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                     }
 
-                    if preview.canChallenge {
+                    if isRefreshingPreview {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else if displayPreview.effectiveCanChallenge {
                         Button(action: handleChallengeTap) {
                             Label("Challenge Pet", systemImage: "bolt.horizontal.circle.fill")
                                 .font(.subheadline.weight(.semibold))
@@ -75,7 +101,7 @@ struct OpponentPetChallengeSheet: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
-                    } else if let reason = preview.blockReasonText {
+                    } else if let reason = displayPreview.blockReasonText {
                         Text(reason)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -99,9 +125,9 @@ struct OpponentPetChallengeSheet: View {
                 PetCombatUnbalancedMatchDialog(
                     isPresented: $showUnbalancedDialog,
                     dontShowAgain: $dontShowAgain,
-                    isUnderdog: preview.isAttackerUnderdog,
+                    isUnderdog: displayPreview.isAttackerUnderdog,
                     selectedMode: $selectedMode,
-                    hardcoreBonusLabel: preview.hardcoreBonusLabel,
+                    hardcoreBonusLabel: displayPreview.hardcoreBonusLabel,
                     onCancel: { showUnbalancedDialog = false },
                     onFight: confirmChallenge
                 )
@@ -110,16 +136,30 @@ struct OpponentPetChallengeSheet: View {
         .onAppear {
             selectedMode = PetCombatChallengeMode(rawValue: savedChallengeModeRaw) ?? .balanced
         }
+        .task {
+            await refreshPreview()
+        }
+    }
+
+    private func refreshPreview() async {
+        isRefreshingPreview = true
+        defer { isRefreshingPreview = false }
+        do {
+            let fresh = try await PetService.shared.fetchCombatPreview(targetUserId: opponentUserId)
+            displayPreview = fresh
+            onPreviewRefreshed(fresh)
+        } catch {
+        }
     }
 
     private func handleChallengeTap() {
-        if !preview.isStatUnbalanced {
+        if !displayPreview.isStatUnbalanced {
             dismiss()
             onChallenge(false)
             return
         }
 
-        if skipPetCombatUnbalancedWarning && !preview.isAttackerUnderdog {
+        if skipPetCombatUnbalancedWarning && !displayPreview.isAttackerUnderdog {
             dismiss()
             onChallenge(false)
             return
@@ -131,18 +171,18 @@ struct OpponentPetChallengeSheet: View {
     }
 
     private func confirmChallenge() {
-        if dontShowAgain && !preview.isAttackerUnderdog {
+        if dontShowAgain && !displayPreview.isAttackerUnderdog {
             skipPetCombatUnbalancedWarning = true
         }
         savedChallengeModeRaw = selectedMode.rawValue
-        let disableNerf = preview.isAttackerUnderdog && selectedMode.disableNerfChoice
+        let disableNerf = displayPreview.isAttackerUnderdog && selectedMode.disableNerfChoice
         showUnbalancedDialog = false
         dismiss()
         onChallenge(disableNerf)
     }
 
     private func resolvedSavedMode() -> PetCombatChallengeMode {
-        if preview.isAttackerUnderdog {
+        if displayPreview.isAttackerUnderdog {
             return PetCombatChallengeMode(rawValue: savedChallengeModeRaw) ?? .balanced
         }
         return .balanced

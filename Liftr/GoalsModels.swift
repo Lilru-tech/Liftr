@@ -24,7 +24,7 @@ struct WeeklyGoalResultRow: Codable, Identifiable {
 }
 
 
-struct GoalRowUI: Identifiable {
+struct GoalRowUI: Identifiable, Hashable {
     let id: Int64
     let userId: UUID
     let weekStart: Date

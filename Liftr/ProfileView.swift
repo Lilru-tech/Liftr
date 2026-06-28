@@ -176,6 +176,7 @@ private struct ProfileRootContent<Header: View, TabPicker: View, TabContent: Vie
 
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("backgroundTheme") private var backgroundTheme: String = "mintBlue"
     let userId: UUID?
     private var viewingUserId: UUID? { userId ?? app.userId }
@@ -322,10 +323,11 @@ struct ProfileView: View {
 
             if !isOwnProfile,
                let preview = petCombatPreview,
-               viewingUserId != nil,
+               let opponentId = viewingUserId,
                let defenderPet = preview.defender?.pet,
                defenderPet.evolutionStage.lowercased() != "egg" {
                 ProfileOpponentPetFloatingOverlay(
+                    opponentUserId: opponentId,
                     preview: preview,
                     defenderPet: defenderPet,
                     headToHead: petCombatHeadToHead,
@@ -334,7 +336,8 @@ struct ProfileView: View {
                     onChallenge: { disableNerf in
                         combatDisableNerfChoice = disableNerf
                         showPetCombatArena = true
-                    }
+                    },
+                    onPreviewRefreshed: { petCombatPreview = $0 }
                 )
             }
         }
@@ -365,6 +368,11 @@ struct ProfileView: View {
         }
         .onChange(of: showPetCombatArena) { _, isShowing in
             if !isShowing, let opponentId = viewingUserId, !isOwnProfile {
+                Task { await loadPetCombatPreview(opponentId: opponentId) }
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active, let opponentId = viewingUserId, !isOwnProfile {
                 Task { await loadPetCombatPreview(opponentId: opponentId) }
             }
         }

@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -21,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -30,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.data.PetCombatChallengeMode
 import com.lilru.liftr.data.PetCombatHeadToHeadSummaryWire
@@ -48,10 +51,14 @@ fun OpponentPetChallengeSheet(
     backgroundThemeId: String,
     onDismiss: () -> Unit,
     onChallenge: (Boolean) -> Unit,
+    onRefreshPreview: suspend () -> PetCombatPreviewWire?,
+    onPreviewRefreshed: (PetCombatPreviewWire) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var displayPreview by remember(preview) { mutableStateOf(preview) }
+    var isRefreshingPreview by remember { mutableStateOf(false) }
     var showUnbalancedDialog by remember { mutableStateOf(false) }
     var dontShowAgain by remember { mutableStateOf(false) }
     var skipWarningState by remember { mutableStateOf(LiftrPreferences.skipPetCombatUnbalancedWarning(context)) }
@@ -59,8 +66,20 @@ fun OpponentPetChallengeSheet(
         mutableStateOf(PetCombatChallengeMode.fromRaw(LiftrPreferences.petCombatChallengeMode(context)))
     }
 
+    LaunchedEffect(Unit) {
+        isRefreshingPreview = true
+        try {
+            onRefreshPreview()?.let { fresh ->
+                displayPreview = fresh
+                onPreviewRefreshed(fresh)
+            }
+        } finally {
+            isRefreshingPreview = false
+        }
+    }
+
     fun resolvedSavedMode(): PetCombatChallengeMode =
-        if (preview.isAttackerUnderdog()) {
+        if (displayPreview.isAttackerUnderdog()) {
             PetCombatChallengeMode.fromRaw(LiftrPreferences.petCombatChallengeMode(context))
         } else {
             PetCombatChallengeMode.BALANCED
@@ -72,11 +91,11 @@ fun OpponentPetChallengeSheet(
     }
 
     fun handleChallengeTap() {
-        if (!preview.isStatUnbalanced()) {
+        if (!displayPreview.isStatUnbalanced()) {
             proceedToChallenge(false)
             return
         }
-        if (skipWarningState && !preview.isAttackerUnderdog()) {
+        if (skipWarningState && !displayPreview.isAttackerUnderdog()) {
             proceedToChallenge(false)
             return
         }
@@ -86,12 +105,12 @@ fun OpponentPetChallengeSheet(
     }
 
     fun confirmChallenge() {
-        if (dontShowAgain && !preview.isAttackerUnderdog()) {
+        if (dontShowAgain && !displayPreview.isAttackerUnderdog()) {
             LiftrPreferences.setSkipPetCombatUnbalancedWarning(context, true)
             skipWarningState = true
         }
         LiftrPreferences.setPetCombatChallengeMode(context, selectedMode.rawValue)
-        val disableNerf = preview.isAttackerUnderdog() && selectedMode.disableNerfChoice
+        val disableNerf = displayPreview.isAttackerUnderdog() && selectedMode.disableNerfChoice
         showUnbalancedDialog = false
         proceedToChallenge(disableNerf)
     }
@@ -132,8 +151,8 @@ fun OpponentPetChallengeSheet(
                 )
             }
 
-            val attacker = preview.attacker
-            val defender = preview.defender
+            val attacker = displayPreview.attacker
+            val defender = displayPreview.defender
             if (attacker?.pet != null && defender?.pet != null && attacker.stats != null && defender.stats != null) {
                 PetCombatComparisonStats(
                     attackerName = attacker.pet.displayName(),
@@ -145,7 +164,7 @@ fun OpponentPetChallengeSheet(
                 )
             }
 
-            preview.energy?.let { energy ->
+            displayPreview.energy?.let { energy ->
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -166,22 +185,36 @@ fun OpponentPetChallengeSheet(
                 }
             }
 
-            if (preview.canChallenge) {
-                Button(
-                    onClick = { handleChallengeTap() },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
-                ) {
-                    Text("Challenge Pet", fontWeight = FontWeight.SemiBold)
+            when {
+                isRefreshingPreview -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator()
+                    }
                 }
-            } else {
-                preview.blockReasonText()?.let {
-                    Text(
-                        it,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                displayPreview.effectiveCanChallenge() -> {
+                    Button(
+                        onClick = { handleChallengeTap() },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800))
+                    ) {
+                        Text("Challenge Pet", fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                else -> {
+                    displayPreview.blockReasonText()?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
             }
 
@@ -191,10 +224,10 @@ fun OpponentPetChallengeSheet(
 
         if (showUnbalancedDialog) {
             PetCombatUnbalancedMatchDialog(
-                isUnderdog = preview.isAttackerUnderdog(),
+                isUnderdog = displayPreview.isAttackerUnderdog(),
                 selectedMode = selectedMode,
                 onModeChange = { selectedMode = it },
-                hardcoreBonusLabel = preview.hardcoreBonusLabel(),
+                hardcoreBonusLabel = displayPreview.hardcoreBonusLabel(),
                 dontShowAgain = dontShowAgain,
                 onDontShowAgainChange = { dontShowAgain = it },
                 onDismiss = { showUnbalancedDialog = false },

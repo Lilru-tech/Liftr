@@ -91,6 +91,12 @@ private struct FinishStrengthWorkoutV1Params: Encodable {
     let p_linked: [StrengthWorkoutFinishLinkedInput]
 }
 
+enum StrengthEditSaveSupport {
+    static func removedWorkoutExerciseIds(initial: Set<Int>, current: Set<Int>) -> Set<Int> {
+        initial.subtracting(current)
+    }
+}
+
 enum StrengthWorkoutSaveRPC {
     static func updateStrengthWorkoutV1(
         client: SupabaseClient,

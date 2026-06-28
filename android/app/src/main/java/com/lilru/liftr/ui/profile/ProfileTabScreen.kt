@@ -879,9 +879,22 @@ fun ProfileTabScreen(
             }.getOrNull()
         }
     }
+    val reloadPetCombatPreview: suspend () -> Unit = reloadPetCombatPreview@{
+        val opponentId = profileUserId ?: return@reloadPetCombatPreview
+        if (ui.isOwnProfile) return@reloadPetCombatPreview
+        petCombatPreview = runCatching {
+            PetService.fetchCombatPreview(supabase, opponentId)
+        }.getOrNull()
+        petCombatHeadToHead = runCatching {
+            PetService.fetchCombatHeadToHead(supabase, opponentId)
+        }.getOrNull()
+    }
     val pullState = rememberPullRefreshState(
         refreshing = ui.isRefreshing,
-        onRefresh = { vm.refresh(false) }
+        onRefresh = {
+            vm.refresh(false)
+            scope.launch { reloadPetCombatPreview() }
+        }
     )
 
     val openMySegmentId = remember(segmentDetailId) {
@@ -1752,7 +1765,8 @@ fun ProfileTabScreen(
             val bottomInsetDp = if (profileNoAds) 18 else 70
             val preview = petCombatPreview
             val defenderPet = preview?.defender?.pet
-            if (preview != null && defenderPet != null && !defenderPet.evolutionStage.equals("egg", ignoreCase = true)) {
+            if (preview != null && defenderPet != null && profileUserId != null && !defenderPet.evolutionStage.equals("egg", ignoreCase = true)) {
+                val opponentId = profileUserId
                 ProfileOpponentPetFloatingOverlay(
                     preview = preview,
                     defenderPet = defenderPet,
@@ -1764,6 +1778,10 @@ fun ProfileTabScreen(
                         combatDisableNerfChoice = disableNerf
                         showPetCombatArena = true
                     },
+                    onRefreshPreview = {
+                        runCatching { PetService.fetchCombatPreview(supabase, opponentId) }.getOrNull()
+                    },
+                    onPreviewRefreshed = { petCombatPreview = it },
                     modifier = Modifier.fillMaxSize()
                 )
             }

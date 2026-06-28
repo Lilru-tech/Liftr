@@ -44,6 +44,8 @@ fun ProfileOpponentPetFloatingOverlay(
     bottomInsetDp: Int,
     backgroundThemeId: String,
     onChallenge: (Boolean) -> Unit,
+    onRefreshPreview: suspend () -> PetCombatPreviewWire?,
+    onPreviewRefreshed: (PetCombatPreviewWire) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -176,7 +178,9 @@ fun ProfileOpponentPetFloatingOverlay(
             opponentUsername = opponentUsername,
             backgroundThemeId = backgroundThemeId,
             onDismiss = { showSheet = false },
-            onChallenge = onChallenge
+            onChallenge = onChallenge,
+            onRefreshPreview = onRefreshPreview,
+            onPreviewRefreshed = onPreviewRefreshed
         )
     }
 }
