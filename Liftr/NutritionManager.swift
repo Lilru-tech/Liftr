@@ -52,6 +52,10 @@ enum NutritionDisplayTargets {
     static let sugarsG = 50.0
     static let fiberG = 28.0
     static let sodiumMg = 2300.0
+
+    static func resolved(from weightKg: Double?, sex: String? = nil) -> NutritionMetabolism.MacroTargets {
+        NutritionMetabolism.macroTargets(weightKg: weightKg, sex: sex)
+    }
 }
 
 struct NutritionIngredientRow: Decodable, Identifiable, Hashable {
@@ -430,14 +434,49 @@ private struct NutritionRankingParams: Encodable {
     let p_offset: Int
 }
 
+struct SmartNutritionInsight: Decodable, Identifiable {
+    let id: String
+    let category: String
+    let sentiment: String
+    let priority: Int
+    let title: String
+    let body: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, category, sentiment, priority, title, body
+    }
+}
+
+struct NutritionDayMacroAvg: Decodable {
+    let days: Int?
+    let kcal: Double?
+    let protein_g: Double?
+    let carbs_g: Double?
+    let fat_g: Double?
+}
+
+struct NutritionWeightTrend: Decodable {
+    let start_kg: Double?
+    let end_kg: Double?
+    let delta_kg: Double?
+    let samples: Int?
+    let interpretation: String?
+}
+
 struct SmartNutritionRecommendation: Decodable {
     let recommendation_text: String
     let alerts: [String]
+    let insights: [SmartNutritionInsight]
     let avg_daily_consumed_kcal: Double
     let avg_daily_burned_kcal: Double
     let base_calories_target: Double?
     let avg_daily_energy_out: Double?
     let avg_daily_remaining_budget: Double?
+    let nutrition_goal: String?
+    let archetype: String?
+    let training_day_avg: NutritionDayMacroAvg?
+    let rest_day_avg: NutritionDayMacroAvg?
+    let weight_trend: NutritionWeightTrend?
 
     var displayBaseTarget: Double {
         let b = base_calories_target ?? 0
@@ -455,20 +494,46 @@ struct SmartNutritionRecommendation: Decodable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case recommendation_text, alerts
+        case recommendation_text, alerts, insights
         case avg_daily_consumed_kcal, avg_daily_burned_kcal
         case base_calories_target, avg_daily_energy_out, avg_daily_remaining_budget
+        case nutrition_goal, archetype, training_day_avg, rest_day_avg, weight_trend
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         recommendation_text = try c.decode(String.self, forKey: .recommendation_text)
         alerts = try c.decodeIfPresent([String].self, forKey: .alerts) ?? []
+        insights = try c.decodeIfPresent([SmartNutritionInsight].self, forKey: .insights) ?? []
         avg_daily_consumed_kcal = try c.decode(Double.self, forKey: .avg_daily_consumed_kcal)
         avg_daily_burned_kcal = try c.decode(Double.self, forKey: .avg_daily_burned_kcal)
         base_calories_target = try c.decodeIfPresent(Double.self, forKey: .base_calories_target)
         avg_daily_energy_out = try c.decodeIfPresent(Double.self, forKey: .avg_daily_energy_out)
         avg_daily_remaining_budget = try c.decodeIfPresent(Double.self, forKey: .avg_daily_remaining_budget)
+        nutrition_goal = try c.decodeIfPresent(String.self, forKey: .nutrition_goal)
+        archetype = try c.decodeIfPresent(String.self, forKey: .archetype)
+        training_day_avg = try c.decodeIfPresent(NutritionDayMacroAvg.self, forKey: .training_day_avg)
+        rest_day_avg = try c.decodeIfPresent(NutritionDayMacroAvg.self, forKey: .rest_day_avg)
+        weight_trend = try c.decodeIfPresent(NutritionWeightTrend.self, forKey: .weight_trend)
+    }
+}
+
+struct DailyNutritionInsights: Decodable {
+    let recommendation_text: String
+    let insights: [SmartNutritionInsight]
+    let remaining_calories: Double?
+    let day_kcal: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case recommendation_text, insights, remaining_calories, day_kcal
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        recommendation_text = try c.decode(String.self, forKey: .recommendation_text)
+        insights = try c.decodeIfPresent([SmartNutritionInsight].self, forKey: .insights) ?? []
+        remaining_calories = try c.decodeIfPresent(Double.self, forKey: .remaining_calories)
+        day_kcal = try c.decodeIfPresent(Double.self, forKey: .day_kcal)
     }
 }
 
@@ -801,13 +866,36 @@ enum NutritionManager {
             p_end_date: dateOnlyString(end)
         )
         let res = try await SupabaseManager.shared.client
-            .rpc("get_smart_nutrition_recommendation_v1", params: params)
+            .rpc("get_smart_nutrition_recommendation_v2", params: params)
             .execute()
         let decoder = JSONDecoder.supabase()
         if let rows = try? decoder.decode([SmartNutritionRecommendation].self, from: res.data), let first = rows.first {
             return first
         }
         return try decoder.decode(SmartNutritionRecommendation.self, from: res.data)
+    }
+
+    static func fetchDailyInsights(for date: Date) async throws -> DailyNutritionInsights {
+        let params = NutritionRecommendationParams(p_date: dateOnlyString(date))
+        let res = try await SupabaseManager.shared.client
+            .rpc("get_daily_nutrition_insights_v1", params: params)
+            .execute()
+        let decoder = JSONDecoder.supabase()
+        if let rows = try? decoder.decode([DailyNutritionInsights].self, from: res.data), let first = rows.first {
+            return first
+        }
+        return try decoder.decode(DailyNutritionInsights.self, from: res.data)
+    }
+
+    static func fetchProfileWeightKg(userId: UUID) async throws -> Double? {
+        struct Row: Decodable { let weight_kg: Double? }
+        let res = try await SupabaseManager.shared.client
+            .from("profiles")
+            .select("weight_kg")
+            .eq("user_id", value: userId.uuidString)
+            .single()
+            .execute()
+        return try JSONDecoder.supabase().decode(Row.self, from: res.data).weight_kg
     }
 
     static func fetchNutritionHighlights() async throws -> NutritionHighlights {

@@ -182,6 +182,11 @@
     <string name="nutrition_insights_total_energy_out">Total energy out (target + activity): %1$d kcal/day</string>
     <string name="nutrition_insights_summary">Summary</string>
     <string name="nutrition_insights_watch">Things to watch</string>
+    <string name="nutrition_insights_personalized">Personalized insights</string>
+    <string name="nutrition_insights_training_vs_rest">Training vs rest days</string>
+    <string name="nutrition_insights_training_days">Training</string>
+    <string name="nutrition_insights_rest_days">Rest</string>
+    <string name="nutrition_insights_macro_short">P %1$dg · C %2$dg</string>
     <string name="nutrition_meal_empty">No items logged</string>
     <string name="nutrition_row_subtitle">%1$d g · %2$d kcal</string>
     <string name="nutrition_log_food">Log food</string>
@@ -926,6 +931,11 @@
     <string name="profile_personal_info_section">Personal information</string>
     <string name="profile_height_cm">Height (cm)</string>
     <string name="profile_base_calories_target">Basal Metabolism / BMR (kcal)</string>
+    <string name="profile_nutrition_goal">Nutrition goal</string>
+    <string name="profile_nutrition_goal_maintain">Maintain</string>
+    <string name="profile_nutrition_goal_cut">Cut</string>
+    <string name="profile_nutrition_goal_bulk">Bulk</string>
+    <string name="profile_nutrition_goal_recomp">Recomp</string>
     <string name="profile_weight_kg">Weight (kg)</string>
     <string name="body_weight_history_title">Body weight</string>
     <string name="body_weight_log">Log weight</string>
@@ -1557,7 +1567,7 @@
     <string name="pet_combat_mode_balanced_short">Balanced (Safe)</string>
     <string name="pet_combat_mode_hardcore_short">Hardcore</string>
     <string name="pet_stat_combat_handicap_battles_title">Handicap Battles</string>
-    <string name="pet_stat_combat_handicap_battles_description">Fights featuring a stat gap greater than 5% will not affect your permanent Win/Loss profile record.</string>
+    <string name="pet_stat_combat_handicap_battles_description">Fights featuring a stat gap greater than 25% will not affect your permanent Win/Loss profile record.</string>
     <string name="pet_stat_combat_hardcore_challenge_title">Hardcore Challenge</string>
     <string name="pet_stat_combat_hardcore_challenge_description">As an underdog, you can choose to face un-nerfed opponents to unlock dynamically scaled massive reward multipliers based on the difficulty gap.</string>
     <string name="add_create_routine_toggle">Create routine</string>

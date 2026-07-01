@@ -1979,7 +1979,7 @@ struct EditWorkoutMetaSheet: View {
         do {
             try await deleteWorkoutExerciseFromServer(workoutExerciseId)
             await MainActor.run {
-                s_initialWorkoutExerciseIds.remove(workoutExerciseId)
+                _ = s_initialWorkoutExerciseIds.remove(workoutExerciseId)
             }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }

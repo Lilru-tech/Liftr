@@ -116,4 +116,23 @@ object NutritionMetabolism {
             today
         )
     }
+
+    data class MacroTargets(
+        val proteinG: Double,
+        val carbsG: Double,
+        val fatG: Double,
+        val saturatedFatG: Double = 20.0,
+        val sugarsG: Double = 50.0,
+        val fiberG: Double = 28.0,
+        val sodiumMg: Double = 2300.0
+    )
+
+    fun macroTargets(weightKg: Double?, sex: String? = null): MacroTargets {
+        val weight = imputedWeightKg(sex, weightKg)
+        return MacroTargets(
+            proteinG = (1.8 * weight).roundToInt().toDouble(),
+            carbsG = (2.5 * weight).roundToInt().toDouble(),
+            fatG = (0.9 * weight).roundToInt().toDouble()
+        )
+    }
 }

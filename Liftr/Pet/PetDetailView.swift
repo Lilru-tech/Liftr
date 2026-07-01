@@ -12,6 +12,7 @@ struct PetDetailView: View {
     @State private var recordsExpanded = false
     @State private var showStatCombatHelp = false
     @State private var hasAppeared = false
+    @State private var selectedFood: PetInventoryRow?
 
     var body: some View {
         NavigationStack {
@@ -103,6 +104,30 @@ struct PetDetailView: View {
             viewModel.startPollingIfNeeded()
         }
         .onDisappear { viewModel.stopPolling() }
+        .overlay {
+            if let selectedFood {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation { self.selectedFood = nil }
+                        }
+                    FeedFoodOverlay(
+                        itemType: selectedFood.itemType,
+                        ownedQuantity: selectedFood.quantity,
+                        onClose: { withAnimation { self.selectedFood = nil } },
+                        onFeedSuccess: {
+                            Task {
+                                await viewModel.load()
+                                await viewModel.reloadLogs()
+                                PetRefreshCenter.notifyPetStateDidChange()
+                            }
+                        }
+                    )
+                }
+                .accessibilityIdentifier("feed.overlay")
+            }
+        }
     }
 
     @ViewBuilder
@@ -363,7 +388,7 @@ struct PetDetailView: View {
                     HStack(spacing: 8) {
                         ForEach(foods) { item in
                             Button {
-                                Task { await viewModel.feed(itemType: item.itemType) }
+                                withAnimation { selectedFood = item }
                             } label: {
                                 VStack(spacing: 4) {
                                     AsyncImage(url: PetImageURLBuilder.marketItemURL(path: "market/\(item.itemType).png")) { phase in

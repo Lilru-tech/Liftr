@@ -1,10 +1,13 @@
 package com.lilru.liftr.ui.pets
 
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -39,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.lilru.liftr.R
+import androidx.compose.ui.graphics.Color
 import com.lilru.liftr.data.PetInstanceWire
+import com.lilru.liftr.data.PetInventoryWire
+import io.github.jan.supabase.SupabaseClient
 import com.lilru.liftr.data.PetService
 import com.lilru.liftr.data.PetStatsWire
 import kotlinx.coroutines.delay
@@ -52,11 +58,13 @@ private val FOOD_TYPES = listOf("food_baby", "food_kid", "food_teen", "food_adul
 @Composable
 fun PetDetailPopover(
     vm: PetViewModel,
+    supabase: SupabaseClient,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val ui by vm.uiState.collectAsStateWithLifecycle()
     var showStatCombatHelp by rememberSaveable { mutableStateOf(false) }
+    var selectedFood by remember { mutableStateOf<PetInventoryWire?>(null) }
     val statCombatHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
   LaunchedEffect(Unit) {
         vm.load()
@@ -105,7 +113,7 @@ fun PetDetailPopover(
                 feeding = ui.feeding,
                 evolving = ui.evolving,
                 onEvolve = { vm.confirmEvolution() },
-                onFeed = { vm.feed(it) },
+                onSelectFood = { selectedFood = it },
                 onStatGuideClick = { showStatCombatHelp = true }
             )
         }
@@ -119,6 +127,28 @@ fun PetDetailPopover(
                 sheetState = statCombatHelpSheetState
             ) {
                 PetStatCombatHelpSheetContent(onClose = { showStatCombatHelp = false })
+            }
+        }
+
+        selectedFood?.let { food ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable { selectedFood = null }
+                )
+                FeedFoodOverlay(
+                    itemType = food.itemType,
+                    ownedQuantity = food.quantity,
+                    supabase = supabase,
+                    onClose = { selectedFood = null },
+                    onFeedSuccess = {
+                        vm.load()
+                        vm.reloadLogs()
+                    },
+                    modifier = Modifier.align(Alignment.Center)
+                )
             }
         }
     }
@@ -176,11 +206,11 @@ private fun HatchedSection(
     stats: PetStatsWire?,
     xpRequired: Int,
     canEvolve: Boolean,
-    inventory: List<com.lilru.liftr.data.PetInventoryWire>,
+    inventory: List<PetInventoryWire>,
     feeding: Boolean,
     evolving: Boolean,
     onEvolve: () -> Unit,
-    onFeed: (String) -> Unit,
+    onSelectFood: (PetInventoryWire) -> Unit,
     onStatGuideClick: (() -> Unit)? = null
 ) {
     val req = xpRequired.coerceAtLeast(1)
@@ -225,8 +255,8 @@ private fun HatchedSection(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 foods.forEach { item ->
-                    TextButton(onClick = { onFeed(item.itemType) }, enabled = !feeding) {
-                        Text("${item.itemType.substringAfter("food_")} ×${item.quantity}")
+                    TextButton(onClick = { onSelectFood(item) }, enabled = !feeding) {
+                        Text("${PetFoodItemType.displayName(item.itemType)} ×${item.quantity}")
                     }
                 }
             }

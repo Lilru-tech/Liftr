@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Workout score refinement (server)** — Rolled back the cardio global ×2.5 calibration that over-rewarded walking and low-intensity cardio. Restored original sex modifiers for strength and sport/cardio. Kept modest walk/treadmill activity factor tweaks and the Hyrox missed-rep penalty cap. All published workouts recalculated (iOS + Android read updated scores automatically).
+
+### Notes (database / ops)
+- Apply migrations **`20260701140000_workout_score_rollback_refine_v1.sql`** and **`20260701140100_workout_score_rollback_backfill_v1.sql`** before shipping. Verify distribution with **`docs/migrations/workout_scores_rebalance_inspection_v1.sql`**.
+
 ## [1.22.0] - 2026-06-22
 
 ### Added

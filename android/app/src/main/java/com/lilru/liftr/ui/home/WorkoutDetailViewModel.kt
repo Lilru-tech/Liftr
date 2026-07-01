@@ -19,8 +19,11 @@ import com.lilru.liftr.ui.add.AddCardioActivity
 import com.lilru.liftr.ui.add.AddWorkoutIntensity
 import com.lilru.liftr.ui.add.StrengthExerciseDraft
 import com.lilru.liftr.ui.add.StrengthSetDraft
+import com.lilru.liftr.ui.add.compactSupersetMetadata
 import com.lilru.liftr.ui.add.draftSetToStrengthPayload
-import com.lilru.liftr.ui.add.weightSegmentsToJsonArray
+import com.lilru.liftr.ui.add.patchWorkoutExerciseSupersetsForEdit
+import com.lilru.liftr.workout.StrengthWorkoutEditSavePayload
+import com.lilru.liftr.workout.StrengthWorkoutSaveRpc
 import com.lilru.liftr.ui.add.SportStatsPayloadBuilder
 import com.lilru.liftr.ui.add.duplicate.SportEditEnrichment
 import com.lilru.liftr.ui.add.duplicate.loadSportEditEnrichment
@@ -764,29 +767,6 @@ class WorkoutDetailViewModel(
                 } else {
                     null
                 }
-                val firstTimeFinalize = endedEl != null && w.endedAt.isNullOrBlank()
-
-                supabase.from(BackendContracts.Tables.WORKOUTS).update(
-                    buildJsonObject {
-                        if (title.isNotBlank()) {
-                            put("title", JsonPrimitive(title.trim()))
-                        } else {
-                            put("title", JsonNull)
-                        }
-                        if (notes.isNotBlank()) {
-                            put("notes", JsonPrimitive(notes.trim()))
-                        } else {
-                            put("notes", JsonNull)
-                        }
-                        put("started_at", JsonPrimitive(startedStr))
-                        put("perceived_intensity", JsonPrimitive(intensity.wire))
-                    }
-                ) {
-                    filter {
-                        eq("id", workoutId)
-                        eq("user_id", me)
-                    }
-                }
 
                 val initial = s.strengthEditInitialWorkoutExerciseIds
                 val currentWids = exercises.map { it.workoutExerciseId!! }.toSet()
@@ -803,76 +783,22 @@ class WorkoutDetailViewModel(
                     }
                 }
 
-                exercises.forEachIndexed { orderIdx, ex ->
-                    val weId = ex.workoutExerciseId!!
-                    supabase.from(BackendContracts.Tables.WORKOUT_EXERCISES).update(
-                        buildJsonObject {
-                            put("exercise_id", ex.exerciseId!!)
-                            put("order_index", orderIdx + 1)
-                            if (ex.notes.isNotBlank()) {
-                                put("notes", JsonPrimitive(ex.notes.trim()))
-                            } else {
-                                put("notes", JsonNull)
-                            }
-                            if (ex.customName.isNotBlank()) {
-                                put("custom_name", JsonPrimitive(ex.customName.trim()))
-                            } else {
-                                put("custom_name", JsonNull)
-                            }
-                        }
-                    ) {
-                        filter { eq("id", weId) }
-                    }
-                }
+                val exerciseInputs = StrengthWorkoutEditSavePayload.buildFromDrafts(exercises)
+                StrengthWorkoutSaveRpc.updateStrengthWorkoutV1(
+                    supabase = supabase,
+                    workoutId = workoutId,
+                    title = title.trim().takeIf { it.isNotEmpty() },
+                    notes = notes.trim().takeIf { it.isNotEmpty() },
+                    startedAtIso = startedStr,
+                    endedAtIso = endedEl?.toString(),
+                    perceivedIntensity = intensity.wire,
+                    exercises = exerciseInputs
+                )
 
-                if (currentWids.isNotEmpty()) {
-                    supabase.from(BackendContracts.Tables.EXERCISE_SETS).delete {
-                        filter { isIn("workout_exercise_id", currentWids.toList()) }
-                    }
-                }
-                for (ex in exercises) {
-                    val weId = ex.workoutExerciseId!!
-                    for (st in ex.sets) {
-                        val p = draftSetToStrengthPayload(st) ?: continue
-                        val row = buildJsonObject {
-                            put("workout_exercise_id", weId)
-                            put("set_number", p.setNumber.coerceIn(1, 99))
-                            put("is_completed", true)
-                            if (p.reps != null) put("reps", p.reps)
-                            if (p.weightKg != null) put("weight_kg", p.weightKg)
-                            if (p.rpe != null) put("rpe", p.rpe)
-                            if (p.restSec != null) put("rest_sec", p.restSec)
-                            p.weightSegments?.takeIf { it.size >= 2 }?.let { segs ->
-                                put("weight_segments", weightSegmentsToJsonArray(segs))
-                            }
-                        }
-                        supabase.from(BackendContracts.Tables.EXERCISE_SETS).insert(row) { }
-                    }
-                }
-
-                val endedAtChanged = when {
-                    endedEl != null -> endedEl.toString() != w.endedAt?.trim().orEmpty()
-                    else -> !w.endedAt.isNullOrBlank()
-                }
-                if (endedAtChanged) {
-                    supabase.from(BackendContracts.Tables.WORKOUTS).update(
-                        buildJsonObject {
-                            if (endedEl != null) {
-                                put("ended_at", JsonPrimitive(endedEl.toString()))
-                            } else {
-                                put("ended_at", JsonNull)
-                            }
-                            if (firstTimeFinalize && w.state?.lowercase() == "planned") {
-                                put("state", JsonPrimitive("published"))
-                            }
-                        }
-                    ) {
-                        filter {
-                            eq("id", workoutId)
-                            eq("user_id", me)
-                        }
-                    }
-                }
+                patchWorkoutExerciseSupersetsForEdit(
+                    supabase = supabase,
+                    exercises = compactSupersetMetadata(exercises)
+                )
             }
             result.onSuccess {
                 _uiState.value = _uiState.value.copy(saveMetaBusy = false)

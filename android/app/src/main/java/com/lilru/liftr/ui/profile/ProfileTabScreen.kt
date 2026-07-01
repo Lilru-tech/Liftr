@@ -59,6 +59,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DatePicker
@@ -1971,20 +1972,38 @@ private fun ProfilePersonalInformationCard(
                         )
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        stringResource(R.string.profile_weight_kg),
-                        style = MaterialTheme.typography.bodyLarge
+                if (editingPersonalInfo) {
+                    OutlinedTextField(
+                        value = ui.weightKgDraft,
+                        onValueChange = vm::setWeightKgDraft,
+                        label = { Text(stringResource(R.string.profile_weight_kg)) },
+                        singleLine = true,
+                        enabled = !ui.saveProfileMetricsBusy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Text(
-                        text = ui.weightKgDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_weight_kg),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = ui.weightKgDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
+                NutritionGoalRow(
+                    goal = ui.nutritionGoalDraft,
+                    editing = editingPersonalInfo,
+                    enabled = !ui.saveProfileMetricsBusy,
+                    onGoalSelected = vm::setNutritionGoalDraft
+                )
                 if (editingPersonalInfo) {
                     OutlinedTextField(
                         value = ui.baseCaloriesTargetDraft,
@@ -2113,6 +2132,74 @@ private fun ProfilePersonalInformationCard(
             }
         ) {
             DatePicker(state = state)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun nutritionGoalLabelRes(goal: String): Int = when (goal) {
+    "cut" -> R.string.profile_nutrition_goal_cut
+    "bulk" -> R.string.profile_nutrition_goal_bulk
+    "recomp" -> R.string.profile_nutrition_goal_recomp
+    else -> R.string.profile_nutrition_goal_maintain
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NutritionGoalRow(
+    goal: String,
+    editing: Boolean,
+    enabled: Boolean,
+    onGoalSelected: (String) -> Unit
+) {
+    val options = listOf(
+        "maintain" to R.string.profile_nutrition_goal_maintain,
+        "cut" to R.string.profile_nutrition_goal_cut,
+        "bulk" to R.string.profile_nutrition_goal_bulk,
+        "recomp" to R.string.profile_nutrition_goal_recomp
+    )
+    if (editing) {
+        var expanded by remember { mutableStateOf(false) }
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { if (enabled) expanded = it }
+        ) {
+            OutlinedTextField(
+                value = stringResource(nutritionGoalLabelRes(goal)),
+                onValueChange = {},
+                readOnly = true,
+                enabled = enabled,
+                singleLine = true,
+                label = { Text(stringResource(R.string.profile_nutrition_goal)) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier
+                    .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = enabled)
+                    .fillMaxWidth()
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (id, resId) ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(resId)) },
+                        onClick = {
+                            onGoalSelected(id)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(stringResource(R.string.profile_nutrition_goal), style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = stringResource(nutritionGoalLabelRes(goal)),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }

@@ -23,6 +23,7 @@ private struct ProfileRow: Decodable {
     let sex: String?
     let base_calories_target: Int?
     let base_calories_target_is_manual: Bool?
+    let nutrition_goal: String?
 }
 
 private struct DayActivity: Decodable, Identifiable {
@@ -255,6 +256,7 @@ struct ProfileView: View {
     @State private var baseCaloriesTarget: String = "\(NutritionMetabolism.fallbackKcalNeutral)"
     @State private var baseCaloriesTargetLoadedSnapshot: String = "\(NutritionMetabolism.fallbackKcalNeutral)"
     @State private var baseCaloriesTargetIsManual: Bool = false
+    @State private var nutritionGoal: String = "maintain"
     @State private var profileSex: String?
     @State private var birthDate: Date = Date()
     @State private var hasBirthDate: Bool = false
@@ -2298,6 +2300,26 @@ struct ProfileView: View {
 
                         Divider().opacity(0.15)
                         HStack {
+                            Text("Nutrition goal")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            if editingProfile {
+                                Picker("Nutrition goal", selection: $nutritionGoal) {
+                                    Text("Maintain").tag("maintain")
+                                    Text("Cut").tag("cut")
+                                    Text("Bulk").tag("bulk")
+                                    Text("Recomp").tag("recomp")
+                                }
+                                .pickerStyle(.menu)
+                            } else {
+                                Text(nutritionGoalLabel(nutritionGoal))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        Divider().opacity(0.15)
+                        HStack {
                             Text("Basal Metabolism / BMR (kcal)")
                                 .font(.subheadline.weight(.semibold))
                             Spacer()
@@ -2536,6 +2558,15 @@ struct ProfileView: View {
         baseCaloriesTarget = "\(resolved)"
     }
 
+    private func nutritionGoalLabel(_ goal: String) -> String {
+        switch goal {
+        case "cut": return "Cut"
+        case "bulk": return "Bulk"
+        case "recomp": return "Recomp"
+        default: return "Maintain"
+        }
+    }
+
     private func resolvedBaseCaloriesDisplayKcal() -> Int {
         let hText = heightCm.trimmingCharacters(in: .whitespacesAndNewlines)
         let height = Double(Int(hText) ?? 0)
@@ -2599,6 +2630,8 @@ struct ProfileView: View {
             } else if let weight = Double(wText.replacingOccurrences(of: ",", with: ".")), weight > 0 {
                 payload["weight_kg"] = AnyEncodable(weight)
             }
+
+            payload["nutrition_goal"] = AnyEncodable(nutritionGoal)
 
             guard !payload.isEmpty else { return }
 
@@ -2750,7 +2783,7 @@ struct ProfileView: View {
         do {
             let res1 = try await SupabaseManager.shared.client
                 .from("profiles")
-                .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth,sex,base_calories_target,base_calories_target_is_manual")
+                .select("user_id,username,avatar_url,bio,height_cm,weight_kg,birth_date:date_of_birth,sex,base_calories_target,base_calories_target_is_manual,nutrition_goal")
                 .eq("user_id", value: uid.uuidString)
                 .single()
                 .execute()
@@ -2780,6 +2813,7 @@ struct ProfileView: View {
             )
             self.baseCaloriesTarget = "\(displayKcal)"
             self.baseCaloriesTargetLoadedSnapshot = "\(displayKcal)"
+            self.nutritionGoal = profile.nutrition_goal ?? "maintain"
             self.hasBirthDate = profile.birth_date != nil
             self.birthDate = profile.birth_date ?? Date()
             await loadCoinsBalance(userId: uid)

@@ -130,7 +130,9 @@ begin
     if v_attacker_pool >= v_defender_pool then
       v_stronger_side := 'attacker';
       select * into v_nerf from public.liftr_combat_nerf_stats_to_target_v1(
-        v_defender_pool_full,
+        p_defender_health, p_defender_strength, p_defender_defense, p_defender_speed,
+        p_defender_agility, p_defender_stamina, p_defender_resistance,
+        p_defender_critical_rate, p_defender_intelligence, p_defender_exploration,
         p_attacker_health, p_attacker_strength, p_attacker_defense, p_attacker_speed,
         p_attacker_agility, p_attacker_stamina, p_attacker_resistance,
         p_attacker_critical_rate, p_attacker_intelligence, p_attacker_exploration
@@ -143,7 +145,9 @@ begin
     else
       v_stronger_side := 'defender';
       select * into v_nerf from public.liftr_combat_nerf_stats_to_target_v1(
-        v_attacker_pool_full,
+        p_attacker_health, p_attacker_strength, p_attacker_defense, p_attacker_speed,
+        p_attacker_agility, p_attacker_stamina, p_attacker_resistance,
+        p_attacker_critical_rate, p_attacker_intelligence, p_attacker_exploration,
         p_defender_health, p_defender_strength, p_defender_defense, p_defender_speed,
         p_defender_agility, p_defender_stamina, p_defender_resistance,
         p_defender_critical_rate, p_defender_intelligence, p_defender_exploration
@@ -407,7 +411,8 @@ begin
       if v_attacker_pool_comparison >= v_defender_pool_comparison then
         v_handicap_applied_to := 'attacker';
         select * into v_nerf from public.liftr_combat_nerf_stats_to_target_v1(
-          v_defender_pool_original,
+          v_d_health, v_d_strength, v_d_defense, v_d_speed, v_d_agility, v_d_stamina,
+          v_d_resistance, v_d_critical_rate, v_d_intelligence, v_d_exploration,
           v_a_health, v_a_strength, v_a_defense, v_a_speed, v_a_agility, v_a_stamina,
           v_a_resistance, v_a_critical_rate, v_a_intelligence, v_a_exploration
         );
@@ -424,7 +429,8 @@ begin
       else
         v_handicap_applied_to := 'defender';
         select * into v_nerf from public.liftr_combat_nerf_stats_to_target_v1(
-          v_attacker_pool_original,
+          v_a_health, v_a_strength, v_a_defense, v_a_speed, v_a_agility, v_a_stamina,
+          v_a_resistance, v_a_critical_rate, v_a_intelligence, v_a_exploration,
           v_d_health, v_d_strength, v_d_defense, v_d_speed, v_d_agility, v_d_stamina,
           v_d_resistance, v_d_critical_rate, v_d_intelligence, v_d_exploration
         );

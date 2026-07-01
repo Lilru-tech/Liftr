@@ -73,11 +73,15 @@ object PetService {
         return decodeHatchAtMs(res.data)
     }
 
-    suspend fun feed(supabase: SupabaseClient, itemType: String) {
+    suspend fun feed(supabase: SupabaseClient, itemType: String, quantity: Int = 1) {
         supabase.postgrest.rpc(
             BackendContracts.Rpc.FEED_PET_V1,
-            buildJsonObject { put("p_item_type", itemType) }
+            buildJsonObject {
+                put("p_item_type", itemType)
+                put("p_quantity", quantity)
+            }
         ) { }
+        PetRefreshBus.notifyPetStateDidChange()
     }
 
     suspend fun confirmEvolution(supabase: SupabaseClient) {
@@ -293,6 +297,12 @@ data class PetLogWire(
 ) {
     fun title(): String = when (eventType.trim().lowercase()) {
         "item_used", "fed" -> {
+            val displayName = details?.get("display_name")?.takeIf { it.isNotBlank() }
+            if (displayName != null) {
+                val qty = details?.get("quantity")?.toIntOrNull() ?: 1
+                if (qty > 1) return "Used $displayName ×$qty"
+                return "Used $displayName"
+            }
             val name = details?.get("reason") ?: itemType
             if (name != null) "Used ${name.replace('_', ' ').replaceFirstChar { it.uppercase() }}"
             else "Used item"

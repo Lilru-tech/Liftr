@@ -223,6 +223,7 @@ private struct NutritionMacroRing: View {
 
 private struct NutritionMacroDashboard: View {
     let recommendation: DailyNutritionRecommendation
+    let macroTargets: NutritionMetabolism.MacroTargets
 
     var body: some View {
         HStack(spacing: 8) {
@@ -236,21 +237,21 @@ private struct NutritionMacroDashboard: View {
             NutritionMacroRing(
                 label: "Protein",
                 value: recommendation.total_protein_g_consumed,
-                target: NutritionDisplayTargets.proteinG,
+                target: macroTargets.proteinG,
                 unit: "g",
                 color: .blue
             )
             NutritionMacroRing(
                 label: "Carbs",
                 value: recommendation.total_carbs_g_consumed,
-                target: NutritionDisplayTargets.carbsG,
+                target: macroTargets.carbsG,
                 unit: "g",
                 color: .green
             )
             NutritionMacroRing(
                 label: "Fat",
                 value: recommendation.total_fat_g_consumed,
-                target: NutritionDisplayTargets.fatG,
+                target: macroTargets.fatG,
                 unit: "g",
                 color: .yellow
             )
@@ -258,16 +259,63 @@ private struct NutritionMacroDashboard: View {
     }
 }
 
+private struct NutritionDailyInsightCard: View {
+    let insight: DailyNutritionInsights
+
+    var body: some View {
+        if let top = insight.insights.first {
+            VStack(alignment: .leading, spacing: 8) {
+                Label(top.title, systemImage: insightIcon(for: top.sentiment))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(insightColor(for: top.sentiment))
+                Text(top.body)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.primary.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        } else if !insight.recommendation_text.isEmpty {
+            Text(insight.recommendation_text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.primary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
+    private func insightIcon(for sentiment: String) -> String {
+        switch sentiment {
+        case "positive": return "hand.thumbsup.fill"
+        case "warning": return "exclamationmark.triangle.fill"
+        default: return "lightbulb.fill"
+        }
+    }
+
+    private func insightColor(for sentiment: String) -> Color {
+        switch sentiment {
+        case "positive": return .green
+        case "warning": return .orange
+        default: return .blue
+        }
+    }
+}
+
 private struct NutritionMicroNutrientsSection: View {
     let recommendation: DailyNutritionRecommendation
+    let macroTargets: NutritionMetabolism.MacroTargets
 
     var body: some View {
         DisclosureGroup("More nutrients") {
             VStack(spacing: 10) {
-                microBar("Saturated fat", value: recommendation.total_saturated_fat_g_consumed, target: NutritionDisplayTargets.saturatedFatG, unit: "g")
-                microBar("Sugars", value: recommendation.total_sugars_g_consumed, target: NutritionDisplayTargets.sugarsG, unit: "g")
-                microBar("Fiber", value: recommendation.total_fiber_g_consumed, target: NutritionDisplayTargets.fiberG, unit: "g")
-                microBar("Sodium", value: recommendation.total_sodium_mg_consumed, target: NutritionDisplayTargets.sodiumMg, unit: "mg")
+                microBar("Saturated fat", value: recommendation.total_saturated_fat_g_consumed, target: macroTargets.saturatedFatG, unit: "g")
+                microBar("Sugars", value: recommendation.total_sugars_g_consumed, target: macroTargets.sugarsG, unit: "g")
+                microBar("Fiber", value: recommendation.total_fiber_g_consumed, target: macroTargets.fiberG, unit: "g")
+                microBar("Sodium", value: recommendation.total_sodium_mg_consumed, target: macroTargets.sodiumMg, unit: "mg")
             }
             .padding(.top, 6)
         }
@@ -330,6 +378,8 @@ final class NutritionViewModel: ObservableObject {
     @Published var smartInsightsLoading = false
     @Published var smartInsights: SmartNutritionRecommendation?
     @Published var smartInsightsError: String?
+    @Published var dailyInsight: DailyNutritionInsights?
+    @Published var profileWeightKg: Double?
 
     @Published var highlightsLoading = false
     @Published var highlights: NutritionHighlights?
@@ -349,6 +399,10 @@ final class NutritionViewModel: ObservableObject {
         let weekStart = cal.date(byAdding: .day, value: -6, to: today) ?? today
         insightsToDate = today
         insightsFromDate = weekStart
+    }
+
+    var macroTargets: NutritionMetabolism.MacroTargets {
+        NutritionMetabolism.macroTargets(weightKg: profileWeightKg)
     }
 
     func load(userId: UUID?, showLoadingIndicator: Bool = true) async {
@@ -371,8 +425,12 @@ final class NutritionViewModel: ObservableObject {
             async let plannedMonthTask = NutritionManager.fetchMonthPlannedMealCounts(userId: userId, month: monthDate)
             async let plannedTask = NutritionManager.fetchPlannedItems(userId: userId, date: selectedDate)
             async let invitesTask = NutritionManager.fetchPendingInvites(userId: userId)
+            async let dailyInsightTask = NutritionManager.fetchDailyInsights(for: selectedDate)
+            async let weightTask = NutritionManager.fetchProfileWeightKg(userId: userId)
             diaryItems = try await itemsTask
             recommendation = try await recTask
+            dailyInsight = try? await dailyInsightTask
+            profileWeightKg = try? await weightTask
             let balance = try await monthTask
             let plannedCounts = try await plannedMonthTask
             monthDayBalance = NutritionManager.mergeMonthBalanceWithPlanned(balance, plannedCounts: plannedCounts)
@@ -937,14 +995,17 @@ struct NutritionView: View {
             if vm.loading && vm.recommendation == nil {
                 ProgressView()
             } else if let rec = vm.recommendation {
-                NutritionMacroDashboard(recommendation: rec)
+                NutritionMacroDashboard(recommendation: rec, macroTargets: vm.macroTargets)
                 HStack(spacing: 8) {
                     balanceColumn(title: "Metabolism (BMR)", value: rec.base_calories_target, color: .blue)
                     balanceColumn(title: "Activity burned", value: rec.total_calories_burned_active, color: .mint)
                     balanceColumn(title: "Consumed", value: rec.total_calories_consumed, color: .orange)
                 }
                 NutritionCalorieBudgetStatusRow(remainingKcal: rec.displayRemainingCalories)
-                NutritionMicroNutrientsSection(recommendation: rec)
+                if let dailyInsight = vm.dailyInsight {
+                    NutritionDailyInsightCard(insight: dailyInsight)
+                }
+                NutritionMicroNutrientsSection(recommendation: rec, macroTargets: vm.macroTargets)
             } else {
                 Text("Log meals to see your calorie balance.")
                     .font(.subheadline)

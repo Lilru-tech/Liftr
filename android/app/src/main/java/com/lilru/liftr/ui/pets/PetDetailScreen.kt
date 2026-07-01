@@ -63,6 +63,7 @@ import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.data.PetCombatUserStatsWire
 import com.lilru.liftr.data.PetEnergyPricing
 import com.lilru.liftr.data.PetInstanceWire
+import com.lilru.liftr.data.PetInventoryWire
 import com.lilru.liftr.data.PetService
 import com.lilru.liftr.data.PetStatsWire
 import com.lilru.liftr.data.ProfileEnergyWire
@@ -91,6 +92,7 @@ fun PetDetailScreen(
     }
     var selectedTab by remember { mutableIntStateOf(0) }
     var showStatCombatHelp by rememberSaveable { mutableStateOf(false) }
+    var selectedFood by remember { mutableStateOf<PetInventoryWire?>(null) }
     val statCombatHelpSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     LaunchedEffect(Unit) {
@@ -160,11 +162,8 @@ fun PetDetailScreen(
                 stats = ui.data?.stats,
                 xpRequired = ui.data?.xpRequired ?: 1,
                 canEvolve = ui.data?.canEvolve == true,
-                inventory = ui.data?.inventory.orEmpty(),
-                feeding = ui.feeding,
                 evolving = ui.evolving,
                 onEvolve = { vm.confirmEvolution() },
-                onFeed = { vm.feed(it) },
                 energy = ui.data?.energy,
                 onOpenMarket = onOpenMarket,
                 onStatGuideClick = { showStatCombatHelp = true }
@@ -189,7 +188,7 @@ fun PetDetailScreen(
                 FoodSection(
                     inventory = ui.data?.inventory.orEmpty(),
                     feeding = ui.feeding,
-                    onFeed = { vm.feed(it) }
+                    onSelectFood = { selectedFood = it }
                 )
             } else {
                 PetLogsSection(
@@ -218,6 +217,28 @@ fun PetDetailScreen(
                 sheetState = statCombatHelpSheetState
             ) {
                 PetStatCombatHelpSheetContent(onClose = { showStatCombatHelp = false })
+            }
+        }
+
+        selectedFood?.let { food ->
+            Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable { selectedFood = null }
+                )
+                FeedFoodOverlay(
+                    itemType = food.itemType,
+                    ownedQuantity = food.quantity,
+                    supabase = supabase,
+                    onClose = { selectedFood = null },
+                    onFeedSuccess = {
+                        vm.load()
+                        vm.reloadLogs()
+                    },
+                    modifier = Modifier.align(Alignment.Center)
+                )
             }
         }
     }
@@ -323,11 +344,8 @@ private fun HatchedSection(
     stats: PetStatsWire?,
     xpRequired: Int,
     canEvolve: Boolean,
-    inventory: List<com.lilru.liftr.data.PetInventoryWire>,
-    feeding: Boolean,
     evolving: Boolean,
     onEvolve: () -> Unit,
-    onFeed: (String) -> Unit,
     energy: ProfileEnergyWire? = null,
     onOpenMarket: (() -> Unit)? = null,
     onStatGuideClick: (() -> Unit)? = null
@@ -451,9 +469,9 @@ private fun CollapsibleSection(
 
 @Composable
 private fun FoodSection(
-    inventory: List<com.lilru.liftr.data.PetInventoryWire>,
+    inventory: List<PetInventoryWire>,
     feeding: Boolean,
-    onFeed: (String) -> Unit
+    onSelectFood: (PetInventoryWire) -> Unit
 ) {
     Text("Food", fontWeight = FontWeight.SemiBold)
     val foods = inventory.filter { it.itemType in FOOD_TYPES && it.quantity > 0 }
@@ -465,8 +483,8 @@ private fun FoodSection(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             foods.forEach { item ->
-                TextButton(onClick = { onFeed(item.itemType) }, enabled = !feeding) {
-                    Text("${item.itemType.substringAfter("food_")} ×${item.quantity}")
+                TextButton(onClick = { onSelectFood(item) }, enabled = !feeding) {
+                    Text("${PetFoodItemType.displayName(item.itemType)} ×${item.quantity}")
                 }
             }
         }

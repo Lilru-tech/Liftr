@@ -107,6 +107,29 @@ enum NutritionMetabolism {
             referenceDate: referenceDate
         )
     }
+
+    struct MacroTargets {
+        let proteinG: Double
+        let carbsG: Double
+        let fatG: Double
+        let saturatedFatG: Double
+        let sugarsG: Double
+        let fiberG: Double
+        let sodiumMg: Double
+    }
+
+    static func macroTargets(weightKg: Double?, sex: String? = nil) -> MacroTargets {
+        let weight = imputedWeightKg(sex: sex, weightKg: weightKg)
+        return MacroTargets(
+            proteinG: (1.8 * weight).rounded(),
+            carbsG: (2.5 * weight).rounded(),
+            fatG: (0.9 * weight).rounded(),
+            saturatedFatG: 20,
+            sugarsG: 50,
+            fiberG: 28,
+            sodiumMg: 2300
+        )
+    }
 }
 
 private extension Comparable {

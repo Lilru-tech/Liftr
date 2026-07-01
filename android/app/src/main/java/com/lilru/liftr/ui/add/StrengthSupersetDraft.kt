@@ -109,6 +109,22 @@ const val STRENGTH_ROUTINE_FULL_SELECT =
 const val STRENGTH_ROUTINE_FULL_SELECT_LEGACY =
     "id,name,updated_at,strength_routine_exercises(exercise_id,order_index,notes,custom_name,strength_routine_sets(set_number,reps,weight_kg,rpe,rest_sec,notes,weight_segments))"
 
+suspend fun patchWorkoutExerciseSupersetsForEdit(
+    supabase: SupabaseClient,
+    exercises: List<StrengthExerciseDraft>
+) {
+    val compacted = compactSupersetMetadata(exercises)
+    for (ex in compacted) {
+        val weId = ex.workoutExerciseId ?: continue
+        val patch = buildJsonObject {
+            applyRoutineExerciseSupersetFields(ex)
+        }
+        supabase.from(BackendContracts.Tables.WORKOUT_EXERCISES).update(patch) {
+            filter { eq("id", weId) }
+        }
+    }
+}
+
 fun canStartSupersetAt(list: List<StrengthExerciseDraft>, index: Int): Boolean {
     if (list.size < 2) return false
     if (index < 0 || index >= list.lastIndex) return false

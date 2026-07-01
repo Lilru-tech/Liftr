@@ -49,7 +49,8 @@ private data class ProfileRow(
     @SerialName("date_of_birth") val dateOfBirth: String? = null,
     val sex: String? = null,
     @SerialName("base_calories_target") val baseCaloriesTarget: Int? = null,
-    @SerialName("base_calories_target_is_manual") val baseCaloriesTargetIsManual: Boolean = false
+    @SerialName("base_calories_target_is_manual") val baseCaloriesTargetIsManual: Boolean = false,
+    @SerialName("nutrition_goal") val nutritionGoal: String? = null
 )
 
 @Serializable
@@ -129,6 +130,7 @@ data class ProfileUiState(
     val baseCaloriesTargetDraft: String = "${BackendContracts.NutritionMetabolism.FALLBACK_KCAL_NEUTRAL}",
     val baseCaloriesTargetLoadedSnapshot: String = "${BackendContracts.NutritionMetabolism.FALLBACK_KCAL_NEUTRAL}",
     val baseCaloriesTargetIsManual: Boolean = false,
+    val nutritionGoalDraft: String = "maintain",
     val profileSex: String? = null,
     val hasBirthDate: Boolean = false,
     val birthDateMillis: Long? = null,
@@ -170,7 +172,7 @@ class ProfileViewModel(
                     supabase.from(BackendContracts.Tables.PROFILES)
                         .select(
                             columns = Columns.raw(
-                                "user_id, username, avatar_url, bio, height_cm, weight_kg, date_of_birth, sex, base_calories_target, base_calories_target_is_manual"
+                                "user_id, username, avatar_url, bio, height_cm, weight_kg, date_of_birth, sex, base_calories_target, base_calories_target_is_manual, nutrition_goal"
                             )
                         ) {
                             filter { eq("user_id", uid) }
@@ -277,6 +279,7 @@ class ProfileViewModel(
                     baseCaloriesTargetIsManual = profile?.baseCaloriesTargetIsManual == true,
                     baseCaloriesTargetDraft = resolvedBaseCaloriesDraft(profile, dobStr).toString(),
                     baseCaloriesTargetLoadedSnapshot = resolvedBaseCaloriesDraft(profile, dobStr).toString(),
+                    nutritionGoalDraft = profile?.nutritionGoal?.takeIf { it.isNotBlank() } ?: "maintain",
                     hasBirthDate = dobStr != null,
                     birthDateMillis = dobMillis,
                     weeklyGoalsDone = headerSnippets?.goalsDone ?: 0,
@@ -403,6 +406,10 @@ class ProfileViewModel(
         _uiState.value = _uiState.value.copy(baseCaloriesTargetDraft = value.filter { it.isDigit() })
     }
 
+    fun setNutritionGoalDraft(value: String) {
+        _uiState.value = _uiState.value.copy(nutritionGoalDraft = value)
+    }
+
     fun setWeightKgDraft(value: String) {
         _uiState.value = _uiState.value.copy(weightKgDraft = value)
     }
@@ -489,6 +496,7 @@ class ProfileViewModel(
                     } else {
                         put("date_of_birth", JsonNull)
                     }
+                    put(BackendContracts.ProfileColumns.NUTRITION_GOAL, s.nutritionGoalDraft)
                 }
                 supabase.from(BackendContracts.Tables.PROFILES).update(payload) {
                     filter { eq("user_id", me) }
@@ -509,6 +517,7 @@ class ProfileViewModel(
                     baseCaloriesTargetDraft = resolvedDraft.toString(),
                     baseCaloriesTargetLoadedSnapshot = resolvedDraft.toString(),
                     baseCaloriesTargetIsManual = baseCal != null || s.baseCaloriesTargetIsManual,
+                    nutritionGoalDraft = s.nutritionGoalDraft,
                     hasBirthDate = s.hasBirthDate,
                     birthDateMillis = s.birthDateMillis
                 )
