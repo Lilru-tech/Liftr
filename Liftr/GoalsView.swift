@@ -15,6 +15,7 @@ struct GoalsView: View {
     @State private var allTimeStats: GoalStats?
     @State private var duplicateMessage = ""
     @State private var showCompleted = false
+    @State private var selectedGoal: GoalRowUI?
     private var effectiveUserId: UUID? { userId ?? app.userId }
     private var isOwnProfile: Bool { effectiveUserId != nil && effectiveUserId == app.userId }
     private var currentWeekStart: Date { GoalsManager.currentWeekStart() }
@@ -132,7 +133,7 @@ struct GoalsView: View {
                         Section {
                             ForEach(activeGoals) { g in
                                 goalCard(g)
-                                    .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                                    .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                     .listRowBackground(Color.clear)
                             }
                             .if(isOwnProfile) { view in
@@ -162,9 +163,9 @@ struct GoalsView: View {
                                     
                                 }
                                 .padding(.vertical, 10)
-                                .padding(.horizontal, 12)
+                                .padding(.horizontal, 16)
                             }
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, 16)
                             .padding(.top, 6)
                             .textCase(nil)
                         }
@@ -205,17 +206,17 @@ struct GoalsView: View {
                                             .foregroundStyle(.primary.opacity(0.75))
                                     }
                                     .padding(.vertical, 10)
-                                    .padding(.horizontal, 12)
+                                    .padding(.horizontal, 16)
                                 }
                             }
                             .buttonStyle(.plain)
                             .listRowBackground(Color.clear)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
 
                             if showCompleted {
                                 ForEach(finishedGoalsUI) { g in
                                     goalCard(g)
-                                        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12))
+                                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                                         .listRowBackground(Color.clear)
                                 }
                             }
@@ -230,6 +231,9 @@ struct GoalsView: View {
             }
         }
         .navigationTitle(isOwnProfile ? "My Goals" : "\(viewedUsername)'s Goals")
+        .navigationDestination(item: $selectedGoal) { g in
+            GoalContributionsView(goal: g)
+        }
         .accessibilityIdentifier("goals.screen")
         .toolbar {
             if isOwnProfile {
@@ -452,23 +456,11 @@ struct GoalsView: View {
     }
     
     private func goalCard(_ g: GoalRowUI) -> some View {
-        NavigationLink {
-            GoalContributionsView(goal: g)
-        } label: {
-            goalCardContent(g)
-        }
-        .buttonStyle(.plain)
-        .overlay(alignment: .bottomTrailing) {
-            if isOwnProfile && !g.isCompleted && !isFinished(g) {
-                Button {
-                    Task { await refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .padding(8)
+        goalCardContent(g)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selectedGoal = g
             }
-        }
     }
 
     private func goalCardContent(_ g: GoalRowUI) -> some View {
@@ -525,10 +517,18 @@ struct GoalsView: View {
                     .overlay(Capsule().stroke(.white.opacity(0.12)))
 
                     Spacer()
+
+                    if isOwnProfile && !g.isCompleted && !isFinished(g) {
+                        Button {
+                            Task { await refresh() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 }
             }
             .padding(12)
-            .padding(.trailing, isOwnProfile && !g.isCompleted && !isFinished(g) ? 40 : 0)
             .opacity(g.isCompleted ? 0.78 : 1.0)
         }
     }

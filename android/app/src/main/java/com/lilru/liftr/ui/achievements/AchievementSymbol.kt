@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.MilitaryTech
 import androidx.compose.material.icons.filled.MonetizationOn
+import androidx.compose.material.icons.filled.MonitorWeight
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Pool
 import androidx.compose.material.icons.filled.Sports
@@ -60,6 +61,7 @@ fun imageVectorForAchievement(code: String, category: String): ImageVector {
         c.startsWith("streak_") || c.startsWith("multi_streak_") -> Icons.Filled.Bolt
         c.startsWith("pet_") -> Icons.Filled.Pets
         c.startsWith("coins_") -> Icons.Filled.MonetizationOn
+        c.startsWith("body_weight_") -> Icons.Filled.MonitorWeight
         c.startsWith("first_workout") || c.startsWith("workouts_") || c.startsWith("achievements_") ||
             c.startsWith("first_fail") || c.startsWith("night_workout") || c.startsWith("morning_workout") ||
             c.startsWith("double_session") || c.startsWith("zero_day") -> Icons.Filled.Star
@@ -71,6 +73,7 @@ fun imageVectorForAchievement(code: String, category: String): ImageVector {
         k == "social" -> Icons.Filled.Group
         k == "pet" -> Icons.Filled.Pets
         k == "coins" -> Icons.Filled.MonetizationOn
+        k == "health" -> Icons.Filled.MonitorWeight
         else -> Icons.Filled.Star
     }
 }
@@ -110,6 +113,7 @@ fun prettySubtypeFromCode(code: String, fallbackCategory: String): String {
         c.startsWith("strength_superset_") -> "Super series"
         c.startsWith("pet_") -> "Pets"
         c.startsWith("coins_") -> "Liftr Coins"
+        c.startsWith("body_weight_") -> "Body Weight"
         else -> fallbackCategory.replaceFirstChar { it.titlecase() }
     }
 }

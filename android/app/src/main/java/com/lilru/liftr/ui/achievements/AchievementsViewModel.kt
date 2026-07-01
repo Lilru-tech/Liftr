@@ -61,7 +61,7 @@ data class AchievementRowUi(
 enum class AchievementLockFilter { ALL, UNLOCKED, LOCKED, TRACKED }
 
 enum class AchievementCategoryFilter {
-    ALL, GENERAL, STRENGTH, CARDIO, SPORT, SOCIAL, STREAK, RANKING, PET, COINS;
+    ALL, GENERAL, STRENGTH, CARDIO, SPORT, SOCIAL, STREAK, RANKING, PET, COINS, HEALTH;
 
     val label: String
         get() = when (this) {
@@ -75,6 +75,7 @@ enum class AchievementCategoryFilter {
             RANKING -> "Ranking"
             PET -> "Pet"
             COINS -> "Coins"
+            HEALTH -> "Health"
         }
 }
 

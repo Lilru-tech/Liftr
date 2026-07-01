@@ -22,12 +22,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
 import com.lilru.liftr.data.BackendContracts
+import com.lilru.liftr.nutrition.NutritionMetabolism
 import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Composable
 fun NutritionMacroDashboard(
     recommendation: NutritionRecommendationUi,
+    macroTargets: NutritionMetabolism.MacroTargets = BackendContracts.NutritionDisplayTargets.macroTargets(null),
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -44,21 +46,21 @@ fun NutritionMacroDashboard(
         MacroRing(
             label = stringResource(R.string.nutrition_macro_protein),
             value = recommendation.proteinG,
-            target = BackendContracts.NutritionDisplayTargets.PROTEIN_G,
+            target = macroTargets.proteinG,
             unit = "g",
             color = Color(0xFF007AFF)
         )
         MacroRing(
             label = stringResource(R.string.nutrition_macro_carbs),
             value = recommendation.carbsG,
-            target = BackendContracts.NutritionDisplayTargets.CARBS_G,
+            target = macroTargets.carbsG,
             unit = "g",
             color = Color(0xFF34C759)
         )
         MacroRing(
             label = stringResource(R.string.nutrition_macro_fat),
             value = recommendation.fatG,
-            target = BackendContracts.NutritionDisplayTargets.FAT_G,
+            target = macroTargets.fatG,
             unit = "g",
             color = Color(0xFFFFCC00)
         )
@@ -108,6 +110,7 @@ fun NutritionMicroNutrientsSection(
     recommendation: NutritionRecommendationUi,
     expanded: Boolean,
     onToggle: () -> Unit,
+    macroTargets: NutritionMetabolism.MacroTargets = BackendContracts.NutritionDisplayTargets.macroTargets(null),
     modifier: Modifier = Modifier
 ) {
     Column(modifier.fillMaxWidth()) {
@@ -120,10 +123,10 @@ fun NutritionMicroNutrientsSection(
         }
         if (expanded) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                MicroBar(stringResource(R.string.nutrition_facts_saturated_fat), recommendation.saturatedFatG, BackendContracts.NutritionDisplayTargets.SATURATED_FAT_G, "g")
-                MicroBar(stringResource(R.string.nutrition_facts_sugars), recommendation.sugarsG, BackendContracts.NutritionDisplayTargets.SUGARS_G, "g")
-                MicroBar(stringResource(R.string.nutrition_facts_fiber), recommendation.fiberG, BackendContracts.NutritionDisplayTargets.FIBER_G, "g")
-                MicroBar(stringResource(R.string.nutrition_facts_sodium), recommendation.sodiumMg, BackendContracts.NutritionDisplayTargets.SODIUM_MG, "mg")
+                MicroBar(stringResource(R.string.nutrition_facts_saturated_fat), recommendation.saturatedFatG, macroTargets.saturatedFatG, "g")
+                MicroBar(stringResource(R.string.nutrition_facts_sugars), recommendation.sugarsG, macroTargets.sugarsG, "g")
+                MicroBar(stringResource(R.string.nutrition_facts_fiber), recommendation.fiberG, macroTargets.fiberG, "g")
+                MicroBar(stringResource(R.string.nutrition_facts_sodium), recommendation.sodiumMg, macroTargets.sodiumMg, "mg")
             }
         }
     }

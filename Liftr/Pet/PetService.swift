@@ -38,12 +38,13 @@ final class PetService {
         return decodeHatchAt(from: res.data)
     }
 
-    func feed(itemType: String) async throws {
+    func feed(itemType: String, quantity: Int = 1) async throws {
         struct Params: Encodable {
             let p_item_type: String
+            let p_quantity: Int
         }
         _ = try await client
-            .rpc("feed_pet_v1", params: Params(p_item_type: itemType))
+            .rpc("feed_pet_v1", params: Params(p_item_type: itemType, p_quantity: quantity))
             .execute()
     }
 

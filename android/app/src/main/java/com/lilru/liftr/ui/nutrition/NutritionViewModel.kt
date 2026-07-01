@@ -61,14 +61,43 @@ data class NutritionRecommendationUi(
     val recommendationText: String
 )
 
+data class SmartNutritionInsightUi(
+    val id: String,
+    val category: String,
+    val sentiment: String,
+    val priority: Int,
+    val title: String,
+    val body: String
+)
+
+data class NutritionDayMacroAvgUi(
+    val days: Int?,
+    val kcal: Double?,
+    val proteinG: Double?,
+    val carbsG: Double?,
+    val fatG: Double?
+)
+
 data class SmartNutritionRecommendationUi(
     val recommendationText: String,
     val alerts: List<String>,
+    val insights: List<SmartNutritionInsightUi>,
     val avgDailyConsumedKcal: Double,
     val avgDailyBurnedKcal: Double,
     val baseCaloriesTarget: Double,
     val avgDailyEnergyOut: Double,
-    val avgDailyRemainingBudget: Double
+    val avgDailyRemainingBudget: Double,
+    val nutritionGoal: String?,
+    val archetype: String?,
+    val trainingDayAvg: NutritionDayMacroAvgUi?,
+    val restDayAvg: NutritionDayMacroAvgUi?
+)
+
+data class DailyNutritionInsightsUi(
+    val recommendationText: String,
+    val insights: List<SmartNutritionInsightUi>,
+    val remainingCalories: Double?,
+    val dayKcal: Double?
 )
 
 data class NutritionHighlightsFoodItemUi(
@@ -203,6 +232,8 @@ data class NutritionUiState(
     val month: YearMonth = YearMonth.now(),
     val monthDayBalance: Map<LocalDate, NutritionMonthDayBalance> = emptyMap(),
     val recommendation: NutritionRecommendationUi? = null,
+    val dailyInsight: DailyNutritionInsightsUi? = null,
+    val profileWeightKg: Double? = null,
     val diaryByMeal: Map<String, List<NutritionDiaryItemUi>> = emptyMap(),
     val overlay: NutritionOverlay = NutritionOverlay.None,
     val addSearchQuery: String = "",
@@ -378,14 +409,51 @@ private data class DailyNutritionRecommendationWire(
 )
 
 @Serializable
+private data class SmartNutritionInsightWire(
+    val id: String,
+    val category: String,
+    val sentiment: String,
+    val priority: Int = 0,
+    val title: String,
+    val body: String
+)
+
+@Serializable
+private data class NutritionDayMacroAvgWire(
+    val days: Int? = null,
+    val kcal: Double? = null,
+    @SerialName("protein_g") val proteinG: Double? = null,
+    @SerialName("carbs_g") val carbsG: Double? = null,
+    @SerialName("fat_g") val fatG: Double? = null
+)
+
+@Serializable
 private data class SmartNutritionRecommendationWire(
     @SerialName(BackendContracts.NutritionRpcKeys.RECOMMENDATION_TEXT) val recommendationText: String,
     @SerialName(BackendContracts.NutritionRpcKeys.ALERTS) val alerts: List<String> = emptyList(),
+    @SerialName(BackendContracts.NutritionRpcKeys.INSIGHTS) val insights: List<SmartNutritionInsightWire> = emptyList(),
     @SerialName(BackendContracts.NutritionRpcKeys.AVG_DAILY_CONSUMED_KCAL) val avgDailyConsumedKcal: Double,
     @SerialName(BackendContracts.NutritionRpcKeys.AVG_DAILY_BURNED_KCAL) val avgDailyBurnedKcal: Double,
     @SerialName(BackendContracts.NutritionRpcKeys.BASE_CALORIES_TARGET) val baseCaloriesTarget: Double? = null,
     @SerialName(BackendContracts.NutritionRpcKeys.AVG_DAILY_ENERGY_OUT) val avgDailyEnergyOut: Double? = null,
-    @SerialName(BackendContracts.NutritionRpcKeys.AVG_DAILY_REMAINING_BUDGET) val avgDailyRemainingBudget: Double? = null
+    @SerialName(BackendContracts.NutritionRpcKeys.AVG_DAILY_REMAINING_BUDGET) val avgDailyRemainingBudget: Double? = null,
+    @SerialName(BackendContracts.NutritionRpcKeys.NUTRITION_GOAL) val nutritionGoal: String? = null,
+    @SerialName(BackendContracts.NutritionRpcKeys.ARCHETYPE) val archetype: String? = null,
+    @SerialName(BackendContracts.NutritionRpcKeys.TRAINING_DAY_AVG) val trainingDayAvg: NutritionDayMacroAvgWire? = null,
+    @SerialName(BackendContracts.NutritionRpcKeys.REST_DAY_AVG) val restDayAvg: NutritionDayMacroAvgWire? = null
+)
+
+@Serializable
+private data class DailyNutritionInsightsWire(
+    @SerialName(BackendContracts.NutritionRpcKeys.RECOMMENDATION_TEXT) val recommendationText: String,
+    @SerialName(BackendContracts.NutritionRpcKeys.INSIGHTS) val insights: List<SmartNutritionInsightWire> = emptyList(),
+    @SerialName(BackendContracts.NutritionRpcKeys.REMAINING_CALORIES) val remainingCalories: Double? = null,
+    @SerialName(BackendContracts.NutritionRpcKeys.DAY_KCAL) val dayKcal: Double? = null
+)
+
+@Serializable
+private data class ProfileWeightWire(
+    @SerialName("weight_kg") val weightKg: Double? = null
 )
 
 @Serializable
@@ -1465,7 +1533,12 @@ class NutritionViewModel(
                 val state = _uiState.value
                 val dateStr = state.selectedDate.format(dateFormatter)
                 val monthStart = state.month.atDay(1)
-                val rec = fetchRecommendation(dateStr)
+                val recDeferred = async { fetchRecommendation(dateStr) }
+                val dailyDeferred = async { runCatching { fetchDailyInsights(dateStr) }.getOrNull() }
+                val weightDeferred = async { runCatching { fetchProfileWeightKg(userId) }.getOrNull() }
+                val rec = recDeferred.await()
+                val dailyInsight = dailyDeferred.await()
+                val profileWeightKg = weightDeferred.await()
                 val diary = fetchDiaryItems(userId, dateStr)
                 val monthBalance = mergeMonthBalanceWithPlanned(
                     fetchMonthBalance(monthStart),
@@ -1478,6 +1551,8 @@ class NutritionViewModel(
                     it.copy(
                         loading = false,
                         recommendation = rec,
+                        dailyInsight = dailyInsight,
+                        profileWeightKg = profileWeightKg,
                         diaryByMeal = grouped,
                         monthDayBalance = monthBalance,
                         plannedItems = planned,
@@ -1964,7 +2039,7 @@ class NutritionViewModel(
         to: LocalDate
     ): SmartNutritionRecommendationUi {
         val res = supabase.postgrest.rpc(
-            BackendContracts.Rpc.GET_SMART_NUTRITION_RECOMMENDATION_V1,
+            BackendContracts.Rpc.GET_SMART_NUTRITION_RECOMMENDATION_V2,
             buildJsonObject {
                 put("p_start_date", dateFormatter.format(from))
                 put("p_end_date", dateFormatter.format(to))
@@ -1976,18 +2051,74 @@ class NutritionViewModel(
         } else {
             SupabaseResponseDecoding.json.decodeFromString<SmartNutritionRecommendationWire>(trimmed)
         }
-        val base = (wire.baseCaloriesTarget ?: BackendContracts.NutritionDisplayTargets.CALORIES_KCAL)
-            .coerceAtLeast(1.0)
-        val energyOut = wire.avgDailyEnergyOut ?: (base + wire.avgDailyBurnedKcal)
-        val remaining = wire.avgDailyRemainingBudget ?: (energyOut - wire.avgDailyConsumedKcal)
-        return SmartNutritionRecommendationUi(
+        return wire.toUi()
+    }
+
+    private suspend fun fetchDailyInsights(dateStr: String): DailyNutritionInsightsUi {
+        val res = supabase.postgrest.rpc(
+            BackendContracts.Rpc.GET_DAILY_NUTRITION_INSIGHTS_V1,
+            buildJsonObject { put("p_date", dateStr) }
+        ) { }
+        val trimmed = res.data.trim()
+        val wire = if (trimmed.startsWith("[")) {
+            SupabaseResponseDecoding.decodeListOrObject<DailyNutritionInsightsWire>(trimmed).first()
+        } else {
+            SupabaseResponseDecoding.json.decodeFromString<DailyNutritionInsightsWire>(trimmed)
+        }
+        return DailyNutritionInsightsUi(
             recommendationText = wire.recommendationText,
-            alerts = wire.alerts,
-            avgDailyConsumedKcal = wire.avgDailyConsumedKcal,
-            avgDailyBurnedKcal = wire.avgDailyBurnedKcal,
+            insights = wire.insights.map { it.toUi() },
+            remainingCalories = wire.remainingCalories,
+            dayKcal = wire.dayKcal
+        )
+    }
+
+    private suspend fun fetchProfileWeightKg(userId: String): Double? {
+        val res = supabase.from(BackendContracts.Tables.PROFILES)
+            .select(columns = Columns.raw("weight_kg")) {
+                filter { eq("user_id", userId) }
+                limit(1)
+            }
+        return SupabaseResponseDecoding.decodeListOrObject<ProfileWeightWire>(res.data)
+            .firstOrNull()
+            ?.weightKg
+    }
+
+    private fun SmartNutritionInsightWire.toUi() = SmartNutritionInsightUi(
+        id = id,
+        category = category,
+        sentiment = sentiment,
+        priority = priority,
+        title = title,
+        body = body
+    )
+
+    private fun NutritionDayMacroAvgWire.toUi() = NutritionDayMacroAvgUi(
+        days = days,
+        kcal = kcal,
+        proteinG = proteinG,
+        carbsG = carbsG,
+        fatG = fatG
+    )
+
+    private fun SmartNutritionRecommendationWire.toUi(): SmartNutritionRecommendationUi {
+        val base = (baseCaloriesTarget ?: BackendContracts.NutritionDisplayTargets.CALORIES_KCAL)
+            .coerceAtLeast(1.0)
+        val energyOut = avgDailyEnergyOut ?: (base + avgDailyBurnedKcal)
+        val remaining = avgDailyRemainingBudget ?: (energyOut - avgDailyConsumedKcal)
+        return SmartNutritionRecommendationUi(
+            recommendationText = recommendationText,
+            alerts = alerts,
+            insights = insights.map { it.toUi() },
+            avgDailyConsumedKcal = avgDailyConsumedKcal,
+            avgDailyBurnedKcal = avgDailyBurnedKcal,
             baseCaloriesTarget = base,
             avgDailyEnergyOut = energyOut,
-            avgDailyRemainingBudget = remaining
+            avgDailyRemainingBudget = remaining,
+            nutritionGoal = nutritionGoal,
+            archetype = archetype,
+            trainingDayAvg = trainingDayAvg?.toUi(),
+            restDayAvg = restDayAvg?.toUi()
         )
     }
 

@@ -155,13 +155,14 @@ class PetViewModel(
         pollJob = null
     }
 
-    fun feed(itemType: String) {
+    fun feed(itemType: String, quantity: Int = 1, onSuccess: (() -> Unit)? = null) {
         viewModelScope.launch {
             _ui.update { it.copy(feeding = true, error = null) }
-            runCatching { PetService.feed(supabase, itemType) }
+            runCatching { PetService.feed(supabase, itemType, quantity) }
                 .onSuccess {
                     load()
                     reloadLogs()
+                    onSuccess?.invoke()
                 }
                 .onFailure { e -> _ui.update { it.copy(error = e.message) } }
             _ui.update { it.copy(feeding = false) }

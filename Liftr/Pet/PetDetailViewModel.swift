@@ -138,11 +138,11 @@ final class PetDetailViewModel: ObservableObject {
         }
     }
 
-    func feed(itemType: String) async {
+    func feed(itemType: String, quantity: Int = 1) async {
         isFeeding = true
         defer { isFeeding = false }
         do {
-            try await PetService.shared.feed(itemType: itemType)
+            try await PetService.shared.feed(itemType: itemType, quantity: quantity)
             await load()
             await reloadLogs()
             PetRefreshCenter.notifyPetStateDidChange()

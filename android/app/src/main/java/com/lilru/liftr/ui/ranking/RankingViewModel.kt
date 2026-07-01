@@ -26,6 +26,7 @@ enum class RankingMetric {
     CALORIES,
     LEVEL,
     COINS,
+    TASK_POINTS,
     BEST_WORKOUT,
     GOALS_COMPLETED,
     DUELS_WON,
@@ -122,6 +123,7 @@ internal fun rankingMetricSheetSections(kind: RankingKind): List<RankingMetricSh
         RankingMetric.CALORIES,
         RankingMetric.LEVEL,
         RankingMetric.COINS,
+        RankingMetric.TASK_POINTS,
         RankingMetric.BEST_WORKOUT,
         RankingMetric.GOALS_COMPLETED,
         RankingMetric.DUELS_WON,
@@ -303,6 +305,7 @@ class RankingViewModel(
                     RankingMetric.CALORIES -> fetchCalories(st)
                     RankingMetric.LEVEL -> fetchLevel(st)
                     RankingMetric.COINS -> fetchCoins(st)
+                    RankingMetric.TASK_POINTS -> fetchTaskPoints(st)
                     RankingMetric.BEST_WORKOUT -> fetchBestWorkouts(st)
                     RankingMetric.GOALS_COMPLETED -> fetchGoalsCompleted(st)
                     RankingMetric.DUELS_WON -> fetchDuelsWon(st)
@@ -559,6 +562,30 @@ class RankingViewModel(
                     avatarUrl = o.optNullableString("avatar_url"),
                     primary = "${o.optInt("coins_balance", 0)} Liftr Coins",
                     secondary = "Liftr Coins"
+                )
+            }
+        }
+        return rows to emptyList()
+    }
+
+    private suspend fun fetchTaskPoints(st: RankingUiState): Pair<List<RankingUserRow>, List<RankingWorkoutRow>> {
+        val params = buildJsonObject {
+            put("p_scope", mapScope(st.scope))
+            put("p_limit", 100)
+            put("p_sex", JsonNull)
+            put("p_age_band", JsonNull)
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_TASK_POINTS_LEADERBOARD_V1, params) { }
+        val arr = parseArrayFlexible(res.data)
+        val rows = (0 until arr.length()).mapNotNull { idx ->
+            arr.optJSONObject(idx)?.let { o ->
+                RankingUserRow(
+                    rank = o.optInt("rank", idx + 1),
+                    userId = o.optString("user_id"),
+                    username = o.optNullableString("username"),
+                    avatarUrl = o.optNullableString("avatar_url"),
+                    primary = "${o.optInt("task_points_total", 0)} Task Points",
+                    secondary = "Task Points"
                 )
             }
         }

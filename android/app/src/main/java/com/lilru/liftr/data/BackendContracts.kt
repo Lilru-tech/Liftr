@@ -69,6 +69,9 @@ object BackendContracts {
         const val TERRITORY_CELLS = "territory_cells"
         const val TERRITORY_CAPTURE_EVENTS = "territory_capture_events"
         const val SPORT_SESSIONS = "sport_sessions"
+        const val TASK_TEMPLATES = "task_templates"
+        const val USER_TASKS = "user_tasks"
+        const val USER_WEEKLY_TASK_REFRESHES = "user_weekly_task_refreshes"
         const val STRENGTH_ROUTINES = "strength_routines"
         const val STRENGTH_ROUTINE_EXERCISES = "strength_routine_exercises"
         const val STRENGTH_ROUTINE_FOLDERS = "strength_routine_folders"
@@ -99,6 +102,7 @@ object BackendContracts {
         const val VW_PROFILE_COUNTS = "vw_profile_counts"
         const val VW_SPORT_SESSION_FULL = "vw_sport_session_full"
         const val VW_USER_PRS = "vw_user_prs"
+        const val VW_USER_TASK_POINTS_ROLLUP = "vw_user_task_points_rollup"
         const val VW_WORKOUT_VOLUME = "vw_workout_volume"
     }
 
@@ -114,6 +118,7 @@ object BackendContracts {
         const val DELETE_MY_ACCOUNT = "delete_my_account"
         const val FETCH_DUAL_LINKED_STRENGTH_WORKOUT_DATA = "fetch_dual_linked_strength_workout_data"
         const val FINISH_STRENGTH_WORKOUT_V1 = "finish_strength_workout_v1"
+        const val UPDATE_STRENGTH_WORKOUT_V1 = "update_strength_workout_v1"
         const val GET_BEST_WORKOUTS_LEADERBOARD_V1 = "get_best_workouts_leaderboard_v1"
         const val GET_CALORIES_LEADERBOARD_V1 = "get_calories_leaderboard_v1"
         const val GET_CARDIO_DISTANCE_LEADERBOARD_V1 = "get_cardio_distance_leaderboard_v1"
@@ -135,6 +140,15 @@ object BackendContracts {
         const val GET_LEADERBOARD_V1 = "get_leaderboard_v1"
         const val GET_LEVEL_LEADERBOARD_V1 = "get_level_leaderboard_v1"
         const val GET_COINS_LEADERBOARD_V1 = "get_coins_leaderboard_v1"
+        const val GET_TASK_POINTS_LEADERBOARD_V1 = "get_task_points_leaderboard_v1"
+        const val LIST_MY_WEEKLY_TASKS_V1 = "list_my_weekly_tasks_v1"
+        const val ACCEPT_USER_TASK_V1 = "accept_user_task_v1"
+        const val UNACCEPT_USER_TASK_V1 = "unaccept_user_task_v1"
+        const val REFRESH_MY_WEEKLY_TASKS_V1 = "refresh_my_weekly_tasks_v1"
+        const val GET_USER_TASK_DETAIL_V1 = "get_user_task_detail_v1"
+        const val LIST_USER_TASK_WORKOUTS_V1 = "list_user_task_workouts_v1"
+        const val GET_MY_WEEKLY_TASKS_HISTORY_V1 = "get_my_weekly_tasks_history_v1"
+        const val GET_MY_WEEKLY_TASKS_HOME_SUMMARY_V1 = "get_my_weekly_tasks_home_summary_v1"
         const val LIST_MY_COIN_TRANSACTIONS_V1 = "list_my_coin_transactions_v1"
         const val GET_MY_COIN_SOURCES_V1 = "get_my_coin_sources_v1"
         const val GET_MY_PET_V1 = "get_my_pet_v1"
@@ -178,6 +192,8 @@ object BackendContracts {
         const val GET_DAILY_NUTRITION_RECOMMENDATION_V1 = "get_daily_nutrition_recommendation_v1"
         const val GET_NUTRITION_MONTH_BALANCE_V1 = "get_nutrition_month_balance_v1"
         const val GET_SMART_NUTRITION_RECOMMENDATION_V1 = "get_smart_nutrition_recommendation_v1"
+        const val GET_SMART_NUTRITION_RECOMMENDATION_V2 = "get_smart_nutrition_recommendation_v2"
+        const val GET_DAILY_NUTRITION_INSIGHTS_V1 = "get_daily_nutrition_insights_v1"
         const val GET_NUTRITION_HIGHLIGHTS_V1 = "get_nutrition_highlights_v1"
         const val GET_NUTRITION_RANKING_V1 = "get_nutrition_ranking_v1"
         const val LIST_COMPARABLE_WORKOUTS_V1 = "list_comparable_workouts_v1"
@@ -250,6 +266,7 @@ object BackendContracts {
     object ProfileColumns {
         const val BASE_CALORIES_TARGET = "base_calories_target"
         const val BASE_CALORIES_TARGET_IS_MANUAL = "base_calories_target_is_manual"
+        const val NUTRITION_GOAL = "nutrition_goal"
         const val COINS_BALANCE = "coins_balance"
     }
 
@@ -318,6 +335,13 @@ object BackendContracts {
         const val AVG_DAILY_BURNED_KCAL = "avg_daily_burned_kcal"
         const val AVG_DAILY_ENERGY_OUT = "avg_daily_energy_out"
         const val AVG_DAILY_REMAINING_BUDGET = "avg_daily_remaining_budget"
+        const val INSIGHTS = "insights"
+        const val NUTRITION_GOAL = "nutrition_goal"
+        const val ARCHETYPE = "archetype"
+        const val TRAINING_DAY_AVG = "training_day_avg"
+        const val REST_DAY_AVG = "rest_day_avg"
+        const val WEIGHT_TREND = "weight_trend"
+        const val DAY_KCAL = "day_kcal"
     }
 
     object NutritionDisplayTargets {
@@ -329,6 +353,9 @@ object BackendContracts {
         const val SUGARS_G = 50.0
         const val FIBER_G = 28.0
         const val SODIUM_MG = 2300.0
+
+        fun macroTargets(weightKg: Double?, sex: String? = null): com.lilru.liftr.nutrition.NutritionMetabolism.MacroTargets =
+            com.lilru.liftr.nutrition.NutritionMetabolism.macroTargets(weightKg, sex)
     }
 
     object NutritionMealSlots {

@@ -35,7 +35,7 @@ Tablas:
 - `hyrox_session_stats`
 - `level_thresholds`
 - `notifications`
-- `profiles` (incl. `coins_balance int` — server-managed cached wallet; ver [`Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql`](../Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql))
+- `profiles` (incl. `coins_balance int` — server-managed cached wallet; ver [`Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql`](../Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql); incl. `task_points_total int` — server-managed cumulative Task Points; ver [`Liftr/supabase/migrations/20260718160000_personal_weekly_tasks_v1.sql`](../Liftr/supabase/migrations/20260718160000_personal_weekly_tasks_v1.sql))
 - `racket_session_stats`
 - `rugby_session_stats`
 - `ski_session_stats`
@@ -62,7 +62,7 @@ Tablas:
 - `coin_transactions` (ledger unificado Liftr Coins; `amount` positivo = earn, negativo = futuro spend; ver migración `20260610120000_liftr_coins_ledger_v1.sql`)
   - Columns: `id` (uuid PK), `user_id` (uuid FK `auth.users`), `amount` (int), `action_type` (text), `reference_id` (uuid nullable), `created_at` (timestamptz)
   - RLS: `authenticated` **SELECT** own rows only; **INSERT/UPDATE/DELETE** revoked (solo triggers / `SECURITY DEFINER`)
-  - Idempotencia: índices únicos parciales en `(user_id, reference_id, action_type)` para `like_given`, `user_followed`, `earned_follower`, `comment_added`, `workout_logged`, `achievement_unlocked`, `weekly_goal_perfect_week`, `workout_consistency_streak` (solo `amount > 0`)
+  - Idempotencia: índices únicos parciales en `(user_id, reference_id, action_type)` para `like_given`, `user_followed`, `earned_follower`, `comment_added`, `workout_logged`, `achievement_unlocked`, `weekly_goal_perfect_week`, `workout_consistency_streak`, `user_task_completed` (solo `amount > 0`), `weekly_task_refresh`
 - `coin_reward_rules` (matriz de recompensas; `action_type` PK, `amount`, `enabled`)
 - `segments` (PostGIS `geography(LineString,4326)`; MVP solo creación por usuario; ver `docs/migrations/segments_mvp_v1.sql` o `segments_mvp_v1_part01_*.sql`–`part06_*.sql` si el cliente parte por `;`). Tras [`Liftr/supabase/migrations/20260509120000_segment_route_coverage_v1.sql`](../Liftr/supabase/migrations/20260509120000_segment_route_coverage_v1.sql): columnas opcionales `source_workout_id`, `source_start_fraction`, `source_end_fraction`, y `geog`/`geojson` coherente con el RPC de creación.
 - `segment_efforts` (match por buffer sobre `route_geojson` + tiempo estimado; ver misma migración). Tras la migración `20260509120000_segment_route_coverage_v1.sql`: columna **`route_coverage`** (0–1); trigger antes de insert/actualizar que exige ≥0.95 salvo el entreno origen.
@@ -72,6 +72,9 @@ Tablas:
 - `challenge_templates` (catálogo de retos; `metric_kind`, `cadence`, umbrales, ámbitos opcionales `scope_activity_code` / `scope_sport` / `scope_muscle_primary` / `scope_stat_key`; ver [`docs/migrations/challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql) y migración `20260618194500_challenges_full_coverage_v1.sql`)
 - `challenge_instances` (ventana temporal por plantilla, p. ej. semana ISO)
 - `challenge_claims` (adjudicaciones: usuario, rango, `workout_id`, `adjudication_ts`)
+- `task_templates` (catálogo de tareas semanales procedurales; `category` `cardio`|`strength`|`sport`, `target_metric` incluye `total_reps`, `total_sets`, `routes_sent`, `problems_sent`, `hyrox_weekly_minutes`, `sport_sessions_weekly`, `generation_mode` `static_beginner`|`dynamic_scaled`, recompensas base, ámbitos opcionales; motor v4 con slots ponderados por historial 45d; ver [`Liftr/supabase/migrations/20260718180001_personal_weekly_tasks_v4.sql`](../Liftr/supabase/migrations/20260718180001_personal_weekly_tasks_v4.sql))
+- `user_tasks` (instancias por usuario/semana; `status` `generated`|`accepted`|`completed`|`expired`; recompensas congeladas; `difficulty_band` `easy`|`medium`|`hard`|`extreme`; evaluación al publicar entreno)
+- `user_weekly_task_refreshes` (`user_id`, `week_start`, `refresh_count`; máx. 3 refrescos de menú por semana)
 - `nutrition_ingredients` (catálogo de ingredientes; ver [`Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql))
   - Columns: `id` (uuid PK), `user_id` (uuid nullable FK `auth.users` — `NULL` = ingrediente global del sistema), `name` (text), `calories_per_100g` (numeric(6,2)), `protein_per_100g`, `carbs_per_100g`, `fat_per_100g` (numeric(5,2)), `saturated_fat_per_100g`, `sugars_per_100g`, `fiber_per_100g` (numeric(5,2) default 0), `sodium_mg_per_100g` (numeric(6,2) default 0), `is_public` (boolean default false); ver migración `20260525140000_nutrition_full_profile_v1.sql`
   - RLS: `authenticated` **SELECT** si `is_public = true` OR `user_id = auth.uid()`; **INSERT/UPDATE/DELETE** solo si `user_id = auth.uid()`
@@ -111,6 +114,7 @@ Vistas:
 - `vw_sport_session_full`
 - `vw_user_prs`
 - `vw_workout_volume`
+- `vw_user_task_points_rollup` (agregados de `user_tasks` completadas por usuario)
 
 ## Inventario de RPC detectadas en iOS
 
@@ -140,6 +144,15 @@ Vistas:
 - `get_leaderboard_v1`
 - `get_level_leaderboard_v1`
 - `get_coins_leaderboard_v1` (`p_scope`, `p_limit`, `p_sex`, `p_age_band`) — ranking por `profiles.coins_balance`; sin periodo
+- `get_task_points_leaderboard_v1` (`p_scope`, `p_limit`, `p_sex`, `p_age_band`) — ranking all-time por `profiles.task_points_total`; sin periodo
+- `list_my_weekly_tasks_v1` () — menú semanal del caller: hasta 5 tareas + `accepted_count` (solo `accepted`, no `completed`), `accept_slots_remaining`, `week_start`, `week_end`, `difficulty_band`, `refresh_count`, `free_refresh_available`, `next_refresh_cost_coins` (0/100/150/null); evalúa completado vía `evaluate_user_tasks_for_user` antes de devolver filas; ver [`Liftr/supabase/migrations/20260720120000_personal_weekly_tasks_completion_v1.sql`](../Liftr/supabase/migrations/20260720120000_personal_weekly_tasks_completion_v1.sql); `SECURITY DEFINER`
+- `accept_user_task_v1` (`p_task_id` uuid) — acepta tarea `generated` de la semana actual; máx. 3 **accepted** por semana (`completed` libera slot); evalúa completado tras aceptar; errores `user_task_accept_cap_reached`, `user_task_not_acceptable`
+- `unaccept_user_task_v1` (`p_task_id` uuid) — revierte `accepted` → `generated`; solo semana actual no expirada; error `user_task_not_unacceptable`
+- `refresh_my_weekly_tasks_v1` () — regenera tareas `generated` (conserva aceptadas/completadas); 1º gratis, 2º 100 monedas, 3º 150; error `weekly_task_refresh_cap`, `insufficient_coins`
+- `get_user_task_detail_v1` (`p_task_id` uuid) — detalle ampliado: scopes, fechas, `progress_percent`, `progress_current_label`, `progress_target_label`; ver [`Liftr/supabase/migrations/20260719120000_personal_weekly_tasks_progress_detail_v1.sql`](../Liftr/supabase/migrations/20260719120000_personal_weekly_tasks_progress_detail_v1.sql)
+- `list_user_task_workouts_v1` (`p_task_id` uuid) — entrenos de la semana que aplican al ámbito de la tarea + `contribution_value`, `qualifies`, `contribution_label`; progreso best-in-week vía `_user_tasks_workout_contribution_value`
+- `get_my_weekly_tasks_history_v1` (`p_tasks_limit` int default 10, `p_tasks_offset` int default 0) — JSON `{ stats, completed_tasks[], total_completed_tasks, has_more }`; completed tasks all-time incl. current week, paginated by `completed_at desc`; ver [`Liftr/supabase/migrations/20260721120000_personal_weekly_tasks_history_v2.sql`](../Liftr/supabase/migrations/20260721120000_personal_weekly_tasks_history_v2.sql)
+- `get_my_weekly_tasks_home_summary_v1` () — JSON ligero para pill de Home: `{ week_start, accepted_count, accept_slots_remaining, available_count, completed_count_this_week }`; evalúa completado vía `evaluate_user_tasks_for_user`; ver [`Liftr/supabase/migrations/20260721120002_weekly_tasks_home_summary_v1.sql`](../Liftr/supabase/migrations/20260721120002_weekly_tasks_home_summary_v1.sql)
 - `get_pet_leaderboard_v1` (`p_metric`, `p_scope`, `p_limit`, `p_sex`, `p_age_band`) — rankings de mascotas, sin periodo (all-time). `p_metric`: `level`, `total_stats`, `health`, `strength`, `defense` (requieren mascota activa eclosionada), `battles`, `wins`, `losses`, `win_rate` (mín. 5 combates), `max_damage_dealt`, `max_damage_taken`, `total_damage_dealt`, `total_damage_taken` (de `pet_combat_user_stats`, requieren `total_battles > 0`). Devuelve `rank`, `user_id`, `username`, `avatar_url`, `value` (numeric; `win_rate` en %), `battles`, `pet_name` (custom o display name del tipo), `pet_level`
 - `list_my_coin_transactions_v1` (`p_limit` default 20, max 50; `p_offset` default 0) — historial propio paginado (`order by created_at desc, id desc`); `SECURITY DEFINER`
 - `get_my_coin_sources_v1` (`p_start`, `p_end` timestamptz opcionales; ambos null = all-time) — agregación de monedas **ganadas** (`amount > 0`) por categoría (`source_key`); excluye backfills de economía; `SECURITY DEFINER`
@@ -180,6 +193,8 @@ Vistas:
 - `update_meal_plan_target` (`p_target_id` uuid, `p_quantity_g` numeric, `p_meal_slot` text opcional) → `void`; solo `target_user_id = auth.uid()`; `status in ('pending','accepted')`; actualiza `quantity_g` y opcionalmente `nutrition_meal_plans.meal_slot` del plan del target; errores: `NOT_AUTHENTICATED`, `TARGET_NOT_FOUND`, `FORBIDDEN`, `INVALID_STATUS`, `INVALID_QUANTITY`
 - `complete_meal_plan_as_eaten` (`p_target_id` uuid) → `uuid` (id del nuevo `nutrition_diary_logs`); solo `target_user_id = auth.uid()`; requiere `accepted`; food desde `coalesce(target.ingredient_id, plan.ingredient_id)` / receta análoga; inserta diario y marca `eaten`; errores adicionales: `ALREADY_EATEN`, `PLAN_NOT_FOUND`; ver `20260531120000` + `20260531150000`
 - `get_smart_nutrition_recommendation_v1` (`p_start_date` date, `p_end_date` date) → `jsonb` con análisis multi-día, alertas heurísticas y promedios diarios; ventana máxima 70 días inclusive (cap silencioso en servidor); `SECURITY DEFINER`; alertas y narrativa en inglés con ejemplos de alimentos embebidos en el texto; ver `20260528260000_smart_nutrition_food_recommendations_v10.sql`
+- `get_smart_nutrition_recommendation_v2` (`p_start_date` date, `p_end_date` date) → `jsonb` v11: `insights[]` (tarjetas estructuradas), `training_day_avg`, `rest_day_avg`, `weight_trend`, `nutrition_goal`, `archetype`; mantiene `recommendation_text`, `alerts[]` y campos metabólicos de v1; ventana máx 70 días; copy en inglés; ver `20260828140000_smart_nutrition_recommendation_v11.sql`
+- `get_daily_nutrition_insights_v1` (`p_date` date) → `jsonb` con `recommendation_text`, `insights[]` (top reglas v11 para un solo día), `remaining_calories`, `day_kcal`; tab Nutrition principal iOS/Android; ver `20260828140000_smart_nutrition_recommendation_v11.sql`
 - `get_nutrition_highlights_v1` () → `jsonb` all-time personal stats from `nutrition_diary_logs` (same kcal math as smart recommendation); `SECURITY DEFINER`; ver `20260603120000_nutrition_highlights_v1.sql`. Response:
   - `days_logged`, `total_log_entries`, `first_log_date`, `last_log_date` (ISO `yyyy-MM-dd` or null)
   - `avg_kcal_per_logged_day` (numeric)
@@ -291,7 +306,18 @@ Migración: [`Liftr/supabase/migrations/20260608120000_wearable_route_jobs_v1.sq
 - **Seguimiento personal (tracked):** tabla `user_tracked_achievements` (`user_id`, `achievement_id`, `tracked_at`); máximo **5** filas activas por usuario; RPC **`toggle_tracked_achievement_v1(p_achievement_id)`** → `{ tracked, tracked_count }`; RPC **`get_tracked_achievement_count_v1(p_user_id)`** → `{ count, top_progress_pct }` para el pill de Home; al insertar en `user_achievements` un trigger elimina la fila tracked correspondiente (auto-untrack al desbloquear).
 - `check_and_unlock_achievements_for` con el mismo `p_user_id` recalcula desbloqueos; también puede invocarse vía **triggers** al crear workouts, seguir, like, comentar, etc. (ver definición y triggers en el proyecto Supabase).
 - Mapeo de **icono por prefijo de `code` y categoría** (sustituto local si `icon_url` falla o es nulo): iOS en `Liftr/AchievementsGridView.swift` (`symbolForAchievement`, `prettySubtype`), Android en `ui/achievements/AchievementSymbol.kt`. Convención recomendable para códigos nuevos: `disciplina_umbral` (p. ej. `ski_distance_50k`) alineada con el resto de prefijos de catálogo.
-- **Categorías de filtro en app:** `general`, `strength`, `cardio`, `sport`, `social`, `streak`, `ranking`, **`pet`**, **`coins`** (iOS `CategoryFilter`, Android `AchievementCategoryFilter`).
+- **Categorías de filtro en app:** `general`, `strength`, `cardio`, `sport`, `social`, `streak`, `ranking`, **`pet`**, **`coins`**, **`health`** (iOS `CategoryFilter`, Android `AchievementCategoryFilter`).
+
+### Body weight / Health achievements (migración `20260701120000_body_weight_achievements_v1.sql`)
+
+- **8 filas** de catálogo en categoría **`health`**, prefijo `body_weight_*`. Recompensan **hábitos de registro** (consciencia y consistencia), **nunca** cambios de peso, velocidad de pérdida/ganancia, BMI ni metas de apariencia.
+- **Política de seguridad (obligatoria):** no añadir logros de kg perdidos/ganados, rachas diarias de pesaje, rankings por peso, ni lógica que lea `weight_kg` deltas en desbloqueos. Si en el futuro se piden logros orientados a resultado, deben exigir ventana ≥28 días, suelo BMI 18.5, tope de ritmo ≤0.5 kg/semana y alineación con `profiles.nutrition_goal`.
+- **Desbloqueo:** `unlock_body_weight_achievements(p_user_id)`, invocado desde `check_and_unlock_achievements_for` y trigger `trg_achievements_on_body_weight_entry` → `body_weight_entries` (INSERT).
+- **Métricas:** `liftr_user_body_weight_metrics(p_user_id)` — conteos, meses distintos, span en días, flags `has_manual` / `has_health_sync` (sin deltas de peso).
+- **Progreso en UI:** `get_user_achievements` y `get_tracked_achievement_count_v1` delegan en `liftr_achievement_progress_current` para códigos `body_weight_*`.
+- **Verify:** [`Liftr/supabase/verify/body_weight_achievements_v1.sql`](../Liftr/supabase/verify/body_weight_achievements_v1.sql).
+
+Códigos: `body_weight_first_log`, `body_weight_logs_10`, `body_weight_logs_50`, `body_weight_health_sync_first`, `body_weight_months_3`, `body_weight_months_6`, `body_weight_span_90d`, `body_weight_sources_both`.
 
 ### Pet & Coins achievements (migración `20260628120000_pet_coin_achievements_v1.sql`)
 
@@ -361,6 +387,16 @@ Migración: [`Liftr/supabase/migrations/20260527120000_strength_workout_finish_p
 - **`_liftr_finish_strength_workout_core`**: tras `_liftr_replace_strength_exercise_sets`, ejecuta `_liftr_purge_incomplete_strength_workout` (borra series con `is_completed = false` y ejercicios sin series).
 - **Trigger** `purge_incomplete_strength_on_workout_finalize` en `workouts` (`BEFORE UPDATE OF ended_at`): red de seguridad cuando `ended_at` pasa de NULL a NOT NULL en entrenos `strength`.
 - Finalización = `ended_at` establecido + `state` `planned` → `published` (sin columna `status = completed`).
+
+### Edición de entreno de fuerza (`update_strength_workout_v1`)
+
+Migraciones: [`20260623120000_fix_update_strength_workout_finalize_order_v1.sql`](../Liftr/Liftr/supabase/migrations/20260623120000_fix_update_strength_workout_finalize_order_v1.sql), [`20260630120000_strength_save_bulk_side_effect_guards_v1.sql`](../Liftr/Liftr/supabase/migrations/20260630120000_strength_save_bulk_side_effect_guards_v1.sql).
+
+- iOS y Android **Edit workout** (fuerza) llaman al RPC **`update_strength_workout_v1`**; tras el RPC, ambos parchean superseries en `workout_exercises` (el RPC no escribe `superset_group_id` / `superset_position`).
+- **Orden obligatorio al guardar:** persistir metadatos de ejercicios + reemplazar series (`_liftr_replace_strength_exercise_sets`, series con `is_completed = true`) **antes** de establecer `ended_at` por primera vez. Si `ended_at` pasa de NULL a NOT NULL antes de guardar las series editadas, el trigger de purga puede borrar ejercicios aún referenciados en el payload y el RPC falla con `invalid workout exercise % for workout %`.
+- El RPC activa `liftr.strength_edit_save = on` para que el trigger de purga no corra a mitad del guardado; la purga explícita se ejecuta dentro del RPC justo antes de fijar `ended_at` en la primera finalización vía edición.
+- Durante `_liftr_replace_strength_exercise_sets`, `liftr.bulk_strength_replace = on` suprime triggers por fila de recálculo de score, PR y logros; al terminar el reemplazo, `_liftr_finalize_strength_bulk_side_effects` ejecuta una vez el rebuild de PRs de los ejercicios del payload y `check_and_unlock_achievements_for`. El RPC eleva `statement_timeout` local a 30s (el rol `authenticated` tiene 8s por defecto).
+- Cliente: borrar en servidor los `workout_exercise_id` eliminados en el editor antes del save; si el RPC devuelve `invalid workout exercise`, recargar ejercicios y pedir reintentar.
 
 ### Confirmación en cliente
 
@@ -521,7 +557,7 @@ Migraciones: [`20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/mig
 
 | Tabla | Uso cliente |
 |-------|-------------|
-| `profiles` | `base_calories_target` (integer, default 2000, not null) — valor guardado cuando el usuario define override manual; `base_calories_target_is_manual` (boolean, default `false`) — `true` = usar columna; `false` = BMR Mifflin-St Jeor en servidor |
+| `profiles` | `base_calories_target` (integer, default 2000, not null) — valor guardado cuando el usuario define override manual; `base_calories_target_is_manual` (boolean, default `false`) — `true` = usar columna; `false` = BMR Mifflin-St Jeor en servidor; `nutrition_goal` (text, default `maintain`, check `cut`/`bulk`/`maintain`/`recomp`) — objetivo nutricional para reglas de balance energético v11; `nutrition_goal_rate_kg_per_week` (numeric, nullable) — ritmo opcional en cut/bulk; migración `20260828120000_profiles_nutrition_goal_v1.sql` |
 | `nutrition_ingredients` | Búsqueda/alta de alimentos (`is_public` + propios); perfiles por 100g (macros + micros). Cliente iOS/Android: **INSERT**, **UPDATE** (macros + nombre), **DELETE** solo filas con `user_id = auth.uid()` y `is_public = false`. **DELETE** elimina en cascada favoritos y `nutrition_diary_logs` con ese `ingredient_id`. |
 | `nutrition_recipes` | Recetas propias + catálogo global (`user_id` null); columna opcional `description` (text). Cliente iOS/Android: **INSERT** (create), **UPDATE** (edit nombre/descripción + reemplazo de líneas en `nutrition_recipe_ingredients`), **DELETE** solo filas con `user_id = auth.uid()` y `is_public = false`. **DELETE** de receta elimina en cascada `nutrition_recipe_ingredients`, favoritos y `nutrition_diary_logs` con ese `recipe_id`. |
 | `nutrition_recipe_ingredients` | Composición de receta (lectura en presets del sistema); en edición el cliente borra todas las filas del `recipe_id` e inserta de nuevo |
@@ -577,6 +613,48 @@ Cuando disparan infracombustión, proteína baja (B), carbs bajos (A), patrón a
 ```
 
 **Balance metabólico (multi-día):** `avg_daily_energy_out` = `base_calories_target + avg_daily_burned_kcal`. `avg_daily_remaining_budget` = `avg_daily_energy_out − avg_daily_consumed_kcal` (misma lógica que `remaining_calories` del RPC diario). Migración UX/copy: `20260526230000_smart_nutrition_recommendation_v2_metabolic_ux.sql`.
+
+**RPC `get_smart_nutrition_recommendation_v2` (v11):** mismos parámetros y límites que v1. Requiere `auth.uid()`. Motor interno `nutrition_smart_recommendation_compute_v2(p_user_id, start, end)` con helpers: `nutrition_top_food_contributors_v1`, `nutrition_meal_slot_summary_v1`, `nutrition_training_rest_split_v1`, `nutrition_weight_trend_v1`, `nutrition_logging_quality_v1`. Reglas generan hasta **8** tarjetas en `insights[]` (prioridad + dedup vía `nutrition_rank_insights_v1`). Categorías: `positive`, `micronutrient`, `meal_timing`, `training_day`, `energy_balance`, `behavioral`, `logging_quality`. Cada insight: `{ id, category, sentiment, priority, title, body, metadata? }`. `recommendation_text` resume top 2 insights (no duplica tarjetas). Cliente iOS/Android consume v2 en Coach tab; v1 se conserva para rollback.
+
+```json
+{
+  "recommendation_text": "...",
+  "alerts": ["..."],
+  "insights": [
+    {
+      "id": "sodium_food_driver",
+      "category": "micronutrient",
+      "sentiment": "warning",
+      "priority": 95,
+      "title": "...",
+      "body": "..."
+    }
+  ],
+  "nutrition_goal": "maintain",
+  "archetype": "hybrid_athlete",
+  "avg_daily_consumed_kcal": 0.0,
+  "avg_daily_burned_kcal": 0.0,
+  "base_calories_target": 2000,
+  "avg_daily_energy_out": 0.0,
+  "avg_daily_remaining_budget": 0.0,
+  "training_day_avg": { "days": 0, "kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0 },
+  "rest_day_avg": { "days": 0, "kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0 },
+  "weight_trend": { "start_kg": null, "end_kg": null, "delta_kg": null, "samples": 0, "interpretation": "unknown" }
+}
+```
+
+**RPC `get_daily_nutrition_insights_v1`:** parámetro `p_date` (ISO `yyyy-MM-dd`). Reutiliza reglas v11 en ámbito de un día (p. ej. log parcial hoy). Respuesta:
+
+```json
+{
+  "recommendation_text": "...",
+  "insights": [{ "id": "...", "category": "...", "sentiment": "...", "priority": 0, "title": "...", "body": "..." }],
+  "remaining_calories": 0.0,
+  "day_kcal": 0.0
+}
+```
+
+**Anillos de macros (cliente):** objetivos por peso en tab principal — proteína 1,8 g/kg, carbs 2,5 g/kg, grasa 0,9 g/kg (`NutritionMetabolism.macroTargets` iOS/Android); fallback 70 kg si falta peso en perfil.
 
 **RPC `get_daily_nutrition_recommendation_v1`:** parámetro `p_date` (ISO `yyyy-MM-dd`). Respuesta JSON:
 
@@ -654,7 +732,7 @@ Moneda sin valor monetario real. Balance canónico: `profiles.coins_balance` (ac
 
 **Cliente — lectura:** `profiles.select(coins_balance)` en una petición **aparte** (falla en silencio → `0` si la migración aún no está desplegada). La cabecera de perfil no debe incluir `coins_balance` en el SELECT principal. Componentes: `CoinsBalanceBadge` (iOS/Android). Historial: `list_my_coin_transactions_v1`; desglose por fuente: `get_my_coin_sources_v1` (cliente envía `p_start`/`p_end` según periodo Week/Month/Year o omite ambos para all-time); limpiar: `clear_my_coin_history_v1`. Ranking: métrica **Liftr Coins** vía `get_coins_leaderboard_v1`. Banner efímero al ganar monedas (cliente compara balance antes/después).
 
-**`get_my_coin_sources_v1` — `source_key`:** `workouts`, `pet_workout_bonus`, `pet_coins`, `social`, `nutrition`, `achievements`, `goals_streaks`, `competition`, `pet_combat`, `other`. Excluye `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1`, `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1`.
+**`get_my_coin_sources_v1` — `source_key`:** `workouts`, `pet_workout_bonus`, `pet_coins`, `social`, `nutrition`, `achievements`, `goals_streaks`, `weekly_tasks`, `competition`, `pet_combat`, `other`. Excluye `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1`, `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1`.
 
 ## Pets & Mascots
 
@@ -682,7 +760,7 @@ Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); s
 | `list_pet_market_items_v1()` | Catálogo Market |
 | `buy_pet_market_item_v1(p_item_type, p_quantity)` | Compra con coins (ver reglas abajo) |
 | `start_pet_incubation_v1()` | Consume `pet_egg`; requiere `incubator` en inventario |
-| `feed_pet_v1(p_item_type)` | Alimentar pet activo (no egg) |
+| `feed_pet_v1(p_item_type, p_quantity default 1)` | Alimentar pet activo (no egg); consume `p_quantity` items en una transacción, XP aleatorio por unidad, un solo log `fed` agregado (`details.quantity`, `details.display_name`, `exp_gained` = total); `total_feedings` += quantity; level-ups entre rolls vía `check_pet_level_up` |
 | `confirm_pet_evolution_v1()` | Evolución manual en niveles 25/50/75/100 |
 | `update_pet_custom_name_v1(p_name)` | Renombrar pet equipado |
 | `reroll_pet_egg_v1()` | Reroll tipo/rareza del huevo incubando; coste `floor(50 × 1.1^reroll_count)` coins |
@@ -695,13 +773,13 @@ Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); s
 
 **XP:** `required_exp(level) = 50 × level²` (`pet_levels`). Comida: EXP aleatorio por matriz `pet_food_experience`.
 
-**Arena combat — stat roles (`liftr_combat_strike_v4` + turn order en `execute_pet_combat_v1`, migración `20260625120000_liftr_combat_balance_v4.sql`):** `health` → HP máximo en arena vía `liftr_combat_battle_hp_v1(health)` = `(health × 8 + 9) / 10` (80% del pool anterior); `strength` → daño base por golpe; `agility` → esquiva 3–28% (2% por punto de agi menos mitigación por int enemiga) **y** aporta daño (`×0.22`); `intelligence` → reduce esquiva enemiga, multiplicador de crítico **y** aporta daño (`×0.10`); `defense` + `resistance` → mitigación de daño recibido (promedio); `speed` → ataca primero cada ronda; `agility` también desempata turno si `speed` empata; `critical_rate` → probabilidad de crítico (hasta 50%); `stamina` → reduce penalización por fatiga tras ronda 12; `exploration` → bonus pequeño en el primer golpe; `happiness` → suelo mínimo de varianza de daño. Daño base: `1.22 × effective_strength × mitigation × …` (v3 usaba `1.4 × strength`). `liftr_combat_strike_v3` se conserva para rollback.
+**Arena combat — stat roles (`liftr_combat_strike_v4` + turn order en `execute_pet_combat_v1`, migración `20260625120000_liftr_combat_balance_v4.sql`):** `health` → HP máximo en arena vía `liftr_combat_arena_max_hp_v1(health)` = valor completo de health en combates con handicap; `liftr_combat_battle_hp_v1(health)` = `(health × 8 + 9) / 10` se conserva solo para usos legacy; `strength` → daño base por golpe; `agility` → esquiva 3–28% (2% por punto de agi menos mitigación por int enemiga) **y** aporta daño (`×0.22`); `intelligence` → reduce esquiva enemiga, multiplicador de crítico **y** aporta daño (`×0.10`); `defense` + `resistance` → mitigación de daño recibido (promedio); `speed` → ataca primero cada ronda; `agility` también desempata turno si `speed` empata; `critical_rate` → probabilidad de crítico (hasta 50%); `stamina` → reduce penalización por fatiga tras ronda 12; `exploration` → bonus pequeño en el primer golpe; `happiness` → suelo mínimo de varianza de daño. Daño base: `1.22 × effective_strength × mitigation × …` (v3 usaba `1.4 × strength`). `liftr_combat_strike_v3` se conserva para rollback.
 
 **Arena combat — balance de arquetipos (`20260625120000` + `20260626120000`):** v4: suelo `health_weight` 3 para tipos con peso ≤2; cap tank+DPS: si `health_weight ≥ 5` y `strength_weight ≥ 5`, `strength −1` y `happiness +1`; `monkey` 4/4 HP/str; `griffin` base 4/4 HP/str. v5 (paridad mismo nivel+rareza ~40–60% entre arquetipos de producción): `neon_panther` `strength_weight` 5→4, `exploration_weight` 3→4; `griffin` movilidad `speed` 5, `agility` 4, `intelligence` 2, `exploration` 3 (mantiene `resistance_weight` 5); `dragon` override explícito 4/4/6 HP/str/def, `intelligence` 4, `resistance` 4, `happiness` 4, `exploration` 4, `critical_rate` 1 (suma 40) (el cap v4 dejaba dragon en 6/6). Recompute: `recompute_pet_stats_combat_balance_v1()` — v4 en `20260625120100`, v5 en `20260626120100`; hatch con `liftr_compute_hatch_stats_v1` + re-roll de cada `level_up` en `pet_logs`. Verificación: `supabase/verify/combat_balance_v5.sql` + `combat_balance_v5_monte_carlo.py`.
 
 Cliente: botón ⓘ en Stats del pet y en comparativa pre-combate → `PetStatCombatHelpSheet` / `PetStatCombatHelpSheetContent` (incluye **Stat Balancing**, **Handicap Battles**, **Hardcore Challenge**). Pre-combate underdog: picker Balanced/Hardcore; preferencias `skipPetCombatUnbalancedWarning`, `petCombatChallengeMode`.
 
-**Arena combat — stat handicap (`20260618120000` + hardcore `20260619120000`):** pool de combate = suma de 10 stats (excluye `happiness`). Desbalanceado si `max(pool) * 100 > min(pool) * 105`. Modo **balanced** (default): nerf in-memory del lado fuerte hasta `floor(weaker_pool × 1.05)`. Modo **hardcore** (`execute_pet_combat_v1(p_target, p_disable_nerf_choice=true)` solo si el atacante es underdog): sin nerf; defensor a stats reales. `pet_combat_history.is_handicapped = true` en cualquier combate desbalanceado (balanced o hardcore). `get_pet_combat_head_to_head_v1` excluye filas `is_handicapped = true` del W/L/D competitivo (stats globales `pet_combat_user_stats` siguen contando todo). Preview `stat_balancing` añade `hardcore_buff_multiplier`, `hardcore_bonus_percent`. Recompensas hardcore: underdog gana → `liftr_combat_hardcore_rewards` = premium × `(stronger_pool / weaker_pool)`; fuerte gana → mínimo (`xp:10, coins:5`). Cliente: picker Balanced/Hardcore en modal underdog; preferencias `skipPetCombatUnbalancedWarning`, `petCombatChallengeMode`. Verify: `pet_combat_stat_handicap_v1.sql`, `pet_combat_hardcore_v1.sql`.
+**Arena combat — stat handicap (`20260618120000` + hardcore `20260619120000` + threshold `20260623120000` + nerf v2 `20260630140000`):** **comparison pool** para detectar desbalance = `floor(health × 0.25)` + suma de las otras 9 stats de combate (excluye `happiness`). Desbalanceado si `max(comparison_pool) * 100 > min(comparison_pool) * 125`. Modo **balanced** (default): nerf in-memory del lado fuerte vía `liftr_combat_nerf_stats_to_target_v1` hasta `weaker_effective_power × 1.05` usando `liftr_combat_effective_power_v1` (escala uniforme de las 10 stats de combate, sin volcar delta en health). Modo **hardcore** (`execute_pet_combat_v1(p_target, p_disable_nerf_choice=true)` solo si el atacante es underdog por comparison pool): sin nerf; defensor a stats reales. `pet_combat_history.is_handicapped = true` en cualquier combate desbalanceado (balanced o hardcore). `get_pet_combat_head_to_head_v1` excluye filas `is_handicapped = true` del W/L/D competitivo (stats globales `pet_combat_user_stats` siguen contando todo). Preview `stat_balancing` expone comparison pools en `attacker_stat_pool` / `defender_stat_pool`, más `hardcore_buff_multiplier`, `hardcore_bonus_percent` (ratio de comparison pools). Recompensas hardcore: underdog gana → `liftr_combat_hardcore_rewards` = premium × `(stronger_comparison_pool / weaker_comparison_pool)`; fuerte gana → mínimo (`xp:10, coins:5`). Cliente: picker Balanced/Hardcore en modal underdog; preferencias `skipPetCombatUnbalancedWarning`, `petCombatChallengeMode`; fallback cliente replica comparison pool + umbral 125. Verify: `pet_combat_stat_handicap_v1.sql`, `pet_combat_nerf_balance_v1.sql`, `pet_combat_nerf_production_calibration_v1.sql`, `combat_balance_nerf_monte_carlo.py`.
 
 **Subida de nivel — stats (`pet_level_stat_shared_budget_v1`):** un presupuesto compartido por subida vía `compute_pet_level_stat_delta_v1(pet_type, stage, user_id)` (llamada desde `distribute_pet_stats`). (1) `total_budget = floor(random() × (max − min + 1)) + min` según `pet_stage_rewards` del stage — **una sola tirada por nivel**; (2) por stat, jitter independiente `0.5 + random()` (50%–150%); (3) `raw = total_budget × get_pet_stat_multiplier × weight/total_weight × jitter`; `health = floor(raw × 20)`; resto `round(raw)`. Varianza por stat sin 11 presupuestos independientes (evita pantallas con mayoría de +0). `pet_logs.stats_delta` conserva la misma forma jsonb. Backfill histórico: `backfill_pet_level_stat_variance_v1()` — baseline hatch = stats actuales − suma de deltas `level_up`; re-tira cada log ordenado por `new_level` con stage resuelto por `resolve_pet_stage_at_time` (último log `evolution` antes del timestamp, si no `baby`). `critical_rate` (peso 1) puede seguir en 0 en baby. Fuera de alcance: stats iniciales al hatch (`generate_initial_pet_stats`) y bono evolución (`apply_evolution_stat_bonus`).
 

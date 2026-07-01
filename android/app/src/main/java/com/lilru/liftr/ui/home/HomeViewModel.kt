@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.lilru.liftr.data.BackendContracts
 import com.lilru.liftr.data.CoinManager
 import com.lilru.liftr.data.PremiumStatusStore
+import com.lilru.liftr.ui.tasks.WeeklyTasksHomeSummary
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
@@ -128,7 +129,8 @@ data class HomeUiState(
     val isGuestHomeFeed: Boolean = false,
     /** Last refresh had at least one followee (signed-in empty states). */
     val hasFollowees: Boolean = false,
-    val trackedAchievementCount: Int = 0
+    val trackedAchievementCount: Int = 0,
+    val weeklyTasksHomeSummary: WeeklyTasksHomeSummary? = null
 )
 
 class HomeViewModel(
@@ -390,7 +392,8 @@ class HomeViewModel(
                 val premium = PremiumStatusStore.isPremium.value
                 val r = recalcParallels(me, followees, visibleUserIds)
                 val trackedCount = loadTrackedAchievementCount(me)
-                HomeRefreshResult(enriched, month, prs, premium, canLoadMore, r, trackedCount)
+                val weeklyTasksSummary = loadWeeklyTasksHomeSummary()
+                HomeRefreshResult(enriched, month, prs, premium, canLoadMore, r, trackedCount, weeklyTasksSummary)
             }.onSuccess { h ->
                 Log.i(TAG, "HOME success. workouts=${h.enriched.size} filter=${_uiState.value.kindFilter}")
                 _uiState.value = _uiState.value.copy(
@@ -418,7 +421,8 @@ class HomeViewModel(
                     strongestWeekKcalMtd = h.r.strongestWeekKcalMtd,
                     bestSportScore = h.r.bestSportScore,
                     bestSportLabel = h.r.bestSportLabel,
-                    trackedAchievementCount = h.trackedAchievementCount
+                    trackedAchievementCount = h.trackedAchievementCount,
+                    weeklyTasksHomeSummary = h.weeklyTasksHomeSummary
                 )
             }.onFailure { e ->
                 Log.e(TAG, "HOME failure", e)
@@ -429,6 +433,13 @@ class HomeViewModel(
                     error = "HOME: " + (e.message?.take(260) ?: e::class.java.simpleName)
                 )
             }
+        }
+    }
+
+    fun refreshWeeklyTasksHomeSummary() {
+        viewModelScope.launch {
+            val summary = loadWeeklyTasksHomeSummary()
+            _uiState.update { it.copy(weeklyTasksHomeSummary = summary) }
         }
     }
 
@@ -455,8 +466,21 @@ class HomeViewModel(
         val premium: Boolean,
         val canLoadMore: Boolean,
         val r: RecalcResult,
-        val trackedAchievementCount: Int = 0
+        val trackedAchievementCount: Int = 0,
+        val weeklyTasksHomeSummary: WeeklyTasksHomeSummary? = null
     )
+
+    private suspend fun loadWeeklyTasksHomeSummary(): WeeklyTasksHomeSummary? = runCatching {
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.GET_MY_WEEKLY_TASKS_HOME_SUMMARY_V1) { }
+        val o = JSONObject(res.data)
+        WeeklyTasksHomeSummary(
+            weekStart = o.optString("week_start"),
+            acceptedCount = o.optInt("accepted_count", 0),
+            acceptSlotsRemaining = o.optInt("accept_slots_remaining", 0),
+            availableCount = o.optInt("available_count", 0),
+            completedCountThisWeek = o.optInt("completed_count_this_week", 0),
+        )
+    }.getOrNull()
 
     private suspend fun loadTrackedAchievementCount(me: String): Int = runCatching {
         val res = supabase.postgrest.rpc(

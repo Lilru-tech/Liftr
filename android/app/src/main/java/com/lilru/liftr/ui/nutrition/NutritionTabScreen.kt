@@ -417,7 +417,11 @@ private fun NutritionSummaryCard(
                 CircularProgressIndicator(Modifier.align(Alignment.CenterHorizontally))
             } else if (ui.recommendation != null) {
                 val rec = ui.recommendation!!
-                NutritionMacroDashboard(recommendation = rec)
+                val macroTargets = BackendContracts.NutritionDisplayTargets.macroTargets(ui.profileWeightKg)
+                NutritionMacroDashboard(recommendation = rec, macroTargets = macroTargets)
+                ui.dailyInsight?.let { daily ->
+                    NutritionDailyInsightCard(insight = daily)
+                }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NutritionBalanceColumnCard(
                         title = stringResource(R.string.nutrition_target_base),
@@ -442,7 +446,8 @@ private fun NutritionSummaryCard(
                 NutritionMicroNutrientsSection(
                     recommendation = rec,
                     expanded = ui.microExpanded,
-                    onToggle = { vm.toggleMicroExpanded() }
+                    onToggle = { vm.toggleMicroExpanded() },
+                    macroTargets = macroTargets
                 )
             } else {
                 Text(stringResource(R.string.nutrition_summary_empty), style = MaterialTheme.typography.bodySmall)

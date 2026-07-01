@@ -150,6 +150,14 @@ struct StrengthWorkoutSaveRegressionTests {
         #expect(compacted[2].supersetPosition == nil)
     }
 
+    @Test func strengthRemovedWorkoutExerciseIdsDiff() {
+        let removed = StrengthEditSaveSupport.removedWorkoutExerciseIds(
+            initial: Set([1, 2, 3]),
+            current: Set([2, 4])
+        )
+        #expect(removed == Set([1, 3]))
+    }
+
     @Test func collapseLegacyIdenticalSets() {
         let lines = [
             StrengthWorkoutFinishCollapse.Line(

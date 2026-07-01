@@ -879,9 +879,22 @@ fun ProfileTabScreen(
             }.getOrNull()
         }
     }
+    val reloadPetCombatPreview: suspend () -> Unit = reloadPetCombatPreview@{
+        val opponentId = profileUserId ?: return@reloadPetCombatPreview
+        if (ui.isOwnProfile) return@reloadPetCombatPreview
+        petCombatPreview = runCatching {
+            PetService.fetchCombatPreview(supabase, opponentId)
+        }.getOrNull()
+        petCombatHeadToHead = runCatching {
+            PetService.fetchCombatHeadToHead(supabase, opponentId)
+        }.getOrNull()
+    }
     val pullState = rememberPullRefreshState(
         refreshing = ui.isRefreshing,
-        onRefresh = { vm.refresh(false) }
+        onRefresh = {
+            vm.refresh(false)
+            scope.launch { reloadPetCombatPreview() }
+        }
     )
 
     val openMySegmentId = remember(segmentDetailId) {
@@ -1752,7 +1765,8 @@ fun ProfileTabScreen(
             val bottomInsetDp = if (profileNoAds) 18 else 70
             val preview = petCombatPreview
             val defenderPet = preview?.defender?.pet
-            if (preview != null && defenderPet != null && !defenderPet.evolutionStage.equals("egg", ignoreCase = true)) {
+            if (preview != null && defenderPet != null && profileUserId != null && !defenderPet.evolutionStage.equals("egg", ignoreCase = true)) {
+                val opponentId = profileUserId
                 ProfileOpponentPetFloatingOverlay(
                     preview = preview,
                     defenderPet = defenderPet,
@@ -1764,6 +1778,10 @@ fun ProfileTabScreen(
                         combatDisableNerfChoice = disableNerf
                         showPetCombatArena = true
                     },
+                    onRefreshPreview = {
+                        runCatching { PetService.fetchCombatPreview(supabase, opponentId) }.getOrNull()
+                    },
+                    onPreviewRefreshed = { petCombatPreview = it },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -1953,20 +1971,38 @@ private fun ProfilePersonalInformationCard(
                         )
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        stringResource(R.string.profile_weight_kg),
-                        style = MaterialTheme.typography.bodyLarge
+                if (editingPersonalInfo) {
+                    OutlinedTextField(
+                        value = ui.weightKgDraft,
+                        onValueChange = vm::setWeightKgDraft,
+                        label = { Text(stringResource(R.string.profile_weight_kg)) },
+                        singleLine = true,
+                        enabled = !ui.saveProfileMetricsBusy,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    Text(
-                        text = ui.weightKgDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            stringResource(R.string.profile_weight_kg),
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = ui.weightKgDraft.ifBlank { stringResource(R.string.profile_age_emdash) },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
                 }
+                NutritionGoalRow(
+                    goal = ui.nutritionGoalDraft,
+                    editing = editingPersonalInfo,
+                    enabled = !ui.saveProfileMetricsBusy,
+                    onGoalSelected = vm::setNutritionGoalDraft
+                )
                 if (editingPersonalInfo) {
                     OutlinedTextField(
                         value = ui.baseCaloriesTargetDraft,
@@ -2095,6 +2131,74 @@ private fun ProfilePersonalInformationCard(
             }
         ) {
             DatePicker(state = state)
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun nutritionGoalLabelRes(goal: String): Int = when (goal) {
+    "cut" -> R.string.profile_nutrition_goal_cut
+    "bulk" -> R.string.profile_nutrition_goal_bulk
+    "recomp" -> R.string.profile_nutrition_goal_recomp
+    else -> R.string.profile_nutrition_goal_maintain
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NutritionGoalRow(
+    goal: String,
+    editing: Boolean,
+    enabled: Boolean,
+    onGoalSelected: (String) -> Unit
+) {
+    val options = listOf(
+        "maintain" to R.string.profile_nutrition_goal_maintain,
+        "cut" to R.string.profile_nutrition_goal_cut,
+        "bulk" to R.string.profile_nutrition_goal_bulk,
+        "recomp" to R.string.profile_nutrition_goal_recomp
+    )
+    if (editing) {
+        var expanded by remember { mutableStateOf(false) }
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { if (enabled) expanded = it }
+        ) {
+            OutlinedTextField(
+                value = stringResource(nutritionGoalLabelRes(goal)),
+                onValueChange = {},
+                readOnly = true,
+                enabled = enabled,
+                singleLine = true,
+                label = { Text(stringResource(R.string.profile_nutrition_goal)) },
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier
+                    .menuAnchor(type = MenuAnchorType.PrimaryNotEditable, enabled = enabled)
+                    .fillMaxWidth()
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEach { (id, resId) ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(resId)) },
+                        onClick = {
+                            onGoalSelected(id)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(stringResource(R.string.profile_nutrition_goal), style = MaterialTheme.typography.bodyLarge)
+            Text(
+                text = stringResource(nutritionGoalLabelRes(goal)),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }

@@ -103,6 +103,9 @@ func symbolForAchievement(code: String, category: String) -> String {
     case c.hasPrefix("coins_"):
         return "bitcoinsign.circle.fill"
 
+    case c.hasPrefix("body_weight_"):
+        return "scalemass.fill"
+
     case c.hasPrefix("first_workout"),
          c.hasPrefix("workouts_"),
          c.hasPrefix("achievements_"),
@@ -127,6 +130,7 @@ func symbolForAchievement(code: String, category: String) -> String {
     case "social":   return "person.2.fill"
     case "pet":      return "pawprint.fill"
     case "coins":    return "bitcoinsign.circle.fill"
+    case "health":   return "scalemass.fill"
     default:         return "star.circle.fill"
     }
 }
@@ -210,7 +214,7 @@ struct AchievementsGridView: View {
         case general = "General"
         case strength = "Strength", cardio = "Cardio", sport = "Sport"
         case social = "Social", streak = "Streak", ranking = "Ranking"
-        case pet = "Pet", coins = "Coins"
+        case pet = "Pet", coins = "Coins", health = "Health"
         var id: String { rawValue }
     }
     
@@ -525,6 +529,7 @@ struct AchievementsGridView: View {
         case .ranking:  return "trophy.fill"
         case .pet:      return "pawprint.fill"
         case .coins:    return "bitcoinsign.circle.fill"
+        case .health:   return "scalemass.fill"
         }
     }
 }

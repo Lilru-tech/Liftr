@@ -340,7 +340,9 @@ struct HomeView: View {
     @State private var showGoals = false
     @State private var showCompetitions = false
     @State private var showTrackedAchievements = false
+    @State private var showWeeklyTasks = false
     @State private var trackedAchievementCount = 0
+    @State private var weeklyTasksHomeSummary: WeeklyTasksHomeSummary?
     @State private var homePillScrollEdgeFades = HomePillScrollEdgeFades(showTrailing: false)
     @State private var bestSportLabel = ""
     @State private var shareItem: ShareItem?
@@ -423,6 +425,15 @@ struct HomeView: View {
                             showGoals = true
                         }
                         homeCompactNavPill(
+                            icon: "list.bullet.clipboard.fill",
+                            title: "Weekly tasks",
+                            subtitle: weeklyTasksPillSubtitle,
+                            accentDotColor: weeklyTasksPillDotColor,
+                            trailingChevron: "chevron.right"
+                        ) {
+                            showWeeklyTasks = true
+                        }
+                        homeCompactNavPill(
                             icon: "trophy",
                             title: "Competitions",
                             trailingChevron: "chevron.right"
@@ -483,19 +494,48 @@ struct HomeView: View {
         }
     }
 
+    private var weeklyTasksPillDotColor: Color? {
+        guard let summary = weeklyTasksHomeSummary else { return nil }
+        return WeeklyTasksHomeBadgeState.accentDotColor(for: summary)
+    }
+
+    private var weeklyTasksPillSubtitle: String? {
+        guard let summary = weeklyTasksHomeSummary,
+              WeeklyTasksHomeBadgeState.pillShowsPickSubtitle(for: summary) else { return nil }
+        return "Pick a task"
+    }
+
     private func homeCompactNavPill(
         icon: String,
         title: String,
+        subtitle: String? = nil,
+        accentDotColor: Color? = nil,
         trailingChevron: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .foregroundStyle(.secondary)
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: icon)
+                        .foregroundStyle(.secondary)
+                    if let accentDotColor {
+                        Circle()
+                            .fill(accentDotColor)
+                            .frame(width: 8, height: 8)
+                            .offset(x: 2, y: -2)
+                    }
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Image(systemName: trailingChevron)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
@@ -758,7 +798,9 @@ struct HomeView: View {
                     .zIndex(200)
             }
         }
-        .task { await reloadAll() }
+        .task {
+            await reloadAll()
+        }
         .onChange(of: app.isAuthenticated) { _, _ in
             Task { await reloadAll() }
         }
@@ -913,7 +955,9 @@ struct HomeView: View {
                 }
             } else {
                 print("[Home.onReceive workoutDidChange] reloadAll()…")
-                Task { await reloadAll() }
+                Task {
+                    await reloadAll()
+                }
             }
         }
         .onChange(of: filter) { _, _ in Task { await reloadAll() } }
@@ -932,8 +976,15 @@ struct HomeView: View {
             TrackedAchievementsView()
                 .gradientBG()
         }
+        .navigationDestination(isPresented: $showWeeklyTasks) {
+            PersonalWeeklyTasksView()
+                .gradientBG()
+        }
         .onChange(of: showTrackedAchievements) { _, show in
             if !show { Task { await loadTrackedAchievementSummary() } }
+        }
+        .onChange(of: showWeeklyTasks) { _, show in
+            if !show { Task { await loadWeeklyTasksHomeSummary() } }
         }
         .accessibilityIdentifier("home.screen")
     }
@@ -1236,7 +1287,8 @@ struct HomeView: View {
             async let m: Void = loadMonthlySummary()
             async let i: Void = loadInsights()
             async let ta: Void = loadTrackedAchievementSummary()
-            _ = await (t, w, s, r, m, i, ta)
+            async let wt: Void = loadWeeklyTasksHomeSummary()
+            _ = await (t, w, s, r, m, i, ta, wt)
             
         } catch {
             await MainActor.run { failFeedReload(error, generation: generation) }
@@ -1894,6 +1946,17 @@ struct HomeView: View {
         }
     }
     
+    private func loadWeeklyTasksHomeSummary() async {
+        guard app.userId != nil else {
+            await MainActor.run { weeklyTasksHomeSummary = nil }
+            return
+        }
+        let summary = await WeeklyTasksHomeSummaryLoader.fetch()
+        await MainActor.run {
+            weeklyTasksHomeSummary = summary
+        }
+    }
+
     private func loadTrackedAchievementSummary() async {
         guard let me = app.userId else {
             await MainActor.run { trackedAchievementCount = 0 }

@@ -273,6 +273,7 @@ struct EditWorkoutMetaSheet: View {
     }
     
     @State private var s_items: [SEditableExercise] = []
+    @State private var s_initialWorkoutExerciseIds: Set<Int> = []
     @State private var catalog: [Exercise] = []
     @State private var showExercisePicker = false
     @State private var selectedExerciseForAdd: Exercise? = nil
@@ -1575,7 +1576,10 @@ struct EditWorkoutMetaSheet: View {
                         sets: setsByEx[ex.id, default: [SEditableSet(setId: nil, setNumber: 1, orderIndex: 1, reps: nil, weightKg: "", rpe: "", restSec: nil, segments: [])]]
                     )
                 }
-                await MainActor.run { s_items = mapped }
+                await MainActor.run {
+                    s_items = mapped
+                    s_initialWorkoutExerciseIds = Set(exIds)
+                }
                 
             default:
                 break
@@ -1778,6 +1782,7 @@ struct EditWorkoutMetaSheet: View {
                 
             case "strength":
                 WorkoutSavePerf.begin(.editStrength)
+                try await deleteRemovedStrengthExercisesBeforeSave()
                 let exerciseInputs = strengthExerciseSaveInputs()
                 let setCount = exerciseInputs.reduce(0) { $0 + $1.sets.count }
                 WorkoutSavePerf.mark(
@@ -1815,7 +1820,10 @@ struct EditWorkoutMetaSheet: View {
                         )
                     }
                 )
-                await MainActor.run { s_items = compacted }
+                await MainActor.run {
+                    s_items = compacted
+                    s_initialWorkoutExerciseIds = Set(s_items.map(\.workoutExerciseId))
+                }
                 NotificationCenter.default.post(name: .workoutDidChange, object: workoutId)
                 let scorePayload: Any = saved.score.map { $0 as Any } ?? NSNull()
                 NotificationCenter.default.post(
@@ -1884,7 +1892,32 @@ struct EditWorkoutMetaSheet: View {
             await onSaved()
             dismiss()
         } catch {
-            self.error = error.localizedDescription
+            await handleSaveError(error)
+        }
+    }
+
+    private func deleteRemovedStrengthExercisesBeforeSave() async throws {
+        let current = Set(s_items.map(\.workoutExerciseId))
+        let removed = StrengthEditSaveSupport.removedWorkoutExerciseIds(
+            initial: s_initialWorkoutExerciseIds,
+            current: current
+        )
+        guard !removed.isEmpty else { return }
+        for wid in removed {
+            try await deleteWorkoutExerciseFromServer(wid)
+        }
+        await MainActor.run {
+            s_initialWorkoutExerciseIds.subtract(removed)
+        }
+    }
+
+    private func handleSaveError(_ error: Error) async {
+        let msg = error.localizedDescription
+        if msg.contains("invalid workout exercise") {
+            self.error = "This workout changed on the server. Reloading latest exercises — try Save again."
+            await loadSpecificIfNeeded()
+        } else {
+            self.error = msg
         }
     }
     
@@ -1928,19 +1961,26 @@ struct EditWorkoutMetaSheet: View {
         }
     }
     
+    private func deleteWorkoutExerciseFromServer(_ workoutExerciseId: Int) async throws {
+        _ = try await SupabaseManager.shared.client
+            .from("exercise_sets")
+            .delete()
+            .eq("workout_exercise_id", value: workoutExerciseId)
+            .execute()
+
+        _ = try await SupabaseManager.shared.client
+            .from("workout_exercises")
+            .delete()
+            .eq("id", value: workoutExerciseId)
+            .execute()
+    }
+
     private func deleteExercise(_ workoutExerciseId: Int) async {
         do {
-            _ = try await SupabaseManager.shared.client
-                .from("exercise_sets")
-                .delete()
-                .eq("workout_exercise_id", value: workoutExerciseId)
-                .execute()
-            
-            _ = try await SupabaseManager.shared.client
-                .from("workout_exercises")
-                .delete()
-                .eq("id", value: workoutExerciseId)
-                .execute()
+            try await deleteWorkoutExerciseFromServer(workoutExerciseId)
+            await MainActor.run {
+                _ = s_initialWorkoutExerciseIds.remove(workoutExerciseId)
+            }
         } catch {
             await MainActor.run { self.error = error.localizedDescription }
         }

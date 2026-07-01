@@ -20,12 +20,14 @@ enum ProfileOpponentPetFabPositionStore {
 }
 
 struct ProfileOpponentPetFloatingOverlay: View {
+    let opponentUserId: UUID
     let preview: PetCombatPreview
     let defenderPet: PetCombatPetSummary
     let headToHead: PetCombatHeadToHeadSummary?
     let opponentUsername: String?
     let bannerInset: CGFloat
     let onChallenge: (Bool) -> Void
+    let onPreviewRefreshed: (PetCombatPreview) -> Void
 
     @State private var showChallengeSheet = false
     @State private var perimeterT: CGFloat?
@@ -94,11 +96,13 @@ struct ProfileOpponentPetFloatingOverlay: View {
         .zIndex(999)
         .sheet(isPresented: $showChallengeSheet) {
             OpponentPetChallengeSheet(
+                opponentUserId: opponentUserId,
                 preview: preview,
                 defenderPet: defenderPet,
                 headToHead: headToHead,
                 opponentUsername: opponentUsername,
-                onChallenge: onChallenge
+                onChallenge: onChallenge,
+                onPreviewRefreshed: onPreviewRefreshed
             )
         }
     }

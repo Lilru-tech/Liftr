@@ -8,6 +8,7 @@ struct PetDetailPopover: View {
     @State private var draftName = ""
     @State private var showStatCombatHelp = false
     @State private var now = Date()
+    @State private var selectedFood: PetInventoryRow?
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -82,6 +83,29 @@ struct PetDetailPopover: View {
             PetStatCombatHelpSheet()
                 .presentationDetents([.medium, .large])
                 .presentationBackground(.clear)
+        }
+        .overlay {
+            if let selectedFood {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation { self.selectedFood = nil }
+                        }
+                    FeedFoodOverlay(
+                        itemType: selectedFood.itemType,
+                        ownedQuantity: selectedFood.quantity,
+                        onClose: { withAnimation { self.selectedFood = nil } },
+                        onFeedSuccess: {
+                            Task {
+                                await viewModel.load()
+                                await viewModel.reloadLogs()
+                                PetRefreshCenter.notifyPetStateDidChange()
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 
@@ -226,7 +250,7 @@ struct PetDetailPopover: View {
                     HStack(spacing: 8) {
                         ForEach(foods) { item in
                             Button {
-                                Task { await viewModel.feed(itemType: item.itemType) }
+                                withAnimation { selectedFood = item }
                             } label: {
                                 VStack(spacing: 4) {
                                     AsyncImage(url: PetImageURLBuilder.marketItemURL(path: "market/\(item.itemType).png")) { phase in

@@ -20,7 +20,16 @@ struct NutritionSmartInsightsContent: View {
                     .insightsCard()
             } else if let insights {
                 summaryCard(insights)
-                narrativeCard(insights.recommendation_text)
+                if let training = insights.training_day_avg, let rest = insights.rest_day_avg,
+                   (training.days ?? 0) > 0 || (rest.days ?? 0) > 0 {
+                    trainingRestCard(training: training, rest: rest)
+                }
+                if !insights.insights.isEmpty {
+                    insightsSection(insights.insights)
+                }
+                if !insights.recommendation_text.isEmpty {
+                    narrativeCard(insights.recommendation_text)
+                }
                 if !insights.alerts.isEmpty {
                     alertsSection(insights.alerts)
                 }
@@ -92,6 +101,72 @@ struct NutritionSmartInsightsContent: View {
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .insightsCard()
+    }
+
+    private func trainingRestCard(training: NutritionDayMacroAvg, rest: NutritionDayMacroAvg) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Training vs rest days", systemImage: "figure.run")
+                .font(.subheadline.weight(.semibold))
+            HStack(spacing: 8) {
+                dayTypeColumn(title: "Training", avg: training)
+                dayTypeColumn(title: "Rest", avg: rest)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .insightsCard()
+    }
+
+    private func dayTypeColumn(title: String, avg: NutritionDayMacroAvg) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption.weight(.semibold))
+            Text("\(Int((avg.kcal ?? 0).rounded())) kcal")
+                .font(.footnote.weight(.bold))
+            Text("P \(Int((avg.protein_g ?? 0).rounded()))g · C \(Int((avg.carbs_g ?? 0).rounded()))g")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func insightsSection(_ cards: [SmartNutritionInsight]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Personalized insights", systemImage: "sparkles")
+                .font(.subheadline.weight(.semibold))
+            ForEach(cards) { card in
+                VStack(alignment: .leading, spacing: 6) {
+                    Label(card.title, systemImage: insightIcon(for: card.sentiment))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(insightColor(for: card.sentiment))
+                    Text(card.body)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(insightColor(for: card.sentiment).opacity(0.10), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            }
+        }
+    }
+
+    private func insightIcon(for sentiment: String) -> String {
+        switch sentiment {
+        case "positive": return "hand.thumbsup.fill"
+        case "warning": return "exclamationmark.triangle.fill"
+        default: return "lightbulb.fill"
+        }
+    }
+
+    private func insightColor(for sentiment: String) -> Color {
+        switch sentiment {
+        case "positive": return .green
+        case "warning": return .orange
+        default: return .blue
+        }
     }
 
     private func narrativeCard(_ text: String) -> some View {

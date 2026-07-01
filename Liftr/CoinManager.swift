@@ -161,6 +161,8 @@ final class CoinManager: ObservableObject {
             return "achievements"
         case "weekly_goal_perfect_week", "workout_consistency_streak":
             return "goals_streaks"
+        case "user_task_completed", "weekly_task_refresh":
+            return "weekly_tasks"
         case "competition_bet_win", "competition_bet_refund_draw",
              "competition_bet_refund_cancelled", "competition_bet_escrow":
             return "competition"
@@ -186,6 +188,8 @@ final class CoinManager: ObservableObject {
         case "workout_economy_reduction_30pct_v1": return "Workout economy adjustment"
         case "pet_passive_economy_reduction_30pct_v1": return "Pet passive adjustment"
         case "weekly_goal_perfect_week": return "Perfect week"
+        case "user_task_completed": return "Weekly task"
+        case "weekly_task_refresh": return "Weekly task refresh"
         case "workout_consistency_streak": return "7-day streak"
         case "competition_bet_escrow": return "Competition stake"
         case "competition_bet_win": return "Competition win"
@@ -216,6 +220,7 @@ final class CoinManager: ObservableObject {
         case "nutrition": return "Nutrition"
         case "achievements": return "Achievements"
         case "goals_streaks": return "Goals & streaks"
+        case "weekly_tasks": return "Weekly tasks"
         case "competition": return "Competition"
         case "pet_combat": return "Pet combat"
         case "other": return "Other"
@@ -233,6 +238,7 @@ final class CoinManager: ObservableObject {
         case "nutrition": return Color(red: 0.30, green: 0.69, blue: 0.31)
         case "achievements": return Color(red: 1.0, green: 0.34, blue: 0.13)
         case "goals_streaks": return Color(red: 0.0, green: 0.74, blue: 0.83)
+        case "weekly_tasks": return Color(red: 0.0, green: 0.55, blue: 0.65)
         case "competition": return Color(red: 0.47, green: 0.33, blue: 0.28)
         case "pet_combat": return Color(red: 0.40, green: 0.23, blue: 0.72)
         default: return Color(red: 0.62, green: 0.62, blue: 0.62)

@@ -8,6 +8,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -27,6 +28,33 @@ data class StrengthWorkoutSaveResultWire(
 
 internal object StrengthWorkoutSaveRpc {
     private val json = Json { ignoreUnknownKeys = true }
+
+    suspend fun updateStrengthWorkoutV1(
+        supabase: SupabaseClient,
+        workoutId: Int,
+        title: String?,
+        notes: String?,
+        startedAtIso: String,
+        endedAtIso: String?,
+        perceivedIntensity: String?,
+        exercises: List<StrengthEditExercisePayload>
+    ): StrengthWorkoutSaveResultWire {
+        val params = buildJsonObject {
+            put("p_workout_id", workoutId)
+            put("p_started_at", startedAtIso)
+            put("p_exercises", StrengthWorkoutEditSavePayload.exercisesToJsonArray(exercises))
+            if (title != null) put("p_title", title) else put("p_title", JsonNull)
+            if (notes != null) put("p_notes", notes) else put("p_notes", JsonNull)
+            if (endedAtIso != null) put("p_ended_at", endedAtIso) else put("p_ended_at", JsonNull)
+            if (perceivedIntensity != null) {
+                put("p_perceived_intensity", perceivedIntensity)
+            } else {
+                put("p_perceived_intensity", JsonNull)
+            }
+        }
+        val res = supabase.postgrest.rpc(BackendContracts.Rpc.UPDATE_STRENGTH_WORKOUT_V1, params) { }
+        return json.decodeFromString(res.data)
+    }
 
     suspend fun finishStrengthWorkoutV1(
         supabase: SupabaseClient,

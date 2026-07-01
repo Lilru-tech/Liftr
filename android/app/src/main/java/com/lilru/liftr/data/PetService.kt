@@ -73,11 +73,15 @@ object PetService {
         return decodeHatchAtMs(res.data)
     }
 
-    suspend fun feed(supabase: SupabaseClient, itemType: String) {
+    suspend fun feed(supabase: SupabaseClient, itemType: String, quantity: Int = 1) {
         supabase.postgrest.rpc(
             BackendContracts.Rpc.FEED_PET_V1,
-            buildJsonObject { put("p_item_type", itemType) }
+            buildJsonObject {
+                put("p_item_type", itemType)
+                put("p_quantity", quantity)
+            }
         ) { }
+        PetRefreshBus.notifyPetStateDidChange()
     }
 
     suspend fun confirmEvolution(supabase: SupabaseClient) {
@@ -291,48 +295,57 @@ data class PetLogWire(
     val details: Map<String, String>? = null,
     @SerialName("created_at") val createdAt: String
 ) {
-    fun title(): String = when (eventType.trim().lowercase()) {
-        "item_used", "fed" -> {
-            val name = details?.get("reason") ?: itemType
-            if (name != null) "Used ${name.replace('_', ' ').replaceFirstChar { it.uppercase() }}"
-            else "Used item"
-        }
-        "level_up" -> "Level up"
-        "incubation_started" -> "Incubation started"
-        "hatched" -> "Hatched"
-        "evolution" -> "Evolution"
-        "rarity_upgrade" -> {
-            val from = details?.get("from_rarity")
-            val to = details?.get("to_rarity")
-            if (from != null && to != null) {
-                "Rarity upgrade: ${from.replaceFirstChar { it.uppercase() }} → ${to.replaceFirstChar { it.uppercase() }}"
-            } else {
-                "Rarity upgrade"
+    fun title(): String {
+        return when (eventType.trim().lowercase()) {
+            "item_used", "fed" -> {
+                val displayName = details?.get("display_name")?.takeIf { it.isNotBlank() }
+                if (displayName != null) {
+                    val qty = details?.get("quantity")?.toIntOrNull() ?: 1
+                    if (qty > 1) "Used $displayName ×$qty"
+                    else "Used $displayName"
+                } else {
+                    val name = details?.get("reason") ?: itemType
+                    if (name != null) "Used ${name.replace('_', ' ').replaceFirstChar { it.uppercase() }}"
+                    else "Used item"
+                }
             }
-        }
-        "coins_generated" -> {
-            val coins = details?.get("coins")
-            if (!coins.isNullOrBlank()) "Coins generated: +$coins"
-            else "Coins generated"
-        }
-        "workout_pet_bonus" -> {
-            val message = details?.get("message")
-            if (!message.isNullOrBlank()) message
-            else {
-                val coins = workoutBonusCoinAmount()
-                if (coins != null) "Pet workout bonus: +$coins coins"
-                else "Pet workout bonus"
+            "level_up" -> "Level up"
+            "incubation_started" -> "Incubation started"
+            "hatched" -> "Hatched"
+            "evolution" -> "Evolution"
+            "rarity_upgrade" -> {
+                val from = details?.get("from_rarity")
+                val to = details?.get("to_rarity")
+                if (from != null && to != null) {
+                    "Rarity upgrade: ${from.replaceFirstChar { it.uppercase() }} → ${to.replaceFirstChar { it.uppercase() }}"
+                } else {
+                    "Rarity upgrade"
+                }
             }
-        }
-        "combat" -> {
-            val opponent = details?.get("opponent_username")?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: "opponent"
-            when {
-                details?.get("is_draw") == "true" -> "Draw vs $opponent"
-                details?.get("won") == "true" -> "Victory vs $opponent"
-                else -> "Defeat vs $opponent"
+            "coins_generated" -> {
+                val coins = details?.get("coins")
+                if (!coins.isNullOrBlank()) "Coins generated: +$coins"
+                else "Coins generated"
             }
+            "workout_pet_bonus" -> {
+                val message = details?.get("message")
+                if (!message.isNullOrBlank()) message
+                else {
+                    val coins = workoutBonusCoinAmount()
+                    if (coins != null) "Pet workout bonus: +$coins coins"
+                    else "Pet workout bonus"
+                }
+            }
+            "combat" -> {
+                val opponent = details?.get("opponent_username")?.takeIf { it.isNotBlank() }?.let { "@$it" } ?: "opponent"
+                when {
+                    details?.get("is_draw") == "true" -> "Draw vs $opponent"
+                    details?.get("won") == "true" -> "Victory vs $opponent"
+                    else -> "Defeat vs $opponent"
+                }
+            }
+            else -> eventType.replace('_', ' ').replaceFirstChar { it.uppercase() }
         }
-        else -> eventType.replace('_', ' ').replaceFirstChar { it.uppercase() }
     }
 
     fun subtitle(): String? {

@@ -14,8 +14,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Lightbulb
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Divider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -146,18 +152,39 @@ internal fun InsightsLoadedContent(insights: SmartNutritionRecommendationUi) {
         )
     }
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .insightsCard(),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Text(
-            stringResource(R.string.nutrition_insights_summary),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold
-        )
-        Text(insights.recommendationText, style = MaterialTheme.typography.bodyMedium)
+    val training = insights.trainingDayAvg
+    val rest = insights.restDayAvg
+    if ((training?.days ?: 0) > 0 || (rest?.days ?: 0) > 0) {
+        TrainingRestCard(training = training, rest = rest)
+    }
+
+    if (insights.insights.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                stringResource(R.string.nutrition_insights_personalized),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            insights.insights.forEach { card ->
+                InsightCard(card)
+            }
+        }
+    }
+
+    if (insights.recommendationText.isNotBlank()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .insightsCard(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                stringResource(R.string.nutrition_insights_summary),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(insights.recommendationText, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 
     if (insights.alerts.isNotEmpty()) {
@@ -182,6 +209,98 @@ internal fun InsightsLoadedContent(insights: SmartNutritionRecommendationUi) {
 }
 
 @Composable
+private fun TrainingRestCard(
+    training: NutritionDayMacroAvgUi?,
+    rest: NutritionDayMacroAvgUi?
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .insightsCard(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            stringResource(R.string.nutrition_insights_training_vs_rest),
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DayTypeColumn(
+                title = stringResource(R.string.nutrition_insights_training_days),
+                avg = training,
+                modifier = Modifier.weight(1f)
+            )
+            DayTypeColumn(
+                title = stringResource(R.string.nutrition_insights_rest_days),
+                avg = rest,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun DayTypeColumn(
+    title: String,
+    avg: NutritionDayMacroAvgUi?,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+            .padding(8.dp)
+    ) {
+        Text(title, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            stringResource(R.string.nutrition_kcal_format, (avg?.kcal ?: 0.0).roundToInt()),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            stringResource(
+                R.string.nutrition_insights_macro_short,
+                (avg?.proteinG ?: 0.0).roundToInt(),
+                (avg?.carbsG ?: 0.0).roundToInt()
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun InsightCard(card: SmartNutritionInsightUi) {
+    val tint = insightColor(card.sentiment)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(tint.copy(alpha = 0.10f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(insightIcon(card.sentiment), contentDescription = null, tint = tint)
+            Text(card.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = tint)
+        }
+        Text(card.body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+private fun insightIcon(sentiment: String): ImageVector = when (sentiment) {
+    "positive" -> Icons.Filled.ThumbUp
+    "warning" -> Icons.Filled.Warning
+    else -> Icons.Filled.Lightbulb
+}
+
+private fun insightColor(sentiment: String): Color = when (sentiment) {
+    "positive" -> Color(0xFF34C759)
+    "warning" -> Color(0xFFFF9800)
+    else -> Color(0xFF007AFF)
+}
+
+@Composable
 private fun MetricColumn(
     title: String,
     value: Int,
@@ -199,6 +318,42 @@ private fun MetricColumn(
             stringResource(R.string.nutrition_kcal_format, value),
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun NutritionDailyInsightCard(
+    insight: DailyNutritionInsightsUi,
+    modifier: Modifier = Modifier
+) {
+    val top = insight.insights.firstOrNull()
+    if (top != null) {
+        val tint = insightColor(top.sentiment)
+        Column(
+            modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(insightIcon(top.sentiment), contentDescription = null, tint = tint)
+                Text(top.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = tint)
+            }
+            Text(top.body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    } else if (insight.recommendationText.isNotBlank()) {
+        Text(
+            insight.recommendationText,
+            modifier = modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                .padding(12.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

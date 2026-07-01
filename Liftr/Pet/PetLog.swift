@@ -13,6 +13,12 @@ struct PetLog: Identifiable, Equatable {
     static func title(for log: PetLog) -> String {
         switch normalizedEventType(log.eventType) {
         case "item_used", "fed":
+            if let displayName = log.details?["display_name"], !displayName.isEmpty {
+                if let qtyRaw = log.details?["quantity"], let qty = Int(qtyRaw), qty > 1 {
+                    return "Used \(displayName) ×\(qty)"
+                }
+                return "Used \(displayName)"
+            }
             if let name = log.details?["reason"] ?? log.itemType {
                 return "Used \(name.replacingOccurrences(of: "_", with: " ").capitalized)"
             }

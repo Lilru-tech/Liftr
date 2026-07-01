@@ -1,5 +1,8 @@
 package com.lilru.liftr.data
 
+import android.text.format.DateUtils
+import java.time.Instant
+import java.time.OffsetDateTime
 import kotlin.math.pow
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -70,15 +73,23 @@ data class PetCombatStatsSummaryWire(
 ) {
     val combatStatPoolTotal: Int
         get() = health + strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
+
+    val comparisonStatPoolTotal: Int
+        get() {
+            return kotlin.math.floor(health * 0.25).toInt() +
+                strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
+        }
 }
 
 object PetCombatStatBalancing {
+    private const val HANDICAP_THRESHOLD_PCT = 125
+
     fun isUnbalanced(attacker: PetCombatStatsSummaryWire, defender: PetCombatStatsSummaryWire): Boolean {
-        val poolA = attacker.combatStatPoolTotal
-        val poolB = defender.combatStatPoolTotal
+        val poolA = attacker.comparisonStatPoolTotal
+        val poolB = defender.comparisonStatPoolTotal
         val stronger = maxOf(poolA, poolB)
         val weaker = minOf(poolA, poolB)
-        return stronger * 100 > weaker * 105
+        return stronger * 100 > weaker * HANDICAP_THRESHOLD_PCT
     }
 }
 
@@ -145,6 +156,15 @@ data class PetCombatPreviewWire(
         return "+$percent% Coins & XP"
     }
 
+    fun effectiveCanChallenge(): Boolean {
+        if (canChallenge) return true
+        if (blockReason == "cooldown_active") {
+            val expiresAt = parsedCooldownExpiresAt()
+            if (expiresAt != null && !expiresAt.isAfter(Instant.now())) return true
+        }
+        return false
+    }
+
     fun blockReasonText(): String? = when (blockReason) {
         "self_challenge" -> "You cannot challenge yourself."
         "attacker_no_pet" -> "You need a hatched pet to challenge."
@@ -152,9 +172,32 @@ data class PetCombatPreviewWire(
         "attacker_egg" -> "Your pet must hatch before battling."
         "defender_egg" -> "This user's pet has not hatched yet."
         "no_energy" -> "No arena energy left. You regain 1 energy every 4 hours."
-        "cooldown_active" -> "You recently battled this user. Try again later."
+        "cooldown_active" -> cooldownActiveReasonText()
         null -> null
         else -> blockReason.replace('_', ' ').replaceFirstChar { it.uppercase() }
+    }
+
+    private fun parsedCooldownExpiresAt(): Instant? {
+        val raw = cooldownExpiresAt ?: return null
+        return runCatching { Instant.parse(raw) }.getOrNull()
+            ?: runCatching { OffsetDateTime.parse(raw).toInstant() }.getOrNull()
+    }
+
+    private fun cooldownActiveReasonText(): String? {
+        val expiresAt = parsedCooldownExpiresAt()
+        if (expiresAt != null && expiresAt.isAfter(Instant.now())) {
+            val relative = DateUtils.getRelativeTimeSpanString(
+                expiresAt.toEpochMilli(),
+                System.currentTimeMillis(),
+                DateUtils.MINUTE_IN_MILLIS
+            )
+            return "You can challenge again $relative."
+        }
+        return if (expiresAt == null) {
+            "You recently battled this user. Try again later."
+        } else {
+            null
+        }
     }
 }
 

@@ -225,7 +225,7 @@ struct FAQsView: View {
             ),
             FAQ(
                 question: "How are workout points calculated?",
-                answer: "Score depends on your profile factors and workout data. Strength uses volume, reps and sets; cardio uses distance, pace and time; sport uses match stats. More demanding sessions earn more points.",
+                answer: "Each workout earns points based on what you log. Strength reflects volume, density, top load and exercise variety. Cardio reflects duration, distance, elevation, pace and heart rate when available — light activities like walking score lower than runs or strength sessions by design. Sport and Hyrox reflect session duration, match result, station performance and official time. Harder sessions and higher intensity earn more points.",
                 category: "Premium & Ads"
             ),
             FAQ(

@@ -12,7 +12,7 @@ enum PetStatCombatGuide {
     static let handicapTitle = "Stat Balancing (Handicap)"
     static let handicapDescription = "If a pet's total stats are significantly higher than the opponent, their combat stats are temporarily rebalanced for a near-even fight. Both pets use their full health stat as arena HP. Winning after being rebalanced yields minimum rewards."
     static let handicapBattlesTitle = "Handicap Battles"
-    static let handicapBattlesDescription = "Fights featuring a stat gap greater than 5% will not affect your permanent Win/Loss profile record."
+    static let handicapBattlesDescription = "Fights featuring a stat gap greater than 25% will not affect your permanent Win/Loss profile record."
     static let hardcoreChallengeTitle = "Hardcore Challenge"
     static let hardcoreChallengeDescription = "As an underdog, you can choose to face un-nerfed opponents to unlock dynamically scaled massive reward multipliers based on the difficulty gap."
     static let footer = "Higher stats help more. Pet type weights which stats grow fastest on level-up. At the same level and rarity, production archetypes are tuned for close matchups."

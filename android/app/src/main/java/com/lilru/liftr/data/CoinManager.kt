@@ -142,6 +142,7 @@ object CoinManager {
         "achievement_unlocked", "achievement_unlocked_bronze",
         "achievement_unlocked_silver", "achievement_unlocked_gold" -> "achievements"
         "weekly_goal_perfect_week", "workout_consistency_streak" -> "goals_streaks"
+        "user_task_completed", "weekly_task_refresh" -> "weekly_tasks"
         "competition_bet_win", "competition_bet_refund_draw",
         "competition_bet_refund_cancelled", "competition_bet_escrow" -> "competition"
         "pet_combat_reward" -> "pet_combat"
@@ -162,6 +163,8 @@ object CoinManager {
         "workout_economy_reduction_30pct_v1" -> "Workout economy adjustment"
         "pet_passive_economy_reduction_30pct_v1" -> "Pet passive adjustment"
         "weekly_goal_perfect_week" -> "Perfect week"
+        "user_task_completed" -> "Weekly task"
+        "weekly_task_refresh" -> "Weekly task refresh"
         "workout_consistency_streak" -> "7-day streak"
         "competition_bet_escrow" -> "Competition stake"
         "competition_bet_win" -> "Competition win"
@@ -187,6 +190,7 @@ object CoinManager {
         "nutrition" -> "Nutrition"
         "achievements" -> "Achievements"
         "goals_streaks" -> "Goals & streaks"
+        "weekly_tasks" -> "Weekly tasks"
         "competition" -> "Competition"
         "pet_combat" -> "Pet combat"
         "other" -> "Other"
@@ -201,6 +205,7 @@ object CoinManager {
         "nutrition" -> Color(0xFF4CAF50)
         "achievements" -> Color(0xFFFF5722)
         "goals_streaks" -> Color(0xFF00BCD4)
+        "weekly_tasks" -> Color(0xFF008C9E)
         "competition" -> Color(0xFF795548)
         "pet_combat" -> Color(0xFF673AB7)
         else -> Color(0xFF9E9E9E)
