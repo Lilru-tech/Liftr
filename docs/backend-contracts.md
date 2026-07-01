@@ -35,7 +35,7 @@ Tablas:
 - `hyrox_session_stats`
 - `level_thresholds`
 - `notifications`
-- `profiles` (incl. `coins_balance int` — server-managed cached wallet; ver [`Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql`](../Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql))
+- `profiles` (incl. `coins_balance int` — server-managed cached wallet; ver [`Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql`](../Liftr/supabase/migrations/20260610120000_liftr_coins_ledger_v1.sql); incl. `task_points_total int` — server-managed cumulative Task Points; ver [`Liftr/supabase/migrations/20260718160000_personal_weekly_tasks_v1.sql`](../Liftr/supabase/migrations/20260718160000_personal_weekly_tasks_v1.sql))
 - `racket_session_stats`
 - `rugby_session_stats`
 - `ski_session_stats`
@@ -62,7 +62,7 @@ Tablas:
 - `coin_transactions` (ledger unificado Liftr Coins; `amount` positivo = earn, negativo = futuro spend; ver migración `20260610120000_liftr_coins_ledger_v1.sql`)
   - Columns: `id` (uuid PK), `user_id` (uuid FK `auth.users`), `amount` (int), `action_type` (text), `reference_id` (uuid nullable), `created_at` (timestamptz)
   - RLS: `authenticated` **SELECT** own rows only; **INSERT/UPDATE/DELETE** revoked (solo triggers / `SECURITY DEFINER`)
-  - Idempotencia: índices únicos parciales en `(user_id, reference_id, action_type)` para `like_given`, `user_followed`, `earned_follower`, `comment_added`, `workout_logged`, `achievement_unlocked`, `weekly_goal_perfect_week`, `workout_consistency_streak` (solo `amount > 0`)
+  - Idempotencia: índices únicos parciales en `(user_id, reference_id, action_type)` para `like_given`, `user_followed`, `earned_follower`, `comment_added`, `workout_logged`, `achievement_unlocked`, `weekly_goal_perfect_week`, `workout_consistency_streak`, `user_task_completed` (solo `amount > 0`), `weekly_task_refresh`
 - `coin_reward_rules` (matriz de recompensas; `action_type` PK, `amount`, `enabled`)
 - `segments` (PostGIS `geography(LineString,4326)`; MVP solo creación por usuario; ver `docs/migrations/segments_mvp_v1.sql` o `segments_mvp_v1_part01_*.sql`–`part06_*.sql` si el cliente parte por `;`). Tras [`Liftr/supabase/migrations/20260509120000_segment_route_coverage_v1.sql`](../Liftr/supabase/migrations/20260509120000_segment_route_coverage_v1.sql): columnas opcionales `source_workout_id`, `source_start_fraction`, `source_end_fraction`, y `geog`/`geojson` coherente con el RPC de creación.
 - `segment_efforts` (match por buffer sobre `route_geojson` + tiempo estimado; ver misma migración). Tras la migración `20260509120000_segment_route_coverage_v1.sql`: columna **`route_coverage`** (0–1); trigger antes de insert/actualizar que exige ≥0.95 salvo el entreno origen.
@@ -72,6 +72,9 @@ Tablas:
 - `challenge_templates` (catálogo de retos; `metric_kind`, `cadence`, umbrales, ámbitos opcionales `scope_activity_code` / `scope_sport` / `scope_muscle_primary` / `scope_stat_key`; ver [`docs/migrations/challenges_mvp_v1.sql`](migrations/challenges_mvp_v1.sql) y migración `20260618194500_challenges_full_coverage_v1.sql`)
 - `challenge_instances` (ventana temporal por plantilla, p. ej. semana ISO)
 - `challenge_claims` (adjudicaciones: usuario, rango, `workout_id`, `adjudication_ts`)
+- `task_templates` (catálogo de tareas semanales procedurales; `category` `cardio`|`strength`|`sport`, `target_metric` incluye `total_reps`, `total_sets`, `routes_sent`, `problems_sent`, `hyrox_weekly_minutes`, `sport_sessions_weekly`, `generation_mode` `static_beginner`|`dynamic_scaled`, recompensas base, ámbitos opcionales; motor v4 con slots ponderados por historial 45d; ver [`Liftr/supabase/migrations/20260718180001_personal_weekly_tasks_v4.sql`](../Liftr/supabase/migrations/20260718180001_personal_weekly_tasks_v4.sql))
+- `user_tasks` (instancias por usuario/semana; `status` `generated`|`accepted`|`completed`|`expired`; recompensas congeladas; `difficulty_band` `easy`|`medium`|`hard`|`extreme`; evaluación al publicar entreno)
+- `user_weekly_task_refreshes` (`user_id`, `week_start`, `refresh_count`; máx. 3 refrescos de menú por semana)
 - `nutrition_ingredients` (catálogo de ingredientes; ver [`Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql`](../Liftr/supabase/migrations/20260525120000_nutrition_ecosystem_v1.sql))
   - Columns: `id` (uuid PK), `user_id` (uuid nullable FK `auth.users` — `NULL` = ingrediente global del sistema), `name` (text), `calories_per_100g` (numeric(6,2)), `protein_per_100g`, `carbs_per_100g`, `fat_per_100g` (numeric(5,2)), `saturated_fat_per_100g`, `sugars_per_100g`, `fiber_per_100g` (numeric(5,2) default 0), `sodium_mg_per_100g` (numeric(6,2) default 0), `is_public` (boolean default false); ver migración `20260525140000_nutrition_full_profile_v1.sql`
   - RLS: `authenticated` **SELECT** si `is_public = true` OR `user_id = auth.uid()`; **INSERT/UPDATE/DELETE** solo si `user_id = auth.uid()`
@@ -111,6 +114,7 @@ Vistas:
 - `vw_sport_session_full`
 - `vw_user_prs`
 - `vw_workout_volume`
+- `vw_user_task_points_rollup` (agregados de `user_tasks` completadas por usuario)
 
 ## Inventario de RPC detectadas en iOS
 
@@ -140,6 +144,15 @@ Vistas:
 - `get_leaderboard_v1`
 - `get_level_leaderboard_v1`
 - `get_coins_leaderboard_v1` (`p_scope`, `p_limit`, `p_sex`, `p_age_band`) — ranking por `profiles.coins_balance`; sin periodo
+- `get_task_points_leaderboard_v1` (`p_scope`, `p_limit`, `p_sex`, `p_age_band`) — ranking all-time por `profiles.task_points_total`; sin periodo
+- `list_my_weekly_tasks_v1` () — menú semanal del caller: hasta 5 tareas + `accepted_count` (solo `accepted`, no `completed`), `accept_slots_remaining`, `week_start`, `week_end`, `difficulty_band`, `refresh_count`, `free_refresh_available`, `next_refresh_cost_coins` (0/100/150/null); evalúa completado vía `evaluate_user_tasks_for_user` antes de devolver filas; ver [`Liftr/supabase/migrations/20260720120000_personal_weekly_tasks_completion_v1.sql`](../Liftr/supabase/migrations/20260720120000_personal_weekly_tasks_completion_v1.sql); `SECURITY DEFINER`
+- `accept_user_task_v1` (`p_task_id` uuid) — acepta tarea `generated` de la semana actual; máx. 3 **accepted** por semana (`completed` libera slot); evalúa completado tras aceptar; errores `user_task_accept_cap_reached`, `user_task_not_acceptable`
+- `unaccept_user_task_v1` (`p_task_id` uuid) — revierte `accepted` → `generated`; solo semana actual no expirada; error `user_task_not_unacceptable`
+- `refresh_my_weekly_tasks_v1` () — regenera tareas `generated` (conserva aceptadas/completadas); 1º gratis, 2º 100 monedas, 3º 150; error `weekly_task_refresh_cap`, `insufficient_coins`
+- `get_user_task_detail_v1` (`p_task_id` uuid) — detalle ampliado: scopes, fechas, `progress_percent`, `progress_current_label`, `progress_target_label`; ver [`Liftr/supabase/migrations/20260719120000_personal_weekly_tasks_progress_detail_v1.sql`](../Liftr/supabase/migrations/20260719120000_personal_weekly_tasks_progress_detail_v1.sql)
+- `list_user_task_workouts_v1` (`p_task_id` uuid) — entrenos de la semana que aplican al ámbito de la tarea + `contribution_value`, `qualifies`, `contribution_label`; progreso best-in-week vía `_user_tasks_workout_contribution_value`
+- `get_my_weekly_tasks_history_v1` (`p_tasks_limit` int default 10, `p_tasks_offset` int default 0) — JSON `{ stats, completed_tasks[], total_completed_tasks, has_more }`; completed tasks all-time incl. current week, paginated by `completed_at desc`; ver [`Liftr/supabase/migrations/20260721120000_personal_weekly_tasks_history_v2.sql`](../Liftr/supabase/migrations/20260721120000_personal_weekly_tasks_history_v2.sql)
+- `get_my_weekly_tasks_home_summary_v1` () — JSON ligero para pill de Home: `{ week_start, accepted_count, accept_slots_remaining, available_count, completed_count_this_week }`; evalúa completado vía `evaluate_user_tasks_for_user`; ver [`Liftr/supabase/migrations/20260721120002_weekly_tasks_home_summary_v1.sql`](../Liftr/supabase/migrations/20260721120002_weekly_tasks_home_summary_v1.sql)
 - `get_pet_leaderboard_v1` (`p_metric`, `p_scope`, `p_limit`, `p_sex`, `p_age_band`) — rankings de mascotas, sin periodo (all-time). `p_metric`: `level`, `total_stats`, `health`, `strength`, `defense` (requieren mascota activa eclosionada), `battles`, `wins`, `losses`, `win_rate` (mín. 5 combates), `max_damage_dealt`, `max_damage_taken`, `total_damage_dealt`, `total_damage_taken` (de `pet_combat_user_stats`, requieren `total_battles > 0`). Devuelve `rank`, `user_id`, `username`, `avatar_url`, `value` (numeric; `win_rate` en %), `battles`, `pet_name` (custom o display name del tipo), `pet_level`
 - `list_my_coin_transactions_v1` (`p_limit` default 20, max 50; `p_offset` default 0) — historial propio paginado (`order by created_at desc, id desc`); `SECURITY DEFINER`
 - `get_my_coin_sources_v1` (`p_start`, `p_end` timestamptz opcionales; ambos null = all-time) — agregación de monedas **ganadas** (`amount > 0`) por categoría (`source_key`); excluye backfills de economía; `SECURITY DEFINER`
@@ -719,7 +732,7 @@ Moneda sin valor monetario real. Balance canónico: `profiles.coins_balance` (ac
 
 **Cliente — lectura:** `profiles.select(coins_balance)` en una petición **aparte** (falla en silencio → `0` si la migración aún no está desplegada). La cabecera de perfil no debe incluir `coins_balance` en el SELECT principal. Componentes: `CoinsBalanceBadge` (iOS/Android). Historial: `list_my_coin_transactions_v1`; desglose por fuente: `get_my_coin_sources_v1` (cliente envía `p_start`/`p_end` según periodo Week/Month/Year o omite ambos para all-time); limpiar: `clear_my_coin_history_v1`. Ranking: métrica **Liftr Coins** vía `get_coins_leaderboard_v1`. Banner efímero al ganar monedas (cliente compara balance antes/después).
 
-**`get_my_coin_sources_v1` — `source_key`:** `workouts`, `pet_workout_bonus`, `pet_coins`, `social`, `nutrition`, `achievements`, `goals_streaks`, `competition`, `pet_combat`, `other`. Excluye `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1`, `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1`.
+**`get_my_coin_sources_v1` — `source_key`:** `workouts`, `pet_workout_bonus`, `pet_coins`, `social`, `nutrition`, `achievements`, `goals_streaks`, `weekly_tasks`, `competition`, `pet_combat`, `other`. Excluye `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1`, `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1`.
 
 ## Pets & Mascots
 

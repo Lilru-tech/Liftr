@@ -8,6 +8,7 @@ enum CoinLogFilterCategory: String, CaseIterable, Identifiable {
     case nutrition
     case achievements
     case goalsStreaks = "goals_streaks"
+    case weeklyTasks = "weekly_tasks"
     case competition
     case petCombat = "pet_combat"
     case other

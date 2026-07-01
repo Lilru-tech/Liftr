@@ -98,6 +98,7 @@ private fun rankingMetricButtonLabel(metric: RankingMetric) = when (metric) {
     RankingMetric.CALORIES -> stringResource(R.string.ranking_metric_calories)
     RankingMetric.LEVEL -> stringResource(R.string.ranking_metric_level)
     RankingMetric.COINS -> stringResource(R.string.ranking_metric_coins)
+    RankingMetric.TASK_POINTS -> stringResource(R.string.ranking_metric_task_points)
     RankingMetric.BEST_WORKOUT -> stringResource(R.string.ranking_metric_top_workouts)
     RankingMetric.GOALS_COMPLETED -> stringResource(R.string.ranking_metric_goals)
     RankingMetric.DUELS_WON -> stringResource(R.string.ranking_metric_duels)
@@ -303,6 +304,7 @@ fun RankingTabScreen(
                     val showPeriod = when (ui.metric) {
                         RankingMetric.LEVEL,
                         RankingMetric.COINS,
+                        RankingMetric.TASK_POINTS,
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON,
                         RankingMetric.TERRITORY_SHARE,
@@ -313,6 +315,7 @@ fun RankingTabScreen(
                     val showKind = when (ui.metric) {
                         RankingMetric.LEVEL,
                         RankingMetric.COINS,
+                        RankingMetric.TASK_POINTS,
                         RankingMetric.GOALS_COMPLETED,
                         RankingMetric.DUELS_WON,
                         RankingMetric.CHALLENGE_PODIUMS,

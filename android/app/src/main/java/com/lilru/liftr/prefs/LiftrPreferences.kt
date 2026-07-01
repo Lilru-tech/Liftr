@@ -17,6 +17,8 @@ object LiftrPreferences {
     private const val KEY_BACKGROUND_THEME = "backgroundTheme"
     private const val KEY_PET_LOG_DISABLED_CATEGORIES = "petLogDisabledCategories"
     private const val KEY_COIN_LOG_DISABLED_CATEGORIES = "coinLogDisabledCategories"
+    private const val KEY_WEEKLY_TASKS_LAST_SEEN_COMPLETED_COUNT = "weeklyTasksLastSeenCompletedCount"
+    private const val KEY_WEEKLY_TASKS_LAST_SEEN_WEEK_START = "weeklyTasksLastSeenWeekStart"
 
     /**
      * Si es true, se abre el entreno activo sin [com.lilru.liftr.ui.home.StartWorkoutCountdownScreen]
@@ -118,6 +120,32 @@ object LiftrPreferences {
 
     fun setCoinLogDisabledCategories(context: Context, keys: Set<String>) {
         setStringList(context, KEY_COIN_LOG_DISABLED_CATEGORIES, keys.sorted())
+    }
+
+    fun weeklyTasksLastSeenCompletedCount(context: Context): Int =
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .getInt(KEY_WEEKLY_TASKS_LAST_SEEN_COMPLETED_COUNT, 0)
+
+    fun setWeeklyTasksLastSeenCompletedCount(context: Context, value: Int) {
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .edit()
+            .putInt(KEY_WEEKLY_TASKS_LAST_SEEN_COMPLETED_COUNT, value)
+            .apply()
+    }
+
+    fun weeklyTasksLastSeenWeekStart(context: Context): String? =
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .getString(KEY_WEEKLY_TASKS_LAST_SEEN_WEEK_START, null)
+
+    fun setWeeklyTasksLastSeenWeekStart(context: Context, value: String) {
+        context.applicationContext
+            .getSharedPreferences(PREF, MODE_PRIVATE)
+            .edit()
+            .putString(KEY_WEEKLY_TASKS_LAST_SEEN_WEEK_START, value)
+            .apply()
     }
 
     private const val KEY_TERRITORY_REFERENCE_LAT = "territoryReferenceLat"

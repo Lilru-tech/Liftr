@@ -1,11 +1,15 @@
 package com.lilru.liftr.ui.home
 
+import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.rememberScrollState
@@ -47,6 +51,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.lilru.liftr.R
+import com.lilru.liftr.ui.tasks.WeeklyTasksHomeBadgeState
+import com.lilru.liftr.ui.tasks.WeeklyTasksHomeSummary
 import com.lilru.liftr.ui.components.LiftrAvatar
 import androidx.compose.ui.platform.LocalContext
 
@@ -194,10 +200,14 @@ fun HomeModulePillRow(
     dataExpanded: Boolean,
     onToggleData: () -> Unit,
     showGoals: Boolean,
+    showWeeklyTasks: Boolean,
     showCompetitions: Boolean,
     showAchievements: Boolean,
     trackedAchievementCount: Int,
+    weeklyTasksHomeSummary: WeeklyTasksHomeSummary?,
+    homeContext: Context,
     onGoals: () -> Unit,
+    onWeeklyTasks: () -> Unit,
     onCompetitions: () -> Unit,
     onAchievements: () -> Unit,
     modifier: Modifier = Modifier
@@ -235,6 +245,23 @@ fun HomeModulePillRow(
                     title = stringResource(R.string.home_weekly_goals),
                     trailing = "›",
                     onClick = onGoals
+                )
+            }
+            if (showWeeklyTasks) {
+                val summary = weeklyTasksHomeSummary
+                val dotColor = summary?.let { WeeklyTasksHomeBadgeState.accentDotColor(homeContext, it) }
+                val subtitle = if (summary != null && WeeklyTasksHomeBadgeState.pillShowsPickSubtitle(summary)) {
+                    stringResource(R.string.home_weekly_tasks_pill_pick_task)
+                } else {
+                    null
+                }
+                HomeCompactNavPill(
+                    icon = { Text("📋", style = MaterialTheme.typography.bodyLarge) },
+                    title = stringResource(R.string.home_weekly_tasks_pill),
+                    subtitle = subtitle,
+                    accentDotColor = dotColor,
+                    trailing = "›",
+                    onClick = onWeeklyTasks
                 )
             }
             if (showCompetitions) {
@@ -295,7 +322,9 @@ private fun HomeCompactNavPill(
     icon: @Composable () -> Unit,
     title: String,
     trailing: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    subtitle: String? = null,
+    accentDotColor: Color? = null,
 ) {
     val shape = RoundedCornerShape(LiftrRadii.pill)
     Row(
@@ -308,14 +337,36 @@ private fun HomeCompactNavPill(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-            icon()
-            Text(
-                text = title,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Box {
+                icon()
+                if (accentDotColor != null) {
+                    Box(
+                        Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 2.dp, y = (-2).dp)
+                            .size(8.dp)
+                            .background(accentDotColor, CircleShape)
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
             Text(
                 trailing,
                 style = MaterialTheme.typography.labelMedium,

@@ -75,8 +75,10 @@ data class PetCombatStatsSummaryWire(
         get() = health + strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
 
     val comparisonStatPoolTotal: Int
-        get() = kotlin.math.floor(health * 0.25).toInt()
-            + strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
+        get() {
+            return kotlin.math.floor(health * 0.25).toInt() +
+                strength + defense + speed + agility + stamina + resistance + criticalRate + intelligence + exploration
+        }
 }
 
 object PetCombatStatBalancing {

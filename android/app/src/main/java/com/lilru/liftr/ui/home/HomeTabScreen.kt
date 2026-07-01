@@ -138,6 +138,7 @@ fun HomeTabScreen(
     homeRefreshNonce: Int = 0,
     homeFeedSyncNonce: Int = 0,
     homeFeedSyncWorkoutId: Int = 0,
+    homeWeeklyTasksSyncNonce: Int = 0,
     onGoToProfileTab: () -> Unit = {},
     hazeState: HazeState = remember { HazeState() },
     modifier: Modifier = Modifier
@@ -167,6 +168,12 @@ fun HomeTabScreen(
     LaunchedEffect(homeFeedSyncNonce) {
         if (homeFeedSyncNonce > 0) {
             vm.onReturnFromWorkoutDetail(homeFeedSyncWorkoutId)
+        }
+    }
+
+    LaunchedEffect(homeWeeklyTasksSyncNonce) {
+        if (homeWeeklyTasksSyncNonce > 0) {
+            vm.refreshWeeklyTasksHomeSummary()
         }
     }
 
@@ -334,6 +341,9 @@ fun HomeTabScreen(
                     onOpenGoals = {
                         me?.let { u -> AppNavEvents.send(MainOverlay.Goals(u)) }
                     },
+                    onOpenWeeklyTasks = {
+                        AppNavEvents.send(MainOverlay.WeeklyTasks)
+                    },
                     onOpenCompetitions = { AppNavEvents.send(MainOverlay.CompetitionsHub) },
                     onOpenTrackedAchievements = {
                         me?.let { AppNavEvents.send(MainOverlay.TrackedAchievements(it)) }
@@ -347,7 +357,7 @@ fun HomeTabScreen(
                         scope.launch {
                             HomeUiPreferences.setAllCollapsed(homeContext, c)
                         }
-                    }
+                    },
                 )
                 val homeBottomInsetPx = with(LocalDensity.current) { 72.dp.toPx() }
                 HomeFloatingDockOverlay(
@@ -494,7 +504,8 @@ private fun HomeContentColumn(
     onOpenCompetitions: () -> Unit,
     onOpenTrackedAchievements: () -> Unit,
     onToggleDataPanel: () -> Unit,
-    onSetCollapse: (Boolean) -> Unit
+    onSetCollapse: (Boolean) -> Unit,
+    onOpenWeeklyTasks: () -> Unit,
 ) {
     val todayFeedLabel = stringResource(R.string.home_feed_today)
     val yesterdayFeedLabel = stringResource(R.string.home_feed_yesterday)
@@ -550,10 +561,14 @@ private fun HomeContentColumn(
                             dataExpanded = !collapse.collapseModules,
                             onToggleData = onToggleDataPanel,
                             showGoals = me != null,
+                            showWeeklyTasks = me != null,
                             showCompetitions = me != null,
                             showAchievements = me != null && ui.trackedAchievementCount > 0,
                             trackedAchievementCount = ui.trackedAchievementCount,
+                            weeklyTasksHomeSummary = ui.weeklyTasksHomeSummary,
+                            homeContext = homeContext,
                             onGoals = onOpenGoals,
+                            onWeeklyTasks = onOpenWeeklyTasks,
                             onCompetitions = onOpenCompetitions,
                             onAchievements = onOpenTrackedAchievements
                         )

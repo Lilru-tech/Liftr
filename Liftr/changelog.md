@@ -4,13 +4,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.23.0] - 2026-07-01
+
+### Added
+- **Weekly tasks** — Personal weekly task system: procedural menu, accept up to five tasks per week, progress tracking, history, Task Points, coin rewards, and a Home quick pill (iOS + Android).
+- **Achievements — body weight** — New achievement milestones for logging body weight (iOS + Android).
+- **Pets — feeding** — Feed multiple portions of food in one action (choose quantity: 1, 5, 10, or 25) (iOS + Android).
 
 ### Changed
-- **Workout score refinement (server)** — Rolled back the cardio global ×2.5 calibration that over-rewarded walking and low-intensity cardio. Restored original sex modifiers for strength and sport/cardio. Kept modest walk/treadmill activity factor tweaks and the Hyrox missed-rep penalty cap. All published workouts recalculated (iOS + Android read updated scores automatically).
+- **Nutrition — insights** — Improved nutrition recommendations in Nutrition insights (iOS + Android).
+- **Pets — battle** — Rebalanced the stat handicap (nerf) system: imbalance threshold raised from **5%** to **25%** before Balanced mode applies nerfs, plus further combat calibration (iOS + Android).
+- **Workouts — score system** — Rolled back the cardio global ×2.5 calibration that over-rewarded walking and low-intensity cardio. Restored original sex modifiers for strength and sport/cardio. Kept modest walk/treadmill activity factor tweaks and the Hyrox missed-rep penalty cap. All published workouts recalculated (iOS + Android read updated scores automatically).
+
+### Fixed
+- **Goals** — Fixed layout issues in the Goals view (iOS + Android).
+- **Strength — edit workout** — Fixed saving edits failing when marking the workout as finished (iOS + Android).
+- **Strength — edit workout** — Fixed a timeout when saving strength workouts with multiple exercises or sets (iOS + Android).
+- **Pets — battle** — Fixed cooldown copy showing **“X minutes ago”** instead of a future relative time before you can challenge again (iOS + Android).
 
 ### Notes (database / ops)
-- Apply migrations **`20260701140000_workout_score_rollback_refine_v1.sql`** and **`20260701140100_workout_score_rollback_backfill_v1.sql`** before shipping. Verify distribution with **`docs/migrations/workout_scores_rebalance_inspection_v1.sql`**.
+- **Weekly tasks** — Apply migrations **`20260718160000_personal_weekly_tasks_v1.sql`** through **`20260721120002_weekly_tasks_home_summary_v1.sql`** (and related hotfixes) before shipping.
+- **Achievements — body weight** — Apply migration **`20260701120000_body_weight_achievements_v1.sql`** before shipping.
+- **Pets — battle nerf** — Apply migration **`20260630140000_liftr_pet_combat_nerf_balance_v2.sql`** before shipping.
+- **Workouts — score system** — Apply migrations **`20260701140000_workout_score_rollback_refine_v1.sql`** and **`20260701140100_workout_score_rollback_backfill_v1.sql`** before shipping. Verify distribution with **`docs/migrations/workout_scores_rebalance_inspection_v1.sql`**.
 
 ## [1.22.0] - 2026-06-22
 

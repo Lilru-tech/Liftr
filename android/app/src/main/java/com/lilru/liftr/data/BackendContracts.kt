@@ -69,6 +69,9 @@ object BackendContracts {
         const val TERRITORY_CELLS = "territory_cells"
         const val TERRITORY_CAPTURE_EVENTS = "territory_capture_events"
         const val SPORT_SESSIONS = "sport_sessions"
+        const val TASK_TEMPLATES = "task_templates"
+        const val USER_TASKS = "user_tasks"
+        const val USER_WEEKLY_TASK_REFRESHES = "user_weekly_task_refreshes"
         const val STRENGTH_ROUTINES = "strength_routines"
         const val STRENGTH_ROUTINE_EXERCISES = "strength_routine_exercises"
         const val STRENGTH_ROUTINE_FOLDERS = "strength_routine_folders"
@@ -99,6 +102,7 @@ object BackendContracts {
         const val VW_PROFILE_COUNTS = "vw_profile_counts"
         const val VW_SPORT_SESSION_FULL = "vw_sport_session_full"
         const val VW_USER_PRS = "vw_user_prs"
+        const val VW_USER_TASK_POINTS_ROLLUP = "vw_user_task_points_rollup"
         const val VW_WORKOUT_VOLUME = "vw_workout_volume"
     }
 
@@ -136,6 +140,15 @@ object BackendContracts {
         const val GET_LEADERBOARD_V1 = "get_leaderboard_v1"
         const val GET_LEVEL_LEADERBOARD_V1 = "get_level_leaderboard_v1"
         const val GET_COINS_LEADERBOARD_V1 = "get_coins_leaderboard_v1"
+        const val GET_TASK_POINTS_LEADERBOARD_V1 = "get_task_points_leaderboard_v1"
+        const val LIST_MY_WEEKLY_TASKS_V1 = "list_my_weekly_tasks_v1"
+        const val ACCEPT_USER_TASK_V1 = "accept_user_task_v1"
+        const val UNACCEPT_USER_TASK_V1 = "unaccept_user_task_v1"
+        const val REFRESH_MY_WEEKLY_TASKS_V1 = "refresh_my_weekly_tasks_v1"
+        const val GET_USER_TASK_DETAIL_V1 = "get_user_task_detail_v1"
+        const val LIST_USER_TASK_WORKOUTS_V1 = "list_user_task_workouts_v1"
+        const val GET_MY_WEEKLY_TASKS_HISTORY_V1 = "get_my_weekly_tasks_history_v1"
+        const val GET_MY_WEEKLY_TASKS_HOME_SUMMARY_V1 = "get_my_weekly_tasks_home_summary_v1"
         const val LIST_MY_COIN_TRANSACTIONS_V1 = "list_my_coin_transactions_v1"
         const val GET_MY_COIN_SOURCES_V1 = "get_my_coin_sources_v1"
         const val GET_MY_PET_V1 = "get_my_pet_v1"
@@ -341,8 +354,8 @@ object BackendContracts {
         const val FIBER_G = 28.0
         const val SODIUM_MG = 2300.0
 
-        fun macroTargets(weightKg: Double?, sex: String? = null): NutritionMetabolism.MacroTargets =
-            NutritionMetabolism.macroTargets(weightKg, sex)
+        fun macroTargets(weightKg: Double?, sex: String? = null): com.lilru.liftr.nutrition.NutritionMetabolism.MacroTargets =
+            com.lilru.liftr.nutrition.NutritionMetabolism.macroTargets(weightKg, sex)
     }
 
     object NutritionMealSlots {

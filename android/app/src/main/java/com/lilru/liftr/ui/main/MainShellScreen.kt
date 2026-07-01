@@ -103,6 +103,7 @@ import com.lilru.liftr.ui.competition.CompetitionDetailFromIdScreen
 import com.lilru.liftr.ui.competition.CompetitionReviewsScreen
 import com.lilru.liftr.ui.competition.CompetitionsHubScreen
 import com.lilru.liftr.ui.goals.GoalsScreen
+import com.lilru.liftr.ui.tasks.PersonalWeeklyTasksScreen
 import com.lilru.liftr.ui.home.HomeFeedSync
 import com.lilru.liftr.ui.home.HomeTabScreen
 import com.lilru.liftr.ui.home.WorkoutDetailFromNotificationOverlay
@@ -272,6 +273,7 @@ fun MainShellScreen(
     var selected by rememberSaveable { mutableStateOf(MainTab.Home) }
     var homeRefreshNonce by remember { mutableIntStateOf(0) }
     var homeFeedSyncNonce by remember { mutableIntStateOf(0) }
+    var homeWeeklyTasksSyncNonce by remember { mutableIntStateOf(0) }
     var homeFeedSyncWorkoutId by remember { mutableIntStateOf(0) }
     var duplicateApplyNonce by rememberSaveable { mutableStateOf(0) }
     var kindNudge by rememberSaveable { mutableStateOf<String?>(null) }
@@ -385,7 +387,11 @@ fun MainShellScreen(
     }
 
     fun clearOverlay() {
+        val wasWeeklyTasks = overlay is MainOverlay.WeeklyTasks
         overlay = null
+        if (wasWeeklyTasks) {
+            homeWeeklyTasksSyncNonce++
+        }
     }
 
     val hazeState = remember { HazeState() }
@@ -432,6 +438,7 @@ fun MainShellScreen(
                         homeRefreshNonce = homeRefreshNonce,
                         homeFeedSyncNonce = homeFeedSyncNonce,
                         homeFeedSyncWorkoutId = homeFeedSyncWorkoutId,
+                        homeWeeklyTasksSyncNonce = homeWeeklyTasksSyncNonce,
                         onGoToProfileTab = { selected = MainTab.Profile },
                         hazeState = hazeState,
                         modifier = tabContentModifier
@@ -563,6 +570,13 @@ fun MainShellScreen(
                     supabase = supabase,
                     targetUserId = overlayNonNull.userId,
                     viewedUsername = "",
+                    onBack = { clearOverlay() },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            is MainOverlay.WeeklyTasks -> {
+                PersonalWeeklyTasksScreen(
+                    supabase = supabase,
                     onBack = { clearOverlay() },
                     modifier = Modifier.fillMaxSize()
                 )

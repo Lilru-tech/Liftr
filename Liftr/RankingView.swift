@@ -46,6 +46,15 @@ struct CoinsRankRow: Decodable, Identifiable {
     let coins_balance: Int
 }
 
+struct TaskPointsRankRow: Decodable, Identifiable {
+    var id: UUID { user_id }
+    let rank: Int
+    let user_id: UUID
+    let username: String?
+    let avatar_url: String?
+    let task_points_total: Int
+}
+
 struct GoalsLeaderRow: Decodable, Identifiable {
     var id: UUID { user_id }
     let rank: Int
@@ -328,7 +337,7 @@ enum LBMetricSection: String, CaseIterable, Identifiable {
         let base: [LBMetric]
         switch self {
         case .general:
-            base = [.score, .calories, .level, .coins, .bestWorkout, .goals, .duels, .challengePodiums]
+            base = [.score, .calories, .level, .coins, .taskPoints, .bestWorkout, .goals, .duels, .challengePodiums]
         case .social:
             base = [.likesReceived, .commentsReceived, .groupSessions, .achievements]
         case .strength:
@@ -358,6 +367,7 @@ enum LBMetric: String, CaseIterable, Identifiable {
     case calories = "Calories"
     case level = "Level"
     case coins = "Liftr Coins"
+    case taskPoints = "Task Points"
     case bestWorkout = "Top workouts"
     case goals = "Goals"
     case duels = "Duels"
@@ -549,6 +559,7 @@ final class RankingVM: ObservableObject {
     @Published var rows: [LeaderRow] = []
     @Published var levelRows: [LevelRankRow] = []
     @Published var coinsRows: [CoinsRankRow] = []
+    @Published var taskPointsRows: [TaskPointsRankRow] = []
     @Published var workoutRows: [WorkoutLeaderRow] = []
     @Published var goalsRows: [GoalsLeaderRow] = []
     @Published var duelsRows: [DuelsLeaderRow] = []
@@ -626,6 +637,7 @@ final class RankingVM: ObservableObject {
         kcalRows = []
         levelRows = []
         coinsRows = []
+        taskPointsRows = []
         workoutRows = []
         goalsRows = []
         duelsRows = []
@@ -1225,6 +1237,38 @@ final class RankingVM: ObservableObject {
         }
     }
 
+    private func fetchTaskPointsLeaderboard() async {
+        do {
+            var params: [String: AnyJSON] = [:]
+            params["p_scope"] = ajString(scope == .global ? "global" : "friends")
+            params["p_limit"] = ajInt(100)
+            params["p_sex"] = ajString(sexOpt?.rawValue)
+            params["p_age_band"] = ajString(mapAge(age))
+
+            let res = try await SupabaseManager.shared.client
+                .rpc("get_task_points_leaderboard_v1", params: params)
+                .execute()
+
+            let decoded = try JSONDecoder.supabase().decode([TaskPointsRankRow].self, from: res.data)
+            await MainActor.run {
+                self.taskPointsRows = decoded
+                self.rows = []
+                self.kcalRows = []
+                self.levelRows = []
+                self.coinsRows = []
+                self.workoutRows = []
+                self.goalsRows = []
+                self.duelsRows = []
+            }
+        } catch {
+            guard !shouldIgnoreLeaderboardFetchError(error) else { return }
+            await MainActor.run {
+                self.error = error.localizedDescription
+                self.taskPointsRows = []
+            }
+        }
+    }
+
     private func fetchCoinsLeaderboard() async {
         do {
             var params: [String: AnyJSON] = [:]
@@ -1420,6 +1464,10 @@ final class RankingVM: ObservableObject {
         }
         if metric == .coins {
             await fetchCoinsLeaderboard()
+            return
+        }
+        if metric == .taskPoints {
+            await fetchTaskPointsLeaderboard()
             return
         }
         if metric == .calories {
@@ -1840,7 +1888,7 @@ struct RankingView: View {
     private func metricSkipsPeriod(_ m: LBMetric) -> Bool {
         if m.isPetMetric { return true }
         switch m {
-        case .level, .coins, .goals, .duels, .territoryShare, .territoryCells: return true
+        case .level, .coins, .taskPoints, .goals, .duels, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
@@ -1848,7 +1896,7 @@ struct RankingView: View {
     private func metricSkipsKind(_ m: LBMetric) -> Bool {
         if m.isPetMetric { return true }
         switch m {
-        case .level, .coins, .goals, .duels, .challengePodiums, .segmentPopularity, .territoryShare, .territoryCells: return true
+        case .level, .coins, .taskPoints, .goals, .duels, .challengePodiums, .segmentPopularity, .territoryShare, .territoryCells: return true
         default: return false
         }
     }
@@ -2081,6 +2129,49 @@ struct RankingView: View {
                                     .monospacedDigit()
                                 Image(systemName: "bitcoinsign.circle.fill")
                                     .foregroundStyle(Color.yellow.opacity(0.95))
+                            }
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                }
+                .listStyle(.plain)
+                .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .scrollIndicators(.never)
+
+            } else if vm.metric == .taskPoints {
+                List(vm.taskPointsRows) { row in
+                    Section {
+                        HStack(spacing: 12) {
+                            Text("\(row.rank).")
+                                .font(.headline)
+                                .frame(width: 30, alignment: .trailing)
+
+                            AvatarView(urlString: row.avatar_url)
+                                .frame(width: 36, height: 36)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                NavigationLink {
+                                    ProfileView(userId: row.user_id).gradientBG()
+                                } label: {
+                                    Text(row.username ?? "user")
+                                        .font(.subheadline.weight(.semibold))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+
+                                Text("Task Points")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            HStack(spacing: 4) {
+                                Text("\(row.task_points_total)")
+                                    .font(.headline)
+                                    .monospacedDigit()
+                                Image(systemName: "flag.fill")
+                                    .foregroundStyle(Color.orange.opacity(0.95))
                             }
                         }
                     }
@@ -3107,6 +3198,7 @@ struct RankingView: View {
         case .calories: return vm.kcalRows.isEmpty
         case .level: return vm.levelRows.isEmpty
         case .coins: return vm.coinsRows.isEmpty
+        case .taskPoints: return vm.taskPointsRows.isEmpty
         case .bestWorkout: return vm.workoutRows.isEmpty
         case .goals: return vm.goalsRows.isEmpty
         case .duels: return vm.duelsRows.isEmpty

@@ -43,6 +43,7 @@ enum class CoinLogFilterCategory(val key: String) {
     NUTRITION("nutrition"),
     ACHIEVEMENTS("achievements"),
     GOALS_STREAKS("goals_streaks"),
+    WEEKLY_TASKS("weekly_tasks"),
     COMPETITION("competition"),
     PET_COMBAT("pet_combat"),
     OTHER("other");
