@@ -11,5 +11,11 @@ Guía de **App Store (iOS)** y **Google Play (Android)**: [docs/publishing.md](d
 
 **Protección de `main`:** [docs/github-branch-protection.md](docs/github-branch-protection.md) — script `scripts/protect-main-branch.sh`.
 
+## Documentación de ingeniería
+
+- **Arquitectura y dominios de producto:** [docs/liftr-app-overview.md](docs/liftr-app-overview.md) — mapa cross-platform de iOS, Android, Supabase, entrenos activos, nutrición, coins, pets, rankings y rutas wearable.
+- **Contratos Supabase:** [docs/backend-contracts.md](docs/backend-contracts.md) — tablas, RPC, notas RLS y restricciones operativas que deben respetar los clientes.
+- **Paridad Android:** [docs/android-parity-inventory.md](docs/android-parity-inventory.md) — mapa iOS → Android y notas pendientes específicas de plataforma.
+
 ## Stakeholder materials
 Executive deck, 5-minute demo script, and technical API appendix: [docs/stakeholder/](docs/stakeholder/).
