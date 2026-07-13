@@ -4,7 +4,7 @@ Documento interno derivado del inventario del repo. Para el histórico detallado
 
 ## Qué es Liftr
 
-**Liftr** es una app social de **seguimiento de entrenamientos** (fuerza, cardio y deportes de equipo/individuales), **progreso**, **puntuación**, **metas semanales**, **competiciones**, **logros**, **rankings** e **importación desde salud** (HealthKit en iOS, Health Connect en Android). El backend vive en **Supabase** (Auth, Postgres, RPC, notificaciones vía funciones edge según el repo).
+**Liftr** es una app social de **seguimiento de entrenamientos** (fuerza, cardio y deportes de equipo/individuales), **progreso**, **nutrición**, **puntuación**, **metas semanales**, **competiciones**, **logros**, **rankings**, **gamificación con Liftr Coins y mascotas**, e **importación/sincronización desde salud y wearables** (HealthKit en iOS, Health Connect en Android, Garmin para rutas externas). El backend vive en **Supabase** (Auth, Postgres, RPC, notificaciones vía funciones edge según el repo).
 
 Referencia de alto nivel: [../README.md](../README.md), [../Liftr/readme.md](../Liftr/readme.md), inventario de contratos en [backend-contracts.md](backend-contracts.md).
 
@@ -68,6 +68,7 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 - Pantallas dedicadas: fuerza ([`../Liftr/ActiveStrengthWorkoutView.swift`](../Liftr/ActiveStrengthWorkoutView.swift)), cardio ([`../Liftr/ActiveCardioWorkoutView.swift`](../Liftr/ActiveCardioWorkoutView.swift)), deporte ([`../Liftr/ActiveSportWorkoutView.swift`](../Liftr/ActiveSportWorkoutView.swift)).
 - iOS: **Live Activities** / Dynamic Island ([`../Liftr/WorkoutLiveActivityManager.swift`](../Liftr/WorkoutLiveActivityManager.swift), targets `LiftrWorkoutLiveActivity*`).
 - Android: tracking GPS, efectos y ViewModels bajo `ui/active/`, widget/refresh en `ongoing/`.
+- **Recuperación ante cierre/crash**: ambos clientes guardan un checkpoint local para entrenos activos de fuerza, cardio y deporte ([`../Liftr/ActiveWorkoutSessionCheckpoint.swift`](../Liftr/ActiveWorkoutSessionCheckpoint.swift), [`../android/app/src/main/java/com/lilru/liftr/workout/ActiveWorkoutSessionCheckpoint.kt`](../android/app/src/main/java/com/lilru/liftr/workout/ActiveWorkoutSessionCheckpoint.kt)). Al volver a abrir, se descarta si tiene más de 7 días, si el workout ya terminó o si pertenece a otro usuario; si es recuperable, la UI ofrece **Resume**, **Finish now** o **Discard**. En fuerza, **Finish now** reutiliza `finish_strength_workout_v1` y puede encolar `WorkoutFinishSync` en errores recuperables; en cardio/deporte actualiza la sesión y cierra el workout desde el cliente.
 
 ### 5. Detalle, edición y duplicar
 
@@ -78,6 +79,7 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 
 - **iOS**: HealthKit — [`../Liftr/AppleHealthImportView.swift`](../Liftr/AppleHealthImportView.swift), [`../Liftr/HealthKitCardioImportService.swift`](../Liftr/HealthKitCardioImportService.swift).
 - **Android**: Health Connect — `HealthConnectImportScreen.kt` (mismo RPC cardio v2 que iOS, según inventario de paridad).
+- **Wearable routes / Garmin**: Profile settings expone [`../Liftr/WearableConnectView.swift`](../Liftr/WearableConnectView.swift) en iOS y [`../android/app/src/main/java/com/lilru/liftr/ui/wearable/WearableConnectScreen.kt`](../android/app/src/main/java/com/lilru/liftr/ui/wearable/WearableConnectScreen.kt) en Android. El backend normaliza trabajos en `external_workout_route_jobs` y no modifica calorías ni duración; iOS escribe rutas faltantes como `HKWorkoutRoute`, mientras Android aplica GeoJSON a Liftr tras emparejar sesiones de Health Connect ([`../android/app/src/main/java/com/lilru/liftr/externalroute/ExternalRouteSyncService.kt`](../android/app/src/main/java/com/lilru/liftr/externalroute/ExternalRouteSyncService.kt)). Setup operativo: [garmin-connect-developer-setup.md](garmin-connect-developer-setup.md); contrato: [backend-contracts.md#wearable-gps-route-sync-garmin-external](backend-contracts.md#wearable-gps-route-sync-garmin-external).
 
 ### 7. Búsqueda y descubrimiento
 
@@ -130,6 +132,29 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 - Comprobación de actualización: [`../Liftr/AppUpdateChecker.swift`](../Liftr/AppUpdateChecker.swift), en Android Play Store update prompt.
 - Documentación operativa: [publishing.md](publishing.md), [android-play-release.md](android-play-release.md), [postgres-sql-execution-notes.md](postgres-sql-execution-notes.md).
 
+### 18. Nutrición
+
+- Tab principal en iOS: [`../Liftr/NutritionView.swift`](../Liftr/NutritionView.swift); Android agrupa lógica bajo `nutrition/` y pantallas Compose en `ui/nutrition/`.
+- Flujo funcional: catálogo de ingredientes y recetas, favoritos, diario por `meal_slot`, planificación social de comidas e invitaciones, resumen diario/mensual, highlights, rankings y recomendaciones inteligentes.
+- Restricciones de contrato: las comidas usan slots exactos `Breakfast`, `Lunch`, `Dinner`, `Snack`; los objetivos kcal pueden venir de BMR/TDEE automático o override manual; los clientes deben usar los RPC y columnas descritos en [backend-contracts.md#nutrition-mvp](backend-contracts.md#nutrition-mvp) para evitar divergencias entre iOS y Android.
+
+### 19. Liftr Coins
+
+- Moneda virtual sin valor monetario real; balance canónico en Supabase (`profiles.coins_balance`) y ledger en `coin_transactions`. El cliente muestra balance con `CoinsBalanceBadge` y refresca desde servidor con `CoinManager` / Android `CoinManager`, sin incrementar localmente el saldo después de mutaciones.
+- Superficies de producto: balance en perfil, historial, desglose por fuente, banners efímeros al ganar monedas, ranking de coins, apuestas en competiciones y gasto en Pet Market.
+- Fuentes de monedas verificadas en backend: entrenos publicados, bonus de mascota, social, nutrición, logros, metas/rachas, competición y pet combat. Detalle operativo y anti-exploit: [backend-contracts.md#liftr-coins-economía-virtual](backend-contracts.md#liftr-coins-economía-virtual).
+
+### 20. Pets, arena y PetDex
+
+- iOS vive en [`../Liftr/Pet/`](../Liftr/Pet/); Android en [`../android/app/src/main/java/com/lilru/liftr/ui/pets/`](../android/app/src/main/java/com/lilru/liftr/ui/pets/) y [`../android/app/src/main/java/com/lilru/liftr/data/PetService.kt`](../android/app/src/main/java/com/lilru/liftr/data/PetService.kt).
+- Flujo funcional: comprar huevo/incubadora/comida en Pet Market, incubar, eclosionar, alimentar, evolucionar, renombrar, subir rareza, revisar logs, combatir en arena, consultar stats/head-to-head y descubrir especies en PetDex.
+- Restricciones importantes: mutaciones de `pet_instances`, stats e inventario pasan por RPC; los sprites salen del bucket público `pets`; la energía de arena se regenera de forma lazy; el Market oculta huevo/incubadora si ya hay inventario o pet activo. La guía de rarezas, stats y combate está en las sheets de ayuda de ambos clientes y el contrato completo en [backend-contracts.md#pets-mascots](backend-contracts.md#pets-mascots).
+
+### 21. Rankings y logros recientes
+
+- Rankings nuevos conectan métricas de Liftr Coins, mascotas, logros por periodo, segmentos, retos y deportes específicos al mismo patrón de `RankingView` / `RankingTabScreen`.
+- Logros recientes incluyen categorías `pet` y `coins`, seguimiento personal de hasta 5 logros pendientes y progreso expuesto por `get_user_achievements`. Al añadir códigos nuevos, actualizar el catálogo en Supabase, el mapeo de iconos iOS/Android y [backend-contracts.md#achievements-contrato-cliente-y-operación-en-bd](backend-contracts.md#achievements-contrato-cliente-y-operación-en-bd).
+
 ## Inventario de Swift (pantallas / módulos clave)
 
 Los archivos `.swift` bajo `Liftr/` cubren lo anterior; nombres representativos además de los ya citados: `RegisterView`, `LoginView`, `WorkoutCard`, `ExercisePickerSheet`, `PeriodCompareView`, `CompetitionsHubView`, `GoalsView`, `RankingView`, `CompareWorkoutsView`, `AchievementsFromNotificationView`, etc.
@@ -146,7 +171,7 @@ La fuente más útil para una **charla tipo “estamos en las dos plataformas”
 
 1. **Una frase**: app de entrenos multi-modalidad + social + metas + competiciones + rankings, con datos en Supabase.
 2. **Tres pilares**: registrar entreno (fuerza/cardio/deporte) → ver progreso y consistencia → competir / rankear / logros.
-3. **Diferenciadores recientes** (según changelog): grupo en un móvil, rutinas con carpetas, Health import, Live Activity/FGS, comparación avanzada y period compare.
+3. **Diferenciadores recientes** (según changelog): grupo en un móvil, rutinas con carpetas, Health import, Live Activity/FGS, recuperación de entrenos activos, nutrición social, Liftr Coins, mascotas/PetDex, rutas Garmin y period compare.
 4. **Técnico** (si preguntan): clientes nativos, Postgres + RPC con lista congelada en `BackendContracts` / `backend-contracts.md`, RLS, edge functions para notificaciones/borrado.
 
 **Nota de seguridad**: en charlas técnicas, no repitas claves anónimas en claro; revisar configuración de claves (p. ej. `SupabaseManager`) y preferir secretos fuera del control de versiones.
