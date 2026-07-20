@@ -17,7 +17,9 @@ Track your workouts, manage progress, and stay motivated.
 ## ☁️ CI/CD
 **iOS:** **Xcode Cloud** workflow **Devel** — one build per push to branch `devel` (TestFlight). Do not add a second workflow on `devel`; see [docs/xcode-cloud-workflows.md](../docs/xcode-cloud-workflows.md).
 
-**Other:** GitHub Actions under `.github/workflows/` (not iOS archives).
+**iOS UI regression:** GitHub Actions validates 14 critical journeys on `main` against an ephemeral Supabase branch. It does not archive the app; see [docs/ios-ui-regression-tests.md](../docs/ios-ui-regression-tests.md).
+
+**Android:** GitHub Actions builds and tests changes under `android/**`; see [android/README.md](../android/README.md).
 
 ## 🏗️ Project Structure
 📁 Liftr
