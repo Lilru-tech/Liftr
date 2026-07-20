@@ -18,7 +18,7 @@ El flujo normal es `devel` → [sincronización automática de `main`](../.githu
 3. Si las migraciones no pueden reconstruir el baseline, copia los esquemas `public`, `auth` y `extensions` del proyecto padre a la rama.
 4. Ejecuta [`ui_regression_user.sql`](../Liftr/supabase/seed/ui_regression_user.sql) y comprueba login, RPCs de mascotas y fixtures.
 5. Selecciona un simulador iPhone disponible y ejecuta las 14 clases permitidas explícitamente en el workflow, sin paralelismo.
-6. Publica el resumen, las capturas de fallos y el resultado `.xcresult`.
+6. Publica el resumen y las capturas si la ejecución no se cancela. El bundle `.xcresult` completo solo se sube cuando falla el job.
 7. Intenta eliminar la rama en un paso `always()`.
 
 La rama se crea desde el proyecto Supabase real, pero todas las escrituras de las pruebas ocurren en la rama efímera. El seed prepara:
@@ -101,7 +101,14 @@ Sustituye la clase para aislar otro recorrido. Para reproducir exactamente CI, u
 
 ### Crear el backend efímero local
 
-Para reproducir también el aprovisionamiento de CI, instala Supabase CLI, `jq`, `psql` y `pg_dump`; exporta `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`, `SUPABASE_DB_PASSWORD`, `UI_TEST_EMAIL`, `UI_TEST_PASSWORD` y un `BRANCH_NAME` único. Después:
+Para reproducir también el aprovisionamiento de CI, instala Supabase CLI, `jq`, `psql` y `pg_dump`. Con Homebrew, instala los clientes PostgreSQL y expón sus binarios:
+
+```bash
+brew install libpq jq
+export PATH="$(brew --prefix libpq)/bin:$PATH"
+```
+
+Exporta `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_ID`, `SUPABASE_DB_PASSWORD`, `UI_TEST_EMAIL`, `UI_TEST_PASSWORD` y un `BRANCH_NAME` único. Si el proyecto padre no usa el endpoint por defecto, exporta también `SUPABASE_DB_HOST` y `SUPABASE_DB_PORT`. Después:
 
 ```bash
 bash scripts/ci/supabase-branch-create.sh
@@ -112,7 +119,7 @@ set +a
 export SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-${ANON_KEY:-}}"
 ```
 
-Copia esas credenciales y las variables `UI_TEST_*` a `.ui-test.env` antes de ejecutar `xcodebuild`. Elimina siempre la rama al terminar:
+Copia esas credenciales y las variables `UI_TEST_*` a `scripts/ci/.ui-test.env` antes de ejecutar `xcodebuild`. Elimina siempre la rama al terminar:
 
 ```bash
 bash scripts/ci/supabase-branch-teardown.sh
@@ -124,10 +131,10 @@ Una ejecución cancelada o sin credenciales puede no completar el teardown. En e
 
 | Salida | Cuándo | Contenido |
 | --- | --- | --- |
-| GitHub step summary | Siempre que exista `TestResults.xcresult` | Resultado, duración, pasos y mensaje de cada prueba. |
-| `ios-ui-screenshots-<run_id>` | Siempre; puede estar vacío | PNG de cada fallo y `report.html`. |
-| `ios-ui-visual-report-<run_id>` | Siempre; puede estar vacío | Informe HTML autocontenido. |
-| `ios-ui-test-results-<run_id>` | Solo si falla el job | Bundle completo para abrir con Xcode. |
+| GitHub step summary | Ejecución no cancelada con `TestResults.xcresult` | Resultado, duración, pasos y mensaje de cada prueba. |
+| `ios-ui-screenshots-<run_id>` | Ejecución no cancelada con adjuntos exportados | PNG de cada fallo y `report.html`. |
+| `ios-ui-visual-report-<run_id>` | Ejecución no cancelada con informe generado | Informe HTML autocontenido. |
+| `ios-ui-test-results-<run_id>` | Job fallido con bundle disponible | Bundle completo para abrir con Xcode. |
 
 Fallos frecuentes:
 
