@@ -24,13 +24,14 @@ Two workflows were configured with the same start condition:
 
 One git push matched both workflows, so Apple started two archives (e.g. Build 179 under Devel and Build 180 under Default for the same merge commit).
 
-GitHub Actions in this repo do **not** start Xcode Cloud builds:
+GitHub Actions in this repo do **not** start Xcode Cloud builds. The iOS regression workflow compiles and tests on a GitHub-hosted simulator, but it does not archive or publish the app:
 
-| Workflow | Triggers on `devel` push? | iOS build? |
-|----------|---------------------------|------------|
-| [`.github/workflows/main.yml`](../.github/workflows/main.yml) | Yes — fast-forwards `main` | No |
-| [`.github/workflows/supabase-edge-territory.yml`](../.github/workflows/supabase-edge-territory.yml) | Only if territory edge paths change | No |
-| [`.github/workflows/android.yml`](../.github/workflows/android.yml) | Only if `android/**` changes | No |
+| Workflow | Trigger relevante | Resultado |
+|----------|-------------------|-----------|
+| [`.github/workflows/main.yml`](../.github/workflows/main.yml) | Push a `devel` | Fast-forward de `main`; no compila iOS. |
+| [`.github/workflows/ios-regression-tests.yml`](../.github/workflows/ios-regression-tests.yml) | Push a `main`, tag `v*` o manual | Compila y ejecuta 14 recorridos UI contra una rama efímera de Supabase; no archiva. |
+| [`.github/workflows/supabase-edge-territory.yml`](../.github/workflows/supabase-edge-territory.yml) | Cambios de rutas de territory | Despliega/verifica Edge Functions; no compila iOS. |
+| [`.github/workflows/android.yml`](../.github/workflows/android.yml) | Cambios bajo `android/**` | Compila y prueba Android; no compila iOS. |
 
 ## Audit checklist (before deleting Default)
 
@@ -73,4 +74,5 @@ Alternative: [App Store Connect](https://appstoreconnect.apple.com) → your app
 ## Related docs
 
 - [publishing.md](publishing.md) — App Store release overview
+- [ios-ui-regression-tests.md](ios-ui-regression-tests.md) — GitHub Actions, entorno Supabase efímero y reproducción local
 - [Liftr/readme.md](../Liftr/readme.md) — project CI summary
