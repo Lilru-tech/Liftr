@@ -7,6 +7,7 @@ Cliente **nativo (Kotlin + Jetpack Compose)** para [Google Play](https://play.go
 - **Android Studio** (o JDK 17+ y el **Android SDK**; `local.properties` debe apuntar al SDK, lo habitual con Android Studio al abrir la carpeta `android/`).
 - Estrategia y despliegue: [../docs/android-strategy.md](../docs/android-strategy.md) y [../docs/android-play-release.md](../docs/android-play-release.md).
 - Contratos backend (tabla/RPC compartidos con iOS): [../docs/backend-contracts.md](../docs/backend-contracts.md).
+- Arena de mascotas (RPCs, energía, balance): [../docs/pet-combat-arena.md](../docs/pet-combat-arena.md).
 
 ## Configuración
 

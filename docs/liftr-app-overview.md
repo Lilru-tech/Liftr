@@ -59,7 +59,7 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 - **Fuerza**: ejercicios del catálogo, series/reps/peso/descansos, plantillas **rutinas** con carpetas, orden, duplicados, hash de contenido (changelog 1.9.x).
 - **Grupo / dual en el mismo dispositivo**: participantes, “misma sesión” vs “por persona”, enlaces en BD (changelog 1.8.x; RPC como `plan_strength_squad_programs`, `create_linked_strength_workout_copy` en [backend-contracts.md](backend-contracts.md)).
 - **Cardio**: tipos de actividad, GPS, ruta GeoJSON, splits por km, Live Activity en iOS; foreground service + widget en Android ([android-parity-inventory.md](android-parity-inventory.md)).
-- **Deportes**: muchos deportes con stats específicas (padel, fútbol, Hyrox, ski, etc.); tablas `*_session_stats` listadas en contratos.
+- **Deportes**: muchos deportes con stats específicas (padel, fútbol, Hyrox, ski, **climbing**, etc.); tablas `*_session_stats` listadas en contratos (climbing: `climbing_session_stats` / `climbing_session_routes`, ranking `get_climbing_routes_sent_leaderboard_v1`).
 - **Recomendaciones** de entreno: [`../Liftr/WorkoutRecommendationService.swift`](../Liftr/WorkoutRecommendationService.swift) / motor en Android `WorkoutRecommendationEngine.kt`.
 - **Cuenta atrás** antes de empezar: pantallas enlazadas desde detalle (paridad documentada en [../android/ADD_WORKOUT_PARITY.md](../android/ADD_WORKOUT_PARITY.md)).
 
@@ -110,6 +110,10 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 ### 13. Competiciones
 
 - Hub, detalle, crear, envíos y revisiones: carpeta [`../Liftr/Competition/`](../Liftr/Competition/) en iOS; `ui/competition/*` en Android; RPC `submit_workout_to_competition`, `review_competition_workout`, tablas `competitions`, `competition_workouts`, etc.
+
+### 13b. Pets arena (combate)
+
+- Challenge desde perfil / sheets de oponente; preview + execute server-side; modos Balanced/Hardcore cuando hay desbalance. Runbook: [pet-combat-arena.md](pet-combat-arena.md). Contrato detallado: [backend-contracts.md](backend-contracts.md#pets-mascots).
 
 ### 14. Roadmap / voz del usuario
 

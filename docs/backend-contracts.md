@@ -17,6 +17,8 @@ Tablas:
 - `basketball_session_stats`
 - `cardio_sessions`
 - `cardio_session_stats`
+- `climbing_session_stats` (stats de sesión climbing; FK `sport_sessions.id`; enums `climbing_environment` / `climbing_style` / `climbing_grade_system`; ver `20260715120000_climbing_sport_v1.sql`)
+- `climbing_session_routes` (rutas/problemas por sesión; `route_order`, grades, `sent`/`flash`)
 - `competitions` (incl. `bet_amount int` default 0 — stake Liftr Coins en duelos; ver `20260612120000_competition_bet_escrow_v1.sql`)
 - `competition_blocks`
 - `competition_goals`
@@ -147,6 +149,7 @@ Vistas:
 - `get_workout_likes_received_leaderboard_v1`, `get_workout_comments_received_leaderboard_v1`, `get_group_workout_sessions_leaderboard_v1` (social / feed quality; published workouts in period)
 - `get_achievements_unlocked_period_leaderboard_v1` (app metric **Achievements**; uses same workout-style period as other leaderboards). Optional in same migration file: `get_achievements_total_unlocked_leaderboard_v1` (no `p_period`) for ad-hoc / analytics, not wired in clients.
 - `get_hyrox_best_official_time_leaderboard_v1`, `get_football_goals_leaderboard_v1`, `get_ski_distance_leaderboard_v1`
+- `get_climbing_routes_sent_leaderboard_v1` (`p_scope`, `p_period`, `p_limit`, `p_sex`, `p_age_band`, optional `p_environment`) — suma `climbing_session_stats.routes_sent` en entrenos sport publicados con `sport_sessions.sport = 'climbing'`; filtra `environment` indoor/outdoor si se pasa
 - `get_user_achievements`
 - `toggle_tracked_achievement_v1` (`p_achievement_id` bigint) → `{ tracked, tracked_count }`; toggle seguimiento personal (máx. 5; solo logros no desbloqueados)
 - `get_tracked_achievement_count_v1` (`p_user_id` uuid) → `{ count, top_progress_pct }`; resumen ligero para Home
@@ -656,7 +659,13 @@ Moneda sin valor monetario real. Balance canónico: `profiles.coins_balance` (ac
 
 **`get_my_coin_sources_v1` — `source_key`:** `workouts`, `pet_workout_bonus`, `pet_coins`, `social`, `nutrition`, `achievements`, `goals_streaks`, `competition`, `pet_combat`, `other`. Excluye `workout_coin_doubling_v1`, `workout_economy_rebalance_v1`, `workout_economy_reduction_30pct_v1`, `pet_passive_economy_rebalance_v1`, `pet_passive_economy_reduction_30pct_v1`.
 
+## Climbing (sport)
+
+Migración [`Liftr/supabase/migrations/20260715120000_climbing_sport_v1.sql`](../Liftr/supabase/migrations/20260715120000_climbing_sport_v1.sql). Clientes: iOS `ClimbingSessionEditor` + persistencia en Add/Active/Detail/Edit; Android `ClimbingSessionEditorSection` + `climbing/` helpers. `sport_sessions.sport = 'climbing'`. Retos: métrica `cumulative_climbing_routes_sent`. Ranking: `get_climbing_routes_sent_leaderboard_v1`. Constantes Android: `BackendContracts.Tables.CLIMBING_SESSION_*` / `Rpc.GET_CLIMBING_ROUTES_SENT_LEADERBOARD_V1`.
+
 ## Pets & Mascots
+
+Runbook de arena (flujo cliente, energía, handicap/hardcore, balance v4/v5, verify): [pet-combat-arena.md](pet-combat-arena.md).
 
 Gamificación portada de SettleIt. Mutaciones solo vía RPC (`authenticated`); sin `INSERT`/`UPDATE` directo en `pet_instances`, `pet_instance_stats` ni `user_inventory`.
 
