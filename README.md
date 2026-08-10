@@ -11,5 +11,12 @@ Guía de **App Store (iOS)** y **Google Play (Android)**: [docs/publishing.md](d
 
 **Protección de `main`:** [docs/github-branch-protection.md](docs/github-branch-protection.md) — script `scripts/protect-main-branch.sh`.
 
+## Documentación de ingeniería
+
+- **Arquitectura y dominios:** [docs/liftr-app-overview.md](docs/liftr-app-overview.md)
+- **Contratos Supabase:** [docs/backend-contracts.md](docs/backend-contracts.md)
+- **Pet combat arena (ops):** [docs/pet-combat-arena.md](docs/pet-combat-arena.md) — energía, cooldown, handicap/hardcore, balance v4/v5 y verify
+- **Paridad Android:** [docs/android-parity-inventory.md](docs/android-parity-inventory.md)
+
 ## Stakeholder materials
 Executive deck, 5-minute demo script, and technical API appendix: [docs/stakeholder/](docs/stakeholder/).
