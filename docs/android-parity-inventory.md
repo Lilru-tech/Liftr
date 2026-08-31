@@ -42,6 +42,7 @@ Resumen: el cliente Android en `android/` cubre las mismas áreas principales qu
 | `AddWorkoutSheet` | Crear / plantillas | MVP |
 | `WorkoutCard`, `WorkoutDetailView` | Lista y detalle | MVP |
 | `ActiveStrengthWorkoutView`, `ActiveCardioWorkoutView`, `ActiveSportWorkoutView` | En vivo, temporizador, series | MVP |
+| `ActiveWorkoutRecoveryOverlay`, `ActiveWorkoutSessionCheckpoint` | Crash recovery (Resume / Finish now / Discard). Android: `ActiveWorkoutRecoveryHost` + `workout/ActiveWorkoutSessionCheckpoint.kt`. Runbook: [`active-workout-recovery.md`](active-workout-recovery.md) | MVP (hecho) |
 | `StartWorkoutCountdownView` | [StartWorkoutCountdownScreen](android/app/src/main/java/com/lilru/liftr/ui/home/StartWorkoutCountdownScreen.kt) — sólo vía [WorkoutDetailScreen](android/app/src/main/java/com/lilru/liftr/ui/home/WorkoutDetailScreen.kt); mapa de entradas en sección *Cuenta atrás* de [`ADD_WORKOUT_PARITY`](../android/ADD_WORKOUT_PARITY.md) | MVP (hecho) |
 | `EditWorkoutMetaSheet` | Metadatos (nombre, fecha, etc.) | MVP |
 | `WorkoutHelpSheet` | Ayuda in-app | F2 |
