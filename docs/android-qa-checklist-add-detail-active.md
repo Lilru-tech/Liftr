@@ -16,6 +16,7 @@ Objetivo: validar **comportamiento y datos** entre un build **iOS** (referencia)
 | Detalle | `Liftr/WorkoutDetailView.swift`, `EditWorkoutMetaSheet.swift`, `CommentView.swift` | `ui/home/WorkoutDetailScreen.kt`, `WorkoutDetailViewModel.kt`, `Edit*WorkoutMetaSheetContent.kt` |
 | Cuenta atrás | `Liftr/StartWorkoutCountdownView.swift` | `ui/home/StartWorkoutCountdownScreen.kt`, `prefs/LiftrPreferences.kt` (`skipStartCountdown`) |
 | Activos | `ActiveStrengthWorkoutView.swift`, `ActiveCardioWorkoutView.swift`, `ActiveSportWorkoutView.swift` | `ui/active/ActiveStrengthWorkoutScreen.kt`, `ActiveCardioWorkoutScreen.kt`, `ActiveSportWorkoutScreen.kt` + `*ViewModel.kt` |
+| Recuperación crash | `ActiveWorkoutSessionCheckpoint.swift`, `ActiveWorkoutRecoveryOverlay.swift` | `workout/ActiveWorkoutSessionCheckpoint.kt`, `ui/active/ActiveWorkoutRecoveryHost.kt` |
 | Ayuda Add | `WorkoutHelpSheet` (iOS) | `ui/add/WorkoutHelpScreen.kt` (`WorkoutHelpSheetContent`) |
 
 Paridad Add detallada (RPC, planned, competición, comentarios): [`android/ADD_WORKOUT_PARITY.md`](../android/ADD_WORKOUT_PARITY.md).
@@ -123,6 +124,8 @@ Paridad Add detallada (RPC, planned, competición, comentarios): [`android/ADD_W
 ---
 
 ## F. Recuperación tras cierre / crash (checkpoint local)
+
+Runbook (persistencia, Finish now, purga, pitfalls iOS vs Android): [`active-workout-recovery.md`](active-workout-recovery.md).
 
 - [ ] **Fuerza**: completar varias series → forzar cierre de la app → al relanzar, alerta **Unfinished workout** con **Resume / Finish now / Discard**.
 - [ ] **Resume (fuerza)**: series completadas y posición de navegación restauradas; al **Finish** normal se borra el checkpoint.

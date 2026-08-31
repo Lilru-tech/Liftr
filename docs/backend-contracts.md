@@ -355,12 +355,13 @@ Implementadas en:
 
 ### Purga de series/ejercicios incompletos al finalizar
 
-Migración: [`Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql`](../Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql).
+Migración de referencia: [`Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql`](../Liftr/supabase/migrations/20260527120000_strength_workout_finish_purge_v1.sql). **Deploy a aplicar antes de clientes 1.19.1+:** [`Liftr/supabase/migrations/20260612111424_strength_workout_finish_purge_deploy_v1.sql`](../Liftr/supabase/migrations/20260612111424_strength_workout_finish_purge_deploy_v1.sql) (backfill de `is_completed` + misma función/trigger; también limpia `workout_exercises` vacíos en entrenos strength ya finalizados).
 
 - Columna **`exercise_sets.is_completed`** (`boolean NOT NULL DEFAULT false`): las series insertadas por el finish RPC se marcan `true`; las plantillas del entreno en curso permanecen `false`.
 - **`_liftr_finish_strength_workout_core`**: tras `_liftr_replace_strength_exercise_sets`, ejecuta `_liftr_purge_incomplete_strength_workout` (borra series con `is_completed = false` y ejercicios sin series).
 - **Trigger** `purge_incomplete_strength_on_workout_finalize` en `workouts` (`BEFORE UPDATE OF ended_at`): red de seguridad cuando `ended_at` pasa de NULL a NOT NULL en entrenos `strength`.
 - Finalización = `ended_at` establecido + `state` `planned` → `published` (sin columna `status = completed`).
+- Runbook de checkpoint local, Resume / Finish now / Discard (iOS + Android): [`active-workout-recovery.md`](active-workout-recovery.md).
 
 ### Confirmación en cliente
 
