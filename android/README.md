@@ -4,9 +4,9 @@ Cliente **nativo (Kotlin + Jetpack Compose)** para [Google Play](https://play.go
 
 ## Requisitos
 
-- **Android Studio** (o JDK 17+ y el **Android SDK**; `local.properties` debe apuntar al SDK, lo habitual con Android Studio al abrir la carpeta `android/`).
+- **Android Studio** (o **JDK 21** y el **Android SDK**; `local.properties` debe apuntar al SDK, lo habitual con Android Studio al abrir la carpeta `android/`). `app/build.gradle.kts` usa `jvmTarget = 21` / `JavaVersion.VERSION_21`.
 - Estrategia y despliegue: [../docs/android-strategy.md](../docs/android-strategy.md) y [../docs/android-play-release.md](../docs/android-play-release.md).
-- Contratos backend (tabla/RPC compartidos con iOS): [../docs/backend-contracts.md](../docs/backend-contracts.md).
+- Contratos backend (tabla/RPC compartidos con iOS): [../docs/backend-contracts.md](../docs/backend-contracts.md). Territorio (captura, cola OSM, CI): [../docs/territory-capture.md](../docs/territory-capture.md).
 
 ## Configuración
 
@@ -26,4 +26,12 @@ Cliente **nativo (Kotlin + Jetpack Compose)** para [Google Play](https://play.go
 
 ## CI
 
-El workflow [`.github/workflows/android.yml`](../.github/workflows/android.yml) compila el módulo con Gradle en cada cambio bajo `android/`.
+El workflow [`.github/workflows/android.yml`](../.github/workflows/android.yml) corre en **push** y **pull_request** cuando cambia `android/**`.
+
+| Item | Valor |
+|------|--------|
+| Runner | `ubuntu-latest` |
+| JDK | Temurin **21** (Gradle cache on `android/**/*.gradle.kts` + wrapper) |
+| Único job | `./gradlew :app:assembleDebug --no-daemon` |
+
+No ejecuta unit tests, lint ni emulador. En local: `./gradlew :app:testDebugUnitTest` (p. ej. `territory/TerritoryCaptureClientTest.kt`). El AAB de Play no se genera en este workflow; firma y bundle: [android-play-release.md](../docs/android-play-release.md).

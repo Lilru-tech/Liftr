@@ -29,7 +29,7 @@ GitHub Actions in this repo do **not** start Xcode Cloud builds:
 | Workflow | Triggers on `devel` push? | iOS build? |
 |----------|---------------------------|------------|
 | [`.github/workflows/main.yml`](../.github/workflows/main.yml) | Yes — fast-forwards `main` | No |
-| [`.github/workflows/supabase-edge-territory.yml`](../.github/workflows/supabase-edge-territory.yml) | Only if territory edge paths change | No |
+| [`.github/workflows/supabase-edge-territory.yml`](../.github/workflows/supabase-edge-territory.yml) | Deploy on territory edge path changes; queue drain every 30 min (see [territory-capture.md](territory-capture.md)) | No |
 | [`.github/workflows/android.yml`](../.github/workflows/android.yml) | Only if `android/**` changes | No |
 
 ## Audit checklist (before deleting Default)

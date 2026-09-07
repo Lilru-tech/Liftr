@@ -277,10 +277,10 @@ Full list with parameters: [backend-contracts.md § Inventario de RPC](../backen
 |----------|------|------|
 | `send-notifications` | Service | Poll `notifications` where `sent_at` is null; honor `user_notification_settings`; FCM v1 |
 | `delete-auth-user` | User JWT + service role | `auth.admin.deleteUser` for GDPR delete |
-| `resolve-territory-municipality` | Service / scheduled | Nominatim/OSM queue → `ingest_territory_municipality_v1` |
+| `resolve-territory-municipality` | Service / scheduled; user JWT may drain 1 queue item | Nominatim/OSM queue → `ingest_territory_municipality_v1`. Ops: [territory-capture.md](../territory-capture.md) |
 | `notify-new-user` | Webhook | Resend email to admins on signup |
 
-Clients invoke (with session JWT): `delete-auth-user`, `resolve-territory-municipality` (operator paths).
+Clients invoke (with session JWT): `delete-auth-user`, `resolve-territory-municipality` (queue drain only; operator ingest uses service role or `TERRITORY_MAINTENANCE_SECRET` — [territory-capture.md](../territory-capture.md)).
 
 ---
 
