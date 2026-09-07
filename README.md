@@ -11,5 +11,7 @@ Guía de **App Store (iOS)** y **Google Play (Android)**: [docs/publishing.md](d
 
 **Protección de `main`:** [docs/github-branch-protection.md](docs/github-branch-protection.md) — script `scripts/protect-main-branch.sh`.
 
+**Territory capture (ops):** [docs/territory-capture.md](docs/territory-capture.md) — GPS hex capture, municipality geocode queue, edge function, and GitHub Actions drain.
+
 ## Stakeholder materials
 Executive deck, 5-minute demo script, and technical API appendix: [docs/stakeholder/](docs/stakeholder/).

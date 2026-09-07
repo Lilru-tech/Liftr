@@ -430,6 +430,8 @@ Luego, con sesión de ese usuario, `get_user_premium_status_v1` debe devolver `t
 
 ## Territory (map game)
 
+Ops (cuándo se aplica la captura, cola de geocode, edge Nominatim, CI cada 30 min, fallos): [territory-capture.md](territory-capture.md).
+
 Migraciones: `Liftr/supabase/migrations/20260513140000_territory_capture_v1.sql` y sucesivas (hex capture, municipios, map RPC).
 
 ### Tablas principales

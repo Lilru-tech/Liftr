@@ -11,7 +11,7 @@ After applying `20260522140000_disk_io_optimizations_v1.sql` and client updates:
 ## Weekly
 
 - Compare p95 API latency from app logs / Supabase API metrics.
-- Row count growth on `territory_cells` (large table increases IO per spatial scan).
+- Row count growth on `territory_cells` (large table increases IO per spatial scan). Capture/geocode ops: [territory-capture.md](territory-capture.md).
 
 ## Upgrade decision (Phase D)
 

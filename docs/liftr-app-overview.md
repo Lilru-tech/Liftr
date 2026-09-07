@@ -58,7 +58,7 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 - **Modos Add vs Plan**: publicado vs planificado (enum `PublishMode` en [`../Liftr/AddWorkoutSheet.swift`](../Liftr/AddWorkoutSheet.swift)).
 - **Fuerza**: ejercicios del catálogo, series/reps/peso/descansos, plantillas **rutinas** con carpetas, orden, duplicados, hash de contenido (changelog 1.9.x).
 - **Grupo / dual en el mismo dispositivo**: participantes, “misma sesión” vs “por persona”, enlaces en BD (changelog 1.8.x; RPC como `plan_strength_squad_programs`, `create_linked_strength_workout_copy` en [backend-contracts.md](backend-contracts.md)).
-- **Cardio**: tipos de actividad, GPS, ruta GeoJSON, splits por km, Live Activity en iOS; foreground service + widget en Android ([android-parity-inventory.md](android-parity-inventory.md)).
+- **Cardio**: tipos de actividad, GPS, ruta GeoJSON, splits por km, Live Activity en iOS; foreground service + widget en Android ([android-parity-inventory.md](android-parity-inventory.md)). Al publicar cardio GPS al aire libre, **captura de territorio** (hexágonos RPC-only): [territory-capture.md](territory-capture.md).
 - **Deportes**: muchos deportes con stats específicas (padel, fútbol, Hyrox, ski, etc.); tablas `*_session_stats` listadas en contratos.
 - **Recomendaciones** de entreno: [`../Liftr/WorkoutRecommendationService.swift`](../Liftr/WorkoutRecommendationService.swift) / motor en Android `WorkoutRecommendationEngine.kt`.
 - **Cuenta atrás** antes de empezar: pantallas enlazadas desde detalle (paridad documentada en [../android/ADD_WORKOUT_PARITY.md](../android/ADD_WORKOUT_PARITY.md)).
@@ -128,7 +128,7 @@ En **iOS** y **Android** la estructura es equivalente: **Home**, **Búsqueda**, 
 ### 17. Calidad de producto en cliente
 
 - Comprobación de actualización: [`../Liftr/AppUpdateChecker.swift`](../Liftr/AppUpdateChecker.swift), en Android Play Store update prompt.
-- Documentación operativa: [publishing.md](publishing.md), [android-play-release.md](android-play-release.md), [postgres-sql-execution-notes.md](postgres-sql-execution-notes.md).
+- Documentación operativa: [publishing.md](publishing.md), [android-play-release.md](android-play-release.md), [postgres-sql-execution-notes.md](postgres-sql-execution-notes.md), [territory-capture.md](territory-capture.md).
 
 ## Inventario de Swift (pantallas / módulos clave)
 
